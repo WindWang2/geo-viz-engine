@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GeoViz Engine - Architecture Options</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 40px; }
+  h1 { text-align: center; font-size: 28px; margin-bottom: 40px; color: #60a5fa; }
+  .options { display: flex; gap: 24px; max-width: 1400px; margin: 0 auto; }
+  .card {
+    flex: 1; background: #1e293b; border-radius: 16px; padding: 28px;
+    border: 2px solid #334155; cursor: pointer; transition: all 0.3s;
+    position: relative;
+  }
+  .card:hover { border-color: #60a5fa; transform: translateY(-4px); box-shadow: 0 12px 40px rgba(96,165,250,0.15); }
+  .card.selected { border-color: #3b82f6; background: #1e3a5f; }
+  .card .badge { position: absolute; top: -12px; right: 20px; background: #3b82f6; color: white; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .card .badge.green { background: #10b981; }
+  .card h2 { font-size: 20px; margin-bottom: 6px; color: #f1f5f9; }
+  .card .subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 20px; }
+  .layer { background: #0f172a; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; border-left: 3px solid; }
+  .layer.shell { border-color: #f59e0b; }
+  .layer.frontend { border-color: #60a5fa; }
+  .layer.backend { border-color: #10b981; }
+  .layer.data { border-color: #a78bfa; }
+  .layer-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .layer.shell .layer-title { color: #f59e0b; }
+  .layer.frontend .layer-title { color: #60a5fa; }
+  .layer.backend .layer-title { color: #10b981; }
+  .layer.data .layer-title { color: #a78bfa; }
+  .layer-content { font-size: 12px; color: #94a3b8; line-height: 1.6; }
+  .layer-content code { background: #334155; padding: 1px 6px; border-radius: 4px; color: #e2e8f0; font-size: 11px; }
+  .pros-cons { margin-top: 16px; }
+  .pros-cons h3 { font-size: 13px; margin-bottom: 6px; }
+  .pros-cons ul { list-style: none; font-size: 12px; line-height: 1.8; }
+  .pros-cons .pro { color: #10b981; }
+  .pros-cons .con { color: #f87171; }
+  .pros-cons .pro::before { content: "✓ "; }
+  .pros-cons .con::before { content: "✗ "; }
+  .verdict { margin-top: 16px; padding: 10px 14px; border-radius: 8px; font-size: 12px; line-height: 1.6; }
+  .verdict.rec { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: #10b981; }
+  .verdict.alt { background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.3); color: #60a5fa; }
+  .verdict.warn { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: #f87171; }
+  #indicator { text-align: center; padding: 20px; color: #64748b; font-size: 14px; margin-top: 20px; }
+  .selected-text { color: #3b82f6; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>GeoViz Engine — Architecture Options</h1>
+
+<div class="options">
+  <!-- Option A -->
+  <div class="card" data-choice="option-a" onclick="toggleSelect(this)">
+    <div class="badge green">推荐</div>
+    <h2>方案A：Tauri + 嵌入式Python</h2>
+    <div class="subtitle">Python 打包进应用，单进程运行</div>
+
+    <div class="layer shell">
+      <div class="layer-title">桌面壳</div>
+      <div class="layer-content"><code>Tauri 2.x</code> Rust后端 · 2-5MB · WebView渲染</div>
+    </div>
+    <div class="layer frontend">
+      <div class="layer-title">前端渲染</div>
+      <div class="layer-content"><code>D3.js</code> 曲线/等值线 · <code>deck.gl</code> 大规模渲染 · <code>Three.js</code> 3D</div>
+    </div>
+    <div class="layer backend">
+      <div class="layer-title">Python后端（嵌入式）</div>
+      <div class="layer-content"><code>FastAPI</code> · <code>uvicorn</code> 内嵌启动 · <code>PyInstaller</code> 打包分发<br>本地 <code>localhost</code> 通信 · 无需外部安装Python</div>
+    </div>
+    <div class="layer data">
+      <div class="layer-title">数据处理</div>
+      <div class="layer-content"><code>lasio</code> 测井 · <code>segyio</code> 地震 · <code>GDAL</code> 栅格矢量 · <code>scipy</code> 插值等值线</div>
+    </div>
+
+    <div class="pros-cons">
+      <h3 style="color:#10b981">优势</h3>
+      <ul>
+        <li class="pro">单机部署简单，双击运行</li>
+        <li class="pro">Python生态完整可用</li>
+        <li class="pro">支持局域网模式（改为监听0.0.0.0）</li>
+        <li class="pro">Tauri轻量，适合地质工作站</li>
+      </ul>
+      <h3 style="color:#f87171">风险</h3>
+      <ul>
+        <li class="con">PyInstaller打包体积较大(~200MB)</li>
+        <li class="con">Python嵌入增加了构建复杂度</li>
+        <li class="con">Rust侧需写通信桥接代码</li>
+      </ul>
+    </div>
+    <div class="verdict rec">★ 推荐：单机体验最好，无需外部依赖</div>
+  </div>
+
+  <!-- Option B -->
+  <div class="card" data-choice="option-b" onclick="toggleSelect(this)">
+    <div class="badge">备选</div>
+    <h2>方案B：Tauri + 外置Python服务</h2>
+    <div class="subtitle">Python独立运行，应用连接服务</div>
+
+    <div class="layer shell">
+      <div class="layer-title">桌面壳</div>
+      <div class="layer-content"><code>Tauri 2.x</code> Rust后端 · 2-5MB · WebView渲染</div>
+    </div>
+    <div class="layer frontend">
+      <div class="layer-title">前端渲染</div>
+      <div class="layer-content">同方案A：<code>D3.js</code> · <code>deck.gl</code> · <code>Three.js</code></div>
+    </div>
+    <div class="layer backend">
+      <div class="layer-title">Python后端（独立进程）</div>
+      <div class="layer-content"><code>FastAPI</code> · <code>uvicorn</code> 独立运行<br>需要用户自行安装 <code>Python 3.11+</code><br>支持局域网/服务器部署</div>
+    </div>
+    <div class="layer data">
+      <div class="layer-title">数据处理</div>
+      <div class="layer-content">同方案A：完整Python地质数据生态</div>
+    </div>
+
+    <div class="pros-cons">
+      <h3 style="color:#10b981">优势</h3>
+      <ul>
+        <li class="pro">架构最清晰，前后端完全解耦</li>
+        <li class="pro">局域网/云端部署零修改</li>
+        <li class="pro">打包体积小（不含Python）</li>
+        <li class="pro">Python端可独立升级</li>
+      </ul>
+      <h3 style="color:#f87171">风险</h3>
+      <ul>
+        <li class="con">用户需自行安装Python环境</li>
+        <li class="con">需要管理Python进程启停</li>
+        <li class="con">版本兼容性问题（用户Python版本不一致）</li>
+      </ul>
+    </div>
+    <div class="verdict alt">适合团队协作/局域网场景，但终端用户体验不如方案A</div>
+  </div>
+
+  <!-- Option C -->
+  <div class="card" data-choice="option-c" onclick="toggleSelect(this)">
+    <h2>方案C：混合模式</h2>
+    <div class="subtitle">开发时外置Python，发布时嵌入打包</div>
+
+    <div class="layer shell">
+      <div class="layer-title">桌面壳</div>
+      <div class="layer-content"><code>Tauri 2.x</code> · 开发/发布双模式</div>
+    </div>
+    <div class="layer frontend">
+      <div class="layer-title">前端渲染</div>
+      <div class="layer-content">同上：<code>D3.js</code> · <code>deck.gl</code> · <code>Three.js</code></div>
+    </div>
+    <div class="layer backend">
+      <div class="layer-title">Python后端（自适应）</div>
+      <div class="layer-content">开发时：<code>venv</code> 外置运行<br>发布时：<code>PyInstaller</code> 嵌入打包<br>通过环境变量 <code>GEOVIZ_MODE</code> 切换</div>
+    </div>
+    <div class="layer data">
+      <div class="layer-title">数据处理</div>
+      <div class="layer-content">同上：完整Python地质数据生态</div>
+    </div>
+
+    <div class="pros-cons">
+      <h3 style="color:#10b981">优势</h3>
+      <ul>
+        <li class="pro">开发体验最好（热重载、快速调试）</li>
+        <li class="pro">发布时打包，终端用户无需配置</li>
+        <li class="pro">局域网模式也支持（外置Python）</li>
+        <li class="pro">最灵活，两全其美</li>
+      </ul>
+      <h3 style="color:#f87171">风险</h3>
+      <ul>
+        <li class="con">需维护两套启动脚本</li>
+        <li class="con">打包和发布流程更复杂</li>
+        <li class="con">CI/CD需要覆盖两种模式测试</li>
+      </ul>
+    </div>
+    <div class="verdict rec">★ 实际最实用：开发用外置，发布用嵌入</div>
+  </div>
+</div>
+
+<div id="indicator">
+  <div id="indicator-text">点击上方选项卡片进行选择，然后回到终端继续</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+function toggleSelect(el) {
+  const container = el.closest('.options');
+  container.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  window.selectedChoice = el.dataset.choice;
+  const label = el.querySelector('h2').textContent;
+  document.getElementById('indicator-text').innerHTML = '<span class="selected-text">' + label + '</span> 已选择 — 回到终端继续';
+}
+</script>
+</body>
+</html>

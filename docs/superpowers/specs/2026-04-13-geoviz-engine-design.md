@@ -46,19 +46,39 @@ GeoViz Engine 是一个基于前后端分离架构的地质数据可视化桌面
 - `dev`：前端 Vite dev server + Python uvicorn 独立运行
 - `prod`：Tauri 启动时 spawn 内嵌的 Python 进程
 
-#### Tauri Python 进程管理
+#### Tauri 2.0 Sidecar 配置与命名
+
+Tauri 2.0 要求 Sidecar 二进制文件遵循平台特定的命名规范：`[binary-name]-[target-triple]`。
+
+1. **tauri.conf.json 配置**:
+   ```json
+   {
+     "bundle": {
+       "externalBin": [
+         "binaries/geoviz-backend"
+       ]
+     }
+   }
+   ```
+2. **构建脚本处理**:
+   构建时，`src-python` 构建出的可执行文件需重命名为 `geoviz-backend-x86_64-pc-windows-msvc.exe` (以 Windows 为例) 并放入 `src-tauri/binaries/` 目录。
+
+#### Tauri Python 进程管理与安全 (Auth Token)
+
+为了保证本地 API 的安全性，防止其他进程恶意调用，采用动态生成的 Auth Token：
 
 ```
 Tauri main.rs 启动流程:
-1. 检测 GEOVIZ_MODE 环境变量
-2. if prod:
-   a. 查找内嵌 Python 可执行文件（同目录下 python/dist/bin/python）
-   b. spawn 子进程运行 uvicorn（绑定随机端口）
-   c. 等待 /api/system/status 返回 200（最多等30s）
-   d. WebView 加载 http://localhost:{port}
-3. if dev:
-   a. WebView 直接加载 http://localhost:5173（Vite dev server）
-   b. 假设 Python uvicorn 已在 http://localhost:8000 运行
+1. 生成长度为 32 位的随机 `GEOVIZ_API_TOKEN`
+2. 检测 GEOVIZ_MODE 环境变量
+3. if prod:
+   a. 查找内嵌 Python 可执行文件（按 target-triple 命名规则）
+   b. spawn 子进程运行 uvicorn，同时通过环境变量或 `--token` 参数传入 `GEOVIZ_API_TOKEN`
+   c. 等待 /api/system/status 返回 200（需验证 Token）
+   d. WebView 加载时将 Token 注入前端 `localStorage` 或通过 Rust 暴露给前端
+4. if dev:
+   a. WebView 直接加载 http://localhost:5173
+   b. Python 服务需手动启动并使用固定的开发 Token
 ```
 
 #### 开发脚本
@@ -149,6 +169,7 @@ geo-viz-engine/
 │   │   ├── i18n/             # 国际化
 │   │   │   ├── zh.json
 │   │   │   └── en.json
+│   │   ├── router.ts         # 路由配置（独立页面）
 │   │   ├── App.tsx
 │   │   └── main.tsx
 │   ├── package.json
@@ -227,6 +248,7 @@ interface Viewport {
 3. 可见范围变化 → 向后端请求对应数据块
 4. 数据返回 → Renderer.setData() 渲染
 5. 缩放过程中前端用已缓存数据做低精度预览，后台加载高精度数据后替换
+6. **高性能传输**: 使用 **Apache Arrow** 格式传输采样点数据。后端将 float 数组打包为 Arrow RecordBatch，前端使用 `arrow-js` 零拷贝读取。
 
 ### 3.3 Shared Modules
 
@@ -237,11 +259,29 @@ interface Viewport {
 | `DataCache` | LRU缓存，存储已加载数据块，避免重复请求 |
 | `CoordSystem` | 数据坐标系 ↔ 屏幕像素坐标转换 |
 
-### 3.4 Well Log Visualization (V1 Priority)
+**Memory Management Note**:
+为了避免 React 状态追踪导致的大规模数据重渲染延迟，所有的原始数值数据（如测井曲线点集、地震采样数组）应存储在 `Ref` 或全局数据存储中，而非直接存入 `useState/Zustand`。Zustand 仅维护数据的元数据、加载状态和 Viewport 参数。
+
+### 3.4 Page Routing — 独立页面架构
+
+每种可视化类型是独立的处理页面，不强行融合多种图示在同一页面。
+
+```
+/ (首页/仪表盘)
+  ├─ /well-log          测井可视化页面（独立）
+  ├─ /seismic           地震剖面页面（独立，V1.1）
+  ├─ /contour           等值线图页面（独立，V1.1）
+  └─ /3d-viewer         三维地质页面（独立，V2）
+```
+
+每个页面独立加载数据、独立管理状态、独立渲染。页面间通过侧边栏导航切换。
+这简化了组件复杂度和状态管理 — 不存在跨图示类型的数据耦合。
+
+### 3.5 Well Log Visualization (V1 Priority)
 
 **组件树**：
 ```
-WellLogPage
+WellLogPage (独立路由页面)
   └─ WellLogViewer
        ├─ DepthAxis          深度轴（左侧）
        ├─ TrackColumn[]      测井道数组
@@ -284,6 +324,11 @@ WellLogPage
 ```
 GET /api/well-log/{id}/curves?depth_start=100&depth_end=200&max_points=5000
 ```
+
+**Content Negotiation**:
+API 会根据请求头 `Accept` 返回不同格式：
+- `application/json`: 返回标准 JSON 数据（适合元数据和少量点）
+- `application/vnd.apache.arrow`: 返回 Arrow 格式数据（大批量采样点推荐）
 
 ### 4.2 Data Models
 
@@ -373,6 +418,7 @@ class ExportRequest(BaseModel):
 | Well Log | lasio | 0.30+ | LAS格式解析 |
 | Seismic | segyio | 1.9+ | SEG-Y格式解析 |
 | Science | scipy/numpy | latest | 等值线/插值 |
+| Data Serialization | Apache Arrow | latest | 高性能科学计算并行传输 (pyarrow/arrow-js) |
 | Data Model | Pydantic | 2.x | 数据校验 |
 | Test (FE) | Vitest + Testing Library | latest | 前端测试 |
 | Test (BE) | pytest | latest | 后端测试 |
@@ -456,3 +502,5 @@ class ExportRequest(BaseModel):
 | Windows WebView2 兼容性 | Low | Win10/11 已预装；Tauri 支持自动引导安装 |
 | 招聘前端 WebGL 人才 | Medium | Three.js/CesiumJS 开发者比 OpenGL 更易招 |
 | 模拟数据与真实数据差异 | Medium | 设计好数据接口，后端适配器模式切换 |
+| 数据序列化瓶颈 (JSON) | High | 引入 Apache Arrow 实现零拷贝序列化与二进制传输 |
+| 跨进程本地 API 攻击 | Medium | 采用动态生成 Auth Token 并在进程间加密传递 |
