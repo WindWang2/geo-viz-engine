@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.auth import AuthTokenMiddleware
 from app.api.system import router as system_router
+from app.api.data import router as data_router
 
 app = FastAPI(
     title="GeoViz Engine Backend",
@@ -10,10 +11,8 @@ app = FastAPI(
     description="Python FastAPI backend for geo-viz-engine",
 )
 
-# Auth middleware — validates X-API-Token on every request
 app.add_middleware(AuthTokenMiddleware)
 
-# CORS — allow Vite dev server and Tauri WebView
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "tauri://localhost"],
@@ -23,6 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(system_router)
+app.include_router(data_router)
 
 
 if __name__ == "__main__":
