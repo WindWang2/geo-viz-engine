@@ -1,0 +1,37 @@
+{
+  "app": {
+    "title": "GeoViz Engine",
+    "version": "Version"
+  },
+  "nav": {
+    "home": "Home",
+    "wellLog": "Well Log",
+    "seismic": "Seismic",
+    "contour": "Contour Map",
+    "threeD": "3D Viewer"
+  },
+  "page": {
+    "home": {
+      "title": "Welcome to GeoViz Engine",
+      "description": "Professional Geological Data Visualization Platform",
+      "startWellLog": "Start Well Log Analysis"
+    },
+    "wellLog": {
+      "title": "Well Log Visualization",
+      "noData": "No data available. Generate synthetic data to get started.",
+      "generateData": "Generate Synthetic Data",
+      "generating": "Generating..."
+    }
+  },
+  "status": {
+    "ready": "Ready",
+    "loading": "Loading...",
+    "error": "Error",
+    "backendConnected": "Backend Connected",
+    "backendDisconnected": "Backend Disconnected"
+  },
+  "lang": {
+    "zh": "中文",
+    "en": "English"
+  }
+}

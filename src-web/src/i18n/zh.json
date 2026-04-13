@@ -1,0 +1,37 @@
+{
+  "app": {
+    "title": "GeoViz Engine",
+    "version": "版本"
+  },
+  "nav": {
+    "home": "首页",
+    "wellLog": "测井可视化",
+    "seismic": "地震剖面",
+    "contour": "等值线图",
+    "threeD": "三维地质"
+  },
+  "page": {
+    "home": {
+      "title": "欢迎使用 GeoViz Engine",
+      "description": "专业地质数据可视化平台",
+      "startWellLog": "开始测井分析"
+    },
+    "wellLog": {
+      "title": "测井可视化",
+      "noData": "暂无数据，请生成合成数据开始体验",
+      "generateData": "生成合成数据",
+      "generating": "生成中..."
+    }
+  },
+  "status": {
+    "ready": "就绪",
+    "loading": "加载中...",
+    "error": "错误",
+    "backendConnected": "后端已连接",
+    "backendDisconnected": "后端未连接"
+  },
+  "lang": {
+    "zh": "中文",
+    "en": "English"
+  }
+}
