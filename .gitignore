@@ -1,2 +1,36 @@
+# Python
+src-python/venv/
 __pycache__/
+**/__pycache__/
+src-python/.pytest_cache/
 *.pyc
+*.pyo
+
+# Node
+src-web/node_modules/
+src-web/dist/
+
+# Rust
+src-tauri/target/
+
+# Build artifacts
+src-tauri/binaries/geoviz-backend
+src-tauri/binaries/geoviz-backend-*
+*.spec
+
+# Env
+.env.local
+.env.*.local
+!.env.development
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+*.iml
