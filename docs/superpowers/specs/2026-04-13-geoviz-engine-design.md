@@ -33,8 +33,9 @@ GeoViz Engine 是一个基于前后端分离架构的地质数据可视化桌面
 
 ### 1.4 Target Platform
 
-- Windows 桌面端为主
-- 架构上预留跨平台能力（Tauri 支持 Mac/Linux）
+- 全平台桌面端：Windows / macOS / Linux
+- Tauri 2.x 原生支持三平台
+- 发布产物：Windows (.msi/.exe)、macOS (.dmg)、Linux (.AppImage/.deb)
 
 ## 2. Architecture
 
@@ -500,6 +501,8 @@ class ExportRequest(BaseModel):
 | Rust-Tauri 学习曲线 | Medium | Tauri 2.x 文档完善，Rust侧代码量少（主要是进程管理） |
 | SEG-Y 格式多样性 | Medium | segyio 处理大多数变体；异常格式添加 fallback |
 | Windows WebView2 兼容性 | Low | Win10/11 已预装；Tauri 支持自动引导安装 |
+| macOS/Linux WebView | Low | macOS 用 WKWebView，Linux 用 WebKitGTK；Tauri 统一处理 |
+| 跨平台打包测试 | Medium | GitHub Actions CI 构建三平台产物；Sidecar 命名按 target-triple 区分 |
 | 招聘前端 WebGL 人才 | Medium | Three.js/CesiumJS 开发者比 OpenGL 更易招 |
 | 模拟数据与真实数据差异 | Medium | 设计好数据接口，后端适配器模式切换 |
 | 数据序列化瓶颈 (JSON) | High | 引入 Apache Arrow 实现零拷贝序列化与二进制传输 |
