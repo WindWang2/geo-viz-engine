@@ -13,7 +13,12 @@ async def generate_data(
     Generate synthetic well log data and cache in memory.
     Returns metadata only (curve data available via /api/well-log endpoints).
     """
-    wells = generate_wells(count=body.count)
+    wells = generate_wells(
+        count=body.count,
+        depth_start=body.depth_start,
+        depth_end=body.depth_end,
+        depth_step=body.depth_step,
+    )
     metadata = [
         WellMetadata(
             well_id=w.well_id,

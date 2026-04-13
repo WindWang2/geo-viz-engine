@@ -1,3 +1,4 @@
+import hmac
 import os
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -17,7 +18,7 @@ class AuthTokenMiddleware(BaseHTTPMiddleware):
             )
 
         provided_token = request.headers.get("X-API-Token", "")
-        if not provided_token or provided_token != expected_token:
+        if not provided_token or not hmac.compare_digest(provided_token, expected_token):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid or missing API token"},

@@ -1,4 +1,5 @@
 use rand::distributions::Alphanumeric;
+use rand::rngs::OsRng;
 use rand::Rng;
 use tauri::Manager;
 
@@ -11,7 +12,7 @@ pub struct AppState {
 
 /// Generate a cryptographically-adequate 32-character alphanumeric token.
 pub fn generate_api_token() -> String {
-    rand::thread_rng()
+    OsRng
         .sample_iter(&Alphanumeric)
         .take(32)
         .map(char::from)
@@ -42,6 +43,7 @@ pub fn run() {
                 // The sidecar binary is named geoviz-backend-<target-triple>
                 // and placed in src-tauri/binaries/ at build time.
                 // For Phase 1 (dev only), this branch is a no-op placeholder.
+                eprintln!("WARNING: prod sidecar not yet implemented");
                 let _ = app; // suppress unused warning
             }
             // In dev mode: Python is started separately by dev.sh

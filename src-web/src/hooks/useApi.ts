@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const DEV_TOKEN = import.meta.env.VITE_DEV_API_TOKEN ?? "dev-token-local-development-32x";
@@ -17,42 +17,36 @@ async function getToken(): Promise<string> {
 
 interface UseApiReturn {
   request: <T>(path: string, options?: RequestInit) => Promise<T>;
-  loading: boolean;
-  error: string | null;
 }
 
 export function useApi(): UseApiReturn {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const request = useCallback(async <T>(
     path: string,
     options: RequestInit = {},
   ): Promise<T> => {
-    setLoading(true);
-    setError(null);
-    try {
-      const token = await getToken();
-      const response = await fetch(`${API_BASE_URL}${path}`, {
-        ...options,
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Token": token,
-          ...(options.headers as Record<string, string> ?? {}),
-        },
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    const token = await getToken();
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Token": token,
+        ...(options.headers as Record<string, string> ?? {}),
+      },
+    });
+    if (!response.ok) {
+      let message = `HTTP ${response.status}: ${response.statusText}`;
+      try {
+        const body = await response.json();
+        if (body?.detail) {
+          message = String(body.detail);
+        }
+      } catch {
+        // response body is not JSON — keep the status-based message
       }
-      return (await response.json()) as T;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setError(msg);
-      throw err;
-    } finally {
-      setLoading(false);
+      throw new Error(message);
     }
+    return (await response.json()) as T;
   }, []);
 
-  return { request, loading, error };
+  return { request };
 }

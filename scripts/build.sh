@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "[geo-viz] Building Python backend with PyInstaller ..."
 cd "$ROOT_DIR/src-python"
 source venv/bin/activate
-pip install pyinstaller --quiet
+pip install -r requirements-build.txt --quiet
 pyinstaller --onefile --name geoviz-backend app/main.py   --distpath "$ROOT_DIR/src-tauri/binaries"
 
 TARGET_TRIPLE=$(rustc -Vv | grep 'host:' | awk '{print $2}')

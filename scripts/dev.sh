@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-export GEOVIZ_API_TOKEN="dev-token-local-development-32x"
+GEOVIZ_API_TOKEN="$(grep '^VITE_DEV_API_TOKEN=' "$ROOT_DIR/src-web/.env.development" | cut -d= -f2)"
+export GEOVIZ_API_TOKEN
 
 echo "[geo-viz] Starting Python backend on :8000 ..."
 cd "$ROOT_DIR/src-python"

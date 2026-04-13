@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import List
 
 import numpy as np
@@ -33,7 +34,7 @@ def generate_well_log(
     n = len(depths)
 
     # Build a layered lithology sequence with ~50-80 layers
-    n_boundaries = min(80, n // 100)
+    n_boundaries = max(2, min(80, n // 100))
     boundary_indices = np.sort(rng.choice(n, size=n_boundaries, replace=False))
 
     lithology = np.zeros(n, dtype=int)  # default: shale
@@ -122,14 +123,31 @@ def generate_well_log(
     )
 
 
-def generate_wells(count: int = 10) -> List[WellLogData]:
-    """Generate `count` synthetic wells and cache them in memory."""
+def generate_wells(
+    count: int = 10,
+    depth_start: float = 0.0,
+    depth_end: float = 3000.0,
+    depth_step: float = 0.125,
+    base_seed: int | None = None,
+) -> List[WellLogData]:
+    """Generate `count` synthetic wells and cache them in memory.
+
+    Args:
+        base_seed: Optional base seed for reproducibility. If None, uses current time.
+    """
     global _wells_cache
     wells: List[WellLogData] = []
+    base = base_seed if base_seed is not None else int(time.time())
     for i in range(count):
         well_id = f"WELL-{i + 1:03d}"
         well_name = f"Well {i + 1}"
-        well = generate_well_log(well_id, well_name, seed=i * 42 + 7)
+        well = generate_well_log(
+            well_id, well_name,
+            depth_start=depth_start,
+            depth_end=depth_end,
+            depth_step=depth_step,
+            seed=base + i * 42 + 7,
+        )
         wells.append(well)
     _wells_cache = {w.well_id: w for w in wells}
     return wells
