@@ -1,27 +1,214 @@
-# GeoViz Engine - 地质可视化引擎
+# GeoViz Engine — 地质数据可视化桌面引擎
 
-基于 Tauri + WebView + Python 的地质数据可视化桌面应用。
+![Tauri](https://img.shields.io/badge/Tauri-2.10.3-blue?logo=tauri)
+![React](https://img.shields.io/badge/React-18.3.1-61DAFB?logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.6.3-3178C6?logo=typescript)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688?logo=fastapi)
+![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-## 技术架构
+面向地质工程师和科研人员的**跨平台桌面应用**，提供测井数据可视化与分析功能。
+
+---
+
+## About / 项目简介
+
+GeoViz Engine 是一款基于 **Tauri 2.x + React + Python FastAPI** 的地质数据可视化桌面应用，采用三层架构设计：
+
+- **桌面壳（Rust/Tauri）**：窗口管理、安全 API Token 分发、Python sidecar 进程管理
+- **前端渲染（React/Web）**：用户界面、状态管理、路由、国际化
+- **后端计算（Python）**：REST API、地质数据处理、合成数据生成
+
+目标用户：地质工程师、测井分析人员、地球科学领域科研人员。
+
+---
+
+## Architecture / 技术架构
 
 ```
-桌面壳: Tauri (Rust)
-前端渲染: WebGL/WebGPU + D3.js + Three.js/CesiumJS
-后端处理: Python (FastAPI + segyio + lasio + GDAL)
+┌─────────────────────────────────────────────────────┐
+│               Desktop Shell (Tauri 2.x / Rust)       │
+│   窗口管理 · API Token 安全生成与分发 · 进程管理      │
+└───────────────┬────────────────────┬─────────────────┘
+                │  WebView           │  Sidecar (IPC)
+┌───────────────▼──────┐  ┌──────────▼──────────────────┐
+│   Frontend (React)    │  │   Backend (Python FastAPI)   │
+│                       │  │                              │
+│  React 18 + Vite      │  │  REST API · 数据处理          │
+│  TypeScript           │  │  numpy · pyarrow · lasio     │
+│  Zustand (状态管理)    │◄─►  合成数据生成                 │
+│  React Router 7       │  │  AuthToken 中间件             │
+│  TailwindCSS          │  │                              │
+│  i18next (中/英)      │  └──────────────────────────────┘
+└───────────────────────┘
 ```
 
-## 功能模块
+### Tech Stack / 完整技术栈
 
-- 测井可视化：标准测井道图、岩性柱状图、多井对比
-- 地震可视化：剖面渲染、水平切片、任意线切割
-- 平面图可视化：等值线/填色图、交互编辑
-- 三维可视化：地质体、井轨迹（V2）
-- 图件管理：PNG/PDF/SVG 导出
+| 层级 | 技术 | 版本 |
+|------|------|------|
+| 桌面壳 | Tauri | 2.10.3 |
+| 前端框架 | React | 18.3.1 |
+| 语言 | TypeScript | 5.6.3 |
+| 构建工具 | Vite | 5.4.10 |
+| 状态管理 | Zustand | 4.5.0 |
+| 样式 | TailwindCSS | 3.4.14 |
+| 路由 | React Router | 7.0.2 |
+| 国际化 | i18next | 23.7.6 |
+| 后端框架 | FastAPI | 0.115.0 |
+| 数据验证 | Pydantic | 2.9.2 |
+| 数值计算 | numpy | 2.1.3 |
+| 列式数据 | pyarrow | 18.0.0 |
+| LAS 解析 | lasio | 0.30 |
 
-## 开发状态
+---
 
-🚧 项目规划中
+## Features / 功能模块
+
+### Phase 1 已实现功能
+
+**认证与安全**
+- `AuthTokenMiddleware`：Tauri 启动时生成 32 位随机 token，通过环境变量安全传递给 Python 后端
+- 所有 API 请求需携带 `X-API-Token` 请求头
+
+**系统 API**
+- `GET /api/system/status`：返回版本、运行时间、Python 环境信息
+
+**测井数据 API**
+- `GET /api/data/wells`：返回合成井列表（10 口模拟井）
+- `GET /api/data/wells/{well_id}/curves`：返回指定井的曲线数据（GR / RT / DEN / NPHI）
+
+**合成数据生成**
+- 基于 numpy 生成 10 口模拟井数据
+- 每口井包含四条标准测井曲线（自然伽马、电阻率、密度、中子）
+
+**前端 UI**
+- `AppLayout` 三栏布局：Sidebar + 主内容区 + StatusBar
+- Toolbar 工具栏、首页（HomePage）、测井页面（WellLogPage）
+- 中英双语 i18n 支持（`en.json` / `zh.json`）
+
+**状态管理**
+- `useWellStore`：井数据的全局状态
+- `useSettingsStore`：应用设置状态
+
+---
+
+## Roadmap / 开发路线图
+
+| 阶段 | 状态 | 内容 |
+|------|------|------|
+| Phase 1 | ✅ 已完成 | 项目骨架、三层架构、认证、基础 API、合成数据 |
+| Phase 2 | 🔜 计划中 | 测井曲线 Canvas 2D 渲染、LAS 文件上传与解析 |
+| Phase 3 | 📋 待规划 | 多井对比、岩性柱状图 |
+| Phase 4 | 📋 待规划 | 地震数据可视化（segyio） |
+| Phase 5 | 📋 待规划 | 三维可视化（Three.js / CesiumJS） |
+
+---
+
+## Quick Start / 快速开始
+
+### 前置条件
+
+- [Rust](https://rustup.rs/) (stable)
+- Node.js 18+
+- Python 3.12+
+- 系统依赖（WebView2 / libwebkit2gtk）：参考 [Tauri 先决条件文档](https://tauri.app/start/prerequisites/)
+
+### 开发模式
+
+```bash
+# 1. 克隆项目
+git clone <repo-url>
+cd geo-viz-engine
+
+# 2. 安装前端依赖
+cd src-web && npm install && cd ..
+
+# 3. 创建 Python 虚拟环境并安装依赖
+cd src-python
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cd ..
+
+# 4. 一键启动（Python 后端 + Vite 前端 + Tauri 桌面壳）
+./scripts/dev.sh
+```
+
+### 生产构建
+
+```bash
+./scripts/build.sh
+```
+
+---
+
+## Project Structure / 项目结构
+
+```
+geo-viz-engine/
+├── src-tauri/              # Tauri 桌面壳 (Rust)
+│   ├── src/
+│   │   ├── lib.rs          # Tauri 配置、sidecar 启动、token 生成
+│   │   └── main.rs
+│   ├── binaries/           # Python sidecar 构建产物
+│   └── tauri.conf.json
+├── src-web/                # React 前端
+│   └── src/
+│       ├── pages/          # HomePage, WellLogPage
+│       ├── components/     # Sidebar, Toolbar, StatusBar
+│       ├── stores/         # useWellStore, useSettingsStore
+│       ├── hooks/          # useApi
+│       ├── i18n/           # en.json, zh.json
+│       └── router.tsx
+├── src-python/             # FastAPI 后端
+│   └── app/
+│       ├── api/            # system.py, data.py
+│       ├── models/         # well_log.py, common.py
+│       ├── services/       # data_generator.py
+│       ├── auth.py         # AuthTokenMiddleware
+│       └── main.py
+├── scripts/                # dev.sh, build.sh
+├── data/generated/         # 合成数据输出目录
+└── docs/                   # 设计文档
+```
+
+---
+
+## Testing / 测试
+
+| 层级 | 框架 | 数量 | 覆盖范围 |
+|------|------|------|----------|
+| Python 后端 | pytest | 36 tests | API、数据模型、认证、数据生成 |
+| React 前端 | vitest + @testing-library/react | 39 tests | 组件、页面、hooks、stores、i18n |
+| TypeScript | tsc | — | 零编译错误 |
+| Rust | cargo check | — | 编译通过 |
+
+```bash
+# Python 后端测试
+cd src-python && source venv/bin/activate && pytest
+
+# React 前端测试
+cd src-web && npm test
+
+# Rust 编译检查
+cd src-tauri && cargo check
+```
+
+---
+
+## API Overview / API 概览
+
+所有请求需携带 `X-API-Token` 请求头（由 Tauri 在运行时注入）。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/system/status` | 系统状态（版本、运行时间、环境） |
+| `GET` | `/api/data/wells` | 获取井列表 |
+| `GET` | `/api/data/wells/{well_id}/curves` | 获取指定井的测井曲线数据 |
+
+---
 
 ## License
 
-MIT
+[MIT](LICENSE)

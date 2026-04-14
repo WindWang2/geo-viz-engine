@@ -1,6 +1,6 @@
 # Phase 1: Project Scaffold Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status:** ALL TASKS COMPLETED. All 18 tasks have been implemented and committed. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 搭建 geo-viz-engine 全平台桌面应用的基础项目骨架，包含 Tauri 壳、React 前端、Python 后端、路由、i18n 和合成数据生成器。
 
@@ -12,7 +12,7 @@
 
 ## Task 1: Python 目录结构 + 环境初始化
 
-- [ ] **1.1** 创建完整目录结构
+- [x] **1.1** 创建完整目录结构
 
   ```bash
   mkdir -p src-python/app/api
@@ -24,7 +24,7 @@
   touch data/generated/.gitkeep
   ```
 
-- [ ] **1.2** 创建 `src-python/requirements.txt`
+- [x] **1.2** 创建 `src-python/requirements.txt`
 
   ```
   fastapi==0.115.0
@@ -39,7 +39,7 @@
   pytest-cov==6.0.0
   ```
 
-- [ ] **1.3** 创建 `src-python/pyproject.toml`
+- [x] **1.3** 创建 `src-python/pyproject.toml`
 
   ```toml
   [tool.pytest.ini_options]
@@ -58,7 +58,7 @@
   ]
   ```
 
-- [ ] **1.4** 创建 Python 虚拟环境并安装依赖
+- [x] **1.4** 创建 Python 虚拟环境并安装依赖
 
   ```bash
   cd src-python
@@ -69,7 +69,7 @@
 
   预期输出末尾：`Successfully installed fastapi-0.115.0 ...`
 
-- [ ] **1.5** 创建所有 `__init__.py` 文件
+- [x] **1.5** 创建所有 `__init__.py` 文件
 
   ```bash
   touch src-python/app/__init__.py
@@ -79,7 +79,7 @@
   touch src-python/tests/__init__.py
   ```
 
-- [ ] **1.6** Commit
+- [x] **1.6** Commit
 
   ```bash
   git add src-python/ data/generated/.gitkeep scripts/
@@ -90,7 +90,7 @@
 
 ## Task 2: Pydantic 数据模型 (TDD)
 
-- [ ] **2.1** 写测试：`src-python/tests/test_models.py`
+- [x] **2.1** 写测试：`src-python/tests/test_models.py`
 
   ```python
   from datetime import datetime
@@ -189,7 +189,7 @@
           GenerateDataRequest(count=101)
   ```
 
-- [ ] **2.2** 运行测试 — 预期全部失败（模块不存在）
+- [x] **2.2** 运行测试 — 预期全部失败（模块不存在）
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest tests/test_models.py -v 2>&1 | head -20
@@ -197,7 +197,7 @@
 
   预期：`ModuleNotFoundError: No module named 'app.models.common'`
 
-- [ ] **2.3** 实现 `src-python/app/models/common.py`
+- [x] **2.3** 实现 `src-python/app/models/common.py`
 
   ```python
   from datetime import datetime
@@ -217,7 +217,7 @@
       code: Optional[str] = None
   ```
 
-- [ ] **2.4** 实现 `src-python/app/models/well_log.py`
+- [x] **2.4** 实现 `src-python/app/models/well_log.py`
 
   ```python
   from typing import List, Optional, Tuple
@@ -267,7 +267,7 @@
       generated_count: int
   ```
 
-- [ ] **2.5** 运行测试 — 预期全部通过
+- [x] **2.5** 运行测试 — 预期全部通过
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest tests/test_models.py -v
@@ -275,7 +275,7 @@
 
   预期：`11 passed`
 
-- [ ] **2.6** Commit
+- [x] **2.6** Commit
 
   ```bash
   git add src-python/app/models/ src-python/tests/test_models.py
@@ -286,7 +286,7 @@
 
 ## Task 3: Auth Token 中间件 (TDD)
 
-- [ ] **3.1** 创建 `src-python/tests/conftest.py`
+- [x] **3.1** 创建 `src-python/tests/conftest.py`
 
   此文件必须在所有测试导入 `app` 之前设置环境变量：
 
@@ -311,7 +311,7 @@
       return {"X-API-Token": TEST_TOKEN}
   ```
 
-- [ ] **3.2** 写测试：`src-python/tests/test_auth.py`
+- [x] **3.2** 写测试：`src-python/tests/test_auth.py`
 
   ```python
   import os
@@ -364,7 +364,7 @@
       assert response.status_code == 401
   ```
 
-- [ ] **3.3** 运行测试 — 预期失败
+- [x] **3.3** 运行测试 — 预期失败
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest tests/test_auth.py -v 2>&1 | head -10
@@ -372,7 +372,7 @@
 
   预期：`ModuleNotFoundError: No module named 'app.auth'`
 
-- [ ] **3.4** 实现 `src-python/app/auth.py`
+- [x] **3.4** 实现 `src-python/app/auth.py`
 
   ```python
   import os
@@ -403,7 +403,7 @@
           return await call_next(request)
   ```
 
-- [ ] **3.5** 运行测试 — 预期全部通过
+- [x] **3.5** 运行测试 — 预期全部通过
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest tests/test_auth.py -v
@@ -411,7 +411,7 @@
 
   预期：`4 passed`
 
-- [ ] **3.6** Commit
+- [x] **3.6** Commit
 
   ```bash
   git add src-python/app/auth.py src-python/tests/test_auth.py src-python/tests/conftest.py
@@ -422,7 +422,7 @@
 
 ## Task 4: System Status API (TDD)
 
-- [ ] **4.1** 写测试：`src-python/tests/test_api_system.py`
+- [x] **4.1** 写测试：`src-python/tests/test_api_system.py`
 
   ```python
   from httpx import AsyncClient, ASGITransport
@@ -458,7 +458,7 @@
       assert response.json()["detail"] == "Invalid or missing API token"
   ```
 
-- [ ] **4.2** 运行测试 — 预期失败
+- [x] **4.2** 运行测试 — 预期失败
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest tests/test_api_system.py -v 2>&1 | head -10
@@ -466,7 +466,7 @@
 
   预期：`ModuleNotFoundError: No module named 'app.main'`
 
-- [ ] **4.3** 实现 `src-python/app/api/system.py`
+- [x] **4.3** 实现 `src-python/app/api/system.py`
 
   ```python
   from datetime import datetime, timezone
@@ -488,7 +488,7 @@
       )
   ```
 
-- [ ] **4.4** 实现最小 `src-python/app/main.py`（仅注册 system router，data router 在 Task 6 添加）
+- [x] **4.4** 实现最小 `src-python/app/main.py`（仅注册 system router，data router 在 Task 6 添加）
 
   ```python
   import os
@@ -526,7 +526,7 @@
       uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
   ```
 
-- [ ] **4.5** 运行测试 — 预期全部通过
+- [x] **4.5** 运行测试 — 预期全部通过
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest tests/test_api_system.py -v
@@ -534,7 +534,7 @@
 
   预期：`3 passed`
 
-- [ ] **4.6** Commit
+- [x] **4.6** Commit
 
   ```bash
   git add src-python/app/main.py src-python/app/api/system.py src-python/tests/test_api_system.py
@@ -545,7 +545,7 @@
 
 ## Task 5: Synthetic Data Generator Service (TDD)
 
-- [ ] **5.1** 写测试：`src-python/tests/test_data_generator.py`
+- [x] **5.1** 写测试：`src-python/tests/test_data_generator.py`
 
   ```python
   import pytest
@@ -645,7 +645,7 @@
       assert well.depth_step == 0.5
   ```
 
-- [ ] **5.2** 运行测试 — 预期失败
+- [x] **5.2** 运行测试 — 预期失败
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest tests/test_data_generator.py -v 2>&1 | head -10
@@ -653,7 +653,7 @@
 
   预期：`ModuleNotFoundError: No module named 'app.services.data_generator'`
 
-- [ ] **5.3** 实现 `src-python/app/services/data_generator.py`
+- [x] **5.3** 实现 `src-python/app/services/data_generator.py`
 
   ```python
   from __future__ import annotations
@@ -798,7 +798,7 @@
       return list(_wells_cache.values())
   ```
 
-- [ ] **5.4** 运行测试 — 预期全部通过
+- [x] **5.4** 运行测试 — 预期全部通过
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest tests/test_data_generator.py -v
@@ -806,7 +806,7 @@
 
   预期：`13 passed`
 
-- [ ] **5.5** Commit
+- [x] **5.5** Commit
 
   ```bash
   git add src-python/app/services/data_generator.py src-python/tests/test_data_generator.py
@@ -817,7 +817,7 @@
 
 ## Task 6: Data Generation API (TDD)
 
-- [ ] **6.1** 写测试：`src-python/tests/test_api_data.py`
+- [x] **6.1** 写测试：`src-python/tests/test_api_data.py`
 
   ```python
   from httpx import AsyncClient, ASGITransport
@@ -901,7 +901,7 @@
       assert response.status_code == 401
   ```
 
-- [ ] **6.2** 运行测试 — 预期失败
+- [x] **6.2** 运行测试 — 预期失败
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest tests/test_api_data.py -v 2>&1 | head -15
@@ -909,7 +909,7 @@
 
   预期：`404 Not Found` 或 router 未注册的错误
 
-- [ ] **6.3** 实现 `src-python/app/api/data.py`
+- [x] **6.3** 实现 `src-python/app/api/data.py`
 
   ```python
   from fastapi import APIRouter, Body
@@ -945,7 +945,7 @@
       )
   ```
 
-- [ ] **6.4** 将 data router 注册到 `src-python/app/main.py`（在 system router 之后添加一行）
+- [x] **6.4** 将 data router 注册到 `src-python/app/main.py`（在 system router 之后添加一行）
 
   在 `app.include_router(system_router)` 后追加：
 
@@ -993,7 +993,7 @@
       uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
   ```
 
-- [ ] **6.5** 运行全量后端测试 — 预期全部通过
+- [x] **6.5** 运行全量后端测试 — 预期全部通过
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest -v
@@ -1001,7 +1001,7 @@
 
   预期：`~31 passed`（models×11 + auth×4 + system×3 + data_generator×13 + data_api×7）
 
-- [ ] **6.6** Commit
+- [x] **6.6** Commit
 
   ```bash
   git add src-python/app/api/data.py src-python/app/main.py src-python/tests/test_api_data.py
@@ -1012,7 +1012,7 @@
 
 ## Task 7: Tauri 项目骨架 — Cargo.toml + tauri.conf.json
 
-- [ ] **7.1** 创建 `src-tauri` 目录结构
+- [x] **7.1** 创建 `src-tauri` 目录结构
 
   ```bash
   mkdir -p src-tauri/src
@@ -1021,7 +1021,7 @@
   touch src-tauri/binaries/.gitkeep
   ```
 
-- [ ] **7.2** 创建 `src-tauri/Cargo.toml`
+- [x] **7.2** 创建 `src-tauri/Cargo.toml`
 
   ```toml
   [package]
@@ -1053,7 +1053,7 @@
   strip = true
   ```
 
-- [ ] **7.3** 创建 `src-tauri/build.rs`
+- [x] **7.3** 创建 `src-tauri/build.rs`
 
   ```rust
   fn main() {
@@ -1061,7 +1061,7 @@
   }
   ```
 
-- [ ] **7.4** 创建 `src-tauri/tauri.conf.json`
+- [x] **7.4** 创建 `src-tauri/tauri.conf.json`
 
   ```json
   {
@@ -1102,7 +1102,7 @@
   }
   ```
 
-- [ ] **7.5** 创建 `src-tauri/capabilities/default.json`
+- [x] **7.5** 创建 `src-tauri/capabilities/default.json`
 
   ```json
   {
@@ -1117,7 +1117,7 @@
   }
   ```
 
-- [ ] **7.6** 验证 Cargo.toml 语法（`cargo check` 会下载依赖，约1-3分钟）
+- [x] **7.6** 验证 Cargo.toml 语法（`cargo check` 会下载依赖，约1-3分钟）
 
   ```bash
   cd src-tauri && cargo fetch
@@ -1125,7 +1125,7 @@
 
   预期：无错误输出（警告可忽略）
 
-- [ ] **7.7** Commit
+- [x] **7.7** Commit
 
   ```bash
   git add src-tauri/
@@ -1136,7 +1136,7 @@
 
 ## Task 8: Rust Token 生成 + Tauri Commands
 
-- [ ] **8.1** 创建 `src-tauri/src/lib.rs`
+- [x] **8.1** 创建 `src-tauri/src/lib.rs`
 
   ```rust
   use rand::distributions::Alphanumeric;
@@ -1193,7 +1193,7 @@
   }
   ```
 
-- [ ] **8.2** 创建 `src-tauri/src/main.rs`
+- [x] **8.2** 创建 `src-tauri/src/main.rs`
 
   ```rust
   // Prevents additional console window on Windows in release builds.
@@ -1204,7 +1204,7 @@
   }
   ```
 
-- [ ] **8.3** 验证 Rust 代码编译
+- [x] **8.3** 验证 Rust 代码编译
 
   ```bash
   cd src-tauri && cargo check 2>&1 | tail -5
@@ -1212,7 +1212,7 @@
 
   预期末尾：`Finished \`dev\` profile [unoptimized + debuginfo] target(s)` 或仅有 warning，无 error。
 
-- [ ] **8.4** Commit
+- [x] **8.4** Commit
 
   ```bash
   git add src-tauri/src/
@@ -1223,7 +1223,7 @@
 
 ## Task 9: 前端项目初始化 — package.json + Vite + TypeScript
 
-- [ ] **9.1** 创建 `src-web` 目录结构
+- [x] **9.1** 创建 `src-web` 目录结构
 
   ```bash
   mkdir -p src-web/src/components/common
@@ -1235,7 +1235,7 @@
   mkdir -p src-web/src/__mocks__/@tauri-apps/api
   ```
 
-- [ ] **9.2** 创建 `src-web/package.json`
+- [x] **9.2** 创建 `src-web/package.json`
 
   ```json
   {
@@ -1279,7 +1279,7 @@
   }
   ```
 
-- [ ] **9.3** 安装依赖
+- [x] **9.3** 安装依赖
 
   ```bash
   cd src-web && npm install
@@ -1287,7 +1287,7 @@
 
   预期：`added XXX packages` 无错误。
 
-- [ ] **9.4** 创建 `src-web/tsconfig.json`
+- [x] **9.4** 创建 `src-web/tsconfig.json`
 
   ```json
   {
@@ -1312,7 +1312,7 @@
   }
   ```
 
-- [ ] **9.5** 创建 `src-web/vite.config.ts`
+- [x] **9.5** 创建 `src-web/vite.config.ts`
 
   ```typescript
   import { defineConfig } from "vite";
@@ -1340,7 +1340,7 @@
   });
   ```
 
-- [ ] **9.6** 创建 `src-web/vitest.config.ts`
+- [x] **9.6** 创建 `src-web/vitest.config.ts`
 
   ```typescript
   import { defineConfig } from "vitest/config";
@@ -1360,13 +1360,13 @@
   });
   ```
 
-- [ ] **9.7** 创建 `src-web/src/test-setup.ts`
+- [x] **9.7** 创建 `src-web/src/test-setup.ts`
 
   ```typescript
   import "@testing-library/jest-dom";
   ```
 
-- [ ] **9.8** Commit
+- [x] **9.8** Commit
 
   ```bash
   git add src-web/package.json src-web/package-lock.json src-web/tsconfig.json src-web/vite.config.ts src-web/vitest.config.ts src-web/src/test-setup.ts
@@ -1377,7 +1377,7 @@
 
 ## Task 10: TailwindCSS + PostCSS + HTML 入口
 
-- [ ] **10.1** 创建 `src-web/tailwind.config.js`
+- [x] **10.1** 创建 `src-web/tailwind.config.js`
 
   ```javascript
   /** @type {import('tailwindcss').Config} */
@@ -1405,7 +1405,7 @@
   };
   ```
 
-- [ ] **10.2** 创建 `src-web/postcss.config.js`
+- [x] **10.2** 创建 `src-web/postcss.config.js`
 
   ```javascript
   export default {
@@ -1416,7 +1416,7 @@
   };
   ```
 
-- [ ] **10.3** 创建 `src-web/index.html`
+- [x] **10.3** 创建 `src-web/index.html`
 
   ```html
   <!doctype html>
@@ -1433,7 +1433,7 @@
   </html>
   ```
 
-- [ ] **10.4** 创建全局样式入口 `src-web/src/index.css`
+- [x] **10.4** 创建全局样式入口 `src-web/src/index.css`
 
   ```css
   @tailwind base;
@@ -1455,7 +1455,7 @@
   }
   ```
 
-- [ ] **10.5** Commit
+- [x] **10.5** Commit
 
   ```bash
   git add src-web/tailwind.config.js src-web/postcss.config.js src-web/index.html src-web/src/index.css
@@ -1466,7 +1466,7 @@
 
 ## Task 11: i18n 基础配置 (TDD)
 
-- [ ] **11.1** 写测试：`src-web/src/i18n/i18n.test.ts`
+- [x] **11.1** 写测试：`src-web/src/i18n/i18n.test.ts`
 
   ```typescript
   import i18n from "./index";
@@ -1518,7 +1518,7 @@
   });
   ```
 
-- [ ] **11.2** 运行测试 — 预期失败
+- [x] **11.2** 运行测试 — 预期失败
 
   ```bash
   cd src-web && npx vitest run src/i18n/i18n.test.ts 2>&1 | tail -10
@@ -1526,7 +1526,7 @@
 
   预期：`Cannot find module './index'`
 
-- [ ] **11.3** 创建 `src-web/src/i18n/zh.json`
+- [x] **11.3** 创建 `src-web/src/i18n/zh.json`
 
   ```json
   {
@@ -1568,7 +1568,7 @@
   }
   ```
 
-- [ ] **11.4** 创建 `src-web/src/i18n/en.json`
+- [x] **11.4** 创建 `src-web/src/i18n/en.json`
 
   ```json
   {
@@ -1610,7 +1610,7 @@
   }
   ```
 
-- [ ] **11.5** 创建 `src-web/src/i18n/index.ts`
+- [x] **11.5** 创建 `src-web/src/i18n/index.ts`
 
   ```typescript
   import i18n from "i18next";
@@ -1635,7 +1635,7 @@
   export default i18n;
   ```
 
-- [ ] **11.6** 运行测试 — 预期全部通过
+- [x] **11.6** 运行测试 — 预期全部通过
 
   ```bash
   cd src-web && npx vitest run src/i18n/i18n.test.ts
@@ -1643,7 +1643,7 @@
 
   预期：`9 passed`
 
-- [ ] **11.7** Commit
+- [x] **11.7** Commit
 
   ```bash
   git add src-web/src/i18n/
@@ -1654,7 +1654,7 @@
 
 ## Task 12: Zustand Stores (TDD)
 
-- [ ] **12.1** 写测试：`src-web/src/stores/stores.test.ts`
+- [x] **12.1** 写测试：`src-web/src/stores/stores.test.ts`
 
   ```typescript
   import { act, renderHook } from "@testing-library/react";
@@ -1743,7 +1743,7 @@
   });
   ```
 
-- [ ] **12.2** 运行测试 — 预期失败
+- [x] **12.2** 运行测试 — 预期失败
 
   ```bash
   cd src-web && npx vitest run src/stores/stores.test.ts 2>&1 | tail -5
@@ -1751,7 +1751,7 @@
 
   预期：`Cannot find module './useSettingsStore'`
 
-- [ ] **12.3** 创建 `src-web/src/stores/useSettingsStore.ts`
+- [x] **12.3** 创建 `src-web/src/stores/useSettingsStore.ts`
 
   ```typescript
   import { create } from "zustand";
@@ -1773,7 +1773,7 @@
   }));
   ```
 
-- [ ] **12.4** 创建 `src-web/src/stores/useWellStore.ts`
+- [x] **12.4** 创建 `src-web/src/stores/useWellStore.ts`
 
   ```typescript
   import { create } from "zustand";
@@ -1807,7 +1807,7 @@
   }));
   ```
 
-- [ ] **12.5** 运行测试 — 预期全部通过
+- [x] **12.5** 运行测试 — 预期全部通过
 
   ```bash
   cd src-web && npx vitest run src/stores/stores.test.ts
@@ -1815,7 +1815,7 @@
 
   预期：`10 passed`
 
-- [ ] **12.6** Commit
+- [x] **12.6** Commit
 
   ```bash
   git add src-web/src/stores/
@@ -1826,7 +1826,7 @@
 
 ## Task 13: useApi Hook (TDD)
 
-- [ ] **13.1** 创建 Tauri API mock：`src-web/src/__mocks__/@tauri-apps/api/core.ts`
+- [x] **13.1** 创建 Tauri API mock：`src-web/src/__mocks__/@tauri-apps/api/core.ts`
 
   ```typescript
   import { vi } from "vitest";
@@ -1834,7 +1834,7 @@
   export const invoke = vi.fn();
   ```
 
-- [ ] **13.2** 写测试：`src-web/src/hooks/useApi.test.ts`
+- [x] **13.2** 写测试：`src-web/src/hooks/useApi.test.ts`
 
   ```typescript
   import { renderHook, act, waitFor } from "@testing-library/react";
@@ -1932,7 +1932,7 @@
   });
   ```
 
-- [ ] **13.3** 运行测试 — 预期失败
+- [x] **13.3** 运行测试 — 预期失败
 
   ```bash
   cd src-web && npx vitest run src/hooks/useApi.test.ts 2>&1 | tail -5
@@ -1940,7 +1940,7 @@
 
   预期：`Cannot find module './useApi'`
 
-- [ ] **13.4** 创建 `src-web/src/hooks/useApi.ts`
+- [x] **13.4** 创建 `src-web/src/hooks/useApi.ts`
 
   ```typescript
   import { useState, useCallback } from "react";
@@ -2012,7 +2012,7 @@
   }
   ```
 
-- [ ] **13.5** 运行测试 — 预期全部通过
+- [x] **13.5** 运行测试 — 预期全部通过
 
   ```bash
   cd src-web && npx vitest run src/hooks/useApi.test.ts
@@ -2020,14 +2020,14 @@
 
   预期：`6 passed`
 
-- [ ] **13.6** 创建 `src-web/.env.development`
+- [x] **13.6** 创建 `src-web/.env.development`
 
   ```env
   VITE_DEV_API_TOKEN=dev-token-local-development-32x
   VITE_API_BASE_URL=http://localhost:8000
   ```
 
-- [ ] **13.7** Commit
+- [x] **13.7** Commit
 
   ```bash
   git add src-web/src/hooks/ src-web/src/__mocks__/ src-web/.env.development
@@ -2038,7 +2038,7 @@
 
 ## Task 14: Layout 组件 (TDD)
 
-- [ ] **14.1** 写测试：`src-web/src/components/common/Sidebar.test.tsx`
+- [x] **14.1** 写测试：`src-web/src/components/common/Sidebar.test.tsx`
 
   ```typescript
   import { render, screen } from "@testing-library/react";
@@ -2082,7 +2082,7 @@
   });
   ```
 
-- [ ] **14.2** 写测试：`src-web/src/components/common/StatusBar.test.tsx`
+- [x] **14.2** 写测试：`src-web/src/components/common/StatusBar.test.tsx`
 
   ```typescript
   import { render, screen } from "@testing-library/react";
@@ -2113,7 +2113,7 @@
   });
   ```
 
-- [ ] **14.3** 写测试：`src-web/src/components/common/Toolbar.test.tsx`
+- [x] **14.3** 写测试：`src-web/src/components/common/Toolbar.test.tsx`
 
   ```typescript
   import { render, screen, fireEvent } from "@testing-library/react";
@@ -2156,7 +2156,7 @@
   });
   ```
 
-- [ ] **14.4** 运行 component 测试 — 预期失败
+- [x] **14.4** 运行 component 测试 — 预期失败
 
   ```bash
   cd src-web && npx vitest run src/components/common/ 2>&1 | tail -5
@@ -2164,7 +2164,7 @@
 
   预期：`Cannot find module './Sidebar'` 等
 
-- [ ] **14.5** 创建 `src-web/src/components/common/Sidebar.tsx`
+- [x] **14.5** 创建 `src-web/src/components/common/Sidebar.tsx`
 
   ```typescript
   import { NavLink } from "react-router-dom";
@@ -2209,7 +2209,7 @@
   }
   ```
 
-- [ ] **14.6** 创建 `src-web/src/components/common/StatusBar.tsx`
+- [x] **14.6** 创建 `src-web/src/components/common/StatusBar.tsx`
 
   ```typescript
   import { useTranslation } from "react-i18next";
@@ -2228,7 +2228,7 @@
   }
   ```
 
-- [ ] **14.7** 创建 `src-web/src/components/common/Toolbar.tsx`
+- [x] **14.7** 创建 `src-web/src/components/common/Toolbar.tsx`
 
   ```typescript
   import { useTranslation } from "react-i18next";
@@ -2257,7 +2257,7 @@
   }
   ```
 
-- [ ] **14.8** 创建 `src-web/src/components/layout/AppLayout.tsx`
+- [x] **14.8** 创建 `src-web/src/components/layout/AppLayout.tsx`
 
   ```typescript
   import { Outlet } from "react-router-dom";
@@ -2281,7 +2281,7 @@
   }
   ```
 
-- [ ] **14.9** 运行 layout 测试 — 预期全部通过
+- [x] **14.9** 运行 layout 测试 — 预期全部通过
 
   ```bash
   cd src-web && npx vitest run src/components/
@@ -2289,7 +2289,7 @@
 
   预期：`9 passed`
 
-- [ ] **14.10** Commit
+- [x] **14.10** Commit
 
   ```bash
   git add src-web/src/components/
@@ -2300,7 +2300,7 @@
 
 ## Task 15: Pages (TDD)
 
-- [ ] **15.1** 写测试：`src-web/src/pages/HomePage.test.tsx`
+- [x] **15.1** 写测试：`src-web/src/pages/HomePage.test.tsx`
 
   ```typescript
   import { render, screen } from "@testing-library/react";
@@ -2340,7 +2340,7 @@
   });
   ```
 
-- [ ] **15.2** 写测试：`src-web/src/pages/WellLogPage.test.tsx`
+- [x] **15.2** 写测试：`src-web/src/pages/WellLogPage.test.tsx`
 
   ```typescript
   import { render, screen, waitFor } from "@testing-library/react";
@@ -2397,7 +2397,7 @@
   });
   ```
 
-- [ ] **15.3** 运行测试 — 预期失败
+- [x] **15.3** 运行测试 — 预期失败
 
   ```bash
   cd src-web && npx vitest run src/pages/ 2>&1 | tail -5
@@ -2405,7 +2405,7 @@
 
   预期：`Cannot find module './HomePage'`
 
-- [ ] **15.4** 创建 `src-web/src/pages/HomePage.tsx`
+- [x] **15.4** 创建 `src-web/src/pages/HomePage.tsx`
 
   ```typescript
   import { Link } from "react-router-dom";
@@ -2442,7 +2442,7 @@
   }
   ```
 
-- [ ] **15.5** 创建 `src-web/src/pages/WellLogPage.tsx`
+- [x] **15.5** 创建 `src-web/src/pages/WellLogPage.tsx`
 
   ```typescript
   import { useTranslation } from "react-i18next";
@@ -2530,7 +2530,7 @@
   }
   ```
 
-- [ ] **15.6** 运行页面测试 — 预期全部通过
+- [x] **15.6** 运行页面测试 — 预期全部通过
 
   ```bash
   cd src-web && npx vitest run src/pages/
@@ -2538,7 +2538,7 @@
 
   预期：`6 passed`
 
-- [ ] **15.7** Commit
+- [x] **15.7** Commit
 
   ```bash
   git add src-web/src/pages/
@@ -2549,7 +2549,7 @@
 
 ## Task 16: router.tsx + App.tsx + main.tsx
 
-- [ ] **16.1** 创建 `src-web/src/router.tsx`
+- [x] **16.1** 创建 `src-web/src/router.tsx`
 
   ```typescript
   import { createBrowserRouter } from "react-router-dom";
@@ -2571,7 +2571,7 @@
   export default router;
   ```
 
-- [ ] **16.2** 创建 `src-web/src/App.tsx`
+- [x] **16.2** 创建 `src-web/src/App.tsx`
 
   ```typescript
   import { RouterProvider } from "react-router-dom";
@@ -2584,7 +2584,7 @@
   }
   ```
 
-- [ ] **16.3** 创建 `src-web/src/main.tsx`
+- [x] **16.3** 创建 `src-web/src/main.tsx`
 
   ```typescript
   import React from "react";
@@ -2599,7 +2599,7 @@
   );
   ```
 
-- [ ] **16.4** 运行全量前端测试验证无回归
+- [x] **16.4** 运行全量前端测试验证无回归
 
   ```bash
   cd src-web && npx vitest run
@@ -2607,7 +2607,7 @@
 
   预期：`~31 passed`（i18n×9 + stores×10 + useApi×6 + components×9 + pages×6）
 
-- [ ] **16.5** 验证 TypeScript 编译无错误
+- [x] **16.5** 验证 TypeScript 编译无错误
 
   ```bash
   cd src-web && npx tsc --noEmit
@@ -2615,7 +2615,7 @@
 
   预期：无任何输出（无错误）
 
-- [ ] **16.6** Commit
+- [x] **16.6** Commit
 
   ```bash
   git add src-web/src/router.tsx src-web/src/App.tsx src-web/src/main.tsx
@@ -2626,7 +2626,7 @@
 
 ## Task 17: dev.sh + build.sh + 最终集成
 
-- [ ] **17.1** 创建 `scripts/dev.sh`
+- [x] **17.1** 创建 `scripts/dev.sh`
 
   ```bash
   #!/usr/bin/env bash
@@ -2669,7 +2669,7 @@
   kill "$PYTHON_PID" "$VITE_PID" 2>/dev/null || true
   ```
 
-- [ ] **17.2** 创建 `scripts/build.sh`
+- [x] **17.2** 创建 `scripts/build.sh`
 
   ```bash
   #!/usr/bin/env bash
@@ -2706,13 +2706,13 @@
   echo "[geo-viz] Build complete. Artifacts in src-tauri/target/release/bundle/"
   ```
 
-- [ ] **17.3** 赋予脚本执行权限
+- [x] **17.3** 赋予脚本执行权限
 
   ```bash
   chmod +x scripts/dev.sh scripts/build.sh
   ```
 
-- [ ] **17.4** 手动冒烟测试 Python 后端（在独立终端执行）
+- [x] **17.4** 手动冒烟测试 Python 后端（在独立终端执行）
 
   ```bash
   cd src-python
@@ -2735,7 +2735,7 @@
   kill %1  # 停止后台 uvicorn
   ```
 
-- [ ] **17.5** 运行全量后端测试最终验证
+- [x] **17.5** 运行全量后端测试最终验证
 
   ```bash
   cd src-python && source venv/bin/activate && python -m pytest -v --tb=short
@@ -2743,7 +2743,7 @@
 
   预期：`~31 passed, 0 failed`
 
-- [ ] **17.6** 运行全量前端测试最终验证
+- [x] **17.6** 运行全量前端测试最终验证
 
   ```bash
   cd src-web && npx vitest run
@@ -2751,7 +2751,7 @@
 
   预期：`~31 passed, 0 failed`
 
-- [ ] **17.7** Commit
+- [x] **17.7** Commit
 
   ```bash
   git add scripts/
@@ -2762,7 +2762,7 @@
 
 ## Task 18: 最终整合 Commit
 
-- [ ] **18.1** 确认所有文件已跟踪
+- [x] **18.1** 确认所有文件已跟踪
 
   ```bash
   git status
@@ -2770,7 +2770,7 @@
 
   预期：仅有 `node_modules/`（已在 .gitignore）和 `src-python/venv/`（已在 .gitignore）显示为未跟踪。
 
-- [ ] **18.2** 确认 `.gitignore` 包含必要条目（在项目根目录追加，若不存在则创建）
+- [x] **18.2** 确认 `.gitignore` 包含必要条目（在项目根目录追加，若不存在则创建）
 
   ```gitignore
   # Python
@@ -2798,7 +2798,7 @@
   .env.local
   ```
 
-- [ ] **18.3** 最终 commit
+- [x] **18.3** 最终 commit
 
   ```bash
   git add .gitignore

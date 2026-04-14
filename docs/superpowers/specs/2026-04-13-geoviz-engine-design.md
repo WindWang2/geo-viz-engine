@@ -1,7 +1,7 @@
 # GeoViz Engine — Design Specification
 
 **Date**: 2026-04-13
-**Status**: Draft
+**Status**: Phase 1 Complete (2026-04-14)
 **Author**: WANG Assistant + User
 
 ## 1. Overview
@@ -403,38 +403,38 @@ class ExportRequest(BaseModel):
 
 | Layer | Technology | Version | Purpose |
 |-------|-----------|---------|---------|
-| Desktop Shell | Tauri | 2.x | Rust壳，窗口+进程管理 |
-| UI Framework | React | 18+ | 组件化UI |
-| Language | TypeScript | 5.x | 类型安全 |
-| Build Tool | Vite | 5.x | 前端构建 |
-| State | Zustand | 4.x | 轻量状态管理 |
-| 2D Rendering | Canvas 2D + D3.js | v7 | 测井曲线、道图 |
-| Large-scale | deck.gl | 9.x | 地震剖面、等值线(V1.1) |
-| SVG Interaction | D3.js | v7 | 岩性符号、平面图编辑 |
-| 3D | Three.js | r160+ | 三维地质(V2) |
-| Styling | TailwindCSS | 3.x | UI样式 |
+| Desktop Shell | Tauri | 2.10.3 | Rust壳，窗口+进程管理 |
+| UI Framework | React | 18.3.1 | 组件化UI |
+| Language | TypeScript | 5.6.3 | 类型安全 |
+| Build Tool | Vite | 5.4.10 | 前端构建 |
+| State | Zustand | 4.5.0 | 轻量状态管理 |
+| 2D Rendering | Canvas 2D (D3.js 待 Phase 2 引入) | — | 测井曲线、道图 |
+| Large-scale | deck.gl | 9.3.0 (Phase 2+) | 地震剖面、等值线(V1.1) |
+| SVG Interaction | D3.js | v7 (Phase 2+) | 岩性符号、平面图编辑 |
+| 3D | Three.js | 0.183.2 (V2) | 三维地质(V2) |
+| Styling | TailwindCSS | 3.4.14 | UI样式 |
 | Icons | Lucide React | latest | 图标 |
-| Backend | FastAPI | 0.100+ | Python API |
+| Backend | FastAPI | 0.115.0 | Python API |
 | ASGI | uvicorn | latest | Python服务 |
-| Well Log | lasio | 0.30+ | LAS格式解析 |
-| Seismic | segyio | 1.9+ | SEG-Y格式解析 |
+| Well Log | lasio | 0.30 | LAS格式解析 |
+| Seismic | segyio | 1.9.14 (待引入) | SEG-Y格式解析 |
 | Science | scipy/numpy | latest | 等值线/插值 |
-| Data Serialization | Apache Arrow | latest | 高性能科学计算并行传输 (pyarrow/arrow-js) |
-| Data Model | Pydantic | 2.x | 数据校验 |
+| Data Serialization | Apache Arrow | pyarrow 18.0.0 / arrow-js 21.1.0 | 高性能科学计算并行传输 (pyarrow/arrow-js) |
+| Data Model | Pydantic | 2.9.2 | 数据校验 |
 | Test (FE) | Vitest + Testing Library | latest | 前端测试 |
 | Test (BE) | pytest | latest | 后端测试 |
-| i18n | i18next | latest | 中英双语 |
+| i18n | i18next | 23.7.6 | 中英双语 |
 
 ## 6. V1 Delivery Scope
 
 ### Phase 1: Project Scaffold (Week 1-2)
 
-- [ ] Tauri 2.x + React + Vite + TypeScript 项目骨架
-- [ ] FastAPI 后端骨架 + 健康检查API
-- [ ] 合成数据生成器（10口模拟井）
-- [ ] 前后端通信（dev模式启动脚本）
-- [ ] 基础UI布局（侧边栏井列表 + 工作区 + 状态栏）
-- [ ] i18n 基础配置（中英双语）
+- [x] Tauri 2.x + React + Vite + TypeScript 项目骨架
+- [x] FastAPI 后端骨架 + 健康检查API
+- [x] 合成数据生成器（10口模拟井）
+- [x] 前后端通信（dev模式启动脚本）
+- [x] 基础UI布局（侧边栏井列表 + 工作区 + 状态栏）
+- [x] i18n 基础配置（中英双语）
 
 ### Phase 2: Well Log MVP (Week 3-6)
 
@@ -497,7 +497,7 @@ class ExportRequest(BaseModel):
 | Risk | Level | Mitigation |
 |------|-------|------------|
 | Canvas 2D 大数据量性能 | Low | 虚拟化渲染 + 按需加载 + 降采样 |
-| PyInstaller 打包体积大(~200MB) | Medium | 使用 UPX 压缩；考虑 Nuitka 作为备选 |
+| PyInstaller 打包体积大(~200MB) | Medium | 使用 --onedir 模式（--onefile 有双进程 bug #11686）；UPX 压缩；Tauri 社区标准方案 |
 | Rust-Tauri 学习曲线 | Medium | Tauri 2.x 文档完善，Rust侧代码量少（主要是进程管理） |
 | SEG-Y 格式多样性 | Medium | segyio 处理大多数变体；异常格式添加 fallback |
 | Windows WebView2 兼容性 | Low | Win10/11 已预装；Tauri 支持自动引导安装 |
