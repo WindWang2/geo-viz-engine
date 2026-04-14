@@ -1,8 +1,27 @@
-from fastapi import APIRouter, Body
-from app.models.well_log import GenerateDataRequest, GenerateDataResponse, WellMetadata
-from app.services.data_generator import generate_wells
+from fastapi import APIRouter, Body, HTTPException
+from app.models.well_log import GenerateDataRequest, GenerateDataResponse, WellLogData, WellMetadata
+from app.services import data_generator
 
 router = APIRouter(prefix="/api/data", tags=["data"])
+
+
+@router.get("/list", response_model=list[WellMetadata])
+async def list_wells() -> list[WellMetadata]:
+    """
+    List metadata for all cached wells (including statically loaded mock data).
+    """
+    wells = data_generator.get_cached_wells()
+    metadata = [
+        WellMetadata(
+            well_id=w.well_id,
+            well_name=w.well_name,
+            depth_start=w.depth_start,
+            depth_end=w.depth_end,
+            curve_names=[c.name for c in w.curves],
+        )
+        for w in wells
+    ]
+    return metadata
 
 
 @router.post("/generate", response_model=GenerateDataResponse)
@@ -13,7 +32,7 @@ async def generate_data(
     Generate synthetic well log data and cache in memory.
     Returns metadata only (curve data available via /api/well-log endpoints).
     """
-    wells = generate_wells(
+    wells = data_generator.generate_wells(
         count=body.count,
         depth_start=body.depth_start,
         depth_end=body.depth_end,
@@ -34,3 +53,18 @@ async def generate_data(
         message=f"Generated {len(wells)} synthetic wells successfully",
         generated_count=len(wells),
     )
+
+
+@router.get("/well/{well_id}", response_model=WellLogData)
+async def get_well_data(well_id: str) -> WellLogData:
+    """
+    Get full well log data including all curve values for a generated well.
+    Data is retrieved from the in-memory cache.
+    """
+    well = data_generator._wells_cache.get(well_id)
+    if well is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Well '{well_id}' not found. Generate data first via /api/data/generate.",
+        )
+    return well

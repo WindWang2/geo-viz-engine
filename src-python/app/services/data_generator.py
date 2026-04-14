@@ -156,3 +156,41 @@ def generate_wells(
 def get_cached_wells() -> List[WellLogData]:
     """Return all previously generated wells from the in-memory cache."""
     return list(_wells_cache.values())
+
+
+def get_well_by_id(well_id: str) -> WellLogData | None:
+    """Return a specific well from the in-memory cache by ID, or None if not found."""
+    return _wells_cache.get(well_id)
+
+
+def load_static_mock_data(data_dir: str = "data/generated") -> int:
+    """
+    Load pre-generated mock well data from static JSON files.
+    Returns the number of wells loaded.
+    """
+    import json
+    import os
+    global _wells_cache
+
+    loaded = 0
+    index_path = os.path.join(data_dir, "index.json")
+
+    if not os.path.exists(index_path):
+        return 0
+
+    with open(index_path, "r") as f:
+        data = json.load(f)
+        index = data.get("wells", [])
+
+    for entry in index:
+        filename = entry.get("file") or entry.get("filename")
+        if not filename:
+            continue
+        well_path = os.path.join(data_dir, filename)
+        if os.path.exists(well_path):
+            with open(well_path, "r") as wf:
+                well_data = WellLogData.model_validate_json(wf.read())
+                _wells_cache[well_data.well_id] = well_data
+                loaded += 1
+
+    return loaded
