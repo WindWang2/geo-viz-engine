@@ -1,0 +1,44 @@
+{
+  "wells": [
+    {
+      "well_id": "WELL-001",
+      "well_name": "Well 001 (Shallow)",
+      "depth_start": 0.0,
+      "depth_end": 1500.0,
+      "curve_names": [
+        "GR",
+        "RT",
+        "DEN",
+        "NPHI"
+      ],
+      "file": "well-001.json"
+    },
+    {
+      "well_id": "WELL-002",
+      "well_name": "Well 002 (Deep)",
+      "depth_start": 1500.0,
+      "depth_end": 3000.0,
+      "curve_names": [
+        "GR",
+        "RT",
+        "DEN",
+        "NPHI"
+      ],
+      "file": "well-002.json"
+    },
+    {
+      "well_id": "WELL-003",
+      "well_name": "Well 003 (Full)",
+      "depth_start": 0.0,
+      "depth_end": 3000.0,
+      "curve_names": [
+        "GR",
+        "RT",
+        "DEN",
+        "NPHI"
+      ],
+      "file": "well-003.json"
+    }
+  ],
+  "count": 3
+}
