@@ -13,7 +13,7 @@
     "active": true,
     "targets": "all",
     "externalBin": [],
-    "icon": []
+    "icon": ["icons/icon.png"]
   },
   "app": {
     "windows": [

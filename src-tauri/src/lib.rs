@@ -1,7 +1,6 @@
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use rand::Rng;
-use tauri::Manager;
 
 /// Application state shared across Tauri commands.
 pub struct AppState {
@@ -19,11 +18,15 @@ pub fn generate_api_token() -> String {
         .collect()
 }
 
-/// Tauri command: return the API token to the frontend.
-/// The frontend uses this token in X-API-Token header for backend calls.
-#[tauri::command]
-pub fn get_api_token(app: tauri::AppHandle) -> String {
-    app.state::<AppState>().api_token.clone()
+mod commands {
+    use tauri::Manager;
+
+    /// Tauri command: return the API token to the frontend.
+    /// The frontend uses this token in X-API-Token header for backend calls.
+    #[tauri::command]
+    pub fn get_api_token(app: tauri::AppHandle) -> String {
+        app.state::<super::AppState>().api_token.clone()
+    }
 }
 
 /// Entry point called from main.rs.
@@ -35,7 +38,7 @@ pub fn run() {
         .manage(AppState {
             api_token: token.clone(),
         })
-        .invoke_handler(tauri::generate_handler![get_api_token])
+        .invoke_handler(tauri::generate_handler![commands::get_api_token])
         .setup(move |app| {
             let mode = std::env::var("GEOVIZ_MODE").unwrap_or_else(|_| "prod".to_string());
             if mode == "prod" {
