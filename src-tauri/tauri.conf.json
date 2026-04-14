@@ -12,9 +12,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": [
-      "binaries/geoviz-backend"
-    ],
+    "externalBin": [],
     "icon": []
   },
   "app": {

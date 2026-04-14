@@ -3,7 +3,7 @@ import { vi, beforeEach, afterEach } from "vitest";
 import { useApi } from "./useApi";
 
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+(globalThis as any).fetch = mockFetch;
 
 beforeEach(() => {
   mockFetch.mockReset();
