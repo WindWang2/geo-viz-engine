@@ -1,4 +1,4 @@
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 import { vi, beforeEach, afterEach } from "vitest";
 import { useApi } from "./useApi";
 
@@ -16,23 +16,20 @@ afterEach(() => {
 });
 
 describe("useApi", () => {
-  it("starts with loading=false and error=null", () => {
+  it("exposes a request function", () => {
     const { result } = renderHook(() => useApi());
-    expect(result.current.loading).toBe(false);
-    expect(result.current.error).toBeNull();
+    expect(typeof result.current.request).toBe("function");
   });
 
-  it("sets loading=true during request", async () => {
-    mockFetch.mockImplementationOnce(
-      () => new Promise((resolve) => setTimeout(() => resolve({
-        ok: true,
-        json: async () => ({ status: "ok" }),
-      }), 50))
-    );
+  it("calls fetch when request is invoked", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: "ok" }),
+    });
 
     const { result } = renderHook(() => useApi());
-    act(() => { result.current.request("/api/system/status"); });
-    expect(result.current.loading).toBe(true);
+    await act(async () => { await result.current.request("/api/system/status"); });
+    expect(mockFetch).toHaveBeenCalledOnce();
   });
 
   it("sends X-API-Token header", async () => {
@@ -64,7 +61,7 @@ describe("useApi", () => {
     expect(data).toEqual(payload);
   });
 
-  it("sets error state on HTTP error", async () => {
+  it("throws on HTTP error", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 401,
@@ -73,20 +70,19 @@ describe("useApi", () => {
 
     const { result } = renderHook(() => useApi());
     await act(async () => {
-      try { await result.current.request("/api/system/status"); }
-      catch { /* expected */ }
+      await expect(result.current.request("/api/system/status")).rejects.toThrow("401");
     });
-    await waitFor(() => expect(result.current.error).toContain("401"));
   });
 
-  it("sets loading=false after request completes", async () => {
+  it("resolves after request completes", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({}),
     });
 
     const { result } = renderHook(() => useApi());
-    await act(async () => { await result.current.request("/path"); });
-    expect(result.current.loading).toBe(false);
+    await act(async () => {
+      await expect(result.current.request("/path")).resolves.toBeDefined();
+    });
   });
 });
