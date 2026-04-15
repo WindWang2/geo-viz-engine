@@ -265,14 +265,19 @@ interface Viewport {
 
 ### 3.4 Page Routing — 独立页面架构
 
-每种可视化类型是独立的处理页面，不强行融合多种图示在同一页面。
+每种可视化类型是独立的处理页面，不强行融合多种图示在同一页面。所有模块路由均以 AppLayout 为容器（含顶栏 Toolbar + 左侧 Sidebar + 底栏 StatusBar）。
 
 ```
-/ (首页/仪表盘)
+/ (首页/仪表盘 Dashboard)
   ├─ /well-log          测井可视化页面（独立）
-  ├─ /seismic           地震剖面页面（独立，V1.1）
-  ├─ /contour           等值线图页面（独立，V1.1）
-  └─ /3d-viewer         三维地质页面（独立，V2）
+  ├─ /seismic           地震剖面页面（占位，V1.1）
+  ├─ /contour           等值线图页面（占位，V1.1）
+  ├─ /3d-viewer         三维地质页面（占位，V2）
+  └─ /map               井位分布地图总览
+
+独立路由（不使用 AppLayout）：
+  /table                井数据表格页（BottomTabBar 移动端风格）
+  /well/:well_id        井详情slide-over面板（在 MapHomePage 内展开）
 ```
 
 每个页面独立加载数据、独立管理状态、独立渲染。页面间通过侧边栏导航切换。
