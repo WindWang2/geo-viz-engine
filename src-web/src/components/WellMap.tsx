@@ -5,6 +5,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useMapStore } from '../stores/useMapStore';
 import type { WellLocation } from '../types/coordinate';
+import { useApi } from '../hooks/useApi';
 
 // MapLibre style — using free OSM raster tiles
 const MAP_STYLE = 'https://basemaps.cartocdn.com/glpositron-gl-style/style.json';
@@ -18,6 +19,7 @@ export default function WellMap() {
   const [mapLoaded, setMapLoaded] = useState(false);
 
   const { selectedWellId, setSelectedWellId } = useMapStore();
+  const { request } = useApi();
 
   // Initialize map once
   useEffect(() => {
@@ -103,28 +105,23 @@ map.current.on('load', () => {
   useEffect(() => {
     if (!mapLoaded || !map.current) return;
 
-    fetch('/api/data/wells')
-      .then((r) => r.json())
-      .then((data: WellLocation[]) => {
+    async function loadWells() {
+      try {
+        const data = await request<WellLocation[]>('/api/data/wells');
         if (!map.current) return;
         const features = data.map((well) => ({
           type: 'Feature' as const,
-          geometry: {
-            type: 'Point' as const,
-            coordinates: [well.longitude, well.latitude],
-          },
-          properties: {
-            well_id: well.well_id,
-            name: well.well_name,
-            longitude: well.longitude,
-            latitude: well.latitude,
-          },
+          geometry: { type: 'Point' as const, coordinates: [well.longitude, well.latitude] },
+          properties: { well_id: well.well_id, name: well.well_name, longitude: well.longitude, latitude: well.latitude },
         }));
-        const source = map.current.getSource(WELL_SOURCE_ID) as maplibregl.GeoJSONSource;
+        const source = map.current!.getSource(WELL_SOURCE_ID) as maplibregl.GeoJSONSource;
         source.setData({ type: 'FeatureCollection', features });
-      })
-      .catch(console.error);
-  }, [mapLoaded]);
+      } catch (e) {
+        console.error('Failed to load wells:', e);
+      }
+    }
+    loadWells();
+  }, [mapLoaded, request]);
 
   // Highlight selected well: update paint property
   useEffect(() => {

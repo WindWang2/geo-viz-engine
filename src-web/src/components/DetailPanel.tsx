@@ -5,6 +5,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useMapStore } from '../stores/useMapStore';
 import { WellLogViewer } from './well-log';
 import type { WellLogData } from './well-log';
+import { useApi } from '../hooks/useApi';
 
 /**
  * Slide-over detail panel for well geology profile.
@@ -25,6 +26,7 @@ export default function DetailPanel() {
   const { well_id } = useParams<{ well_id: string }>();
   const navigate = useNavigate();
   const { selectedWellId, isPanelOpen, closePanel } = useMapStore();
+  const { request } = useApi();
 
   // Fetch well data when panel opens with a selected well
   const [wellData, setWellData] = useState<WellLogData | null>(null);
@@ -41,20 +43,18 @@ export default function DetailPanel() {
     setError(null);
     setWellData(null);
 
-    fetch(`/api/data/well/${encodeURIComponent(selectedWellId)}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<WellLogData>;
-      })
-      .then((d) => {
+    async function loadWell() {
+      try {
+        const d = await request<WellLogData>(`/api/data/well/${encodeURIComponent(selectedWellId!)}`);
         if (!cancelled) { setWellData(d); setLoading(false); }
-      })
-      .catch((e) => {
-        if (!cancelled) { setError(String(e)); setLoading(false); }
-      });
+      } catch (e) {
+        if (!cancelled) { setError(e instanceof Error ? e.message : String(e)); setLoading(false); }
+      }
+    }
+    loadWell();
 
     return () => { cancelled = true; };
-  }, [isPanelOpen, selectedWellId]);
+  }, [isPanelOpen, selectedWellId, request]);
 
   // Sync URL param → store (covers both initial mount hydration and subsequent navigations)
   const hasHydrated = useRef(false);
