@@ -307,14 +307,14 @@ lat = round(random.uniform(28.0,  30.5), 6)   # 北纬 28-30.5°
 
 ### Phase 1（MVP）— 本次实现
 - [x] Spec 本文档完成 ✓
-- [ ] 安装 maplibre-gl 依赖
-- [ ] `MapHomePage` 基本地图 + 井点打点（mock 坐标）
-- [ ] 点击 Marker 打开 DetailPanel（基本版，无编辑/Hover）
-- [ ] `DetailPanel` 嵌入 GeologicalProfileViewer（已有组件复用）
-- [ ] ESC / 点击遮罩关闭 Panel
-- [ ] Bottom Tab Bar 导航（地图/表格）
-- [ ] 后端 mock 坐标注入
-- [ ] 41 Python 测试仍然全部通过
+- [x] 安装 maplibre-gl 依赖
+- [x] `MapHomePage` 基本地图 + 井点打点（mock 坐标）
+- [x] 点击 Marker 打开 DetailPanel（基本版，无编辑/Hover）
+- [x] `DetailPanel` 嵌入 GeologicalProfileViewer（已有组件复用）
+- [x] ESC / 点击遮罩关闭 Panel
+- [x] Bottom Tab Bar 导航（地图/表格）
+- [x] 后端 mock 坐标注入
+- [x] 36 Python 测试仍然全部通过
 
 ### Phase 2（交互增强）
 - [ ] Inline editable text（HOC 封装）
@@ -364,3 +364,6 @@ react-router-dom     ^6        # 已有
 - [ ] 所有 Phase 1 功能无需刷新页面
 - [ ] Python 后端测试 `pytest -q` 维持 41/41 passed
 - [ ] 前端 build 无 TypeScript 错误
+
+**Actual merged:** PR #2 (`88f344d`) - 2026-04-15
+**Test status:** pytest 36/36 ✅ | tsc --noEmit clean ✅
