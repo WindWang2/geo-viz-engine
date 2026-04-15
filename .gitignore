@@ -40,6 +40,6 @@ data/generated/*.json
 !data/generated/index.json
 
 # Temp folder
-temp/
 tmp/
 *.tmp
+.worktrees/
