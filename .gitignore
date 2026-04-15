@@ -34,3 +34,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.iml
+
+# Generated mock data
+data/generated/*.json
+!data/generated/index.json
