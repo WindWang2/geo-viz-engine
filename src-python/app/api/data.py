@@ -18,10 +18,29 @@ async def list_wells() -> list[WellMetadata]:
             depth_start=w.depth_start,
             depth_end=w.depth_end,
             curve_names=[c.name for c in w.curves],
+            longitude=w.longitude,
+            latitude=w.latitude,
         )
         for w in wells
     ]
     return metadata
+
+
+@router.get("/wells", response_model=list[dict])
+async def list_wells_location():
+    """
+    Returns lightweight list of wells with coordinates, for map markers and table.
+    """
+    wells = data_generator.get_cached_wells()
+    return [
+        {
+            "well_id": w.well_id,
+            "well_name": w.well_name,
+            "longitude": w.longitude,
+            "latitude": w.latitude,
+        }
+        for w in wells
+    ]
 
 
 @router.post("/generate", response_model=GenerateDataResponse)
@@ -45,6 +64,8 @@ async def generate_data(
             depth_start=w.depth_start,
             depth_end=w.depth_end,
             curve_names=[c.name for c in w.curves],
+            longitude=w.longitude,
+            latitude=w.latitude,
         )
         for w in wells
     ]

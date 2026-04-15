@@ -19,7 +19,7 @@ export default function WellTablePage() {
   const [total, setTotal] = useState(0);
 
   useEffect(() => {
-    fetch('/api/wells')
+    fetch('/api/data/wells')
       .then((r) => r.json())
       .then((data: WellLocation[]) => {
         setWells(data);

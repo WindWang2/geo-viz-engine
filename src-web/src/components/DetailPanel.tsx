@@ -1,14 +1,16 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMapStore } from '../stores/useMapStore';
+import { WellLogViewer } from './well-log';
+import type { WellLogData } from './well-log';
 
 /**
  * Slide-over detail panel for well geology profile.
  * Appears when a well marker is clicked on the map (selectedWellId != null).
  * Layout: full-height right-side panel with header (back button + close),
- * scrollable content area hosting GeologicalProfileViewer,
+ * scrollable content area hosting WellLogViewer,
  * and embedded NavigationControls at bottom.
  *
  * Design spec: Direction A — full-screen takeover with visible back controls.
@@ -16,13 +18,45 @@ import { useMapStore } from '../stores/useMapStore';
  *   1. Top-left "← 返回地图" button (goes to /)
  *   2. Top-right "✕" close button (clears selectedWellId)
  *   3. Bottom NavigationControls ← / → arrows
+ *
+ * WellLogViewer now renders directly inside the panel rather than via routing.
  */
 export default function DetailPanel() {
   const { well_id } = useParams<{ well_id: string }>();
   const navigate = useNavigate();
   const { selectedWellId, isPanelOpen, closePanel } = useMapStore();
 
-  // Sync URL param with store selection
+  // Fetch well data when panel opens with a selected well
+  const [wellData, setWellData] = useState<WellLogData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isPanelOpen || !selectedWellId) {
+      setWellData(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setWellData(null);
+
+    fetch(`/api/data/well/${encodeURIComponent(selectedWellId)}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<WellLogData>;
+      })
+      .then((d) => {
+        if (!cancelled) { setWellData(d); setLoading(false); }
+      })
+      .catch((e) => {
+        if (!cancelled) { setError(String(e)); setLoading(false); }
+      });
+
+    return () => { cancelled = true; };
+  }, [isPanelOpen, selectedWellId]);
+
+  // Sync URL param → store
   useEffect(() => {
     if (well_id && well_id !== selectedWellId) {
       useMapStore.getState().setSelectedWellId(well_id);
@@ -33,7 +67,7 @@ export default function DetailPanel() {
 
   return (
     <>
-      {/* Semi-transparent backdrop — click to dismiss */}
+      {/* Backdrop */}
       <div
         className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]"
         onClick={closePanel}
@@ -50,24 +84,18 @@ export default function DetailPanel() {
         {/* Header */}
         <header className="flex shrink-0 items-center justify-between border-b border-gray-100 px-4 py-3">
           <div className="flex items-center gap-3">
-            {/* Primary back button */}
             <button
               onClick={() => { closePanel(); navigate('/'); }}
               className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 active:bg-gray-200"
             >
-              <span>←</span>
-              <span>返回地图</span>
+              <span>←</span><span>返回地图</span>
             </button>
-
-            {/* Well ID badge */}
             {selectedWellId && (
               <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-600">
                 {selectedWellId}
               </span>
             )}
           </div>
-
-          {/* Close button */}
           <button
             onClick={closePanel}
             className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
@@ -77,10 +105,28 @@ export default function DetailPanel() {
           </button>
         </header>
 
-        {/* Content: GeologicalProfileViewer renders based on well_id route param */}
-        <main className="min-h-0 flex-1 overflow-y-auto">
-          {/* Dynamic route: /well/:well_id renders the viewer inside the panel */}
-          {/* We render the matched child — GeologicalProfileViewer is rendered by App router */}
+        {/* Content: WellLogViewer renders here inside the panel */}
+        <main className="min-h-0 flex-1 overflow-y-auto p-4">
+          {loading && (
+            <div className="flex h-48 items-center justify-center text-gray-400 text-sm animate-pulse">
+              加载中…
+            </div>
+          )}
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+              错误：{error}
+            </div>
+          )}
+          {wellData && !loading && (
+            <div className="h-full border border-gray-200 rounded-lg overflow-hidden">
+              <WellLogViewer wellData={wellData} />
+            </div>
+          )}
+          {!loading && !error && !wellData && (
+            <div className="flex h-48 items-center justify-center text-gray-400 text-sm">
+              选择一口井查看详情
+            </div>
+          )}
         </main>
 
         {/* Footer: NavigationControls */}
@@ -92,15 +138,21 @@ export default function DetailPanel() {
   );
 }
 
-/** Inline NavigationControls — prev/next well browsing from /wells list */
+/** Inline NavigationControls — prev/next well browsing */
 function NavigationControls({ wellId }: { wellId: string | null }) {
-  const handlePrev = () => {
-    // Navigate to prev well in list — simplified, replaced by actual app logic
-    console.warn('[DetailPanel] NavigationControls: prev not fully implemented yet');
-  };
+  const navigate = useNavigate();
 
-  const handleNext = () => {
-    console.warn('[DetailPanel] NavigationControls: next not fully implemented yet');
+  // Simple previous/next using numeric suffix pattern
+  const handleNav = (direction: 'prev' | 'next') => {
+    if (!wellId) return;
+    const numMatch = wellId.match(/\d+$/);
+    if (!numMatch) return;
+    const num = parseInt(numMatch[0], 10);
+    const newNum = direction === 'prev' ? num - 1 : num + 1;
+    if (newNum <= 0) return;
+    const newId = wellId.replace(/\d+$/, String(newNum));
+    useMapStore.getState().setSelectedWellId(newId);
+    navigate(`/well/${encodeURIComponent(newId)}`);
   };
 
   if (!wellId) return null;
@@ -108,21 +160,19 @@ function NavigationControls({ wellId }: { wellId: string | null }) {
   return (
     <div className="flex items-center justify-between">
       <button
-        onClick={handlePrev}
+        onClick={() => handleNav('prev')}
         className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-100 active:bg-gray-200"
       >
-        <span>←</span>
-        <span>上一口</span>
+        <span>←</span><span>上一口</span>
       </button>
 
       <span className="text-xs text-gray-400">切换测井</span>
 
       <button
-        onClick={handleNext}
+        onClick={() => handleNav('next')}
         className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-100 active:bg-gray-200"
       >
-        <span>下一口</span>
-        <span>→</span>
+        <span>下一口</span><span>→</span>
       </button>
     </div>
   );

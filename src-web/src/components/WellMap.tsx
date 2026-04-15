@@ -103,7 +103,7 @@ map.current.on('load', () => {
   useEffect(() => {
     if (!mapLoaded || !map.current) return;
 
-    fetch('/api/wells')
+    fetch('/api/data/wells')
       .then((r) => r.json())
       .then((data: WellLocation[]) => {
         if (!map.current) return;

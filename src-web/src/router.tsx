@@ -1,16 +1,24 @@
 import { createBrowserRouter } from "react-router-dom";
-import AppLayout from "./components/layout/AppLayout";
-import HomePage from "./pages/HomePage";
-import WellLogPage from "./pages/WellLogPage";
+import MapHomePage from "./pages/MapHomePage";
+import WellTablePage from "./pages/WellTablePage";
 
 const router = createBrowserRouter([
   {
     path: "/",
-    element: <AppLayout />,
-    children: [
-      { index: true, element: <HomePage /> },
-      { path: "well-log", element: <WellLogPage /> },
-    ],
+    element: <MapHomePage />,
+  },
+  {
+    // Deep-link to well detail: same page, DetailPanel reads well_id param and opens
+    path: "/well/:well_id",
+    element: <MapHomePage />,
+  },
+  {
+    path: "/table",
+    element: <WellTablePage />,
+  },
+  {
+    path: "*",
+    loader: () => { throw new Response("", { status: 302, headers: { Location: "/" } }); },
   },
 ]);
 
