@@ -9,6 +9,10 @@ class AuthTokenMiddleware(BaseHTTPMiddleware):
     """Validate X-API-Token header against GEOVIZ_API_TOKEN environment variable."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        # Allow CORS preflight requests without token validation
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         expected_token = os.environ.get("GEOVIZ_API_TOKEN", "")
         if not expected_token:
             # No token configured — deny all to prevent accidental open access
