@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@popperjs/core": "^2.11.8",
+    "@types/maplibre-gl": "^1.13.2",
+    "maplibre-gl": "^5.23.0",
+    "tippy.js": "^6.3.7",
+    "zustand": "^5.0.12"
+  }
+}
