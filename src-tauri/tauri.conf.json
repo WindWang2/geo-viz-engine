@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "cd ../src-web && npm run build",
+    "beforeBuildCommand": "cd /home/kevin/projects/geo-viz-engine/src-web && npm run build",
     "frontendDist": "../src-web/dist"
   },
   "bundle": {
@@ -28,7 +28,7 @@
       }
     ],
     "security": {
-      "csp": null // TODO(Phase2-prod): Set a restrictive CSP before release, e.g. "default-src 'self'"
+      "csp": null
     }
   }
 }

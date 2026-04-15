@@ -48,7 +48,7 @@ done
 
 echo "[geo-viz] Starting Tauri dev ..."
 cd "$ROOT_DIR/src-tauri"
-GEOVIZ_MODE=dev cargo tauri dev
+WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 GEOVIZ_MODE=dev cargo tauri dev
 
 if [ -n "$PYTHON_PID" ]; then
   kill "$PYTHON_PID" 2>/dev/null || true

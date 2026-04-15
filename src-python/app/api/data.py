@@ -1,8 +1,16 @@
 from fastapi import APIRouter, Body, HTTPException
-from app.models.well_log import GenerateDataRequest, GenerateDataResponse, WellLogData, WellMetadata
+from app.models.well_log import (
+    GenerateDataRequest,
+    GenerateDataResponse,
+    WellLogData,
+    WellMetadata,
+    WellDetailData,
+)
 from app.services import data_generator
+from app.services.well_data_service import WellDataService
 
 router = APIRouter(prefix="/api/data", tags=["data"])
+_well_data_service = WellDataService()
 
 
 @router.get("/list", response_model=list[WellMetadata])
@@ -89,3 +97,14 @@ async def get_well_data(well_id: str) -> WellLogData:
             detail=f"Well '{well_id}' not found. Generate data first via /api/data/generate.",
         )
     return well
+
+@router.get("/well-detail/{well_name}", response_model=WellDetailData)
+async def get_well_detail(well_name: str) -> WellDetailData:
+    """
+    Get comprehensive well data from Excel (aligned intervals and curves).
+    """
+    try:
+        data = _well_data_service.get_well_details(well_name)
+        return WellDetailData(**data)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))

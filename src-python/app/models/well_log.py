@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -34,6 +34,36 @@ class WellMetadata(BaseModel):
     depth_start: float
     depth_end: float
     curve_names: List[str]
+
+
+class IntervalItem(BaseModel):
+    top: float
+    bottom: float
+    name: str
+
+
+class FaciesData(BaseModel):
+    phase: List[IntervalItem]
+    sub_phase: List[IntervalItem]
+    micro_phase: List[IntervalItem]
+
+
+class WellIntervals(BaseModel):
+    series: List[IntervalItem]
+    system: List[IntervalItem]
+    formation: List[IntervalItem]
+    member: List[IntervalItem]
+    lithology: List[IntervalItem]
+    systems_tract: List[IntervalItem]
+    sequence: List[IntervalItem]
+    facies: FaciesData
+
+
+class WellDetailData(BaseModel):
+    well_id: str
+    well_name: str
+    curves: List[Dict[str, Any]] # Or refine to CurveData
+    intervals: WellIntervals
 
 
 class GenerateDataRequest(BaseModel):

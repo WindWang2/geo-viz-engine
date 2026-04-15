@@ -1,18 +1,74 @@
-'use client';
-
-import WellMap from '../components/WellMap';
-import DetailPanel from '../components/DetailPanel';
-import BottomTabBar from '../components/BottomTabBar';
+import { useEffect, useState } from 'react';
+import { useWellStore } from '../stores/useWellStore';
+import { useMapStore } from '../stores/useMapStore';
+import { useApi } from '../hooks/useApi';
+import WellMap from '../components/map/WellMap';
+import DetailPanel from '../components/panel/DetailPanel';
+import type { WellLogData } from '../components/well-log/types';
 
 export default function MapHomePage() {
+  const { wells, setWells } = useWellStore();
+  const { panelOpen, selectedWellId, selectWell, closePanel } = useMapStore();
+  const { request } = useApi();
+
+  const [wellData, setWellData] = useState<WellLogData | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  // Load wells list on mount
+  useEffect(() => {
+    if (wells.length > 0) return;
+    (async () => {
+      try {
+        const data = await request<any[]>('/api/data/list');
+        if (Array.isArray(data) && data.length > 0) {
+          setWells(data);
+        } else {
+          // Trigger generation if no cached wells
+          const gen = await request<any>('/api/data/generate', { method: 'POST' });
+          setWells(gen?.wells ?? []);
+        }
+      } catch {
+        // Silently fail on initial load
+      }
+    })();
+  }, []);
+
+  // Watch selectedWellId → fetch full well data
+  useEffect(() => {
+    if (!selectedWellId) {
+      setWellData(null);
+      return;
+    }
+    setDetailLoading(true);
+    setDetailError(null);
+    request<WellLogData>(`/api/data/well/${selectedWellId}`)
+      .then(setWellData)
+      .catch((e) => setDetailError(e?.message ?? '加载失败'))
+      .finally(() => setDetailLoading(false));
+  }, [selectedWellId, request]);
+
+  const selectedWell = wells.find((w) => w.well_id === selectedWellId);
+  const selectedWellName = selectedWell?.well_name ?? selectedWellId ?? '';
+
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden">
-      <div className="relative min-h-0 flex-1">
-        <WellMap />
-        {/* DetailPanel fetches and renders WellLogViewer directly when a well is selected */}
-        <DetailPanel />
-      </div>
-      <BottomTabBar />
+    <div className="relative w-full h-full overflow-hidden">
+      <WellMap
+        wells={wells}
+        onWellClick={(id) => selectWell(id)}
+        selectedWellId={selectedWellId}
+      />
+
+      <DetailPanel
+        wellId={selectedWellId ?? ''}
+        wellName={selectedWellName}
+        wellData={wellData}
+        open={panelOpen}
+        loading={detailLoading}
+        error={detailError}
+        onClose={closePanel}
+        onBack={closePanel}
+      />
     </div>
   );
 }

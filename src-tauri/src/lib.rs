@@ -31,7 +31,7 @@ mod commands {
 
 /// Entry point called from main.rs.
 pub fn run() {
-    let token = generate_api_token();
+    let token = std::env::var("GEOVIZ_API_TOKEN").unwrap_or_else(|_| generate_api_token());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())

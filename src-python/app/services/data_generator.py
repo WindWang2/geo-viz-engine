@@ -8,7 +8,18 @@ import numpy as np
 from app.models.well_log import CurveData, WellLogData
 
 # Module-level in-memory cache: well_id -> WellLogData
-_wells_cache: dict[str, WellLogData] = {}
+_wells_cache: dict[str, WellLogData] = {
+    "老龙1": WellLogData(
+        well_id="老龙1",
+        well_name="老龙1",
+        depth_start=2515.0,
+        depth_end=2610.0,
+        depth_step=0.125,
+        longitude=107.5,
+        latitude=29.8,
+        curves=[] # Placeholder, will use well-detail endpoint for real data
+    )
+}
 
 
 def generate_well_log(

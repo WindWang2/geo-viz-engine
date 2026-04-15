@@ -1,193 +1,212 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GeoViz Engine - Architecture Options</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 40px; }
-  h1 { text-align: center; font-size: 28px; margin-bottom: 40px; color: #60a5fa; }
-  .options { display: flex; gap: 24px; max-width: 1400px; margin: 0 auto; }
-  .card {
-    flex: 1; background: #1e293b; border-radius: 16px; padding: 28px;
-    border: 2px solid #334155; cursor: pointer; transition: all 0.3s;
-    position: relative;
-  }
-  .card:hover { border-color: #60a5fa; transform: translateY(-4px); box-shadow: 0 12px 40px rgba(96,165,250,0.15); }
-  .card.selected { border-color: #3b82f6; background: #1e3a5f; }
-  .card .badge { position: absolute; top: -12px; right: 20px; background: #3b82f6; color: white; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-  .card .badge.green { background: #10b981; }
-  .card h2 { font-size: 20px; margin-bottom: 6px; color: #f1f5f9; }
-  .card .subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 20px; }
-  .layer { background: #0f172a; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; border-left: 3px solid; }
-  .layer.shell { border-color: #f59e0b; }
-  .layer.frontend { border-color: #60a5fa; }
-  .layer.backend { border-color: #10b981; }
-  .layer.data { border-color: #a78bfa; }
-  .layer-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
-  .layer.shell .layer-title { color: #f59e0b; }
-  .layer.frontend .layer-title { color: #60a5fa; }
-  .layer.backend .layer-title { color: #10b981; }
-  .layer.data .layer-title { color: #a78bfa; }
-  .layer-content { font-size: 12px; color: #94a3b8; line-height: 1.6; }
-  .layer-content code { background: #334155; padding: 1px 6px; border-radius: 4px; color: #e2e8f0; font-size: 11px; }
-  .pros-cons { margin-top: 16px; }
-  .pros-cons h3 { font-size: 13px; margin-bottom: 6px; }
-  .pros-cons ul { list-style: none; font-size: 12px; line-height: 1.8; }
-  .pros-cons .pro { color: #10b981; }
-  .pros-cons .con { color: #f87171; }
-  .pros-cons .pro::before { content: "✓ "; }
-  .pros-cons .con::before { content: "✗ "; }
-  .verdict { margin-top: 16px; padding: 10px 14px; border-radius: 8px; font-size: 12px; line-height: 1.6; }
-  .verdict.rec { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: #10b981; }
-  .verdict.alt { background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.3); color: #60a5fa; }
-  .verdict.warn { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: #f87171; }
-  #indicator { text-align: center; padding: 20px; color: #64748b; font-size: 14px; margin-top: 20px; }
-  .selected-text { color: #3b82f6; font-weight: 600; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Geological SVG Symbols & Well Log Design</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .log-grid {
+      display: grid;
+      grid-template-columns: 40px 40px 40px 120px 40px 40px 80px 80px 120px 150px 40px 40px 40px 40px 40px 40px;
+      border-left: 1px solid #000;
+      border-right: 1px solid #000;
+    }
+    .header-cell {
+      border-right: 1px solid #000;
+      border-bottom: 1px solid #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 11px;
+      font-weight: bold;
+      padding: 2px;
+      background-color: #ffffff;
+    }
+    .track-cell {
+      border-right: 1px solid #000;
+      border-bottom: 1px solid #000;
+      position: relative;
+    }
+    .vertical-text {
+      writing-mode: vertical-lr;
+      text-orientation: mixed;
+      transform: rotate(180deg);
+    }
+    .symbol-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      background: white;
+    }
+    .symbol-preview {
+      width: 60px;
+      height: 60px;
+      border: 1px solid #000;
+    }
+  </style>
 </head>
-<body>
-<h1>GeoViz Engine — Architecture Options</h1>
+<body class="bg-gray-100 p-6 font-sans">
 
-<div class="options">
-  <!-- Option A -->
-  <div class="card" data-choice="option-a" onclick="toggleSelect(this)">
-    <div class="badge green">推荐</div>
-    <h2>方案A：Tauri + 嵌入式Python</h2>
-    <div class="subtitle">Python 打包进应用，单进程运行</div>
+  <!-- SVG Patterns Definitions (Hidden) -->
+  <svg width="0" height="0" style="position:absolute;">
+    <defs>
+      <!-- Sandstone: Dots -->
+      <pattern id="pattern-sandstone" x="0" y="0" width="10" height="10" patternUnits="userSpaceOnUse">
+        <circle cx="2" cy="2" r="0.8" fill="black" />
+        <circle cx="7" cy="7" r="0.8" fill="black" />
+      </pattern>
+      <!-- Shale: Horizontal lines -->
+      <pattern id="pattern-shale" x="0" y="0" width="20" height="4" patternUnits="userSpaceOnUse">
+        <line x1="0" y1="2" x2="20" y2="2" stroke="black" stroke-width="0.5" />
+      </pattern>
+      <!-- Limestone: Bricks -->
+      <pattern id="pattern-limestone" x="0" y="0" width="30" height="15" patternUnits="userSpaceOnUse">
+        <line x1="0" y1="0" x2="30" y2="0" stroke="black" stroke-width="1" />
+        <line x1="0" y1="7.5" x2="30" y2="7.5" stroke="black" stroke-width="1" />
+        <line x1="10" y1="0" x2="10" y2="7.5" stroke="black" stroke-width="1" />
+        <line x1="25" y1="7.5" x2="25" y2="15" stroke="black" stroke-width="1" />
+      </pattern>
+      <!-- Dolomite: Inclined Bricks -->
+      <pattern id="pattern-dolomite" x="0" y="0" width="30" height="15" patternUnits="userSpaceOnUse">
+        <line x1="0" y1="0" x2="30" y2="0" stroke="black" stroke-width="1" />
+        <line x1="0" y1="7.5" x2="30" y2="7.5" stroke="black" stroke-width="1" />
+        <line x1="5" y1="0" x2="15" y2="7.5" stroke="black" stroke-width="1" />
+        <line x1="20" y1="7.5" x2="30" y2="15" stroke="black" stroke-width="1" />
+      </pattern>
+      <!-- Siltstone: Dashed lines + dots -->
+      <pattern id="pattern-siltstone" x="0" y="0" width="20" height="6" patternUnits="userSpaceOnUse">
+        <line x1="0" y1="3" x2="12" y2="3" stroke="black" stroke-width="0.5" stroke-dasharray="2,2" />
+        <circle cx="16" cy="3" r="0.6" fill="black" />
+      </pattern>
+    </defs>
+  </svg>
 
-    <div class="layer shell">
-      <div class="layer-title">桌面壳</div>
-      <div class="layer-content"><code>Tauri 2.x</code> Rust后端 · 2-5MB · WebView渲染</div>
-    </div>
-    <div class="layer frontend">
-      <div class="layer-title">前端渲染</div>
-      <div class="layer-content"><code>D3.js</code> 曲线/等值线 · <code>deck.gl</code> 大规模渲染 · <code>Three.js</code> 3D</div>
-    </div>
-    <div class="layer backend">
-      <div class="layer-title">Python后端（嵌入式）</div>
-      <div class="layer-content"><code>FastAPI</code> · <code>uvicorn</code> 内嵌启动 · <code>PyInstaller</code> 打包分发<br>本地 <code>localhost</code> 通信 · 无需外部安装Python</div>
-    </div>
-    <div class="layer data">
-      <div class="layer-title">数据处理</div>
-      <div class="layer-content"><code>lasio</code> 测井 · <code>segyio</code> 地震 · <code>GDAL</code> 栅格矢量 · <code>scipy</code> 插值等值线</div>
-    </div>
+  <div class="max-w-6xl mx-auto">
+    <header class="mb-8">
+      <h1 class="text-3xl font-bold text-gray-900">测井可视化 - 地质符号库 & 设计方案</h1>
+      <p class="text-gray-600 mt-2">基于 demo.jpg 样式的 SVG Pattern 实现与数据映射方案</p>
+    </header>
 
-    <div class="pros-cons">
-      <h3 style="color:#10b981">优势</h3>
-      <ul>
-        <li class="pro">单机部署简单，双击运行</li>
-        <li class="pro">Python生态完整可用</li>
-        <li class="pro">支持局域网模式（改为监听0.0.0.0）</li>
-        <li class="pro">Tauri轻量，适合地质工作站</li>
-      </ul>
-      <h3 style="color:#f87171">风险</h3>
-      <ul>
-        <li class="con">PyInstaller打包体积较大(~200MB)</li>
-        <li class="con">Python嵌入增加了构建复杂度</li>
-        <li class="con">Rust侧需写通信桥接代码</li>
-      </ul>
-    </div>
-    <div class="verdict rec">★ 推荐：单机体验最好，无需外部依赖</div>
+    <!-- Section 1: Symbol Library -->
+    <section class="mb-12">
+      <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+        <span class="w-2 h-6 bg-blue-600 rounded"></span>
+        通用地质符号 (SVG Patterns)
+      </h2>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div class="symbol-card">
+          <div class="symbol-preview bg-yellow-100"><svg width="100%" height="100%"><rect width="100%" height="100%" fill="url(#pattern-sandstone)" /></svg></div>
+          <span class="text-sm font-medium">砂岩 (Sandstone)</span>
+        </div>
+        <div class="symbol-card">
+          <div class="symbol-preview bg-gray-200"><svg width="100%" height="100%"><rect width="100%" height="100%" fill="url(#pattern-shale)" /></svg></div>
+          <span class="text-sm font-medium">泥岩 (Shale)</span>
+        </div>
+        <div class="symbol-card">
+          <div class="symbol-preview bg-blue-50"><svg width="100%" height="100%"><rect width="100%" height="100%" fill="url(#pattern-limestone)" /></svg></div>
+          <span class="text-sm font-medium">石灰岩 (Limestone)</span>
+        </div>
+        <div class="symbol-card">
+          <div class="symbol-preview bg-purple-50"><svg width="100%" height="100%"><rect width="100%" height="100%" fill="url(#pattern-dolomite)" /></svg></div>
+          <span class="text-sm font-medium">白云岩 (Dolomite)</span>
+        </div>
+        <div class="symbol-card">
+          <div class="symbol-preview bg-gray-100"><svg width="100%" height="100%"><rect width="100%" height="100%" fill="url(#pattern-siltstone)" /></svg></div>
+          <span class="text-sm font-medium">粉砂岩 (Siltstone)</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 2: Mockup Integration -->
+    <section class="mb-12">
+      <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+        <span class="w-2 h-6 bg-green-600 rounded"></span>
+        测井图集成效果 (岩性剖面)
+      </h2>
+      <div class="bg-white p-6 rounded-xl shadow-lg overflow-auto">
+        <div class="log-grid" style="grid-template-rows: 60px 40px;">
+          <div class="header-cell" style="grid-column: span 3;">地层系统</div>
+          <div class="header-cell">AC / GR</div>
+          <div class="header-cell">深度</div>
+          <div class="header-cell">取心</div>
+          <div class="header-cell">岩性符号</div>
+          <div class="header-cell">典型照片</div>
+          <div class="header-cell">RT / RXO</div>
+          <div class="header-cell">岩性描述</div>
+          <div class="header-cell" style="grid-column: span 3;">沉积相</div>
+          <div class="header-cell" style="grid-column: span 3;">层序</div>
+        </div>
+        
+        <div class="log-grid" style="grid-auto-rows: 150px;">
+          <div class="track-cell flex items-center justify-center border-b border-black"><span class="vertical-text text-[10px]">寒武系</span></div>
+          <div class="track-cell flex items-center justify-center border-b border-black"><span class="vertical-text text-[10px]">下寒武统</span></div>
+          <div class="track-cell flex items-center justify-center border-b border-black"><span class="vertical-text text-[10px]">沧浪铺组</span></div>
+          
+          <div class="track-cell bg-gray-50"></div> <!-- Curves Placeholder -->
+          <div class="track-cell flex items-center justify-center font-mono text-red-600 font-bold">2515</div>
+          <div class="track-cell"></div>
+
+          <!-- Integrated Lithology with SVG Patterns -->
+          <div class="track-cell flex flex-col">
+            <div class="h-1/2 bg-purple-50 border-b border-gray-400">
+               <svg width="100%" height="100%"><rect width="100%" height="100%" fill="url(#pattern-dolomite)" /></svg>
+            </div>
+            <div class="h-1/2 bg-yellow-50">
+               <svg width="100%" height="100%"><rect width="100%" height="100%" fill="url(#pattern-sandstone)" /></svg>
+            </div>
+          </div>
+
+          <div class="track-cell flex items-center justify-center p-2"><div class="w-full h-full border border-red-500 relative flex items-center justify-center font-bold text-red-500 text-[8px] rotate-[-45deg]">PHOTO</div></div>
+          <div class="track-cell bg-gray-50"></div> <!-- Resistivity Placeholder -->
+          
+          <div class="track-cell p-2 text-[10px] space-y-4">
+            <p><strong>2515-2517:</strong> 深灰色砂质白云岩</p>
+            <p><strong>2517-2528:</strong> 灰色白云质细砂岩</p>
+          </div>
+
+          <div class="track-cell flex items-center justify-center text-[10px] p-1 text-center">云质<br/>砂坪</div>
+          <div class="track-cell flex items-center justify-center text-[10px] p-1 text-center font-bold">混积<br/>潮坪</div>
+          <div class="track-cell flex items-center justify-center text-[10px] p-1 text-center">潮坪相</div>
+
+          <div class="track-cell"></div>
+          <div class="track-cell flex items-center justify-center font-bold">HST</div>
+          <div class="track-cell flex items-center justify-center font-bold">SQ2</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 3: Tech Plan -->
+    <section>
+      <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+        <span class="w-2 h-6 bg-orange-600 rounded"></span>
+        技术方案
+      </h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="bg-white p-5 rounded-lg border border-gray-200">
+          <h3 class="font-bold mb-3 text-blue-800">1. 数据驱动 (demo.xls)</h3>
+          <ul class="text-sm space-y-2 text-gray-700">
+            <li>• <strong>Python Backend:</strong> 使用 Pandas 读取 Excel 所有工作表。</li>
+            <li>• <strong>数据转换:</strong> 将深度数据转换为 JSON 序列。岩性关键词（如"砂岩"、"白云岩"）自动映射到符号 ID。</li>
+            <li>• <strong>组合岩性:</strong> 支持通过混合背景色 + Pattern 覆盖来实现组合岩性。</li>
+          </ul>
+        </div>
+        <div class="bg-white p-5 rounded-lg border border-gray-200">
+          <h3 class="font-bold mb-3 text-green-800">2. 可视化引擎 (Vite + React)</h3>
+          <ul class="text-sm space-y-2 text-gray-700">
+            <li>• <strong>CSS Grid 布局:</strong> 替代原有 Canvas 实现，确保文字可搜索、布局可响应且 1:1 还原 `demo.jpg`。</li>
+            <li>• <strong>SVG 曲线:</strong> 使用 `<path>` 渲染高精度测井曲线，支持无限缩放。</li>
+            <li>• <strong>OSM 地图:</strong> 集成 MapLibre，显示测井井位，点击后通过路由平滑跳转至综合图件。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
   </div>
 
-  <!-- Option B -->
-  <div class="card" data-choice="option-b" onclick="toggleSelect(this)">
-    <div class="badge">备选</div>
-    <h2>方案B：Tauri + 外置Python服务</h2>
-    <div class="subtitle">Python独立运行，应用连接服务</div>
-
-    <div class="layer shell">
-      <div class="layer-title">桌面壳</div>
-      <div class="layer-content"><code>Tauri 2.x</code> Rust后端 · 2-5MB · WebView渲染</div>
-    </div>
-    <div class="layer frontend">
-      <div class="layer-title">前端渲染</div>
-      <div class="layer-content">同方案A：<code>D3.js</code> · <code>deck.gl</code> · <code>Three.js</code></div>
-    </div>
-    <div class="layer backend">
-      <div class="layer-title">Python后端（独立进程）</div>
-      <div class="layer-content"><code>FastAPI</code> · <code>uvicorn</code> 独立运行<br>需要用户自行安装 <code>Python 3.11+</code><br>支持局域网/服务器部署</div>
-    </div>
-    <div class="layer data">
-      <div class="layer-title">数据处理</div>
-      <div class="layer-content">同方案A：完整Python地质数据生态</div>
-    </div>
-
-    <div class="pros-cons">
-      <h3 style="color:#10b981">优势</h3>
-      <ul>
-        <li class="pro">架构最清晰，前后端完全解耦</li>
-        <li class="pro">局域网/云端部署零修改</li>
-        <li class="pro">打包体积小（不含Python）</li>
-        <li class="pro">Python端可独立升级</li>
-      </ul>
-      <h3 style="color:#f87171">风险</h3>
-      <ul>
-        <li class="con">用户需自行安装Python环境</li>
-        <li class="con">需要管理Python进程启停</li>
-        <li class="con">版本兼容性问题（用户Python版本不一致）</li>
-      </ul>
-    </div>
-    <div class="verdict alt">适合团队协作/局域网场景，但终端用户体验不如方案A</div>
-  </div>
-
-  <!-- Option C -->
-  <div class="card" data-choice="option-c" onclick="toggleSelect(this)">
-    <h2>方案C：混合模式</h2>
-    <div class="subtitle">开发时外置Python，发布时嵌入打包</div>
-
-    <div class="layer shell">
-      <div class="layer-title">桌面壳</div>
-      <div class="layer-content"><code>Tauri 2.x</code> · 开发/发布双模式</div>
-    </div>
-    <div class="layer frontend">
-      <div class="layer-title">前端渲染</div>
-      <div class="layer-content">同上：<code>D3.js</code> · <code>deck.gl</code> · <code>Three.js</code></div>
-    </div>
-    <div class="layer backend">
-      <div class="layer-title">Python后端（自适应）</div>
-      <div class="layer-content">开发时：<code>venv</code> 外置运行<br>发布时：<code>PyInstaller</code> 嵌入打包<br>通过环境变量 <code>GEOVIZ_MODE</code> 切换</div>
-    </div>
-    <div class="layer data">
-      <div class="layer-title">数据处理</div>
-      <div class="layer-content">同上：完整Python地质数据生态</div>
-    </div>
-
-    <div class="pros-cons">
-      <h3 style="color:#10b981">优势</h3>
-      <ul>
-        <li class="pro">开发体验最好（热重载、快速调试）</li>
-        <li class="pro">发布时打包，终端用户无需配置</li>
-        <li class="pro">局域网模式也支持（外置Python）</li>
-        <li class="pro">最灵活，两全其美</li>
-      </ul>
-      <h3 style="color:#f87171">风险</h3>
-      <ul>
-        <li class="con">需维护两套启动脚本</li>
-        <li class="con">打包和发布流程更复杂</li>
-        <li class="con">CI/CD需要覆盖两种模式测试</li>
-      </ul>
-    </div>
-    <div class="verdict rec">★ 实际最实用：开发用外置，发布用嵌入</div>
-  </div>
-</div>
-
-<div id="indicator">
-  <div id="indicator-text">点击上方选项卡片进行选择，然后回到终端继续</div>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
-<script>
-function toggleSelect(el) {
-  const container = el.closest('.options');
-  container.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
-  el.classList.add('selected');
-  window.selectedChoice = el.dataset.choice;
-  const label = el.querySelector('h2').textContent;
-  document.getElementById('indicator-text').innerHTML = '<span class="selected-text">' + label + '</span> 已选择 — 回到终端继续';
-}
-</script>
 </body>
 </html>

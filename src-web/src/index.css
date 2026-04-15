@@ -15,3 +15,43 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   }
 }
+
+.log-grid {
+  display: grid;
+  grid-template-columns: 40px 40px 40px 40px 120px 40px 40px 80px 80px 120px 150px 40px 40px 40px 40px 40px 40px;
+  border-left: 1px solid #000;
+  border-right: 1px solid #000;
+}
+
+.header-cell {
+  border-right: 1px solid #000;
+  border-bottom: 1px solid #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 11px;
+  font-weight: bold;
+  padding: 2px;
+  background-color: #ffffff;
+}
+
+.header-cell:last-child {
+  border-right: none;
+}
+
+.track-cell {
+  border-right: 1px solid #000;
+  position: relative;
+  min-height: 100%;
+}
+
+.track-cell:last-child {
+  border-right: none;
+}
+
+.vertical-text {
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+}
