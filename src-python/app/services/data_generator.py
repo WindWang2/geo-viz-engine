@@ -81,6 +81,10 @@ def generate_well_log(
     nphi = nphi_base + rng.normal(0, 0.015, n)
     nphi = np.clip(nphi, 0.0, 0.6)
 
+    # Deterministic mock coords (川东片区: ~E106-108.5, N28-30.5)
+    lng = round(106.0 + (seed % 1000) / 1000.0 * 2.5, 6)
+    lat = round(28.0 + (seed % 777) / 777.0 * 2.5, 6)
+
     depths_list = depths.tolist()
 
     curves = [
@@ -119,6 +123,8 @@ def generate_well_log(
         depth_end=actual_depth_end,
         depth_step=depth_step,
         location=None,
+        longitude=lng,
+        latitude=lat,
         curves=curves,
     )
 
