@@ -46,7 +46,12 @@ pub fn run() {
                 // The sidecar binary is named geoviz-backend-<target-triple>
                 // and placed in src-tauri/binaries/ at build time.
                 // For Phase 1 (dev only), this branch is a no-op placeholder.
-                eprintln!("WARNING: prod sidecar not yet implemented");
+                // TODO(Phase2): Spawn actual Python sidecar binary from src-tauri/binaries/
+                eprintln!(
+                    "[WARN] GEOVIZ_MODE=prod but prod sidecar is not yet implemented \
+                     — falling back to dev mode. Sidecar binary must be placed at \
+                     src-tauri/binaries/geoviz-backend-<triple> before prod deployment."
+                );
                 let _ = app; // suppress unused warning
             }
             // In dev mode: Python is started separately by dev.sh

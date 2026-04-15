@@ -28,7 +28,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null // TODO(Phase2-prod): Set a restrictive CSP before release, e.g. "default-src 'self'"
     }
   }
 }
