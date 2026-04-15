@@ -6,15 +6,45 @@
   "nav": {
     "home": "Home",
     "wellLog": "Well Log",
-    "seismic": "Seismic",
+    "seismic": "Seismic Profile",
     "contour": "Contour Map",
-    "threeD": "3D Viewer"
+    "threeD": "3D Viewer",
+    "map": "Map Overview"
   },
   "page": {
     "home": {
       "title": "Welcome to GeoViz Engine",
       "description": "Professional Geological Data Visualization Platform",
       "startWellLog": "Start Well Log Analysis"
+    },
+    "dashboard": {
+      "welcome": "Welcome to GeoViz Engine",
+      "subtitle": "Professional geological data visualization platform — well logs, seismic profiles, contour maps, and more",
+      "sections": {
+        "modules": "Visualization Modules",
+        "quick": "Quick Access"
+      },
+      "modules": {
+        "wellLog": {
+          "name": "Well Log",
+          "desc": "Multi-track curves, lithology column, sedimentary facies analysis"
+        },
+        "seismic": {
+          "name": "Seismic Profile",
+          "desc": "Inline/Crossline browsing and interpretation"
+        },
+        "contour": {
+          "name": "Contour Map",
+          "desc": "Structure maps, fault overlay, filled contours"
+        },
+        "threeD": {
+          "name": "3D Geology",
+          "desc": "3D geological body modeling and spatial analysis"
+        }
+      },
+      "quick": {
+        "map": "Well Distribution Map"
+      }
     },
     "wellLog": {
       "title": "Well Log Visualization",

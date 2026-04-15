@@ -8,13 +8,43 @@
     "wellLog": "测井可视化",
     "seismic": "地震剖面",
     "contour": "等值线图",
-    "threeD": "三维地质"
+    "threeD": "三维地质",
+    "map": "地图总览"
   },
   "page": {
     "home": {
       "title": "欢迎使用 GeoViz Engine",
       "description": "专业地质数据可视化平台",
       "startWellLog": "开始测井分析"
+    },
+    "dashboard": {
+      "welcome": "欢迎使用 GeoViz Engine",
+      "subtitle": "专业地质数据可视化平台，支持测井曲线、地震剖面、等值线图等多种地质数据的交互分析与可视化",
+      "sections": {
+        "modules": "可视化模块",
+        "quick": "快捷入口"
+      },
+      "modules": {
+        "wellLog": {
+          "name": "测井可视化",
+          "desc": "多道测井曲线、岩性柱、沉积相分析"
+        },
+        "seismic": {
+          "name": "地震剖面",
+          "desc": "Inline/Crossline 剖面浏览与解释"
+        },
+        "contour": {
+          "name": "等值线图",
+          "desc": "构造图、断层叠合与填色图"
+        },
+        "threeD": {
+          "name": "三维地质",
+          "desc": "三维地质体建模与空间分析"
+        }
+      },
+      "quick": {
+        "map": "井位分布图"
+      }
     },
     "wellLog": {
       "title": "测井可视化",
