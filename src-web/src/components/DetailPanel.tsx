@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMapStore } from '../stores/useMapStore';
 import { WellLogViewer } from './well-log';
@@ -56,9 +56,13 @@ export default function DetailPanel() {
     return () => { cancelled = true; };
   }, [isPanelOpen, selectedWellId]);
 
-  // Sync URL param → store
+  // Sync URL param → store (covers both initial mount hydration and subsequent navigations)
+  const hasHydrated = useRef(false);
   useEffect(() => {
-    if (well_id && well_id !== selectedWellId) {
+    if (!hasHydrated.current && well_id) {
+      hasHydrated.current = true;
+      useMapStore.getState().setSelectedWellId(well_id);
+    } else if (well_id && well_id !== selectedWellId) {
       useMapStore.getState().setSelectedWellId(well_id);
     }
   }, [well_id, selectedWellId]);
@@ -85,7 +89,7 @@ export default function DetailPanel() {
         <header className="flex shrink-0 items-center justify-between border-b border-gray-100 px-4 py-3">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => { closePanel(); navigate('/'); }}
+              onClick={() => { closePanel(); navigate('/', { replace: true }); }}
               className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 active:bg-gray-200"
             >
               <span>←</span><span>返回地图</span>
@@ -142,12 +146,15 @@ export default function DetailPanel() {
 function NavigationControls({ wellId }: { wellId: string | null }) {
   const navigate = useNavigate();
 
-  // Simple previous/next using numeric suffix pattern
+  if (!wellId) return null;
+
+  // Try parsing numeric suffix; show disabled nav if no pattern
+  const numMatch = wellId.match(/\d+$/);
+  const num = numMatch ? parseInt(numMatch[0], 10) : null;
+  const hasPrev = num !== null && num > 1;
+
   const handleNav = (direction: 'prev' | 'next') => {
-    if (!wellId) return;
-    const numMatch = wellId.match(/\d+$/);
-    if (!numMatch) return;
-    const num = parseInt(numMatch[0], 10);
+    if (!wellId || num === null) return;
     const newNum = direction === 'prev' ? num - 1 : num + 1;
     if (newNum <= 0) return;
     const newId = wellId.replace(/\d+$/, String(newNum));
@@ -155,13 +162,16 @@ function NavigationControls({ wellId }: { wellId: string | null }) {
     navigate(`/well/${encodeURIComponent(newId)}`);
   };
 
-  if (!wellId) return null;
-
   return (
     <div className="flex items-center justify-between">
       <button
         onClick={() => handleNav('prev')}
-        className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-100 active:bg-gray-200"
+        disabled={!hasPrev}
+        className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+          hasPrev
+            ? 'text-gray-600 hover:bg-gray-100 active:bg-gray-200'
+            : 'text-gray-300 cursor-not-allowed'
+        }`}
       >
         <span>←</span><span>上一口</span>
       </button>
