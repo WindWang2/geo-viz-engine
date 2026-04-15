@@ -24,7 +24,7 @@ export default function WellTablePage() {
 
   const handleView = (wellId: string) => {
     selectWell(wellId);
-    navigate('/');
+    navigate('/well-log');
   };
 
   return (

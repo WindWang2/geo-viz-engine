@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { Map, Table2 } from 'lucide-react';
 
 const tabs = [
-  { to: '/',         icon: <Map size={16} />,    labelKey: 'nav.map' },
-  { to: '/table',    icon: <Table2 size={16} />, labelKey: 'nav.table' },
+  { to: '/well-log',         icon: <Map size={16} />,    labelKey: 'nav.map' },
+  { to: '/well-log/table',    icon: <Table2 size={16} />, labelKey: 'nav.table' },
 ];
 
 export default function BottomTabBar() {
@@ -16,7 +16,7 @@ export default function BottomTabBar() {
         <NavLink
           key={tab.to}
           to={tab.to}
-          end={tab.to === '/'}
+          end={tab.to === '/well-log'}
           className={({ isActive }) =>
             `flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
               isActive
