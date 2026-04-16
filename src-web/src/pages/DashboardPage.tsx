@@ -74,10 +74,10 @@ export default function DashboardPage() {
                 {mod.icon}
               </div>
               <div>
-                <p className="font-semibold text-geo-text text-sm group-hover:text-geo-accent transition-colors">
+                <p className="font-semibold text-black text-sm group-hover:text-geo-accent transition-colors">
                   {t(mod.labelKey)}
                 </p>
-                <p className="text-xs text-geo-muted mt-1 leading-relaxed">
+                <p className="text-xs text-gray-600 mt-1 leading-relaxed">
                   {t(mod.descKey)}
                 </p>
               </div>

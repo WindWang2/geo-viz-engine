@@ -20,6 +20,7 @@ export interface WellLogData {
   depth_step: number;
   location: [number, number] | null;
   curves: CurveData[];
+  intervals?: WellIntervals;
   longitude?: number;
   latitude?: number;
 }

@@ -24,8 +24,8 @@ app.add_middleware(AuthTokenMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "tauri://localhost"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -44,4 +44,4 @@ if __name__ == "__main__":
     token = os.environ.get("GEOVIZ_API_TOKEN", "")
     if not token:
         raise RuntimeError("GEOVIZ_API_TOKEN environment variable must be set")
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

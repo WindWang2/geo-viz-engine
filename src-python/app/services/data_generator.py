@@ -5,21 +5,10 @@ from typing import List
 
 import numpy as np
 
-from app.models.well_log import CurveData, WellLogData
+from app.models.well_log import CurveData, WellLogData, WellIntervals, IntervalItem, FaciesData
 
 # Module-level in-memory cache: well_id -> WellLogData
-_wells_cache: dict[str, WellLogData] = {
-    "老龙1": WellLogData(
-        well_id="老龙1",
-        well_name="老龙1",
-        depth_start=2515.0,
-        depth_end=2610.0,
-        depth_step=0.125,
-        longitude=107.5,
-        latitude=29.8,
-        curves=[] # Placeholder, will use well-detail endpoint for real data
-    )
-}
+_wells_cache: dict[str, WellLogData] = {}
 
 
 def generate_well_log(
@@ -127,6 +116,59 @@ def generate_well_log(
 
     actual_depth_end = float(depths[-1]) + depth_step if n > 0 else depth_end
 
+    # --- Generate Intervals (Lithology, Facies, Stratigraphy) ---
+    litho_map = {0: "泥岩", 1: "砂岩", 2: "粉砂岩", 3: "石灰岩"}
+    litho_intervals = []
+    
+    # Create intervals from boundary indices
+    all_indices = [0] + boundary_indices.tolist() + [n]
+    for i in range(len(all_indices) - 1):
+        s_idx, e_idx = all_indices[i], all_indices[i+1]
+        if e_idx > s_idx:
+            litho_type = lithology[s_idx]
+            litho_intervals.append(IntervalItem(
+                top=float(depths[s_idx]),
+                bottom=float(depths[e_idx-1]) + depth_step,
+                name=litho_map.get(int(litho_type), "泥岩")
+            ))
+
+    # Stratigraphy (Blocks of ~500m, ensure at least 1 interval)
+    formation_intervals = []
+    step = 500
+    for d in range(int(depth_start), int(actual_depth_end), step):
+        formation_intervals.append(IntervalItem(
+            top=float(d),
+            bottom=min(float(d + step), actual_depth_end),
+            name=f"Fm.{ (d // step) % 5 + 1 }"
+        ))
+    if not formation_intervals:
+        formation_intervals.append(IntervalItem(
+            top=depth_start, bottom=actual_depth_end, name="Fm.1"
+        ))
+    
+    # Facies (Based on lithology)
+    facies_map = {"砂岩": "河道", "泥岩": "漫滩", "粉砂岩": "沼泽", "石灰岩": "浅滩"}
+    micro_phase = []
+    for li in litho_intervals:
+        name = facies_map.get(li.name, "漫滩")
+        micro_phase.append(IntervalItem(top=li.top, bottom=li.bottom, name=name))
+    
+    intervals = WellIntervals(
+        series=[IntervalItem(top=depth_start, bottom=actual_depth_end, name="三叠系")],
+        system=[IntervalItem(top=depth_start, bottom=actual_depth_end, name="上三叠统")],
+        formation=formation_intervals,
+        member=formation_intervals, # simplify for mock
+        lithology=litho_intervals,
+        systems_tract=[IntervalItem(top=depth_start, bottom=(depth_start+actual_depth_end)/2, name="TST"), 
+                       IntervalItem(top=(depth_start+actual_depth_end)/2, bottom=actual_depth_end, name="HST")],
+        sequence=[IntervalItem(top=depth_start, bottom=actual_depth_end, name="SQ1")],
+        facies=FaciesData(
+            phase=[IntervalItem(top=depth_start, bottom=actual_depth_end, name="三角洲")],
+            sub_phase=[IntervalItem(top=depth_start, bottom=actual_depth_end, name="三角洲平原")],
+            micro_phase=micro_phase
+        )
+    )
+
     return WellLogData(
         well_id=well_id,
         well_name=well_name,
@@ -137,6 +179,7 @@ def generate_well_log(
         longitude=lng,
         latitude=lat,
         curves=curves,
+        intervals=intervals,
     )
 
 

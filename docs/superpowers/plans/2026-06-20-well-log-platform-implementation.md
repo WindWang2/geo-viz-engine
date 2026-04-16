@@ -22,7 +22,7 @@
 - `src-web/src/stores/useMapStore.ts` — 新 Zustand store（Panel open/close, selectedWellId）
 
 ### 修改文件
-- `src-python/app/models/well_log.py` — `WellMetadata` / `WellLogData` 加 `longitude`/`latitude`
+- `src-python/app/models/well_log.py` — `WellMetadata` / `WellLogData` 加 `longitude`/`latitude`/`intervals`
 - `src-python/app/services/data_generator.py` — mock 生成经纬度
 - `src-web/src/store/useWellStore.ts` — 扩展字段（选井状态、panel 状态）
 - `src-web/src/components/well-log/types.ts` — TS 接口加坐标字段
@@ -471,7 +471,7 @@ export function useKeyboardClose(onClose: () => void, enabled: boolean = true) {
 ```tsx
 import { useCallback } from 'react';
 import { X, ChevronLeft } from 'lucide-react';
-import { GeologicalProfileViewer } from '../well-log';
+import { WellLogDashboard } from '../well-log';
 import type { WellLogData } from '../well-log/types';
 import { useKeyboardClose } from '../../hooks/useKeyboardClose';
 
@@ -557,7 +557,7 @@ export default function DetailPanel({
             </div>
           )}
           {wellData && !loading && (
-            <GeologicalProfileViewer wellData={wellData} />
+            <WellLogDashboard data={wellData} />
           )}
         </div>
       </aside>
@@ -881,4 +881,4 @@ Expected: 输出中包含 `longitude` 和 `latitude`。
 
 ---
 
-*Last reviewed: 2026-06-20*
+*Last reviewed: 2026-04-16*

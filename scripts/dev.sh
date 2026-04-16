@@ -21,7 +21,7 @@ if ! port_in_use 8000; then
   echo "[geo-viz] Starting Python backend on :8000 ..."
   cd "$ROOT_DIR/src-python"
   source venv/bin/activate
-  uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload &
+  uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload &
   PYTHON_PID=$!
 else
   echo "[geo-viz] Python backend already running on :8000, skipping..."
@@ -30,7 +30,7 @@ fi
 if ! port_in_use 5173; then
   echo "[geo-viz] Starting Vite frontend on :5173 ..."
   cd "$ROOT_DIR/src-web"
-  npm run dev &
+  npm run dev -- --host &
   VITE_PID=$!
 else
   echo "[geo-viz] Vite frontend already running on :5173, skipping..."

@@ -32,11 +32,11 @@ export const IntervalTrack: React.FC<IntervalTrackProps> = ({
         return (
           <div
             key={i}
-            className="absolute left-0 right-0 border-b border-black flex items-center justify-center p-0.5 text-center bg-white"
+            className="absolute left-0 right-0 border-b border-black flex items-center justify-center p-0.5 text-center bg-white text-black"
             style={{ top, height, borderBottomWidth: i === intervals.length - 1 ? 0 : 1 }}
             title={`${interval.top}m - ${interval.bottom}m: ${interval.name}`}
           >
-            <span className={`${verticalText ? 'vertical-text' : ''} text-[10px] leading-[1.1] select-none break-all`}>
+            <span className={`${verticalText ? 'vertical-text' : ''} text-[10px] font-bold leading-[1.1] select-none break-all`}>
               {interval.name}
             </span>
           </div>

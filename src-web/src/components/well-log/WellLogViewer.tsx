@@ -50,10 +50,10 @@ export const WellLogViewer: React.FC<WellLogViewerProps> = ({
     <div className={`well-log-viewer ${className}`}>
       {/* Header with well info */}
       <div className="well-log-header mb-3 p-3 bg-gray-50 rounded-lg">
-        <h3 className="text-lg font-semibold text-gray-800">
-          {wellData.well_name} <span className="text-gray-500 font-normal">({wellData.well_id})</span>
+        <h3 className="text-lg font-semibold text-black">
+          {wellData.well_name} <span className="text-black/60 font-normal">({wellData.well_id})</span>
         </h3>
-        <div className="text-sm text-gray-600 mt-1">
+        <div className="text-sm text-black mt-1">
           Depth range: {wellData.depth_start.toFixed(0)}m - {wellData.depth_end.toFixed(0)}m
           {hasMultipleCurves && ` • ${wellData.curves.length} curves`}
           {' • '}{sampleCount.toLocaleString()} samples
@@ -79,7 +79,7 @@ export const WellLogViewer: React.FC<WellLogViewerProps> = ({
       </div>
 
       {/* Scale info footer */}
-      <div className="well-log-footer mt-2 text-xs text-gray-500 text-right">
+      <div className="well-log-footer mt-2 text-xs text-black/60 text-right">
         Scale: 1m = {depthPixelRatio}px • Track width: {trackWidth}px
       </div>
     </div>

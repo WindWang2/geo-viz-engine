@@ -20,7 +20,7 @@ export const LogHeader: React.FC = () => {
               </div>
               <span>40</span>
             </div>
-            <div className="flex justify-between items-center text-[9px] text-blue-600 border-t border-gray-200 mt-0.5 pt-0.5">
+            <div className="flex justify-between items-center text-[9px] text-blue-600 border-t border-gray-400 mt-0.5 pt-0.5">
               <span>0</span>
               <div className="flex flex-col items-center">
                 <div className="w-8 border-t border-blue-600"></div>
@@ -44,7 +44,7 @@ export const LogHeader: React.FC = () => {
               </div>
               <span>20000</span>
             </div>
-            <div className="flex justify-between items-center text-[9px] text-orange-500 border-t border-gray-200 mt-0.5 pt-0.5">
+            <div className="flex justify-between items-center text-[9px] text-orange-500 border-t border-gray-400 mt-0.5 pt-0.5">
               <span>1</span>
               <div className="flex flex-col items-center">
                 <div className="w-8 border-t border-orange-500 border-dashed"></div>

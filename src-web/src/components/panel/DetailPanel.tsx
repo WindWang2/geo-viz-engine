@@ -1,5 +1,5 @@
 import { X, ChevronLeft } from 'lucide-react';
-import { WellLogViewer } from '../well-log';
+import { WellLogDashboard } from '../well-log';
 import type { WellLogData } from '../well-log/types';
 import { useKeyboardClose } from '../../hooks/useKeyboardClose';
 
@@ -84,7 +84,7 @@ export default function DetailPanel({
             </div>
           )}
           {wellData && !loading && (
-            <WellLogViewer wellData={wellData} />
+            <WellLogDashboard data={wellData} />
           )}
         </div>
       </aside>
