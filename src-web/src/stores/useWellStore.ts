@@ -6,6 +6,8 @@ export interface WellMetadata {
   depth_start: number;
   depth_end: number;
   curve_names: string[];
+  longitude?: number | null;
+  latitude?: number | null;
 }
 
 interface WellState {

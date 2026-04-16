@@ -87,8 +87,8 @@ Tauri main.rs 启动流程:
 ```bash
 # scripts/dev.sh — 开发模式一键启动
 #!/bin/bash
-cd src-python && source venv/bin/activate && uvicorn app.main:app --port 8000 &
-cd src-web && npm run dev -- --port 5173 &
+cd src-python && source venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+cd src-web && npm run dev -- --host --port 5173 &
 GEOVIZ_MODE=dev cargo tauri dev
 
 # scripts/build.sh — 生产构建
@@ -346,7 +346,10 @@ class WellLogData(BaseModel):
     depth_end: float
     depth_step: float
     location: Optional[Tuple[float, float]]  # (x, y)坐标
+    longitude: Optional[float]  # 经度 (-180, 180)
+    latitude: Optional[float]   # 纬度 (-90, 90)
     curves: List[CurveData]
+    intervals: Optional[WellIntervals]  # 地层/岩性/相/层序区间数据
 
 class CurveData(BaseModel):
     name: str          # "GR", "RT", "DEN", "NPHI"
@@ -359,15 +362,34 @@ class CurveData(BaseModel):
     color: str         # 默认颜色
     line_style: str    # "solid" | "dashed" | "dotted"
 
+class IntervalItem(BaseModel):
+    top: float
+    bottom: float
+    name: str
+
+class FaciesData(BaseModel):
+    phase: List[IntervalItem]
+    sub_phase: List[IntervalItem]
+    micro_phase: List[IntervalItem]
+
+class WellIntervals(BaseModel):
+    series: List[IntervalItem]         # 系
+    system: List[IntervalItem]         # 统
+    formation: List[IntervalItem]      # 组
+    member: List[IntervalItem]         # 段
+    lithology: List[IntervalItem]      # 岩性
+    systems_tract: List[IntervalItem]  # 体系域
+    sequence: List[IntervalItem]       # 层序
+    facies: FaciesData                 # 沉积相
+
 class WellMetadata(BaseModel):
     well_id: str
     well_name: str
     depth_start: float
     depth_end: float
     curve_names: List[str]
-    file_path: str
-    file_size: int
-    import_time: datetime
+    longitude: Optional[float]  # 经度 (-180, 180)
+    latitude: Optional[float]   # 纬度 (-90, 90)
 
 class ExportRequest(BaseModel):
     format: str         # "png" | "svg" | "pdf"

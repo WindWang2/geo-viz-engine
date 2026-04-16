@@ -1,26 +1,30 @@
 import { create } from 'zustand';
 
-interface MapStore {
-  // Selected well for detail view
+interface MapState {
   selectedWellId: string | null;
-  setSelectedWellId: (id: string | null) => void;
+  panelOpen: boolean;
 
-  // Detail panel visibility
-  isPanelOpen: boolean;
-  openPanel: () => void;
+  selectWell: (wellId: string) => void;
   closePanel: () => void;
+  openPanel: () => void;
   togglePanel: () => void;
 }
 
-export const useMapStore = create<MapStore>((set) => ({
+export const useMapStore = create<MapState>((set) => ({
   selectedWellId: null,
-  isPanelOpen: false,
+  panelOpen: false,
 
-  setSelectedWellId: (id) =>
-    set({ selectedWellId: id, isPanelOpen: id !== null }),
+  selectWell: (wellId) =>
+    set({ selectedWellId: wellId, panelOpen: true }),
 
-  openPanel: () => set({ isPanelOpen: true }),
-  closePanel: () => set({ isPanelOpen: false, selectedWellId: null }),
+  closePanel: () =>
+    set({ panelOpen: false }),
+
+  openPanel: () =>
+    set((state) =>
+      state.selectedWellId ? { panelOpen: true } : {}
+    ),
+
   togglePanel: () =>
-    set((state) => ({ isPanelOpen: !state.isPanelOpen })),
+    set((state) => ({ panelOpen: !state.panelOpen })),
 }));

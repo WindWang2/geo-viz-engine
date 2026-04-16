@@ -1,6 +1,15 @@
 import { useCallback } from "react";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const getApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  // If envUrl is just "http://localhost:8000" and we are accessing via IP, swap localhost for the actual host
+  if (envUrl && typeof window !== "undefined" && window.location.hostname !== "localhost") {
+    return envUrl.replace("localhost", window.location.hostname).replace("127.0.0.1", window.location.hostname);
+  }
+  return envUrl ?? "http://localhost:8000";
+};
+
+const API_BASE_URL = getApiBaseUrl();
 const DEV_TOKEN = import.meta.env.VITE_DEV_API_TOKEN ?? "dev-token-local-development-32x";
 
 function isTauriEnv(): boolean {

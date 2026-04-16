@@ -9,13 +9,20 @@
     "seismic": "Seismic Profile",
     "contour": "Contour Map",
     "threeD": "3D Viewer",
-    "map": "Map Overview"
+    "map": "Map Overview",
+    "nav.map": "Map",
+    "nav.table": "Table"
   },
   "page": {
     "home": {
       "title": "Welcome to GeoViz Engine",
       "description": "Professional Geological Data Visualization Platform",
       "startWellLog": "Start Well Log Analysis"
+    },
+    "table": {
+      "title": "Well Data Table",
+      "searchPlaceholder": "Search well ID or name...",
+      "noResults": "No matching wells"
     },
     "dashboard": {
       "welcome": "Welcome to GeoViz Engine",

@@ -9,13 +9,20 @@
     "seismic": "地震剖面",
     "contour": "等值线图",
     "threeD": "三维地质",
-    "map": "地图总览"
+    "map": "地图总览",
+    "nav.map": "地图",
+    "nav.table": "表格"
   },
   "page": {
     "home": {
       "title": "欢迎使用 GeoViz Engine",
       "description": "专业地质数据可视化平台",
       "startWellLog": "开始测井分析"
+    },
+    "table": {
+      "title": "测井数据表",
+      "searchPlaceholder": "搜索井号或井名...",
+      "noResults": "未找到匹配的井"
     },
     "dashboard": {
       "welcome": "欢迎使用 GeoViz Engine",

@@ -20,6 +20,7 @@ export interface WellLogData {
   depth_step: number;
   location: [number, number] | null;
   curves: CurveData[];
+  intervals?: WellIntervals;
   longitude?: number;
   latitude?: number;
 }
@@ -30,6 +31,8 @@ export interface WellMetadata {
   depth_start: number;
   depth_end: number;
   curve_names: string[];
+  longitude?: number | null;
+  latitude?: number | null;
 }
 
 export interface WellLogCanvasProps {
@@ -46,4 +49,34 @@ export interface WellLogViewerProps {
   depthPixelRatio?: number;
   loading?: boolean;
   error?: string | null;
+}
+
+export interface IntervalItem {
+  top: number;
+  bottom: number;
+  name: string;
+}
+
+export interface FaciesData {
+  phase: IntervalItem[];
+  sub_phase: IntervalItem[];
+  micro_phase: IntervalItem[];
+}
+
+export interface WellIntervals {
+  series: IntervalItem[];
+  system: IntervalItem[];
+  formation: IntervalItem[];
+  member: IntervalItem[];
+  lithology: IntervalItem[];
+  systems_tract: IntervalItem[];
+  sequence: IntervalItem[];
+  facies: FaciesData;
+}
+
+export interface WellDetailData {
+  well_id: string;
+  well_name: string;
+  curves: CurveData[];
+  intervals: WellIntervals;
 }
