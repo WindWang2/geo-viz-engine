@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { LogHeader } from './LogHeader';
 import { CurveTrack } from './CurveTrack';
 import { LithologyTrack } from './LithologyTrack';
 import { IntervalTrack } from './IntervalTrack';
 import { SequenceStructureTrack } from './SequenceStructureTrack';
-import { WellLogData, WellIntervals } from './types';
+import { FaciesTrack, FaciesTrackRef } from './FaciesTrack';
+import { WellLogData, WellIntervals, FaciesData } from './types';
+import jsPDF from 'jspdf';
 
 const EMPTY_INTERVALS: WellIntervals = {
   series: [], system: [], formation: [], member: [],
@@ -14,7 +16,7 @@ const EMPTY_INTERVALS: WellIntervals = {
 
 interface WellLogDashboardProps {
   data: WellLogData;
-}
+};
 
 /**
  * WellLogDashboard - Main container for the 1:1 replica well log visualization.
@@ -28,12 +30,66 @@ export const WellLogDashboard: React.FC<WellLogDashboardProps> = ({ data }) => {
   const pixelRatio = 10; // 1m = 10px
   const depthRange: [number, number] = [startDepth, endDepth];
   const totalHeight = (endDepth - startDepth) * pixelRatio;
+  const faciesTrackWidth = 100; // width for each facies column
 
   // Group curves for tracks
   const leftCurves = data.curves.filter(c => ['AC', 'GR', 'DEN'].includes(c.name.toUpperCase()));
   const rightCurves = data.curves.filter(c => ['RT', 'RXO', 'NPHI'].includes(c.name.toUpperCase()));
 
   const intervals = data.intervals ?? EMPTY_INTERVALS;
+  const [faciesData, setFaciesData] = useState<FaciesData>(intervals.facies);
+
+  const faciesCanvasRef = useRef<FaciesTrackRef>(null);
+
+  const handleFaciesChange = (level: keyof FaciesData, index: number, newName: string) => {
+    const newData = { ...faciesData };
+    newData[level] = [...newData[level]];
+    newData[level][index] = { ...newData[level][index], name: newName };
+    setFaciesData(newData);
+  };
+
+  const exportPNG = () => {
+    if (!faciesCanvasRef.current) {
+      alert('No facies canvas found for export');
+      return;
+    }
+    const dataUrl = faciesCanvasRef.current.getCanvasImage();
+    if (!dataUrl) {
+      alert('Failed to get canvas image');
+      return;
+    }
+    const link = document.createElement('a');
+    link.download = `${data.well_name}_facies_${startDepth}_${endDepth}.png`;
+    link.href = dataUrl;
+    link.click();
+  };
+
+  const exportPDF = () => {
+    if (!faciesCanvasRef.current) {
+      alert('No facies canvas found for export');
+      return;
+    }
+    const dataUrl = faciesCanvasRef.current.getCanvasImage();
+    if (!dataUrl) {
+      alert('Failed to get canvas image');
+      return;
+    }
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
+    const img = new Image();
+    img.src = dataUrl;
+    img.onload = () => {
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pageWidth - 20;
+      const imgHeight = (img.height * imgWidth) / img.width;
+      pdf.addImage(img, 'PNG', 10, 10, imgWidth, Math.min(imgHeight, pageHeight - 20));
+      pdf.save(`${data.well_name}_facies_${startDepth}_${endDepth}.pdf`);
+    };
+  };
 
   return (
     <div className="flex flex-col h-full bg-white overflow-hidden text-black">
@@ -103,10 +159,29 @@ export const WellLogDashboard: React.FC<WellLogDashboardProps> = ({ data }) => {
               ))}
             </div>
             
-            {/* 12-14: 沉积相 (微相, 亚相, 相) */}
-            <IntervalTrack intervals={intervals.facies.micro_phase} depthRange={depthRange} pixelRatio={pixelRatio} />
-            <IntervalTrack intervals={intervals.facies.sub_phase} depthRange={depthRange} pixelRatio={pixelRatio} />
-            <IntervalTrack intervals={intervals.facies.phase} depthRange={depthRange} pixelRatio={pixelRatio} />
+            {/* 12-14: 沉积相 (微相, 亚相, 相) - Interactive Canvas */}
+            <FaciesTrack
+              faciesData={faciesData}
+              depthRange={depthRange}
+              pixelRatio={pixelRatio}
+              onChange={handleFaciesChange}
+              width={faciesTrackWidth}
+              ref={faciesCanvasRef}
+            />
+            <FaciesTrack
+              faciesData={faciesData}
+              depthRange={depthRange}
+              pixelRatio={pixelRatio}
+              onChange={handleFaciesChange}
+              width={faciesTrackWidth}
+            />
+            <FaciesTrack
+              faciesData={faciesData}
+              depthRange={depthRange}
+              pixelRatio={pixelRatio}
+              onChange={handleFaciesChange}
+              width={faciesTrackWidth}
+            />
             
             {/* 15-17: 三级层序 (层序结构, 体系域, 层序) */}
             <SequenceStructureTrack intervals={intervals.systems_tract} depthRange={depthRange} pixelRatio={pixelRatio} />
@@ -114,6 +189,22 @@ export const WellLogDashboard: React.FC<WellLogDashboardProps> = ({ data }) => {
             <IntervalTrack intervals={intervals.sequence} depthRange={depthRange} pixelRatio={pixelRatio} verticalText />
           </div>
         </div>
+      </div>
+
+      {/* Export toolbar */}
+      <div className="border-t border-gray-200 p-3 bg-gray-50 flex gap-3 justify-end">
+        <button
+          onClick={exportPNG}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm"
+        >
+          🖼️ Export PNG
+        </button>
+        <button
+          onClick={exportPDF}
+          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors text-sm"
+        >
+          📄 Export PDF
+        </button>
       </div>
     </div>
   );

@@ -8,3 +8,4 @@ export * from './CurveTrack';
 export * from './LithologyTrack';
 export * from './IntervalTrack';
 export * from './SequenceStructureTrack';
+export * from './FaciesTrack';
