@@ -24,6 +24,14 @@
   color: #000000;
 }
 
+.laolong1-grid {
+  display: grid;
+  grid-template-columns: 40px 40px 40px 120px 40px 60px 120px 150px 120px 80px 80px 80px 60px 40px;
+  border-left: 1px solid #000;
+  border-right: 1px solid #000;
+  color: #000000;
+}
+
 .header-cell {
   border-right: 1px solid #000;
   border-bottom: 1px solid #000;
@@ -38,22 +46,13 @@
   color: #000000;
 }
 
-.header-cell:last-child {
-  border-right: none;
-}
-
 .track-cell {
   border-right: 1px solid #000;
   position: relative;
   min-height: 100%;
 }
 
-.track-cell:last-child {
-  border-right: none;
-}
-
 .vertical-text {
-  writing-mode: vertical-lr;
+  writing-mode: vertical-rl;
   text-orientation: mixed;
-  transform: rotate(180deg);
 }

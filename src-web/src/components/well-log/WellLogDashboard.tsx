@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { LogHeader } from './LogHeader';
 import { CurveTrack } from './CurveTrack';
 import { LithologyTrack } from './LithologyTrack';
@@ -39,7 +39,13 @@ export const WellLogDashboard: React.FC<WellLogDashboardProps> = ({ data }) => {
   const intervals = data.intervals ?? EMPTY_INTERVALS;
   const [faciesData, setFaciesData] = useState<FaciesData>(intervals.facies);
 
+  useEffect(() => {
+    setFaciesData(intervals.facies);
+  }, [intervals.facies]);
+
   const faciesCanvasRef = useRef<FaciesTrackRef>(null);
+  const faciesCanvasRef2 = useRef<FaciesTrackRef>(null);
+  const faciesCanvasRef3 = useRef<FaciesTrackRef>(null);
 
   const handleFaciesChange = (level: keyof FaciesData, index: number, newName: string) => {
     const newData = { ...faciesData };
@@ -48,32 +54,71 @@ export const WellLogDashboard: React.FC<WellLogDashboardProps> = ({ data }) => {
     setFaciesData(newData);
   };
 
+  const MAX_EXPORT_HEIGHT = 8000;
+
+  const getExportCanvases = (): HTMLCanvasElement[] => {
+    const refs = [faciesCanvasRef, faciesCanvasRef2, faciesCanvasRef3];
+    return refs.map(r => r.current?.getCanvasImage?.()).filter((v): v is string => !!v)
+      .map(dataUrl => {
+        const img = new Image();
+        img.src = dataUrl;
+        return img;
+      })
+      .map(img => {
+        const srcHeight = img.naturalHeight;
+        const scale = srcHeight > MAX_EXPORT_HEIGHT ? MAX_EXPORT_HEIGHT / srcHeight : 1;
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * scale);
+        c.height = Math.round(srcHeight * scale);
+        const ctx = c.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        return c;
+      });
+  };
+
   const exportPNG = () => {
-    if (!faciesCanvasRef.current) {
+    const canvases = getExportCanvases();
+    if (canvases.length === 0) {
       alert('No facies canvas found for export');
       return;
     }
-    const dataUrl = faciesCanvasRef.current.getCanvasImage();
-    if (!dataUrl) {
-      alert('Failed to get canvas image');
-      return;
+    // Composite all facies columns side by side
+    const totalWidth = canvases.reduce((s, c) => s + c.width, 0);
+    const height = Math.max(...canvases.map(c => c.height));
+    const merged = document.createElement('canvas');
+    merged.width = totalWidth;
+    merged.height = height;
+    const ctx = merged.getContext('2d')!;
+    let x = 0;
+    for (const c of canvases) {
+      ctx.drawImage(c, x, 0);
+      x += c.width;
     }
     const link = document.createElement('a');
     link.download = `${data.well_name}_facies_${startDepth}_${endDepth}.png`;
-    link.href = dataUrl;
+    link.href = merged.toDataURL('image/png');
     link.click();
   };
 
   const exportPDF = () => {
-    if (!faciesCanvasRef.current) {
+    const canvases = getExportCanvases();
+    if (canvases.length === 0) {
       alert('No facies canvas found for export');
       return;
     }
-    const dataUrl = faciesCanvasRef.current.getCanvasImage();
-    if (!dataUrl) {
-      alert('Failed to get canvas image');
-      return;
+    // Composite all facies columns side by side
+    const totalWidth = canvases.reduce((s, c) => s + c.width, 0);
+    const height = Math.max(...canvases.map(c => c.height));
+    const merged = document.createElement('canvas');
+    merged.width = totalWidth;
+    merged.height = height;
+    const ctx = merged.getContext('2d')!;
+    let x = 0;
+    for (const c of canvases) {
+      ctx.drawImage(c, x, 0);
+      x += c.width;
     }
+    const dataUrl = merged.toDataURL('image/png');
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -166,6 +211,7 @@ export const WellLogDashboard: React.FC<WellLogDashboardProps> = ({ data }) => {
               pixelRatio={pixelRatio}
               onChange={handleFaciesChange}
               width={faciesTrackWidth}
+              level="micro_phase"
               ref={faciesCanvasRef}
             />
             <FaciesTrack
@@ -174,6 +220,8 @@ export const WellLogDashboard: React.FC<WellLogDashboardProps> = ({ data }) => {
               pixelRatio={pixelRatio}
               onChange={handleFaciesChange}
               width={faciesTrackWidth}
+              level="sub_phase"
+              ref={faciesCanvasRef2}
             />
             <FaciesTrack
               faciesData={faciesData}
@@ -181,6 +229,8 @@ export const WellLogDashboard: React.FC<WellLogDashboardProps> = ({ data }) => {
               pixelRatio={pixelRatio}
               onChange={handleFaciesChange}
               width={faciesTrackWidth}
+              level="phase"
+              ref={faciesCanvasRef3}
             />
             
             {/* 15-17: 三级层序 (层序结构, 体系域, 层序) */}

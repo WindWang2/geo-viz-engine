@@ -8,6 +8,7 @@ from app.models.well_log import (
 )
 from app.services import data_generator
 from app.services.well_data_service import WellDataService
+from app.services.laolong1_loader import load_laolong1
 
 router = APIRouter(prefix="/api/data", tags=["data"])
 _well_data_service = WellDataService()
@@ -107,4 +108,19 @@ async def get_well_detail(well_name: str) -> WellDetailData:
         data = _well_data_service.get_well_details(well_name)
         return WellDetailData(**data)
     except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/real-wells")
+async def get_real_wells() -> list[dict]:
+    """Return real well coordinates (WGS84) loaded from static JSON."""
+    return data_generator.get_real_wells()
+
+
+@router.get("/laolong1", response_model=WellLogData)
+async def get_laolong1() -> WellLogData:
+    """Return full well log data for 老龙1井."""
+    try:
+        return load_laolong1()
+    except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

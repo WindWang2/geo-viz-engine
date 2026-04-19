@@ -2,9 +2,9 @@ import { useCallback } from "react";
 
 const getApiBaseUrl = () => {
   const envUrl = import.meta.env.VITE_API_BASE_URL;
-  // If envUrl is just "http://localhost:8000" and we are accessing via IP, swap localhost for the actual host
-  if (envUrl && typeof window !== "undefined" && window.location.hostname !== "localhost") {
-    return envUrl.replace("localhost", window.location.hostname).replace("127.0.0.1", window.location.hostname);
+  // If envUrl references localhost/127.0.0.1 but we are accessing via a different host, swap it
+  if (envUrl && typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+    return envUrl.replace(/(localhost|127\.0\.0\.1)/, window.location.hostname);
   }
   return envUrl ?? "http://localhost:8000";
 };

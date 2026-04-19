@@ -14,6 +14,7 @@ export default function MapHomePage() {
   const [wellData, setWellData] = useState<WellLogData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [realWells, setRealWells] = useState<Array<{well_name: string; longitude: number; latitude: number}>>([]);
 
   // Load wells list on mount
   useEffect(() => {
@@ -33,6 +34,20 @@ export default function MapHomePage() {
       }
     })();
   }, []);
+
+  // Load real well coordinates on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await request<Array<{well_name: string; longitude: number; latitude: number}>>('/api/data/real-wells');
+        if (Array.isArray(data) && data.length > 0) {
+          setRealWells(data);
+        }
+      } catch {
+        // Silently fail
+      }
+    })();
+  }, [request]);
 
   // Watch selectedWellId → fetch full well data
   useEffect(() => {
@@ -55,6 +70,7 @@ export default function MapHomePage() {
     <div className="relative w-full h-full overflow-hidden">
       <WellMap
         wells={wells}
+        realWells={realWells}
         onWellClick={(id) => selectWell(id)}
         selectedWellId={selectedWellId}
       />

@@ -4,6 +4,7 @@ import WellLogLayout from "./components/layout/WellLogLayout";
 import DashboardPage from "./pages/DashboardPage";
 import MapHomePage from "./pages/MapHomePage";
 import WellTablePage from "./pages/WellTablePage";
+import LaoLong1Page from "./pages/LaoLong1Page";
 
 /** 占位页 — 各模块建设期间 */
 function PlaceholderPage({ moduleName }: { moduleName: string }) {
@@ -36,6 +37,7 @@ const router = createBrowserRouter([
       { path: "contour", element: <PlaceholderPage moduleName="等值线图" /> },
       { path: "3d-viewer", element: <PlaceholderPage moduleName="三维地质" /> },
       { path: "map", element: <MapHomePage /> },
+      { path: "laolong1", element: <LaoLong1Page /> },
     ],
   },
   {
