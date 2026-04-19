@@ -9,6 +9,8 @@ from app.models.well_log import CurveData, WellLogData, WellIntervals, IntervalI
 
 # Module-level in-memory cache: well_id -> WellLogData
 _wells_cache: dict[str, WellLogData] = {}
+# Cache for real well coordinates loaded from JSON
+_real_wells_cache: list[dict] = []
 
 
 def generate_well_log(
@@ -22,7 +24,7 @@ def generate_well_log(
     """
     Generate a synthetic well log with GR, RT, DEN, NPHI curves.
 
-    Lithology model (0=shale, 1=sandstone, 2=coal, 3=oil-bearing sand):
+    Lithology model (0=泥岩/shale, 1=砂岩/sandstone, 2=煤/coal, 3=油砂/oil-bearing sand):
       - Shale:   GR~80, RT~2,   DEN~2.55, NPHI~0.25
       - Sand:    GR~30, RT~10,  DEN~2.45, NPHI~0.15
       - Coal:    GR~25, RT~50,  DEN~1.80, NPHI~0.40
@@ -117,7 +119,7 @@ def generate_well_log(
     actual_depth_end = float(depths[-1]) + depth_step if n > 0 else depth_end
 
     # --- Generate Intervals (Lithology, Facies, Stratigraphy) ---
-    litho_map = {0: "泥岩", 1: "砂岩", 2: "粉砂岩", 3: "石灰岩"}
+    litho_map = {0: "泥岩", 1: "砂岩", 2: "煤", 3: "油砂"}
     litho_intervals = []
     
     # Create intervals from boundary indices
@@ -147,7 +149,7 @@ def generate_well_log(
         ))
     
     # Facies (Based on lithology)
-    facies_map = {"砂岩": "河道", "泥岩": "漫滩", "粉砂岩": "沼泽", "石灰岩": "浅滩"}
+    facies_map = {"砂岩": "河道", "泥岩": "漫滩", "煤": "沼泽", "油砂": "浅滩"}
     micro_phase = []
     for li in litho_intervals:
         name = facies_map.get(li.name, "漫滩")
@@ -221,6 +223,27 @@ def get_cached_wells() -> List[WellLogData]:
 def get_well_by_id(well_id: str) -> WellLogData | None:
     """Return a specific well from the in-memory cache by ID, or None if not found."""
     return _wells_cache.get(well_id)
+
+
+def get_real_wells() -> list[dict]:
+    """Return the real well coordinates loaded from JSON."""
+    return list(_real_wells_cache)
+
+
+def load_real_well_coordinates(data_dir: str = "data") -> int:
+    """Load real well coordinates from well_coordinates.json."""
+    import json
+    import os
+    global _real_wells_cache
+
+    path = os.path.join(data_dir, "well_coordinates.json")
+    if not os.path.exists(path):
+        return 0
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    _real_wells_cache = data.get("wells", [])
+    return len(_real_wells_cache)
 
 
 def load_static_mock_data(data_dir: str = "data/generated") -> int:

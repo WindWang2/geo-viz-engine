@@ -1,0 +1,284 @@
+{
+  "wells": [
+    {
+      "well_name": "HZ19-1-1A",
+      "longitude": 114.909183,
+      "latitude": 21.331425
+    },
+    {
+      "well_name": "HZ19-2-1",
+      "longitude": 114.796253,
+      "latitude": 21.224771
+    },
+    {
+      "well_name": "HZ19-3-2",
+      "longitude": 114.874945,
+      "latitude": 21.319152
+    },
+    {
+      "well_name": "HZ19-6-15D",
+      "longitude": 115.079834,
+      "latitude": 21.42153
+    },
+    {
+      "well_name": "HZ19-6-1D",
+      "longitude": 115.402478,
+      "latitude": 21.252785
+    },
+    {
+      "well_name": "HZ19-6-3",
+      "longitude": 115.16042,
+      "latitude": 21.362482
+    },
+    {
+      "well_name": "HZ19-6-9D",
+      "longitude": 115.235711,
+      "latitude": 21.089234
+    },
+    {
+      "well_name": "HZ20-3-1D",
+      "longitude": 115.202724,
+      "latitude": 21.411271
+    },
+    {
+      "well_name": "HZ20-4-1D",
+      "longitude": 115.100924,
+      "latitude": 21.419497
+    },
+    {
+      "well_name": "HZ21-1-1",
+      "longitude": 115.533357,
+      "latitude": 21.267189
+    },
+    {
+      "well_name": "HZ21-1-18",
+      "longitude": 115.151111,
+      "latitude": 21.127565
+    },
+    {
+      "well_name": "HZ21-7-1",
+      "longitude": 115.015679,
+      "latitude": 21.3381
+    },
+    {
+      "well_name": "HZ21-8-1",
+      "longitude": 115.495761,
+      "latitude": 21.380642
+    },
+    {
+      "well_name": "HZ25-10-1",
+      "longitude": 115.238551,
+      "latitude": 21.346703
+    },
+    {
+      "well_name": "HZ25-1-1X",
+      "longitude": 114.923591,
+      "latitude": 21.212307
+    },
+    {
+      "well_name": "HZ25-14-2",
+      "longitude": 114.813046,
+      "latitude": 21.541686
+    },
+    {
+      "well_name": "HZ25-2-1X",
+      "longitude": 115.090083,
+      "latitude": 21.439922
+    },
+    {
+      "well_name": "HZ25-3-1",
+      "longitude": 115.057335,
+      "latitude": 21.215466
+    },
+    {
+      "well_name": "HZ25-4-1",
+      "longitude": 115.347391,
+      "latitude": 21.263586
+    },
+    {
+      "well_name": "HZ25-7-1",
+      "longitude": 114.877157,
+      "latitude": 21.273595
+    },
+    {
+      "well_name": "HZ25-8-1",
+      "longitude": 114.922095,
+      "latitude": 21.277959
+    },
+    {
+      "well_name": "HZ25-9-1",
+      "longitude": 115.354283,
+      "latitude": 21.083618
+    },
+    {
+      "well_name": "HZ26-1-1",
+      "longitude": 115.027595,
+      "latitude": 21.158188
+    },
+    {
+      "well_name": "HZ26-3-1",
+      "longitude": 115.558442,
+      "latitude": 21.366763
+    },
+    {
+      "well_name": "HZ26-6-1",
+      "longitude": 115.48951,
+      "latitude": 21.257068
+    },
+    {
+      "well_name": "HZ26-7-1",
+      "longitude": 114.701866,
+      "latitude": 21.35461
+    },
+    {
+      "well_name": "HZ26-8-1",
+      "longitude": 114.848077,
+      "latitude": 21.471896
+    },
+    {
+      "well_name": "HZ26-12-1",
+      "longitude": 114.985416,
+      "latitude": 21.17951
+    },
+    {
+      "well_name": "HZ27-1-3",
+      "longitude": 114.732248,
+      "latitude": 21.591261
+    },
+    {
+      "well_name": "HZ27-2-1",
+      "longitude": 115.270697,
+      "latitude": 21.380581
+    },
+    {
+      "well_name": "HZ27-3-1",
+      "longitude": 115.29256,
+      "latitude": 21.112026
+    },
+    {
+      "well_name": "HZ27-4-1",
+      "longitude": 114.784019,
+      "latitude": 21.441409
+    },
+    {
+      "well_name": "HZ27-5-1",
+      "longitude": 115.098488,
+      "latitude": 21.294566
+    },
+    {
+      "well_name": "HZ27-5-2",
+      "longitude": 115.454125,
+      "latitude": 21.145589
+    },
+    {
+      "well_name": "HZ27-5-3",
+      "longitude": 115.54982,
+      "latitude": 21.143202
+    },
+    {
+      "well_name": "HZ27-10-1",
+      "longitude": 115.043321,
+      "latitude": 21.538655
+    },
+    {
+      "well_name": "HZ28-6-1",
+      "longitude": 114.851856,
+      "latitude": 21.172751
+    },
+    {
+      "well_name": "HZ32-2-1",
+      "longitude": 115.241803,
+      "latitude": 21.296586
+    },
+    {
+      "well_name": "HZ32-5-1",
+      "longitude": 114.857173,
+      "latitude": 21.177122
+    },
+    {
+      "well_name": "HZ33-1-1",
+      "longitude": 115.336304,
+      "latitude": 21.253779
+    },
+    {
+      "well_name": "HZ33-2-1",
+      "longitude": 115.128271,
+      "latitude": 21.503273
+    },
+    {
+      "well_name": "XJ17-3-1X",
+      "longitude": 115.484166,
+      "latitude": 21.288771
+    },
+    {
+      "well_name": "XJ23-1-1X",
+      "longitude": 115.567132,
+      "latitude": 21.172453
+    },
+    {
+      "well_name": "XJ24-1-1X",
+      "longitude": 115.473261,
+      "latitude": 21.126993
+    },
+    {
+      "well_name": "XJ24-2-2",
+      "longitude": 115.148089,
+      "latitude": 21.542009
+    },
+    {
+      "well_name": "XJ24-3-1AX",
+      "longitude": 115.588729,
+      "latitude": 21.331262
+    },
+    {
+      "well_name": "XJ24-3S-2D",
+      "longitude": 115.102878,
+      "latitude": 21.286582
+    },
+    {
+      "well_name": "XJ24-4-1X",
+      "longitude": 115.383654,
+      "latitude": 21.139543
+    },
+    {
+      "well_name": "XJ24-6-1",
+      "longitude": 114.725182,
+      "latitude": 21.586292
+    },
+    {
+      "well_name": "XJ24-6-2D",
+      "longitude": 115.061178,
+      "latitude": 21.521184
+    },
+    {
+      "well_name": "XJ24-9-1",
+      "longitude": 115.137449,
+      "latitude": 21.478498
+    },
+    {
+      "well_name": "XJ30-1-1X",
+      "longitude": 115.654714,
+      "latitude": 21.192835
+    },
+    {
+      "well_name": "XJ30-2-1X",
+      "longitude": 115.115588,
+      "latitude": 21.326155
+    },
+    {
+      "well_name": "XJ30-4-1",
+      "longitude": 115.166225,
+      "latitude": 21.224133
+    },
+    {
+      "well_name": "XJ30-5-1X",
+      "longitude": 114.744428,
+      "latitude": 21.324485
+    },
+    {
+      "well_name": "XJ30-8-1",
+      "longitude": 114.723453,
+      "latitude": 21.505299
+    }
+  ]
+}

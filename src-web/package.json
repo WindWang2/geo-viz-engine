@@ -13,6 +13,9 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
+    "@types/d3": "^7.4.3",
+    "d3": "^7.9.0",
+    "html2canvas": "^1.4.1",
     "i18next": "^23.7.6",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.468.0",
@@ -21,6 +24,7 @@
     "react-dom": "^18.3.1",
     "react-i18next": "^14.0.0",
     "react-router-dom": "^7.0.2",
+    "svg2pdf.js": "^2.7.0",
     "tippy.js": "^6.3.7",
     "zustand": "^4.5.0"
   },

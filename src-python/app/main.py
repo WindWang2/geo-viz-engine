@@ -5,12 +5,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import AuthTokenMiddleware
 from app.api.system import router as system_router
 from app.api.data import router as data_router
-from app.services.data_generator import load_static_mock_data
+from app.services.data_generator import load_static_mock_data, load_real_well_coordinates
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Load static mock data on startup so cache is always populated
     load_static_mock_data()
+    load_real_well_coordinates()
     yield
 
 app = FastAPI(
@@ -22,10 +23,12 @@ app = FastAPI(
 
 app.add_middleware(AuthTokenMiddleware)
 
+is_dev = os.environ.get("GEOVIZ_DEV", "").lower() in ("1", "true", "yes")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=["*"] if is_dev else ["http://localhost:5173", "tauri://localhost", "https://tauri.localhost"],
+    allow_credentials=not is_dev,
     allow_methods=["*"],
     allow_headers=["*"],
 )
