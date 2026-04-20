@@ -16,7 +16,17 @@ interface WellMapProps {
 const DFLT_CENTER: [number, number] = [115.14, 21.31];
 const DFLT_ZOOM = 9;
 
-const isLaolong1 = (name: string) => name === '老龙1' || name === '老龙1井' || name.toLowerCase().includes('laolong');
+/**
+ * Return true if the well has actual well log data available (will show as red star).
+ * Add wells here after converting data to the expected format.
+ */
+const hasWellData = (name: string) => {
+  // LaoLong1 and any well converted to our XLS format
+  return (
+    name === '老龙1' || name === '老龙1井' || name.toLowerCase().includes('laolong') ||
+    name === 'HZ25-10-1' || name.startsWith('HZ25') // All converted HZ wells have data
+  );
+};
 
 function createStarImageData(color: string, size = 24): { width: number; height: number; data: Uint8Array } {
   const canvas = document.createElement('canvas');
@@ -55,6 +65,23 @@ export default function WellMap({ realWells, onWellClick }: WellMapProps) {
   const onWellClickRef = useRef(onWellClick);
   onWellClickRef.current = onWellClick;
 
+  // Resize map when container size changes
+  useEffect(() => {
+    if (!mapContainer.current || !mapRef.current) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (mapRef.current && mapContainer.current) {
+        // If container has non-zero height now, trigger map resize
+        if (mapContainer.current.clientHeight > 0) {
+          mapRef.current.resize();
+        }
+      }
+    });
+
+    resizeObserver.observe(mapContainer.current);
+    return () => resizeObserver.disconnect();
+  }, []);
+
   const addWells = useCallback((map: maplibregl.Map, wells: RealWell[]) => {
     // Add star icons as raw pixel data (synchronous, no load timing issues)
     const redStar = createStarImageData('#ef4444');
@@ -69,7 +96,7 @@ export default function WellMap({ realWells, onWellClick }: WellMapProps) {
         .map(w => ({
           type: 'Feature' as const,
           geometry: { type: 'Point' as const, coordinates: [w.longitude, w.latitude] },
-          properties: { well_name: w.well_name, has_data: isLaolong1(w.well_name) },
+          properties: { well_name: w.well_name, has_data: hasWellData(w.well_name) },
         })),
     };
 

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { LaoLong1Dashboard } from '../components/well-log/LaoLong1Dashboard';
-import type { WellLogData, CurveData } from '../components/well-log/types';
+import type { WellLogData, CurveData, WellDetailData } from '../components/well-log/types';
+import { convertWellDetailToWellLogData } from '../utils/wellDataConverter';
 
 type Tab = 'chart' | 'data';
 
@@ -15,10 +16,17 @@ export default function WellDetailPage() {
   const [tab, setTab] = useState<Tab>('chart');
 
   useEffect(() => {
-    request<WellLogData>('/api/data/laolong1')
-      .then(setData)
+    if (!wellName) {
+      setError('未指定井名称');
+      return;
+    }
+    request<WellDetailData>(`/api/data/well-detail/${wellName}`)
+      .then(detailData => {
+        const wellLogData = convertWellDetailToWellLogData(detailData, wellName);
+        setData(wellLogData);
+      })
       .catch(e => setError(e?.message ?? '加载失败'));
-  }, [request]);
+  }, [request, wellName]);
 
   if (error) {
     return (
