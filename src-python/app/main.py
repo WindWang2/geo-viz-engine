@@ -11,7 +11,8 @@ from app.services.data_generator import load_static_mock_data, load_real_well_co
 async def lifespan(app: FastAPI):
     # Load static mock data on startup so cache is always populated
     load_static_mock_data()
-    load_real_well_coordinates()
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    load_real_well_coordinates(data_dir=os.path.join(project_root, 'data'))
     yield
 
 app = FastAPI(

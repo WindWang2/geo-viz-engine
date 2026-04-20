@@ -5,6 +5,7 @@ import DashboardPage from "./pages/DashboardPage";
 import MapHomePage from "./pages/MapHomePage";
 import WellTablePage from "./pages/WellTablePage";
 import LaoLong1Page from "./pages/LaoLong1Page";
+import WellDetailPage from "./pages/WellDetailPage";
 
 /** 占位页 — 各模块建设期间 */
 function PlaceholderPage({ moduleName }: { moduleName: string }) {
@@ -38,6 +39,7 @@ const router = createBrowserRouter([
       { path: "3d-viewer", element: <PlaceholderPage moduleName="三维地质" /> },
       { path: "map", element: <MapHomePage /> },
       { path: "laolong1", element: <LaoLong1Page /> },
+      { path: "well-detail/:wellName", element: <WellDetailPage /> },
     ],
   },
   {

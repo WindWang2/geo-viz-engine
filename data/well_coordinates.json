@@ -279,6 +279,11 @@
       "well_name": "XJ30-8-1",
       "longitude": 114.723453,
       "latitude": 21.505299
+    },
+    {
+      "well_name": "老龙1",
+      "longitude": 115.15,
+      "latitude": 21.35
     }
   ]
 }
