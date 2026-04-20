@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500">
+  <!-- Irregular kidney-shaped outline with thicker dash pattern -->
+  <path d="M 150,100 C 200,30 300,50 350,100 C 450,150 550,130 630,220 C 680,300 650,400 550,440 C 400,460 250,450 150,400 C 100,300 100,180 150,100 Z"
+        fill="none" stroke="black" stroke-width="10" stroke-dasharray="16,8"/>
+</svg>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 550" width="800" height="550">
+  <!-- Outer black border -->
+  <rect x="40" y="60" width="720" height="430" fill="none" stroke="black" stroke-width="12"/>
+  <!-- Blue kidney-shaped dashed outline -->
+  <path d="M 200,180 C 250,110 350,130 400,180 C 500,230 600,210 680,300 C 730,380 700,460 600,480 C 450,500 300,490 200,440 C 150,340 150,220 200,180 Z"
+        fill="none" stroke="#2040a0" stroke-width="10" stroke-dasharray="16,8"/>
+</svg>

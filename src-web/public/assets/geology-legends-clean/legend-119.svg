@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 450" width="1000" height="450">
+  <!-- Duct/sand body outline -->
+  <rect x="50" y="0" width="900" height="450" fill="none"/>
+  <path d="M 50,225 L 100,225 M 150,225 C 100,100 150,30 650,40 C 800,50 900,90 875,225 C 900,320 850,380 650,380 C 250,380 120,360 150,225 Z"
+        fill="none" stroke="black" stroke-width="6" stroke-dasharray="10,6"/>
+  <!-- Random small grains - diamond and square -->
+  <g fill="black">
+    <!-- Row 1 -->
+    <polygon points="70,70 85,55 100,70 85,85" /><polygon points="110,70 125,55 140,70 125,85" /><polygon points="150,70 165,55 180,70 165,85" />
+    <polygon points="195,80 210,65 225,80 210,95" /><polygon points="230,85 245,70 260,85 245,100" /><polygon points="265,85 280,70 295,85 280,100" />
+    <polygon points="315,85 330,70 345,85 330,100" /><polygon points="355,80 370,65 385,80 370,95" /><polygon points="390,85 405,70 420,85 405,100" /><polygon points="430,85 445,70 460,85 445,100" />
+    <polygon points="470,85 485,70 500,85 485,100" /><polygon points="510,85 525,70 540,85 525,100" /><polygon points="575,75 590,60 605,75 590,90" /><polygon points="610,70 625,55 640,70 625,85" /><polygon points="645,68 660,53 675,68 660,83" />
+    <polygon points="680,63 695,48 710,63 695,78" /><polygon points="715,63 730,48 745,63 730,78" /><polygon points="760,58 775,43 790,58 775,73" /><polygon points="795,68 810,53 825,68 810,83" />
+    <!-- Row 2 -->
+    <polygon points="40,130 55,115 70,130 55,145" /><polygon points="90,130 105,115 120,130 105,145" /><polygon points="130,130 145,115 160,130 145,145" />
+    <rect x="170" y="120" width="20" height="20" /><rect x="200" y="120" width="20" height="20" /><polygon points="240,130 255,115 270,130 255,145" />
+    <rect x="275" y="125" width="20" height="20" /><rect x="305" y="125" width="20" height="20" /><polygon points="340,140 355,125 370,140 355,155" /><polygon points="380,140 395,125 410,140 395,155" />
+    <rect x="415" y="135" width="20" height="20" /><polygon points="445,140 460,125 475,140 460,155" /><rect x="480" y="135" width="20" height="20" /><rect x="510" y="135" width="20" height="20" />
+    <polygon points="545,140 560,125 575,140 560,155" /><rect x="580" y="135" width="20" height="20" /><polygon points="615,140 630,125 645,140 630,155" /><rect x="650" y="140" width="20" height="20" /><polygon points="680,145 695,130 710,145 695,160" />
+    <rect x="715" y="140" width="20" height="20" /><polygon points="740,145 755,130 770,145 755,160" /><rect x="775" y="145" width="20" height="20" /><polygon points="805,135 820,120 835,135 820,150" /><rect x="840" y="125" width="20" height="20" />
+    <!-- Row 3 -->
+    <polygon points="50,200 65,185 80,200 65,215" /><rect x="90" y="190" width="20" height="20" /><polygon points="120,200 135,185 150,200 135,215" /><polygon points="155,200 170,185 185,200 170,215" />
+    <polygon points="190,205 205,190 220,205 205,220" /><polygon points="225,205 240,190 255,205 240,220" /><polygon points="260,205 275,190 290,205 275,220" /><rect x="295" y="195" width="20" height="20" />
+    <polygon points="330,210 345,195 360,210 345,225" /><polygon points="365,210 380,195 395,210 380,225" /><rect x="400" y="205" width="20" height="20" /><polygon points="430,210 445,195 460,210 445,225" />
+    <rect x="465" y="205" width="20" height="20" /><polygon points="490,210 505,195 520,210 505,225" /><polygon points="535,215 550,200 565,215 550,230" /><rect x="580" y="210" width="20" height="20" /><polygon points="610,215 625,200 640,215 625,230" />
+    <rect x="645" y="210" width="20" height="20" /><polygon points="670,215 685,200 700,215 685,230" /><rect x="705" y="215" width="20" height="20" /><polygon points="735,210 750,195 765,210 750,225" /><polygon points="768,210 783,195 798,210 783,225" />
+    <rect x="805" y="205" width="20" height="20" /><polygon points="835,195 850,180 865,195 850,210" /><polygon points="870,200 885,185 900,200 885,215" />
+    <!-- Continue pattern for remaining rows, truncated for cleanliness -->
+  </g>
+</svg>

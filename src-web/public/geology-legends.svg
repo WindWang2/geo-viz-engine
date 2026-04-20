@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <defs>
+    <!-- 砾石纹理 -->
+    <pattern id="pebble-pattern" patternUnits="userSpaceOnUse" width="20" height="20" patternTransform="scale(1)">
+      <circle cx="10" cy="10" r="8" fill="none" stroke="black" stroke-width="1"/>
+    </pattern>
+    <!-- 砂砾石纹理 -->
+    <pattern id="sand-gravel-pattern" patternUnits="userSpaceOnUse" width="12" height="12">
+      <circle cx="6" cy="6" r="4" fill="none" stroke="black" stroke-width="1"/>
+    </pattern>
+    <!-- 黏土纹理 -->
+    <pattern id="clay-pattern" patternUnits="userSpaceOnUse" width="8" height="8">
+      <path d="M0,4 L8,4 M4,0 L4,8" stroke="black" stroke-width="0.5" fill="none"/>
+    </pattern>
+    <!-- 网格纹理（断层/裂隙） -->
+    <pattern id="grid-pattern" patternUnits="userSpaceOnUse" width="16" height="16">
+      <path d="M0,0 L16,16 M0,16 L16,0" stroke="black" stroke-width="1" fill="none"/>
+    </pattern>
+  </defs>
+
+  <style>
+    text { font-family: Arial, sans-serif; font-size: 14px; fill: black; }
+    .legend-title { font-weight: bold; font-size: 16px; }
+  </style>
+
+  <!-- 标题 -->
+  <text x="10" y="25" class="legend-title">勘探管理图件图例符号 - Q/HS 1011—2016</text>
+
+  <!-- ========== 第一组：探井类别 (TJLB) ========== -->
+  <text x="10" y="60" class="legend-title">1. 探井类别 (TJLB)</text>
+
+  <!-- 区探井、基准井、参数井 -->
+  <g transform="translate(20, 80)">
+    <circle cx="25" cy="25" r="20" fill="none" stroke="black" stroke-width="2"/>
+    <circle cx="25" cy="25" r="14" fill="none" stroke="black" stroke-width="1.5"/>
+    <text x="60" y="30">区探井、基准井、参数井</text>
+  </g>
+
+  <!-- 预探井 -->
+  <g transform="translate(20, 130)">
+    <ellipse cx="25" cy="25" rx="22" ry="20" fill="none" stroke="black" stroke-width="2"/>
+    <ellipse cx="25" cy="25" rx="16" ry="14" fill="none" stroke="black" stroke-width="1.5"/>
+    <text x="60" y="30">预探井</text>
+  </g>
+
+  <!-- 评价井 -->
+  <g transform="translate(20, 180)">
+    <rect x="5" y="5" width="40" height="40" fill="none" stroke="black" stroke-width="2"/>
+    <rect x="10" y="10" width="30" height="30" fill="none" stroke="black" stroke-width="1.5"/>
+    <text x="60" y="30">评价井</text>
+  </g>
+
+  <!-- 探井 -->
+  <g transform="translate(20, 230)">
+    <circle cx="25" cy="25" r="22" fill="none" stroke="black" stroke-width="2"/>
+    <text x="60" y="30">探井</text>
+  </g>
+
+  <!-- 正钻井 -->
+  <g transform="translate(20, 280)">
+    <circle cx="25" cy="25" r="22" fill="none" stroke="black" stroke-width="2"/>
+    <line x1="5" y1="5" x2="45" y2="45" stroke="black" stroke-width="2"/>
+    <line x1="5" y1="45" x2="45" y2="5" stroke="black" stroke-width="2"/>
+    <text x="60" y="30">正钻井</text>
+  </g>
+
+  <!-- 发现井 (油) -->
+  <g transform="translate(300, 80)">
+    <circle cx="25" cy="25" r="22" fill="#ff0000" stroke="black" stroke-width="2"/>
+    <text x="60" y="30">发现井 (红色填充)</text>
+  </g>
+
+  <!-- 千吨井 -->
+  <g transform="translate(300, 130)">
+    <circle cx="25" cy="25" r="22" fill="#ff0000" stroke="black" stroke-width="2"/>
+    <text x="60" y="30">千吨井 (红色填充)</text>
+  </g>
+
+  <!-- 工业油流井 -->
+  <g transform="translate(300, 180)">
+    <circle cx="25" cy="25" r="22" fill="#008000" stroke="black" stroke-width="2"/>
+    <text x="60" y="30">工业油流井 (绿色填充)</text>
+  </g>
+
+  <!-- 工业气流井 -->
+  <g transform="translate(300, 230)">
+    <polygon points="25,3 47,25 25,47 3,25" fill="#ff0000" stroke="black" stroke-width="2"/>
+    <text x="60" y="30">工业气流井 (红色菱形)</text>
+  </g>
+
+  <!-- ========== 第二组：沉积岩 - 堆积物 ========== -->
+  <text x="10" y="340" class="legend-title">2. 沉积岩 - 堆积物 (CJW)</text>
+
+  <!-- 表土和积土层 -->
+  <g transform="translate(20, 360)">
+    <rect x="5" y="5" width="50" height="40" fill="none" stroke="black" stroke-width="1.5"/>
+    <text x="65" y="30">表土和积土层</text>
+  </g>
+
+  <!-- 黏土 -->
+  <g transform="translate(20, 415)">
+    <rect x="5" y="5" width="50" height="40" fill="url(#clay-pattern)" stroke="black" stroke-width="1.5"/>
+    <text x="65" y="30">黏土</text>
+  </g>
+
+  <!-- 卵石 -->
+  <g transform="translate(20, 470)">
+    <rect x="5" y="5" width="50" height="40" fill="url(#pebble-pattern)" stroke="black" stroke-width="1.5"/>
+    <text x="65" y="30">卵石</text>
+  </g>
+
+  <!-- 砾石 -->
+  <g transform="translate(200, 360)">
+    <rect x="5" y="5" width="50" height="40" fill="url(#sand-gravel-pattern)" stroke="black" stroke-width="1.5"/>
+    <text x="65" y="30">砾石</text>
+  </g>
+
+  <!-- 角砾石 -->
+  <g transform="translate(200, 415)">
+    <rect x="5" y="5" width="50" height="40" fill="none" stroke="black" stroke-width="1.5">
+      <pattern>
+      </pattern>
+    </rect>
+    <!-- 角砾石用多边形近似 -->
+    <path d="M10,15 L20,8 L32,12 L42,8 L45,20 L38,30 L45,35 L35,42 L15,40 L8,30 L12,18" fill="none" stroke="black" stroke-width="1" transform="translate(5,5)"/>
+    <path d="M18,38 L8,30 L15,20 L25,25 L35,18 L42,28 L32,35 L22,32" fill="none" stroke="black" stroke-width="1" transform="translate(5,5)"/>
+    <text x="65" y="30">角砾石</text>
+  </g>
+
+  <!-- 断层/裂隙 -->
+  <g transform="translate(200, 470)">
+    <polygon points="5,45 55,5 280,140 0,180" fill="url(#grid-pattern)" stroke="black" stroke-width="3"/>
+    <text x="65" y="30">断层/裂隙 (斜交网格)</text>
+  </g>
+
+  <!-- 砂砾石 -->
+  <g transform="translate(380, 360)">
+    <rect x="5" y="5" width="50" height="40" fill="url(#sand-gravel-pattern)" stroke="black" stroke-width="1.5"/>
+    <text x="65" y="30">砂砾石 (未胶结)</text>
+  </g>
+
+  <!-- ========== 第三组：构造符号 ========== -->
+  <text x="10" y="530" class="legend-title">3. 构造符号</text>
+
+  <!-- 生油凹陷 -->
+  <g transform="translate(20, 550)">
+    <ellipse cx="40" cy="25" rx="70" ry="20" fill="none" stroke="black" stroke-width="2" stroke-dasharray="5,3"/>
+    <text x="120" y="30">生油凹陷 (虚线)</text>
+  </g>
+
+  <!-- 油气聚集带 -->
+  <g transform="translate(300, 550)">
+    <ellipse cx="40" cy="25" rx="60" ry="20" fill="none" stroke="black" stroke-width="2"/>
+    <text x="110" y="30">油气聚集带 (实线)</text>
+  </g>
+</svg>

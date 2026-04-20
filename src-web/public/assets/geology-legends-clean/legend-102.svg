@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 250" width="400" height="250">
+  <!-- 圆形虚线边框 -->
+  <circle cx="200" cy="125" r="85" fill="none" stroke="black" stroke-width="6" stroke-dasharray="8,6"/>
+  <!-- 左上实心区域 -->
+  <path d="M125,45 L270,45 L275,120 L215,125 L145,48 Z" fill="black"/>
+</svg>

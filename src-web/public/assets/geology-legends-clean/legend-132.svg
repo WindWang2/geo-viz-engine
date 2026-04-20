@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 350" width="900" height="350">
+  <!-- Angular unconformity contact - solid lines on both -->
+  <path d="M 50 300 C 100 250 150 220 220 200 C 300 180 350 180 390 180 C 440 180 450 120 460 80 C 470 120 480 180 520 180 C 580 180 650 180 720 180 C 780 180 820 180 840 180"
+        fill="none" stroke="black" stroke-width="8" stroke-dasharray="10,6"/>
+  <path d="M 130 30 C 200 80 280 130 380 180 C 440 180 450 120 460 80 C 470 120 480 180 520 180 C 580 180 650 180 720 180 C 780 180 820 180 840 180"
+        fill="none" stroke="black" stroke-width="8"/>
+</svg>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 250" width="400" height="250">
+  <!-- 八边形边框 -->
+  <polygon points="200,40 270,60 300,125 270,190 200,210 130,190 100,125 130,60"
+           fill="none" stroke="black" stroke-width="16"/>
+  <!-- 红色十字 -->
+  <rect x="130" y="165" width="140" height="50" rx="8" fill="#ff3300"/>
+  <rect x="175" y="120" width="50" height="140" rx="8" fill="#ff3300"/>
+</svg>

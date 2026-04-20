@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 550" width="500" height="550">
+  <!-- Bohai Sea area outline -->
+  <path d="M 80,450 L 120,360 L 280,240 L 280,100 L 380,160 L 430,240 L 380,420 L 280,470 L 100,460 Z"
+        fill="#a0e0f0" stroke="black" stroke-width="8"/>
+  <!-- Text label -->
+  <text x="340" y="180" font-family="SimSun, serif" font-size="120" fill="black">渤海</text>
+</svg>

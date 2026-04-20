@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 79" width="150" height="79">
+  <g fill="none" stroke="black" stroke-width="3" stroke-linecap="round">
+    <!-- Row 1 -->
+    <path d="M30 15 Q35 30 40 15"/>
+    <path d="M70 15 Q75 30 80 15"/>
+    <path d="M105 15 Q110 30 115 15"/>
+    <path d="M140 15 Q145 30 150 15"/>
+    <!-- Row 2 -->
+    <path d="M50 40 Q55 55 60 40"/>
+    <path d="M85 40 Q90 55 95 40"/>
+    <path d="M120 40 Q125 55 130 40"/>
+    <!-- Row 3 -->
+    <path d="M30 58 Q35 73 40 58"/>
+    <path d="M70 58 Q75 73 80 58"/>
+    <path d="M105 58 Q110 73 115 58"/>
+    <path d="M140 58 Q145 73 150 58"/>
+  </g>
+</svg>

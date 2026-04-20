@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 350" width="600" height="350">
+  <!-- Outer square frame -->
+  <rect x="130" y="80" width="240" height="190" fill="none" stroke="black" stroke-width="12"/>
+  <rect x="150" y="100" width="200" height="150" fill="none" stroke="black" stroke-width="8"/>
+  <!-- Solid inverted triangle funnel -->
+  <polygon points="160,100 340,100 250,200" fill="black"/>
+  <!-- Stem -->
+  <rect x="240" y="200" width="20" height="50" fill="black"/>
+</svg>

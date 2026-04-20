@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400">
+  <!-- Two wavy lines in magenta (pink) -->
+  <path d="M 50,150 L 100,50 L 160,200 L 220,50 L 280,200 L 340,50 L 400,200 L 460,50 L 520,200 L 620,50 L 700,220"
+        fill="none" stroke="#ed2680" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 100,350 L 150,200 L 240,350 L 330,200 L 420,350 L 510,200 L 600,350 L 680,200 L 730,330"
+        fill="none" stroke="#ed2680" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

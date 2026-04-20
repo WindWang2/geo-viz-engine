@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" width="900" height="300">
+  <!-- Normal fault displacement -->
+  <g stroke="black" stroke-width="6">
+    <!-- Three horizontal lines with displacement -->
+    <line x1="30" y1="150" x2="870" y2="150" />
+    <line x1="200" y1="200" x2="870" y2="200" />
+    <line x1="30" y="="100" x2="340" y2="100" />
+    <!-- Stepped connection with dashes -->
+    <path d="M 160 150 L 230 80" stroke-dasharray="8,6" />
+    <path d="M 340 100 L 340 150" stroke-dasharray="8,6" />
+    <line x1="340" y1="100" x2="870" y2="100" />
+  </g>
+</svg>

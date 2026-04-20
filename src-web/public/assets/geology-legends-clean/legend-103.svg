@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 250" width="800" height="250">
+  <!-- Left - Red -->
+  <circle cx="150" cy="125" r="100" fill="none" stroke="black" stroke-width="4" stroke-dasharray="8,6"/>
+  <path d="M60,45 330,45 335,130 280,150 145,155 70,58 Z" fill="#ed2600" stroke="black" stroke-width="4"/>
+  <!-- Right - Gray -->
+  <circle cx="650" cy="125" r="100" fill="none" stroke="black" stroke-width="4" stroke-dasharray="8,6"/>
+  <path d="M560,45 830,45 835,130 780,150 645,155 570,58 Z" fill="#888888" stroke="black" stroke-width="4"/>
+</svg>

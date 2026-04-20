@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 350" width="900" height="350">
+  <!-- Winding channel/river sand body with filled internal grains -->
+  <path d="M 50 50 C 100 100 120 120 140 150 C 150 100 170 50 200 100 C 230 150 230 200 270 200 C 300 200 320 180 350 220 C 400 270 450 300 480 280 C 500 250 530 200 570 220 C 600 240 650 230 690 200 C 730 170 780 100 820 130"
+        fill="none" stroke="black" stroke-width="8"/>
+  <path d="M 50 50 C 100 100 120 120 140 150 C 150 100 170 50 200 100 C 230 150 230 200 270 200 C 300 200 320 180 350 220 C 400 270 450 300 480 280 C 500 250 530 200 570 220 C 600 240 650 230 690 200 C 730 170 780 100 820 130"
+        fill="none" stroke="black" stroke-width="8"/>
+  <!-- Filled diamond grains -->
+  <g fill="black">
+    <polygon points="585,190 598,176 612,190 598,204" fill="black" />
+    <polygon points="605,240 618,226 632,240 618,254" fill="black" />
+    <polygon points="625,215 638,201 652,215 638,229" fill="black" />
+    <polygon points="642,255 655,241 669,255 655,269" fill="black" />
+    <polygon points="660,195 673,181 687,195 673,209" fill="black" />
+    <polygon points="670,225 683,211 697,225 683,239" fill="black" />
+    <polygon points="690,160 703,146 717,160 703,174" fill="black" />
+    <polygon points="700,200 713,186 727,200 713,214" fill="black" />
+    <polygon points="705,290 718,276 732,290 718,304" fill="black" />
+    <polygon points="725,135 738,121 752,135 738,149" fill="black" />
+    <polygon points="735,175 748,161 762,175 748,189" fill="black" />
+    <polygon points="745,235 758,221 772,235 758,249" fill="black" />
+    <polygon points="750,275 763,261 777,275 763,289" fill="black" />
+    <polygon points="760,125 773,111 787,125 773,139" fill="black" />
+    <polygon points="770,165 783,151 797,165 783,179" fill="black" />
+    <polygon points="775,215 788,201 802,215 788,229" fill="black" />
+    <polygon points="790,255 803,241 817,255 803,269" fill="black" />
+    <polygon points="810,100 823,86 837,100 823,114" fill="black" />
+    <polygon points="820,140 833,126 847,140 833,154" fill="black" />
+    <polygon points="825,180 838,166 852,180 838,194" fill="black" />
+    <polygon points="835,310 848,296 862,310 848,324" fill="black" />
+    <polygon points="845,225 858,211 872,225 858,239" fill="black" />
+  </g>
+</svg>

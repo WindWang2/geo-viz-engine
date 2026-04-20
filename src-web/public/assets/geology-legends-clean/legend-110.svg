@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+  <!-- Anticline structure contour map with closed circle -->
+  <g stroke="black" stroke-width="6" fill="none">
+    <path d="M 100,450 C 150,100 200,50 450,150" />
+    <path d="M 180,430 C 200,150 250,100 430,190" />
+    <path d="M 250,400 C 270,180 300,150 380,230" />
+    <!-- Parallel contours on the flank -->
+    <path d="M 300,360 C 400,300 500,280 600,300" />
+    <path d="M 300,390 C 400,330 500,310 600,330" />
+    <path d="M 300,420 C 400,360 500,340 600,360" />
+  </g>
+  <!-- Contour labels -->
+  <circle cx="105" cy="290" r="20" fill="none" stroke="black" stroke-width="4"/>
+  <text x="100" y="300" font-size="32" fill="black">6</text>
+  <text x="230" y="330" font-size="80" fill="black">2</text>
+  <text x="190" y="330" font-size="80" fill="black">4</text>
+  <!-- Arrows indicating plunge direction -->
+  <polygon points="430,60 470,100 390,100" fill="black"/>
+  <polygon points="80,360 120,400 40,400" fill="black"/>
+  <polygon points="470,410 510,450 430,450" fill="black"/>
+</svg>

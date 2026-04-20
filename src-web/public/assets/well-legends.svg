@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="320" viewBox="0 0 400 320">
+  <defs>
+    <!-- 预探井符号定义 -->
+    <symbol id="well-exploration" viewBox="0 0 50 50">
+      <circle cx="25" cy="25" r="22" fill="none" stroke="currentColor" stroke-width="3"/>
+      <circle cx="25" cy="25" r="16" fill="none" stroke="currentColor" stroke-width="2"/>
+    </symbol>
+    <!-- 参数井/基准井符号 -->
+    <symbol id="well-parametric" viewBox="0 0 50 50">
+      <ellipse cx="25" cy="25" rx="22" ry="20" fill="none" stroke="currentColor" stroke-width="3"/>
+      <ellipse cx="25" cy="25" rx="16" ry="14" fill="none" stroke="currentColor" stroke-width="2"/>
+    </symbol>
+    <!-- 评价井符号 -->
+    <symbol id="well-appraisal" viewBox="0 0 50 50">
+      <rect x="5" y="5" width="40" height="40" fill="none" stroke="currentColor" stroke-width="3"/>
+      <rect x="10" y="10" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2"/>
+    </symbol>
+    <!-- 普通探井符号 -->
+    <symbol id="well-general" viewBox="0 0 50 50">
+      <circle cx="25" cy="25" r="22" fill="none" stroke="currentColor" stroke-width="3"/>
+    </symbol>
+    <!-- 正钻井符号 -->
+    <symbol id="well-drilling" viewBox="0 0 50 50">
+      <circle cx="25" cy="25" r="22" fill="none" stroke="currentColor" stroke-width="3"/>
+      <line x1="6" y1="6" x2="44" y2="44" stroke="currentColor" stroke-width="3"/>
+      <line x1="6" y1="44" x2="44" y2="6" stroke="currentColor" stroke-width="3"/>
+    </symbol>
+    <!-- 发现井 - 油流 -->
+    <symbol id="well-oil-discovery" viewBox="0 0 50 50">
+      <circle cx="25" cy="25" r="22" fill="#ff0000" stroke="currentColor" stroke-width="2"/>
+    </symbol>
+    <!-- 工业油流井 -->
+    <symbol id="well-oil-production" viewBox="0 0 50 50">
+      <circle cx="25" cy="25" r="22" fill="#008000" stroke="currentColor" stroke-width="2"/>
+    </symbol>
+    <!-- 工业气流井 -->
+    <symbol id="well-gas-production" viewBox="0 0 50 50">
+      <polygon points="25,3 47,25 25,47 3,25" fill="#ff0000" stroke="currentColor" stroke-width="2"/>
+    </symbol>
+    <!-- 水文井 -->
+    <symbol id="well-water" viewBox="0 0 50 50">
+      <rect x="5" y="5" width="40" height="40" fill="none" stroke="currentColor" stroke-width="3"/>
+      <text x="25" y="32" text-anchor="middle" font-size="20" fill="currentColor">水</text>
+    </symbol>
+    <!-- 干井 -->
+    <symbol id="well-dry" viewBox="0 0 50 50">
+      <circle cx="25" cy="25" r="22" fill="none" stroke="currentColor" stroke-width="3"/>
+      <line x1="8" y1="25" x2="42" y2="25" stroke="currentColor" stroke-width="3"/>
+    </symbol>
+    <!-- 生产井 -->
+    <symbol id="well-producing" viewBox="0 0 50 50">
+      <circle cx="25" cy="25" r="18" fill="none" stroke="currentColor" stroke-width="3"/>
+      <line x1="25" y1="7" x2="25" y2="16" stroke="currentColor" stroke-width="3"/>
+      <line x1="16" y1="25" x2="34" y2="25" stroke="currentColor" stroke-width="3"/>
+    </symbol>
+    <!-- 注水井 -->
+    <symbol id="well-injection-water" viewBox="0 0 50 50">
+      <circle cx="25" cy="25" r="18" fill="none" stroke="currentColor" stroke-width="3"/>
+      <line x1="25" y1="34" x2="25" y2="43" stroke="currentColor" stroke-width="3"/>
+      <line x1="16" y1="25" x2="34" y2="25" stroke="currentColor" stroke-width="3"/>
+    </symbol>
+  </defs>
+
+  <style>
+    text { font-family: Arial, sans-serif; font-size: 12px; fill: #333; }
+  </style>
+
+  <!-- 预览网格 -->
+  <g transform="translate(20, 20)">
+    <use href="#well-parametric" width="40" height="40" />
+    <text x="50" y="24">参数井/区探井</text>
+  </g>
+
+  <g transform="translate(20, 70)">
+    <use href="#well-exploration" width="40" height="40" />
+    <text x="50" y="24">预探井</text>
+  </g>
+
+  <g transform="translate(20, 120)">
+    <use href="#well-appraisal" width="40" height="40" />
+    <text x="50" y="24">评价井</text>
+  </g>
+
+  <g transform="translate(20, 170)">
+    <use href="#well-general" width="40" height="40" />
+    <text x="50" y="24">探井</text>
+  </g>
+
+  <g transform="translate(20, 220)">
+    <use href="#well-drilling" width="40" height="40" />
+    <text x="50" y="24">正钻井</text>
+  </g>
+
+  <g transform="translate(20, 270)">
+    <use href="#well-dry" width="40" height="40" />
+    <text x="50" y="24">干井</text>
+  </g>
+
+  <g transform="translate(200, 20)">
+    <use href="#well-oil-discovery" width="40" height="40" />
+    <text x="50" y="24">发现井 (油)</text>
+  </g>
+
+  <g transform="translate(200, 70)">
+    <use href="#well-oil-production" width="40" height="40" />
+    <text x="50" y="24">工业油流井</text>
+  </g>
+
+  <g transform="translate(200, 120)">
+    <use href="#well-gas-production" width="40" height="40" />
+    <text x="50" y="24">工业气流井</text>
+  </g>
+
+  <g transform="translate(200, 170)">
+    <use href="#well-water" width="40" height="40" />
+    <text x="50" y="24">水文井</text>
+  </g>
+
+  <g transform="translate(200, 220)">
+    <use href="#well-producing" width="40" height="40" />
+    <text x="50" y="24">生产井</text>
+  </g>
+
+  <g transform="translate(200, 270)">
+    <use href="#well-injection-water" width="40" height="40" />
+    <text x="50" y="24">注水井</text>
+  </g>
+</svg>
