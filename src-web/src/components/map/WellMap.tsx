@@ -1,7 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { WellMetadata } from '../well-log/types';
 
 interface RealWell {
   well_name: string;
@@ -10,18 +9,138 @@ interface RealWell {
 }
 
 interface WellMapProps {
-  wells: WellMetadata[];
   realWells?: RealWell[];
-  onWellClick: (wellId: string) => void;
-  selectedWellId?: string | null;
+  onWellClick?: (wellName: string) => void;
 }
 
-const DFLT_CENTER: [number, number] = [107.0, 29.0];
-const DFLT_ZOOM = 7;
+const DFLT_CENTER: [number, number] = [115.14, 21.31];
+const DFLT_ZOOM = 9;
 
-export default function WellMap({ wells, realWells, onWellClick, selectedWellId }: WellMapProps) {
+const isLaolong1 = (name: string) => name === '老龙1' || name === '老龙1井' || name.toLowerCase().includes('laolong');
+
+function createStarImageData(color: string, size = 24): { width: number; height: number; data: Uint8Array } {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+
+  const cx = size / 2, cy = size / 2;
+  const outerR = size / 2 - 2;
+  const innerR = outerR * 0.4;
+
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const angle = -(Math.PI / 2) + (Math.PI / 5) * i;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  const imageData = ctx.getImageData(0, 0, size, size);
+  return { width: size, height: size, data: new Uint8Array(imageData.data.buffer) };
+}
+
+export default function WellMap({ realWells, onWellClick }: WellMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const pendingWellsRef = useRef<RealWell[] | null>(null);
+  const onWellClickRef = useRef(onWellClick);
+  onWellClickRef.current = onWellClick;
+
+  const addWells = useCallback((map: maplibregl.Map, wells: RealWell[]) => {
+    // Add star icons as raw pixel data (synchronous, no load timing issues)
+    const redStar = createStarImageData('#ef4444');
+    const grayStar = createStarImageData('#9ca3af');
+    map.addImage('star-red', redStar);
+    map.addImage('star-gray', grayStar);
+
+    const geojson: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: wells
+        .filter(w => w.longitude != null && w.latitude != null)
+        .map(w => ({
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: [w.longitude, w.latitude] },
+          properties: { well_name: w.well_name, has_data: isLaolong1(w.well_name) },
+        })),
+    };
+
+    // Cleanup old layers/sources
+    for (const id of ['wells-star', 'wells-label']) {
+      if (map.getLayer(id)) map.removeLayer(id);
+    }
+    if (map.getSource('real-wells')) map.removeSource('real-wells');
+
+    map.addSource('real-wells', { type: 'geojson', data: geojson });
+
+    // Star markers
+    map.addLayer({
+      id: 'wells-star',
+      type: 'symbol',
+      source: 'real-wells',
+      layout: {
+        'icon-image': ['case', ['get', 'has_data'], 'star-red', 'star-gray'],
+        'icon-size': 1,
+        'icon-allow-overlap': true,
+        'icon-anchor': 'center',
+      },
+    });
+
+    // Labels
+    map.addLayer({
+      id: 'wells-label',
+      type: 'symbol',
+      source: 'real-wells',
+      layout: {
+        'text-field': ['get', 'well_name'],
+        'text-size': 9,
+        'text-offset': [0, 1.4],
+        'text-anchor': 'top',
+        'text-allow-overlap': false,
+      },
+      paint: {
+        'text-color': ['case', ['get', 'has_data'], '#ef4444', '#6b7280'],
+        'text-halo-color': '#ffffff',
+        'text-halo-width': 1,
+      },
+    });
+
+    // Click handler for red stars
+    map.on('click', 'wells-star', (e) => {
+      const props = e.features?.[0]?.properties as any;
+      if (!props) return;
+      if (props.has_data && onWellClickRef.current) {
+        onWellClickRef.current(props.well_name);
+      } else {
+        new maplibregl.Popup({ offset: 10 })
+          .setLngLat(e.lngLat)
+          .setHTML(`<b>${props.well_name}</b><br/><small style="color:#9ca3af">暂无数据</small>`)
+          .addTo(map);
+      }
+    });
+
+    // Cursor style
+    map.on('mouseenter', 'wells-star', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'wells-star', () => { map.getCanvas().style.cursor = ''; });
+
+    // Auto-fit
+    if (geojson.features.length > 0) {
+      const bounds = new maplibregl.LngLatBounds();
+      geojson.features.forEach(f => {
+        const c = (f.geometry as GeoJSON.Point).coordinates;
+        bounds.extend([c[0], c[1]] as [number, number]);
+      });
+      map.fitBounds(bounds, { padding: 60, maxZoom: 12 });
+    }
+  }, []);
 
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return;
@@ -38,154 +157,37 @@ export default function WellMap({ wells, realWells, onWellClick, selectedWellId 
             attribution: '© OpenStreetMap contributors',
           },
         },
-        layers: [
-          {
-            id: 'osm',
-            type: 'raster',
-            source: 'osm',
-            minzoom: 0,
-            maxzoom: 19,
-          },
-        ],
+        layers: [{ id: 'osm', type: 'raster', source: 'osm', minzoom: 0, maxzoom: 19 }],
       },
       center: DFLT_CENTER,
       zoom: DFLT_ZOOM,
     });
 
-    mapRef.current = map;
+    map.on('load', () => {
+      mapRef.current = map;
+      if (pendingWellsRef.current && pendingWellsRef.current.length > 0) {
+        addWells(map, pendingWellsRef.current);
+        pendingWellsRef.current = null;
+      }
+    });
 
-    // Cleanup
     return () => {
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [addWells]);
 
-  // Add / update synthetic well markers
   useEffect(() => {
+    if (!realWells || realWells.length === 0) return;
     const map = mapRef.current;
-    if (!map || !map.loaded()) return;
-
-    // Clear old markers
-    const markers = (map as any)._markers || [];
-    markers.forEach((m: any) => m.remove());
-    (map as any)._markers = [];
-
-    wells.forEach((well) => {
-      if (well.longitude == null || well.latitude == null) return;
-
-      const el = document.createElement('div');
-      el.className = 'well-marker';
-      el.style.cssText = `
-        width: 12px; height: 12px;
-        background: ${well.well_id === selectedWellId ? '#ef4444' : '#3b82f6'};
-        border-radius: 50%;
-        border: 2px solid white;
-        cursor: pointer;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-      `;
-      el.title = well.well_name;
-
-      new maplibregl.Marker(el)
-        .setLngLat([well.longitude, well.latitude])
-        .setPopup(
-          new maplibregl.Popup({ offset: 15 }).setHTML(
-            `<b>${well.well_name}</b><br/><small>${well.well_id}</small>`
-          )
-        )
-        .addTo(map);
-
-      el.addEventListener('click', () => onWellClick(well.well_id));
-
-      (map as any)._markers = [(map as any)._markers || [], markers].flat();
-    });
-  }, [wells, selectedWellId]);
-
-  // Add / update real well GeoJSON layer
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.loaded() || !realWells || realWells.length === 0) return;
-
-    const geojson: GeoJSON.FeatureCollection = {
-      type: 'FeatureCollection',
-      features: realWells
-        .filter(w => w.longitude != null && w.latitude != null)
-        .map(w => ({
-          type: 'Feature' as const,
-          geometry: {
-            type: 'Point' as const,
-            coordinates: [w.longitude, w.latitude],
-          },
-          properties: { well_name: w.well_name },
-        })),
-    };
-
-    // Remove old layer/source if present
-    if (map.getLayer('real-wells-circle')) map.removeLayer('real-wells-circle');
-    if (map.getLayer('real-wells-label')) map.removeLayer('real-wells-label');
-    if (map.getSource('real-wells')) map.removeSource('real-wells');
-
-    map.addSource('real-wells', {
-      type: 'geojson',
-      data: geojson,
-    });
-
-    map.addLayer({
-      id: 'real-wells-circle',
-      type: 'circle',
-      source: 'real-wells',
-      paint: {
-        'circle-radius': 6,
-        'circle-color': '#16a34a',
-        'circle-stroke-width': 2,
-        'circle-stroke-color': '#ffffff',
-      },
-    });
-
-    map.addLayer({
-      id: 'real-wells-label',
-      type: 'symbol',
-      source: 'real-wells',
-      layout: {
-        'text-field': ['get', 'well_name'],
-        'text-size': 10,
-        'text-offset': [0, 1.2],
-        'text-anchor': 'top',
-      },
-      paint: {
-        'text-color': '#15803d',
-        'text-halo-color': '#ffffff',
-        'text-halo-width': 1,
-      },
-    });
-
-    // Popup on click
-    map.on('click', 'real-wells-circle', (e) => {
-      const props = e.features?.[0]?.properties;
-      if (!props) return;
-      const coords = e.lngLat;
-      new maplibregl.Popup({ offset: 10 })
-        .setLngLat(coords)
-        .setHTML(`<b>${props.well_name}</b><br/><small>Real Well</small>`)
-        .addTo(map);
-    });
-
-    // Auto-fit to real wells if no synthetic wells
-    if (wells.length === 0 && geojson.features.length > 0) {
-      const bounds = new maplibregl.LngLatBounds();
-      geojson.features.forEach(f => {
-        const c = (f.geometry as GeoJSON.Point).coordinates;
-        bounds.extend([c[0], c[1]] as [number, number]);
-      });
-      map.fitBounds(bounds, { padding: 50, maxZoom: 12 });
+    if (map && map.loaded()) {
+      addWells(map, realWells);
+    } else {
+      pendingWellsRef.current = realWells;
     }
-  }, [realWells, wells.length]);
+  }, [realWells, addWells]);
 
   return (
-    <div
-      ref={mapContainer}
-      className="w-full h-full"
-      style={{ minHeight: '400px' }}
-    />
+    <div ref={mapContainer} className="w-full h-full" style={{ minHeight: '400px' }} />
   );
 }

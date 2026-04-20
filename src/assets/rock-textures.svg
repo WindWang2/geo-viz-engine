@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="380" viewBox="0 0 400 380">
+  <defs>
+    <!-- 黏土纹理 -->
+    <pattern id="clay-pattern" patternUnits="userSpaceOnUse" width="10" height="10">
+      <path d="M0,5 L10,5 M5,0 L5,10" stroke="black" stroke-width="0.8" fill="none"/>
+    </pattern>
+    <!-- 卵石纹理 -->
+    <pattern id="pebble-pattern" patternUnits="userSpaceOnUse" width="30" height="30">
+      <circle cx="15" cy="15" r="12" fill="none" stroke="black" stroke-width="1.5"/>
+    </pattern>
+    <!-- 砾石纹理 -->
+    <pattern id="gravel-pattern" patternUnits="userSpaceOnUse" width="18" height="18">
+      <circle cx="9" cy="9" r="6" fill="none" stroke="black" stroke-width="1.2"/>
+    </pattern>
+    <!-- 砂砾石纹理 -->
+    <pattern id="sand-gravel-pattern" patternUnits="userSpaceOnUse" width="12" height="12">
+      <circle cx="6" cy="6" r="4" fill="none" stroke="black" stroke-width="1"/>
+    </pattern>
+    <!-- 粉砂纹理 -->
+    <pattern id="silt-pattern" patternUnits="userSpaceOnUse" width="6" height="6">
+      <circle cx="3" cy="3" r="1.8" fill="none" stroke="black" stroke-width="0.8"/>
+    </pattern>
+    <!-- 网格/断层纹理 -->
+    <pattern id="grid-diagonal-pattern" patternUnits="userSpaceOnUse" width="20" height="20">
+      <path d="M0,0 L20,20 M0,20 L20,0" stroke="black" stroke-width="1.2" fill="none"/>
+    </pattern>
+    <!-- 层理纹理 -->
+    <pattern id="bedding-pattern" patternUnits="userSpaceOnUse" width="15" height="15">
+      <line x1="0" y1="7.5" x2="15" y2="7.5" stroke="black" stroke-width="1"/>
+    </pattern>
+    <!-- 交错层理 -->
+    <pattern id="cross-bedding-pattern" patternUnits="userSpaceOnUse" width="20" height="20">
+      <line x1="0" y1="5" x2="20" y2="15" stroke="black" stroke-width="1"/>
+      <line x1="0" y1="10" x2="20" y2="20" stroke="black" stroke-width="1"/>
+    </pattern>
+    <!-- 生物扰动纹理 -->
+    <pattern id="bioturbation-pattern" patternUnits="userSpaceOnUse" width="30" height="30">
+      <path d="M5,15 Q10,5 15,15 T25,15" fill="none" stroke="black" stroke-width="1"/>
+      <path d="M5,10 Q15,20 25,10" fill="none" stroke="black" stroke-width="1"/>
+      <ellipse cx="10" cy="22" rx="3" ry="2" fill="none" stroke="black" stroke-width="1"/>
+      <ellipse cx="20" cy="8" rx="2.5" ry="1.8" fill="none" stroke="black" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <style>
+    text { font-family: Arial, sans-serif; font-size: 12px; fill: #333; }
+    rect { stroke: #333; stroke-width: 1; }
+  </style>
+
+  <g transform="translate(20, 20)">
+    <rect x="0" y="0" width="60" height="40" fill="url(#clay-pattern)"/>
+    <text x="75" y="25">黏土</text>
+  </g>
+
+  <g transform="translate(20, 80)">
+    <rect x="0" y="0" width="60" height="40" fill="url(#pebble-pattern)"/>
+    <text x="75" y="25">卵石</text>
+  </g>
+
+  <g transform="translate(20, 140)">
+    <rect x="0" y="0" width="60" height="40" fill="url(#gravel-pattern)"/>
+    <text x="75" y="25">砾石</text>
+  </g>
+
+  <g transform="translate(20, 200)">
+    <rect x="0" y="0" width="60" height="40" fill="url(#sand-gravel-pattern)"/>
+    <text x="75" y="25">砂砾石</text>
+  </g>
+
+  <g transform="translate(20, 260)">
+    <rect x="0" y="0" width="60" height="40" fill="url(#silt-pattern)"/>
+    <text x="75" y="25">粉砂</text>
+  </g>
+
+  <g transform="translate(20, 320)">
+    <polygon points="0,40 200,0 300,40 0,40" fill="url(#grid-diagonal-pattern)" stroke="#333" stroke-width="2"/>
+    <text x="215" y="25">断层/裂隙</text>
+  </g>
+
+  <g transform="translate(200, 20)">
+    <rect x="0" y="0" width="60" height="40" fill="url(#bedding-pattern)"/>
+    <text x="75" y="25">水平层理</text>
+  </g>
+
+  <g transform="translate(200, 80)">
+    <rect x="0" y="0" width="60" height="40" fill="url(#cross-bedding-pattern)"/>
+    <text x="75" y="25">交错层理</text>
+  </g>
+
+  <g transform="translate(200, 140)">
+    <rect x="0" y="0" width="60" height="40" fill="url(#bioturbation-pattern)"/>
+    <text x="75" y="25">生物扰动</text>
+  </g>
+
+  <g transform="translate(200, 200)">
+    <rect x="0" y="0" width="60" height="40">
+      <pattern>
+      </rect>
+      <!-- 角砾岩示意 -->
+      <path d="M5,10 L15,5 L25,12 L35,8 L40,20 L32,30 L40,35 L30,40 L10,38 L3,28 L8,15" fill="none" stroke="black" stroke-width="1"/>
+      <path d="M15,33 L3,28 L10,18 L20,22 L30,15 L38,25 L28,32 L18,28" fill="none" stroke="black" stroke-width="1"/>
+      <path d="M22,5 L32,12 L42,5 L45,18 L35,28 L45,32 L38,38 L18,35 L8,25 L12,12" fill="none" stroke="black" stroke-width="1"/>
+    <text x="75" y="25">角砾岩</text>
+  </g>
+
+  <g transform="translate(200, 260)">
+    <rect x="0" y="0" width="60" height="40" fill="none" stroke="black"/>
+    <path d="M10,10 L50,30 M10,30 L50,10" stroke="black" stroke-width="2"/>
+    <text x="75" y="25">破碎带</text>
+  </g>
+</svg>
