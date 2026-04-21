@@ -225,8 +225,8 @@ def load_laolong1(xls_path: str | None = None) -> WellLogData:
         depth_end=depth_end,
         depth_step=depth_step,
         location=None,
-        longitude=None,
-        latitude=None,
+        longitude=115.15,
+        latitude=21.35,
         curves=all_curves,
         intervals=intervals,
     )

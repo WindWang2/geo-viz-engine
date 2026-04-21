@@ -11,16 +11,14 @@ export const LaoLong1Dashboard: React.FC<Props> = ({ data, onDataChange }) => {
   const chartRef = useRef<ChartRef>(null);
 
   return (
-    <div className="flex flex-col h-full bg-gray-100 text-black overflow-hidden">
+    <div className="flex flex-col bg-gray-100 text-black min-h-full">
       {/* Scrollable centered chart */}
-      <div className="flex-1 overflow-auto">
-        <div className="flex justify-center py-4 px-4">
-          <LaoLong1Chart ref={chartRef} data={data} onDataChange={onDataChange} />
-        </div>
+      <div className="flex justify-center py-4 px-4">
+        <LaoLong1Chart ref={chartRef} data={data} onDataChange={onDataChange} />
       </div>
 
-      {/* Export toolbar */}
-      <div className="border-t border-gray-300 px-4 py-2 bg-gray-50 text-xs text-gray-500 flex justify-between items-center shrink-0">
+      {/* Sticky export toolbar */}
+      <div className="sticky bottom-0 border-t border-gray-300 px-4 py-2 bg-gray-50 text-xs text-gray-500 flex justify-between items-center">
         <span>{data.well_name} — 深度 {data.depth_start}m - {data.depth_end}m</span>
         <div className="flex gap-2">
           <button onClick={() => chartRef.current?.exportSVG()} className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 text-xs">Export SVG</button>
