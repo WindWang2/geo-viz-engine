@@ -177,14 +177,16 @@ export default function WellMap({ realWells, onWellClick }: WellMapProps) {
       style: {
         version: 8,
         sources: {
-          'osm': {
+          'otm': {
             type: 'raster',
-            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+            tiles: [
+              'https://tile.opentopomap.org/{z}/{x}/{y}.png',
+            ],
             tileSize: 256,
-            attribution: '© OpenStreetMap contributors',
+            attribution: '© OpenTopoMap contributors',
           },
         },
-        layers: [{ id: 'osm', type: 'raster', source: 'osm', minzoom: 0, maxzoom: 19 }],
+        layers: [{ id: 'otm', type: 'raster', source: 'otm', minzoom: 0, maxzoom: 17 }],
       },
       center: DFLT_CENTER,
       zoom: DFLT_ZOOM,
