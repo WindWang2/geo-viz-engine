@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QLabel,
 )
 
+from src.data.cache import DataCache
+
 
 PAGES = [
     ("map", "🗺", "地图总览"),
@@ -47,6 +49,7 @@ class MainWindow(QWidget):
         super().__init__()
         self.setWindowTitle("GeoViz Engine")
         self.resize(1280, 800)
+        self.cache = DataCache()
         self._build_ui()
 
     def _build_ui(self):
@@ -75,14 +78,28 @@ class MainWindow(QWidget):
 
         # Page stack
         self.stack = QStackedWidget()
-        for key, icon, tooltip in PAGES:
-            page = QLabel(f"{tooltip} (placeholder)")
-            page.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            page.setStyleSheet("font-size: 24px; color: #4a5568;")
-            self.stack.addWidget(page)
+
+        # Lazy-import pages to avoid heavy imports at startup
+        from src.pages.well_log_page import WellLogPage
+        self.well_log_page = WellLogPage()
+
+        page_widgets = [
+            QLabel("地图总览 (placeholder)"),   # map — Task 7
+            self.well_log_page,                   # well log
+            QLabel("地震3D (placeholder)"),     # seismic — Task 8
+            QLabel("数据管理 (placeholder)"),   # data — Task 9
+        ]
+        for pw in page_widgets:
+            if isinstance(pw, QLabel):
+                pw.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                pw.setStyleSheet("font-size: 24px; color: #4a5568;")
+            self.stack.addWidget(pw)
         root.addWidget(self.stack, 1)
 
     def _switch_page(self, index: int):
         for i, btn in enumerate(self.sidebar_buttons):
             btn.setChecked(i == index)
         self.stack.setCurrentIndex(index)
+
+    def _on_well_clicked(self, well_name: str):
+        self._switch_page(1)  # Switch to well log page

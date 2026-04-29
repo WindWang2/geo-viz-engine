@@ -3,6 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QPainter
 from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtSvgWidgets import QGraphicsSvgItem
 from PySide6.QtWidgets import (
     QGraphicsRectItem,
     QGraphicsScene,
@@ -61,11 +62,13 @@ class FaciesRenderer(QWidget):
 
             svg_path = PATTERNS_DIR / f"{iv.facies}.svg"
             if svg_path.exists():
-                svg_item = scene.addSvg(str(svg_path))
-                if svg_item:
-                    svg_item.setPos(0, top_y)
-                    svg_renderer = QSvgRenderer(str(svg_path))
-                    svg_item.setScale(min(width / svg_renderer.defaultSize().width(), rect_h / svg_renderer.defaultSize().height()))
+                svg_item = QGraphicsSvgItem(str(svg_path))
+                svg_item.setPos(0, top_y)
+                svg_renderer = QSvgRenderer(str(svg_path))
+                default_size = svg_renderer.defaultSize()
+                if default_size.width() > 0 and default_size.height() > 0:
+                    svg_item.setScale(min(width / default_size.width(), rect_h / default_size.height()))
+                scene.addItem(svg_item)
 
         view = QGraphicsView(scene)
         view.setRenderHint(QPainter.RenderHint.Antialiasing)
