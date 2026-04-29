@@ -43,3 +43,4 @@ data/generated/*.json
 tmp/
 *.tmp
 .worktrees/
+.superpowers/
