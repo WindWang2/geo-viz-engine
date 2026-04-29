@@ -1,21 +1,51 @@
-from src.data.models import WellLogData, CurveData, LithologyInterval, WellCoordinates
+from src.data.models import (
+    CurveData, IntervalItem, WellIntervals, WellLogData, WellCoordinates,
+    FaciesData,
+)
 
 
-def test_curve_data():
+def test_curve_data_defaults():
     c = CurveData(name="GR", unit="gAPI", depth=[0, 1, 2], values=[10, 20, 30])
     assert c.name == "GR"
-    assert len(c.depth) == 3
+    assert c.display_range == (0.0, 100.0)
+    assert c.color == "#63b3ed"
+    assert c.line_style == "solid"
 
 
-def test_well_log_data():
+def test_curve_data_custom():
+    c = CurveData(
+        name="RT", unit="Ω·m", depth=[0, 1], values=[1, 5],
+        display_range=(0.2, 2000), color="#f6ad55", line_style="dashed",
+    )
+    assert c.display_range == (0.2, 2000)
+    assert c.line_style == "dashed"
+
+
+def test_interval_item():
+    iv = IntervalItem(top=10, bottom=20, name="砂岩")
+    assert iv.name == "砂岩"
+
+
+def test_well_intervals():
+    wi = WellIntervals(
+        lithology=[IntervalItem(top=0, bottom=100, name="砂岩")],
+        facies=FaciesData(
+            phase=[IntervalItem(top=0, bottom=100, name="潮坪")],
+        ),
+    )
+    assert len(wi.lithology) == 1
+    assert len(wi.facies.phase) == 1
+
+
+def test_well_log_data_with_intervals():
     w = WellLogData(well_name="Test-1", top_depth=0, bottom_depth=100)
-    assert w.well_name == "Test-1"
-    assert w.curves == []
+    assert w.intervals is None
 
-
-def test_lithology_interval():
-    li = LithologyInterval(top=10, bottom=20, lithology="sandstone", description="砂岩")
-    assert li.lithology == "sandstone"
+    w2 = WellLogData(
+        well_name="Test-2", top_depth=0, bottom_depth=100,
+        intervals=WellIntervals(),
+    )
+    assert w2.intervals is not None
 
 
 def test_well_coordinates():

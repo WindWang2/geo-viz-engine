@@ -1,23 +1,41 @@
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QScrollArea, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QScrollArea
 from PySide6.QtCore import Qt
-from src.data.models import WellLogData
-from src.renderers.well_log.curve_renderer import CurveRenderer
-from src.renderers.well_log.lithology_renderer import LithologyRenderer
-from src.renderers.well_log.facies_renderer import FaciesRenderer
-from src.renderers.well_log.depth_renderer import DepthRenderer
+import pyqtgraph as pg
 
-
-CURVE_COLORS = ["#63b3ed", "#f6ad55", "#68d391", "#fc8181", "#d6bcfa", "#fbd38d"]
+from src.data.models import WellLogData, CurveData, IntervalItem
+from src.renderers.well_log.config import (
+    ChartConfig, TrackType, TrackConfig, CurveTrackConfig,
+    IntervalTrackConfig, TextTrackConfig, SystemsTractTrackConfig,
+)
+from src.renderers.well_log.tracks.base import TrackWidget
+from src.renderers.well_log.tracks.curve_track import CurveTrack
+from src.renderers.well_log.tracks.interval_track import IntervalTrack
+from src.renderers.well_log.tracks.depth_track import DepthTrack
+from src.renderers.well_log.tracks.text_track import TextTrack
+from src.renderers.well_log.tracks.systems_tract_track import SystemsTractTrack
 
 
 class ChartEngine(QWidget):
-    def __init__(self, data: WellLogData):
-        super().__init__()
-        self.data = data
-        self.chart_height = 800
+    def __init__(self, data: WellLogData, config: ChartConfig, parent=None):
+        super().__init__(parent)
+        self._data = data
+        self._config = config
+        self._tracks: list[TrackWidget] = []
+        self._pyqt_tracks: list = []  # CurveTrack | DepthTrack
+        self._master_viewbox: pg.ViewBox | None = None
         self._build()
 
     def _build(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        title = QLabel(self._data.well_name)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            "font-size: 16px; font-weight: bold; color: #e2e8f0; padding: 8px;"
+        )
+        outer.addWidget(title)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
@@ -27,35 +45,102 @@ class ChartEngine(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(1)
 
-        # Title
-        title = QLabel(self.data.well_name)
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #e2e8f0; padding: 8px;")
+        top_depth = self._data.top_depth
+        bottom_depth = self._data.bottom_depth
+        chart_height = int(
+            (bottom_depth - top_depth) * self._config.pixel_ratio
+        ) + self._config.header_height
 
-        # Depth track
-        depth = DepthRenderer(self.data.top_depth, self.data.bottom_depth, height=self.chart_height)
-        layout.addWidget(depth)
+        for track_cfg in self._config.tracks:
+            track = self._create_track(track_cfg, top_depth, bottom_depth)
+            if track is None:
+                continue
+            track.setFixedHeight(chart_height)
+            self._tracks.append(track)
+            layout.addWidget(track)
 
-        # Curve tracks
-        for i, curve in enumerate(self.data.curves):
-            renderer = CurveRenderer(curve, color=CURVE_COLORS[i % len(CURVE_COLORS)])
-            renderer.plot_widget.setFixedHeight(self.chart_height)
-            layout.addWidget(renderer)
-
-        # Lithology track
-        if self.data.lithology:
-            lith = LithologyRenderer(self.data.lithology, height=self.chart_height)
-            layout.addWidget(lith)
-
-        # Facies track
-        if self.data.facies:
-            fac = FaciesRenderer(self.data.facies, height=self.chart_height)
-            layout.addWidget(fac)
+        self._link_depth_axes()
 
         layout.addStretch()
         scroll.setWidget(container)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(title)
         outer.addWidget(scroll)
+
+    def _create_track(self, cfg: TrackConfig,
+                      top_depth: float, bottom_depth: float) -> TrackWidget | None:
+        hh = self._config.header_height
+
+        if cfg.type == TrackType.DEPTH:
+            track = DepthTrack(cfg, top_depth, bottom_depth, hh, self)
+            self._pyqt_tracks.append(track)
+            return track
+
+        if cfg.type == TrackType.CURVES:
+            if not isinstance(cfg, CurveTrackConfig):
+                return None
+            curves = self._resolve_curves(cfg.curve_names)
+            if not curves:
+                return None
+            track = CurveTrack(cfg, curves, hh, self)
+            self._pyqt_tracks.append(track)
+            return track
+
+        if cfg.type == TrackType.INTERVAL:
+            if not isinstance(cfg, IntervalTrackConfig):
+                return None
+            intervals = self._resolve_intervals(cfg.data_key, cfg.facies_level)
+            if intervals is None:
+                return None
+            return IntervalTrack(cfg, intervals, top_depth, bottom_depth, hh, self)
+
+        if cfg.type == TrackType.TEXT:
+            if not isinstance(cfg, TextTrackConfig):
+                return None
+            intervals = self._resolve_intervals(cfg.data_key)
+            if intervals is None:
+                return None
+            return TextTrack(cfg, intervals, top_depth, bottom_depth, hh, self)
+
+        if cfg.type == TrackType.SYSTEMS_TRACT:
+            if not isinstance(cfg, SystemsTractTrackConfig):
+                return None
+            intervals = self._resolve_intervals(cfg.data_key)
+            if intervals is None:
+                return None
+            return SystemsTractTrack(cfg, intervals, top_depth, bottom_depth, hh, self)
+
+        return None
+
+    def _resolve_curves(self, curve_names: list[str]) -> list[CurveData]:
+        result = []
+        for name in curve_names:
+            for c in self._data.curves:
+                if c.name.upper() == name.upper():
+                    result.append(c)
+                    break
+        return result
+
+    def _resolve_intervals(self, data_key: str,
+                           facies_level: str | None = None) -> list[IntervalItem] | None:
+        if self._data.intervals is None:
+            return None
+        intervals = self._data.intervals
+        if data_key == "facies" and facies_level:
+            return getattr(intervals.facies, facies_level, None)
+        return getattr(intervals, data_key, None)
+
+    def _link_depth_axes(self):
+        if not self._pyqt_tracks:
+            return
+
+        self._master_viewbox = self._pyqt_tracks[0].view_box
+
+        for track in self._pyqt_tracks[1:]:
+            track.view_box.setYLink(self._master_viewbox)
+
+        self._master_viewbox.sigYRangeChanged.connect(self._on_depth_range_changed)
+
+    def _on_depth_range_changed(self, viewbox, range_tuple):
+        top, bottom = range_tuple[0], range_tuple[1]
+        for track in self._tracks:
+            if not isinstance(track, (CurveTrack, DepthTrack)):
+                track.set_depth_range(top, bottom)
