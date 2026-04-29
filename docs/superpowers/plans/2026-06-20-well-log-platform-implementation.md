@@ -1,3 +1,5 @@
+> **ARCHIVED** — 本实施计划基于旧 Web 架构（React + MapLibre + Zustand）。新 PySide6 实施计划见 `2026-04-29-desktop-migration-pyside6.md`。
+
 # Well-Log Platform Redesign — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

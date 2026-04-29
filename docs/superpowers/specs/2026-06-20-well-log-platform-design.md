@@ -1,3 +1,5 @@
+> **ARCHIVED** — 本文档基于旧 Web 架构（React + D3/SVG）。新 PySide6 架构见 `2026-04-29-desktop-migration-pyside6-design.md`。旧代码归档于 git tag `v0.1-web`。
+
 # 测井可视化引擎 V2 设计方案 (Geoviz Engine V2)
 
 本项目旨在基于 `demo.jpg` 和 `demo.xls` 提供的专业地质标准，完全重新设计测井可视化引擎。

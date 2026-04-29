@@ -1,10 +1,12 @@
 # Python
 src-python/venv/
+.venv/
 __pycache__/
 **/__pycache__/
 src-python/.pytest_cache/
 *.pyc
 *.pyo
+*.egg-info/
 
 # Node
 src-web/node_modules/
@@ -43,3 +45,4 @@ data/generated/*.json
 tmp/
 *.tmp
 .worktrees/
+.superpowers/

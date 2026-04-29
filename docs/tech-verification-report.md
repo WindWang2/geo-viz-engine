@@ -1,3 +1,5 @@
+> **ARCHIVED** — 本报告验证的是旧 Web 架构（Tauri+React+FastAPI）的技术可行性。新架构（PySide6 单进程）见 `docs/superpowers/specs/2026-04-29-desktop-migration-pyside6-design.md`。
+
 # Geo-Viz-Engine 技术可行性验证报告
 
 > 生成时间：2026-04-14  

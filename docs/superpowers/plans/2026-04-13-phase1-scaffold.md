@@ -1,3 +1,5 @@
+> **ARCHIVED** — 本实施计划基于旧 Web 架构。新 PySide6 实施计划见 `2026-04-29-desktop-migration-pyside6.md`。
+
 # Phase 1: Project Scaffold Implementation Plan
 
 > **Status:** ALL TASKS COMPLETED. All 18 tasks have been implemented and committed. Steps use checkbox (`- [x]`) syntax for tracking.
