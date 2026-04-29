@@ -1,3 +1,5 @@
+> **ARCHIVED** — 本文档描述的 Tauri+React+FastAPI 三层架构已不再使用。新架构见 `2026-04-29-desktop-migration-pyside6-design.md`。旧代码归档于 git tag `v0.1-web`。
+
 # GeoViz Engine — Design Specification
 
 **Date**: 2026-04-13
