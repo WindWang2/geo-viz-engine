@@ -83,8 +83,17 @@ class MainWindow(QWidget):
         from src.pages.well_log_page import WellLogPage
         self.well_log_page = WellLogPage()
 
+        try:
+            from src.pages.map_page import MapPage
+            self.map_page = MapPage(self.cache, well_click_callback=self._on_well_clicked)
+        except ImportError:
+            # QWebEngineView may be unavailable in headless/CI environments
+            self.map_page = None
+
+        map_widget = self.map_page if self.map_page else QLabel("地图总览 (WebEngine unavailable)")
+
         page_widgets = [
-            QLabel("地图总览 (placeholder)"),   # map — Task 7
+            map_widget,                            # map
             self.well_log_page,                   # well log
             QLabel("地震3D (placeholder)"),     # seismic — Task 8
             QLabel("数据管理 (placeholder)"),   # data — Task 9
