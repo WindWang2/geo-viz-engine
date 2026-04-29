@@ -92,10 +92,22 @@ class MainWindow(QWidget):
 
         map_widget = self.map_page if self.map_page else QLabel("地图总览 (WebEngine unavailable)")
 
+        try:
+            from src.renderers.seismic_renderer import _check_pyvista_qt_available
+            if not _check_pyvista_qt_available():
+                raise RuntimeError("pyvistaqt QtInteractor unavailable (no OpenGL)")
+            from src.pages.seismic_page import SeismicPage
+            self.seismic_page = SeismicPage()
+            seismic_widget = self.seismic_page
+        except Exception:
+            seismic_widget = QLabel("地震3D (placeholder)")
+            seismic_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            seismic_widget.setStyleSheet("font-size: 24px; color: #4a5568;")
+
         page_widgets = [
             map_widget,                            # map
             self.well_log_page,                   # well log
-            QLabel("地震3D (placeholder)"),     # seismic — Task 8
+            seismic_widget,                       # seismic — Task 8
             QLabel("数据管理 (placeholder)"),   # data — Task 9
         ]
         for pw in page_widgets:
