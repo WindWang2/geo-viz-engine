@@ -13,10 +13,10 @@ from src.data.cache import DataCache
 
 
 PAGES = [
-    ("map", "🗺", "地图总览"),
-    ("well_log", "⛏", "井剖面"),
-    ("seismic", "🧊", "地震3D"),
-    ("data", "📁", "数据管理"),
+    ("map", "M", "地图总览"),
+    ("well_log", "W", "井剖面"),
+    ("seismic", "S", "地震3D"),
+    ("data", "D", "数据管理"),
 ]
 
 
@@ -87,7 +87,8 @@ class MainWindow(QWidget):
             from src.pages.map_page import MapPage
             self.map_page = MapPage(self.cache, well_click_callback=self._on_well_clicked)
         except ImportError:
-            # QWebEngineView may be unavailable in headless/CI environments
+            self.map_page = None
+        except Exception:
             self.map_page = None
 
         map_widget = self.map_page if self.map_page else QLabel("地图总览 (WebEngine unavailable)")
@@ -110,8 +111,8 @@ class MainWindow(QWidget):
         page_widgets = [
             map_widget,                            # map
             self.well_log_page,                   # well log
-            seismic_widget,                       # seismic — Task 8
-            self.data_page,                      # data — Task 9
+            seismic_widget,                       # seismic
+            self.data_page,                      # data
         ]
         for pw in page_widgets:
             if isinstance(pw, QLabel):

@@ -1,10 +1,16 @@
 import sys
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 from src.app import MainWindow
 
 
 def main():
     app = QApplication(sys.argv)
+
+    font = QFont("SimHei", 10)
+    font.setStyleStrategy(QFont.StyleStrategy.PreferMatch)
+    app.setFont(font)
+
     app.setStyleSheet("""
         QWidget { background: #1a202c; color: #e2e8f0; }
         QGroupBox { border: 1px solid #4a5568; border-radius: 4px; margin-top: 8px; padding-top: 16px; }
@@ -19,6 +25,7 @@ def main():
         QScrollArea { border: none; }
     """)
     app.setApplicationName("GeoViz Engine")
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
