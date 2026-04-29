@@ -104,11 +104,14 @@ class MainWindow(QWidget):
             seismic_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
             seismic_widget.setStyleSheet("font-size: 24px; color: #4a5568;")
 
+        from src.pages.data_page import DataPage
+        self.data_page = DataPage(self.cache)
+
         page_widgets = [
             map_widget,                            # map
             self.well_log_page,                   # well log
             seismic_widget,                       # seismic — Task 8
-            QLabel("数据管理 (placeholder)"),   # data — Task 9
+            self.data_page,                      # data — Task 9
         ]
         for pw in page_widgets:
             if isinstance(pw, QLabel):
