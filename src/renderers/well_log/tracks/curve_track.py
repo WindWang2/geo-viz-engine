@@ -53,6 +53,15 @@ class CurveTrack(TrackWidget):
     def view_box(self) -> pg.ViewBox:
         return self._view_box
 
+    def preferred_width(self) -> int:
+        return self._config.width
+
+    def set_pixel_density(self, px_per_m: float):
+        pass  # pyqtgraph ViewBox density is managed by linked axes
+
     def set_depth_range(self, top: float, bottom: float):
         if self._view_box:
             self._view_box.setYRange(top, bottom, padding=0)
+
+    def sync_depth(self, top: float, bottom: float):
+        self.set_depth_range(top, bottom)
