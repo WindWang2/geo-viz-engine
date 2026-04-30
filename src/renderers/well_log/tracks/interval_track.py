@@ -39,22 +39,6 @@ class _IntervalContent(DepthMappedContent):
         self._px_per_m = px_per_m
         self.update()
 
-    @property
-    def _current_top(self) -> float:
-        return self._visible_top
-
-    @property
-    def _current_bottom(self) -> float:
-        return self._visible_bottom
-
-    @_current_top.setter
-    def _current_top(self, value: float):
-        self._visible_top = value
-
-    @_current_bottom.setter
-    def _current_bottom(self, value: float):
-        self._visible_bottom = value
-
     def _load_patterns(self, pattern_dir: str | None):
         if not pattern_dir:
             return
@@ -82,6 +66,9 @@ class _IntervalContent(DepthMappedContent):
         w = self.width()
         actual_h = self.height()
         span = self._visible_bottom - self._visible_top
+        if span <= 0:
+            painter.end()
+            return
         font = QFont("Noto Sans CJK SC", 8)
         font.setStyleStrategy(QFont.StyleStrategy.NoFontMerging)
         painter.setFont(font)
