@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QScrollArea
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QScrollArea
 from PySide6.QtCore import Qt
 import pyqtgraph as pg
 
@@ -28,22 +28,18 @@ class ChartEngine(QWidget):
     def _build(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-
-        title = QLabel(self._data.well_name)
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(
-            "font-size: 16px; font-weight: bold; color: #e2e8f0; padding: 8px;"
-        )
-        outer.addWidget(title)
+        outer.setSpacing(0)
 
         scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        scroll.setWidgetResizable(True)  # allows horizontal fill of viewport
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
-        container = QWidget()
-        layout = QHBoxLayout(container)
+        self._container = QWidget()
+        layout = QHBoxLayout(self._container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(1)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
         top_depth = self._data.top_depth
         bottom_depth = self._data.bottom_depth
@@ -57,12 +53,14 @@ class ChartEngine(QWidget):
                 continue
             track.setFixedHeight(chart_height)
             self._tracks.append(track)
-            layout.addWidget(track)
+            layout.addWidget(track, 0, Qt.AlignmentFlag.AlignTop)
 
         self._link_depth_axes()
 
         layout.addStretch()
-        scroll.setWidget(container)
+        # Explicitly set container height so QScrollArea knows the content height
+        self._container.setFixedHeight(chart_height)
+        scroll.setWidget(self._container)
         outer.addWidget(scroll)
 
     def _create_track(self, cfg: TrackConfig,
@@ -144,3 +142,8 @@ class ChartEngine(QWidget):
         for track in self._tracks:
             if not isinstance(track, (CurveTrack, DepthTrack)):
                 track.set_depth_range(top, bottom)
+
+    def export(self, file_path: str):
+        """Render all tracks to a PNG file at full chart resolution."""
+        pix = self._container.grab()
+        pix.save(file_path, "PNG")
