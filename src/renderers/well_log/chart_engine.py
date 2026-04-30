@@ -60,12 +60,7 @@ class ChartEngine(QWidget):
 
         self._link_depth_axes()
 
-        # ── Build flat list of all track modules for coordinator ──
-        all_mods: list = []
-        for track in self._tracks:
-            all_mods.append(track)
-
-        # Wrap paired curves (AC+GR, RT+RXO) into CompositeModules
+        # ── Wrap paired curves (AC+GR, RT+RXO) into CompositeModules ──
         curve_map: dict[str, any] = {}
         for t in self._tracks:
             if hasattr(t, '_curves'):
@@ -104,13 +99,6 @@ class ChartEngine(QWidget):
         self._master_viewbox.sigYRangeChanged.connect(self._coordinator.on_master_range_changed)
         self._coordinator.fit_to_viewport()
         self._scroll = scroll
-
-        # Store reference for resize events
-        for w in self.children():
-            if isinstance(w, QScrollArea):
-                self._scroll_ref = w
-                break
-
         layout.addStretch()
         scroll.setWidget(container)
         outer.addWidget(scroll)
