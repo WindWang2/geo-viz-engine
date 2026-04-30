@@ -69,12 +69,14 @@ class SystemsTractTrack(TrackWidget):
                  header_height: int = 40, parent=None):
         self._intervals = intervals
         self._content: _SystemsTractContent | None = None
+        self._top_depth = top_depth
+        self._bottom_depth = bottom_depth
         super().__init__(config, header_height, parent)
 
     def _create_content(self) -> QWidget:
         self._content = _SystemsTractContent(
             self._config, self._intervals,
-            self._config.header_height, 0, self,
+            self._top_depth, self._bottom_depth, self,
         )
         return self._content
 
