@@ -49,6 +49,22 @@ class SystemsTractTrackConfig(TrackConfig):
     data_key: str = "systems_tract"
 
 
+class CurveGroupConfig(BaseModel):
+    """描述一条成组曲线（一个 CompositeModule），对应 AC+GR、RT+RXO 等配对"""
+    label: str = ""
+    curve_names: list[str] = Field(default_factory=list)
+    width: int = 120
+
+
+class ChartLayoutConfig(BaseModel):
+    """
+    新一代列配置：支持更清晰的曲线成组表达。
+    现与旧 `tracks` 列表并存，两套均可被 ChartEngine 消费。
+    迁移路径：ChartEngine 检测 `columns` 是否非空，非空则用新版，否则降级走 `tracks`。
+    """
+    columns: list[str | CurveGroupConfig] = Field(default_factory=list)
+
+
 class ChartConfig(BaseModel):
     tracks: list[TrackConfig]
     pixel_ratio: float = 14.0
