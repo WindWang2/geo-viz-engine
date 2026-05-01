@@ -31,9 +31,77 @@ export class WellLogChart {
     }
     
     _buildEChartsOption(data) {
-        // 占位
+        const { metadata, tracks } = data;
+        const grids = [];
+        const xAxes = [];
+        const yAxes = [];
+        const series = [];
+        
+        let currentLeft = 5; // 左侧初始边距 %
+        const trackWidthStr = 15; // 假设每道宽度 15%
+        
+        // 唯一共享的深度轴（倒序）
+        yAxes.push({
+            type: 'value',
+            inverse: true,
+            min: metadata.topDepth,
+            max: metadata.bottomDepth,
+            gridIndex: 0,
+            position: 'left',
+            axisLine: { onZero: false }
+        });
+
+        tracks.forEach((track, index) => {
+            // 1. 配置独立的 Grid
+            grids.push({
+                left: `${currentLeft}%`,
+                width: `${trackWidthStr}%`,
+                top: '10%',
+                bottom: '5%'
+            });
+            
+            // 2. 为非第一道的网格同步不可见的 Y 轴
+            if (index > 0) {
+                yAxes.push({
+                    type: 'value', inverse: true, min: metadata.topDepth, max: metadata.bottomDepth,
+                    gridIndex: index, show: false
+                });
+            }
+            
+            if (track.type === 'CurveTrack') {
+                // X 轴位于顶部
+                xAxes.push({
+                    type: 'value', gridIndex: index, position: 'top',
+                    name: track.series.map(s => s.name).join('/'),
+                    nameLocation: 'middle', nameGap: 25
+                });
+                
+                // 将数据 [depth, val] 转换为 [val, depth] 以适应 X/Y
+                track.series.forEach(s => {
+                    series.push({
+                        name: s.name,
+                        type: 'line',
+                        xAxisIndex: index,
+                        yAxisIndex: index,
+                        data: s.data.map(point => [point[1], point[0]]),
+                        itemStyle: { color: s.color },
+                        showSymbol: false,
+                        lineStyle: { width: 1 }
+                    });
+                });
+            }
+            
+            currentLeft += trackWidthStr + 2; // +2% 为间隔
+        });
+
         return {
-            title: { text: data.metadata.wellName }
+            title: { text: metadata.wellName, left: 'center' },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+            dataZoom: [{ type: 'inside', yAxisIndex: grids.map((_, i) => i) }], // 深度统一缩放
+            grid: grids,
+            xAxis: xAxes,
+            yAxis: yAxes,
+            series: series
         };
     }
 }
