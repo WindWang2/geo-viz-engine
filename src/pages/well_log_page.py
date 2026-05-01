@@ -96,18 +96,26 @@ class WellLogPage(QWidget):
     def _on_export(self):
         if not self._chart_widget or not self._current_well:
             return
-        path, selected_filter = QFileDialog.getSaveFileName(
+            
+        # 1. 监听一次性信号
+        self.bridge = self._chart_widget.bridge
+        self.bridge.svg_received.connect(self._save_svg_to_disk)
+        
+        # 2. 触发 JS 导出
+        self._chart_widget.export_svg()
+        
+    def _save_svg_to_disk(self, svg_str: str):
+        # 断开连接，防止多次保存
+        try:
+            self.bridge.svg_received.disconnect(self._save_svg_to_disk)
+        except:
+            pass
+            
+        path, _ = QFileDialog.getSaveFileName(
             self, "导出测井图",
             f"{self._current_well}_well_log.svg",
-            "SVG 矢量 (*.svg);;PDF 矢量 (*.pdf);;PNG 图像 (*.png)",
+            "SVG 矢量 (*.svg)"
         )
         if path:
-            lower = path.lower()
-            if lower.endswith('.pdf'):
-                self._chart_widget.export_pdf(path)
-            elif lower.endswith('.svg'):
-                self._chart_widget.export_svg(path)
-            else:
-                if '.' not in path.split('/')[-1]:
-                    path += '.png'
-                self._chart_widget.export_png(path)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(svg_str)
