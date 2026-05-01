@@ -1,4 +1,5 @@
 import json
+import math
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -9,6 +10,16 @@ from src.renderers.well_log.chart_engine import ChartEngine
 
 
 class WellLogPage(QWidget):
+    # Mapping Chinese lithology names to SVG pattern IDs defined in index.html
+    LITHOLOGY_MAP = {
+        "砂岩": "sandstone",
+        "泥岩": "mudstone",
+        "灰岩": "limestone",
+        "白云岩": "dolomite",
+        "页岩": "shale",
+        "粉砂岩": "siltstone",
+    }
+
     def __init__(self):
         super().__init__()
         outer = QVBoxLayout(self)
@@ -83,6 +94,9 @@ class WellLogPage(QWidget):
             return False
 
         self._chart_widget = ChartEngine(self)
+        # Connect signal once during creation
+        self._chart_widget.bridge.svg_received.connect(self._save_svg_to_disk)
+        
         self._stack.addWidget(self._chart_widget)
         self._stack.setCurrentWidget(self._chart_widget)
         self._current_well = well_name
@@ -103,7 +117,7 @@ class WellLogPage(QWidget):
             curve_data = []
             for d, v in zip(curve.depth, curve.values):
                 # Convert NaN to None so it becomes null in JSON
-                val = v if v == v else None
+                val = v if not math.isnan(v) else None
                 curve_data.append([d, val])
 
             payload["tracks"].append({
@@ -117,18 +131,24 @@ class WellLogPage(QWidget):
                 ]
             })
             
-        # 映射岩性 (LithologyTracks)
+        # 映射岩性 (LithologyTracks) - Unify sources
+        lithology_data = []
+        if hasattr(data, 'lithology') and data.lithology:
+            lithology_data.extend(data.lithology)
         if data.intervals and data.intervals.lithology:
+            lithology_data.extend(data.intervals.lithology)
+
+        if lithology_data:
             payload["tracks"].append({
                 "type": "LithologyTrack",
                 "data": [
                     {
                         "top": item.top,
                         "bottom": item.bottom,
-                        "lithology": item.name,
-                        "description": "",
-                        "color": "#cbd5e0" # Default color
-                    } for item in data.intervals.lithology
+                        "lithology": self.LITHOLOGY_MAP.get(item.name, ""),
+                        "description": item.name,
+                        "color": getattr(item, 'color', "#cbd5e0")
+                    } for item in lithology_data
                 ]
             })
 
@@ -141,26 +161,18 @@ class WellLogPage(QWidget):
     def _on_export(self):
         if not self._chart_widget or not self._current_well:
             return
-            
-        # 1. 监听一次性信号
-        self.bridge = self._chart_widget.bridge
-        self.bridge.svg_received.connect(self._save_svg_to_disk)
-        
-        # 2. 触发 JS 导出
+        # Trigger JS export; the signal was connected in load_well
         self._chart_widget.export_svg()
         
     def _save_svg_to_disk(self, svg_str: str):
-        # 断开连接，防止多次保存
-        try:
-            self.bridge.svg_received.disconnect(self._save_svg_to_disk)
-        except:
-            pass
-            
         path, _ = QFileDialog.getSaveFileName(
             self, "导出测井图",
             f"{self._current_well}_well_log.svg",
             "SVG 矢量 (*.svg)"
         )
         if path:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(svg_str)
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(svg_str)
+            except Exception as e:
+                print(f"[WellLog] Failed to save SVG: {e}")
