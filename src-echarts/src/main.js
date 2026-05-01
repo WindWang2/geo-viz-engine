@@ -32,3 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 挂载到 window 供控制台测试
     window.geoviz = chartEngine;
 });
+
+window.exportChartToSvg = function() {
+    return window.geoviz.exportToSvg();
+};

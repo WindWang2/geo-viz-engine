@@ -29,6 +29,35 @@ export class WellLogChart {
         this.currentOptions = this._buildEChartsOption(wellLogData);
         this.chart.setOption(this.currentOptions, true);
     }
+
+    exportToSvg() {
+        // 1. 创建一个临时的、不可见的 DOM 容器
+        const tempContainer = document.createElement('div');
+        // 必须设置确切的宽高，否则 ECharts 无法渲染
+        tempContainer.style.width = this.container.clientWidth + 'px';
+        tempContainer.style.height = this.container.scrollHeight + 'px'; // 导出全长
+        
+        // 2. 使用 'svg' 渲染器初始化
+        const exportChart = echarts.init(tempContainer, null, { renderer: 'svg' });
+        
+        // 3. 复制当前的 Option，为了防止全长压缩，移除 dataZoom 或设定起止
+        const exportOptions = JSON.parse(JSON.stringify(this.currentOptions));
+        if (exportOptions.dataZoom) {
+            delete exportOptions.dataZoom; // 导出全图
+        }
+        // 强制确保全局字体包含中文字库，这很关键
+        exportOptions.textStyle = { fontFamily: '"Microsoft YaHei", "SimHei", sans-serif' };
+
+        exportChart.setOption(exportOptions, true);
+        
+        // 4. 提取 SVG DOM
+        let svgString = tempContainer.querySelector('svg').outerHTML;
+        
+        // 清理
+        exportChart.dispose();
+        
+        return svgString;
+    }
     
     _buildEChartsOption(data) {
         const metadata = data?.metadata || { wellName: 'Unknown Well', topDepth: 0, bottomDepth: 1000 };
