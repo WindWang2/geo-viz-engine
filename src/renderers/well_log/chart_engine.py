@@ -13,6 +13,7 @@ from src.renderers.well_log.tracks.interval_track import IntervalTrack
 from src.renderers.well_log.tracks.depth_track import DepthTrack
 from src.renderers.well_log.tracks.text_track import TextTrack
 from src.renderers.well_log.tracks.systems_tract_track import SystemsTractTrack
+from src.renderers.well_log.modules import CompositeModule, LayoutCoordinator
 
 
 class ChartEngine(QWidget):
@@ -23,6 +24,8 @@ class ChartEngine(QWidget):
         self._tracks: list[TrackWidget] = []
         self._pyqt_tracks: list = []  # CurveTrack | DepthTrack
         self._master_viewbox: pg.ViewBox | None = None
+        self._coordinator: LayoutCoordinator | None = None
+        self._scroll: QScrollArea | None = None
         self._build()
 
     def _build(self):
@@ -43,23 +46,56 @@ class ChartEngine(QWidget):
 
         top_depth = self._data.top_depth
         bottom_depth = self._data.bottom_depth
-        chart_height = int(
-            (bottom_depth - top_depth) * self._config.pixel_ratio
-        ) + self._config.header_height
 
         for track_cfg in self._config.tracks:
             track = self._create_track(track_cfg, top_depth, bottom_depth)
             if track is None:
                 continue
-            track.setFixedHeight(chart_height)
             self._tracks.append(track)
             layout.addWidget(track, 0, Qt.AlignmentFlag.AlignTop)
 
         self._link_depth_axes()
 
+        # ── Wrap paired curves (AC+GR, RT+RXO) into CompositeModules ──
+        curve_map: dict[str, any] = {}
+        for t in self._tracks:
+            if hasattr(t, '_curves'):
+                for c in t._curves:
+                    curve_map[c.name.upper()] = t
+
+        pair_labels = [("AC", "GR"), ("RT", "RXO")]
+        composite_list: list = []
+        paired_keys: set = set()
+
+        for a_name, b_name in pair_labels:
+            t_a = curve_map.get(a_name.upper())
+            t_b = curve_map.get(b_name.upper())
+            if t_a and t_b and t_a is not t_b:
+                cm = CompositeModule(label=f"{a_name}/{b_name}", children=[t_a, t_b], width_override=t_a.config.width)
+                composite_list.append(cm)
+                paired_keys.update([a_name.upper(), b_name.upper()])
+
+        # Rebuild all_mods: composites first, then non-paired singletons
+        final_mods: list = []
+        for cm in composite_list:
+            final_mods.append(cm)
+        for t in self._tracks:
+            if hasattr(t, '_curves'):
+                if t._curves[0].name.upper() not in paired_keys:
+                    final_mods.append(t)
+            else:
+                final_mods.append(t)
+
+        # Wire LayoutCoordinator
+        self._coordinator = LayoutCoordinator(
+            master_vb=self._master_viewbox,
+            modules=final_mods,
+            viewport_height=400,  # placeholder, will be overwritten on first layout
+        )
+        self._master_viewbox.sigYRangeChanged.connect(self._coordinator.on_master_range_changed)
+        self._coordinator.fit_to_viewport()
+        self._scroll = scroll
         layout.addStretch()
-        # Explicitly set container height so QScrollArea knows the content height
-        self._container.setFixedHeight(chart_height)
         scroll.setWidget(self._container)
         outer.addWidget(scroll)
 
@@ -147,3 +183,10 @@ class ChartEngine(QWidget):
         """Render all tracks to a PNG file at full chart resolution."""
         pix = self._container.grab()
         pix.save(file_path, "PNG")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._coordinator and self._scroll:
+            vp_h = self._scroll.viewport().height()
+            if vp_h > 0:
+                self._coordinator.on_resize(vp_h)

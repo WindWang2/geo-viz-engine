@@ -5,6 +5,33 @@ from src.data.models import IntervalItem
 from src.renderers.well_log.config import TrackConfig
 
 
+class DepthMappedContent(QWidget):
+    """
+    Paint-based content widget that maps depth ranges to screen pixels.
+
+    Subclasses must call set_depth_range(top, bottom) to initialize
+    _visible_top / _visible_bottom before the first paint.
+    """
+
+    def __init__(self, intervals: list, top_depth: float, bottom_depth: float, parent=None):
+        super().__init__(parent)
+        self._all_intervals = intervals
+        self._visible_top = top_depth
+        self._visible_bottom = bottom_depth
+        self._px_per_m: float = 0.0
+
+    def set_depth_range(self, top: float, bottom: float):
+        self._visible_top = top
+        self._visible_bottom = bottom
+        self.update()
+
+    def _visible_intervals(self):
+        """Yield intervals that overlap the visible depth range."""
+        for iv in self._all_intervals:
+            if iv.bottom > self._visible_top and iv.top < self._visible_bottom:
+                yield iv
+
+
 class TrackWidget(QWidget):
     depth_range_changed = Signal(float, float)
 
