@@ -73,6 +73,9 @@ export class WellLogChart {
         const xAxes = [];
         const yAxes = [];
         const series = [];
+        const titles = [
+            { text: metadata.wellName, left: 'center', top: '2%', textStyle: { fontSize: 16, fontWeight: 'bold' } }
+        ];
         
         let currentLeft = 5; // 左侧初始边距 %
         
@@ -88,14 +91,40 @@ export class WellLogChart {
         });
 
         tracks.forEach((track, index) => {
-            const trackWidthStr = track.width || 15; // 使用传入的百分比宽度或默认15%
+            const trackWidth = Number(track.width || 15);
             
             // 1. 配置独立的 Grid
             grids.push({
                 left: `${currentLeft}%`,
-                width: `${trackWidthStr}%`,
-                top: '10%',
+                width: `${trackWidth}%`,
+                top: '12%',
                 bottom: '5%'
+            });
+
+            // 表头标题逻辑
+            let trackTitle = track.name || '';
+            if (!trackTitle) {
+                if (track.type === 'CurveTrack') {
+                    trackTitle = track.series.map(s => s.name).join('/');
+                } else if (track.type === 'LithologyTrack') {
+                    trackTitle = '岩性';
+                } else if (track.type === 'DepthTrack') {
+                    trackTitle = '深度';
+                } else {
+                    trackTitle = '区间';
+                }
+            }
+
+            titles.push({
+                text: trackTitle,
+                left: `${currentLeft + trackWidth / 2}%`,
+                top: '7%',
+                textAlign: 'center',
+                backgroundColor: '#eee',
+                borderColor: '#333',
+                borderWidth: 1,
+                padding: [2, 5],
+                textStyle: { fontSize: 12, fontWeight: 'bold' }
             });
             
             // 2. 为非第一道的网格同步不可见的 Y 轴
@@ -115,8 +144,7 @@ export class WellLogChart {
                 // X 轴位于顶部
                 xAxes.push({
                     type: 'value', gridIndex: index, position: 'top',
-                    name: track.series.map(s => s.name).join('/'),
-                    nameLocation: 'middle', nameGap: 25
+                    show: true, nameGap: 25 // 隐藏原本的 name，由 title 代替
                 });
                 
                 // 将数据 [depth, val] 转换为 [val, depth] 以适应 X/Y
@@ -135,7 +163,7 @@ export class WellLogChart {
             } else if (track.type === 'LithologyTrack') {
                 // X 轴对岩性道无意义，隐藏
                 xAxes.push({
-                    type: 'value', gridIndex: index, show: false, min: 0, max: 1, position: 'top', name: '岩性'
+                    type: 'value', gridIndex: index, show: false, min: 0, max: 1, position: 'top'
                 });
                 
                 // 将岩性区间映射为 custom series 渲染矩形
@@ -182,14 +210,14 @@ export class WellLogChart {
             } else if (track.type === 'IntervalTrack') {
                 xAxes.push({
                     type: 'value', gridIndex: index, position: 'top',
-                    name: track.name || '区间', show: true, nameLocation: 'middle', nameGap: 25,
-                    min: 0, max: 1
+                    show: true, min: 0, max: 1
                 });
                 
                 const dataItems = (track.data || []).map(item => ({
                     name: item.name,
                     value: [0, 1, item.top, item.bottom],
-                    itemStyle: { color: item.color || '#fff', borderColor: '#333', borderWidth: 1 }
+                    itemStyle: { color: item.color || '#fff', borderColor: '#333', borderWidth: 1 },
+                    shape: item.shape // 传递形状
                 }));
 
                 series.push({
@@ -205,16 +233,42 @@ export class WellLogChart {
                         const rectHeight = Math.abs(yBot - yTop);
                         const yPos = Math.min(yTop, yBot);
                         
+                        const shapeType = params.data.shape;
+                        let graphicShape;
+                        
+                        if (shapeType === 'triangle-up') {
+                            // TST (蓝色向上三角形 - 示意)
+                            graphicShape = {
+                                type: 'polygon',
+                                shape: {
+                                    points: [[xLeft, yBot], [xRight, yBot], [xLeft + rectWidth / 2, yTop]]
+                                },
+                                style: api.style()
+                            };
+                        } else if (shapeType === 'triangle-down') {
+                            // HST (黄色向下三角形 - 示意)
+                            graphicShape = {
+                                type: 'polygon',
+                                shape: {
+                                    points: [[xLeft, yTop], [xRight, yTop], [xLeft + rectWidth / 2, yBot]]
+                                },
+                                style: api.style()
+                            };
+                        } else {
+                            graphicShape = {
+                                type: 'rect',
+                                shape: { x: xLeft, y: yPos, width: rectWidth, height: rectHeight },
+                                style: api.style()
+                            };
+                        }
+
                         return {
                             type: 'group',
                             children: [
-                                {
-                                    type: 'rect',
-                                    shape: { x: xLeft, y: yPos, width: rectWidth, height: rectHeight },
-                                    style: api.style()
-                                },
+                                graphicShape,
                                 {
                                     type: 'text',
+                                    rotation: track.textOrientation === 'vertical' ? Math.PI / 2 : 0,
                                     style: {
                                         text: params.data.name,
                                         x: xLeft + rectWidth / 2,
@@ -233,11 +287,11 @@ export class WellLogChart {
                 });
             }
             
-            currentLeft += trackWidthStr + 2; // +2% 为间隔
+            currentLeft += trackWidth + 2; // +2% 为间隔
         });
 
         return {
-            title: { text: metadata.wellName, left: 'center' },
+            title: titles,
             tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
             dataZoom: [
                 { type: 'inside', yAxisIndex: grids.map((_, i) => i) },
