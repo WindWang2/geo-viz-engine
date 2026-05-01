@@ -34,6 +34,10 @@ class ChartEngine(QWidget):
         self.channel.registerObject("bridge", self.bridge)
         self.view.page().setWebChannel(self.channel)
         
+        self._is_web_ready = False
+        self._js_queue = []
+        self.bridge.ready.connect(self._on_web_ready)
+        
         # 加载本地打包好的页面
         # 注意: 构建产物在 src-echarts/dist 中
         dist_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../src-echarts/dist/index.html"))
@@ -41,10 +45,23 @@ class ChartEngine(QWidget):
             self.view.load(f"file://{dist_path}")
         else:
             print(f"Warning: ECharts dist not found at {dist_path}")
+
+    @Slot()
+    def _on_web_ready(self):
+        self._is_web_ready = True
+        for js in self._js_queue:
+            self.view.page().runJavaScript(js)
+        self._js_queue.clear()
+
+    def _safe_run_js(self, js: str):
+        if self._is_web_ready:
+            self.view.page().runJavaScript(js)
+        else:
+            self._js_queue.append(js)
             
     def render_data(self, well_data_json: str):
         # 调用 JS 函数 render()
-        self.view.page().runJavaScript(f"window.geoviz.render({well_data_json});")
+        self._safe_run_js(f"window.geoviz.render({well_data_json});")
         
     def export_svg(self):
         # 调用 JS，然后把返回值发给 Python
@@ -52,4 +69,4 @@ class ChartEngine(QWidget):
         var svgStr = window.exportChartToSvg();
         bridge.receive_svg(svgStr);
         """
-        self.view.page().runJavaScript(js)
+        self._safe_run_js(js)

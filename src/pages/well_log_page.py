@@ -1,22 +1,10 @@
-from pathlib import Path
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QStackedWidget, QFileDialog,
 )
-from src.data.loaders import load_well_log_from_excel, load_well_log_laolong1
+from src.data.well_registry import get_well_data
 from src.renderers.well_log.chart_engine import ChartEngine
-from src.renderers.well_log.configs.laolong1 import laolong1_config
-
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
-_LAOLONG1_XLS = Path("/home/kevin/DEVON/老龙1井-野外剖面数据整理 .xls")
-
-# Mapping: well_name → (loader_fn, path, config)
-_WELL_DATA: dict[str, tuple] = {
-    "HZ25-10-1": (load_well_log_from_excel, _DATA_DIR / "HZ25-10-1-laolong.xls", laolong1_config),
-    "老龙1": (load_well_log_laolong1, _LAOLONG1_XLS, laolong1_config),
-}
 
 
 class WellLogPage(QWidget):
@@ -37,7 +25,7 @@ class WellLogPage(QWidget):
         toolbar_layout.addWidget(self._well_name_label)
         toolbar_layout.addStretch()
 
-        self._export_btn = QPushButton("导出 PNG")
+        self._export_btn = QPushButton("导出")
         self._export_btn.setFixedHeight(28)
         self._export_btn.setStyleSheet("""
             QPushButton {
@@ -75,7 +63,7 @@ class WellLogPage(QWidget):
         if well_name == self._current_well and self._chart_widget:
             return True
 
-        entry = _WELL_DATA.get(well_name)
+        entry = get_well_data(well_name)
         if entry is None:
             return False
 
@@ -88,16 +76,18 @@ class WellLogPage(QWidget):
             self._chart_widget = None
 
         try:
-            data = loader_fn(xls_path)
+            data = loader_fn(xls_path, well_name=well_name)
         except Exception as e:
             print(f"[WellLog] Failed to load {well_name}: {e}")
             return False
 
-        data.well_name = well_name
-        self._chart_widget = ChartEngine(data, config)
+        self._chart_widget = ChartEngine(self)
         self._stack.addWidget(self._chart_widget)
         self._stack.setCurrentWidget(self._chart_widget)
         self._current_well = well_name
+        
+        # Note: Actual JSON payload generation and render_data will be implemented in Task 6.
+        # self._chart_widget.render_data(well_data_json)
 
         self._well_name_label.setText(well_name + " 测井图")
         self._toolbar.setVisible(True)
@@ -106,10 +96,18 @@ class WellLogPage(QWidget):
     def _on_export(self):
         if not self._chart_widget or not self._current_well:
             return
-        path, _ = QFileDialog.getSaveFileName(
+        path, selected_filter = QFileDialog.getSaveFileName(
             self, "导出测井图",
-            f"{self._current_well}_well_log.png",
-            "PNG 图像 (*.png)",
+            f"{self._current_well}_well_log.svg",
+            "SVG 矢量 (*.svg);;PDF 矢量 (*.pdf);;PNG 图像 (*.png)",
         )
         if path:
-            self._chart_widget.export(path)
+            lower = path.lower()
+            if lower.endswith('.pdf'):
+                self._chart_widget.export_pdf(path)
+            elif lower.endswith('.svg'):
+                self._chart_widget.export_svg(path)
+            else:
+                if '.' not in path.split('/')[-1]:
+                    path += '.png'
+                self._chart_widget.export_png(path)
