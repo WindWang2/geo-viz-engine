@@ -31,14 +31,14 @@ export class WellLogChart {
     }
     
     _buildEChartsOption(data) {
-        const { metadata, tracks } = data;
+        const metadata = data?.metadata || { wellName: 'Unknown Well', topDepth: 0, bottomDepth: 1000 };
+        const tracks = data?.tracks || [];
         const grids = [];
         const xAxes = [];
         const yAxes = [];
         const series = [];
         
         let currentLeft = 5; // 左侧初始边距 %
-        const trackWidthStr = 15; // 假设每道宽度 15%
         
         // 唯一共享的深度轴（倒序）
         yAxes.push({
@@ -52,6 +52,8 @@ export class WellLogChart {
         });
 
         tracks.forEach((track, index) => {
+            const trackWidthStr = track.width || 15; // 使用传入的百分比宽度或默认15%
+            
             // 1. 配置独立的 Grid
             grids.push({
                 left: `${currentLeft}%`,
@@ -97,7 +99,10 @@ export class WellLogChart {
         return {
             title: { text: metadata.wellName, left: 'center' },
             tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-            dataZoom: [{ type: 'inside', yAxisIndex: grids.map((_, i) => i) }], // 深度统一缩放
+            dataZoom: [
+                { type: 'inside', yAxisIndex: grids.map((_, i) => i) },
+                { type: 'slider', yAxisIndex: grids.map((_, i) => i), right: 10 } // 增加可视化缩放条
+            ],
             grid: grids,
             xAxis: xAxes,
             yAxis: yAxes,
