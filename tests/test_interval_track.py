@@ -57,6 +57,6 @@ def test_interval_track_dynamic_density(qtbot):
     track.sync_depth(0, 50)
     track.set_pixel_density(4.0)  # 200/50=4px/m
 
-    assert track._content._current_top == 0
-    assert track._content._current_bottom == 50
+    assert track._content._visible_top == 0
+    assert track._content._visible_bottom == 50
     assert abs(track._content._px_per_m - 4.0) < 1e-6
