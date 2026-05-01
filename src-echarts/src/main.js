@@ -36,3 +36,12 @@ document.addEventListener('DOMContentLoaded', () => {
 window.exportChartToSvg = function() {
     return window.geoviz.exportToSvg();
 };
+
+if (typeof qt !== 'undefined' && qt.webChannelTransport) {
+    new QWebChannel(qt.webChannelTransport, function (channel) {
+        window.bridge = channel.objects.bridge;
+        window.bridge.web_ready();
+    });
+} else {
+    console.warn("Qt WebChannel transport not found. Running in browser mode?");
+}
