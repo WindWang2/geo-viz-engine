@@ -106,7 +106,12 @@ export class WellLogChart {
                 });
             }
             
-            if (track.type === 'CurveTrack') {
+            if (track.type === 'DepthTrack') {
+                xAxes.push({ type: 'value', gridIndex: index, show: false });
+                // 深度道显示 Y 轴刻度
+                yAxes[index].show = true;
+                yAxes[index].axisLabel = { show: true, fontWeight: 'bold' };
+            } else if (track.type === 'CurveTrack') {
                 // X 轴位于顶部
                 xAxes.push({
                     type: 'value', gridIndex: index, position: 'top',
@@ -170,6 +175,58 @@ export class WellLogChart {
                             type: 'rect',
                             shape: { x: xLeft, y: yTop, width: xRight - xLeft, height: yBot - yTop },
                             style: api.style()
+                        };
+                    },
+                    data: dataItems
+                });
+            } else if (track.type === 'IntervalTrack') {
+                xAxes.push({
+                    type: 'value', gridIndex: index, position: 'top',
+                    name: track.name || '区间', show: true, nameLocation: 'middle', nameGap: 25,
+                    min: 0, max: 1
+                });
+                
+                const dataItems = (track.data || []).map(item => ({
+                    name: item.name,
+                    value: [0, 1, item.top, item.bottom],
+                    itemStyle: { color: item.color || '#fff', borderColor: '#333', borderWidth: 1 }
+                }));
+
+                series.push({
+                    type: 'custom',
+                    xAxisIndex: index,
+                    yAxisIndex: index,
+                    renderItem: (params, api) => {
+                        const yTop = api.coord([0, api.value(2)])[1];
+                        const yBot = api.coord([0, api.value(3)])[1];
+                        const xLeft = api.coord([0, 0])[0];
+                        const xRight = api.coord([1, 0])[0];
+                        const rectWidth = xRight - xLeft;
+                        const rectHeight = Math.abs(yBot - yTop);
+                        const yPos = Math.min(yTop, yBot);
+                        
+                        return {
+                            type: 'group',
+                            children: [
+                                {
+                                    type: 'rect',
+                                    shape: { x: xLeft, y: yPos, width: rectWidth, height: rectHeight },
+                                    style: api.style()
+                                },
+                                {
+                                    type: 'text',
+                                    style: {
+                                        text: params.data.name,
+                                        x: xLeft + rectWidth / 2,
+                                        y: yPos + rectHeight / 2,
+                                        textAlign: 'center',
+                                        textVerticalAlign: 'middle',
+                                        fill: '#000',
+                                        fontWeight: 'bold',
+                                        fontSize: 12
+                                    }
+                                }
+                            ]
                         };
                     },
                     data: dataItems
