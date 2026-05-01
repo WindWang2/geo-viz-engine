@@ -37,6 +37,7 @@ class WellIntervals(BaseModel):
     formation: list[IntervalItem] = []
     member: list[IntervalItem] = []
     lithology: list[IntervalItem] = []
+    lithology_desc: list[IntervalItem] = []
     systems_tract: list[IntervalItem] = []
     sequence: list[IntervalItem] = []
     facies: FaciesData = FaciesData()

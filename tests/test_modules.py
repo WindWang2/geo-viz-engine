@@ -38,7 +38,7 @@ def test_layout_coordinator_fit_calculates_correct_density():
     coord.fit_to_viewport()
     # span = 0 - (-500) = 500m; px_per_m = 1000/500 = 2.0
     child.set_pixel_density.assert_called_once_with(2.0)
-    child.sync_depth.assert_called_with(-500.0, 0.0)
+    child.sync_depth.assert_called_once_with(-500.0, 0.0)
 
 def test_layout_coordinator_on_resize_refits():
     mock_vb = MagicMock()

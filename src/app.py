@@ -36,10 +36,10 @@ class SidebarButton(QPushButton):
                 background: transparent;
             }
             SidebarButton:checked {
-                background: #2d3748;
+                background: #edf2f7;
             }
             SidebarButton:hover {
-                background: #1a202c;
+                background: #e2e8f0;
             }
         """)
 
@@ -60,7 +60,7 @@ class MainWindow(QWidget):
         # Sidebar
         self.sidebar = QWidget()
         self.sidebar.setFixedWidth(56)
-        self.sidebar.setStyleSheet("background: #0d1117;")
+        self.sidebar.setStyleSheet("background: #f7fafc;")
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(4, 8, 4, 8)
         sidebar_layout.setSpacing(4)
@@ -103,7 +103,7 @@ class MainWindow(QWidget):
         except Exception:
             seismic_widget = QLabel("地震3D (placeholder)")
             seismic_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            seismic_widget.setStyleSheet("font-size: 24px; color: #4a5568;")
+            seismic_widget.setStyleSheet("font-size: 24px; color: #a0aec0;")
 
         from src.pages.data_page import DataPage
         self.data_page = DataPage(self.cache)
@@ -117,7 +117,7 @@ class MainWindow(QWidget):
         for pw in page_widgets:
             if isinstance(pw, QLabel):
                 pw.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                pw.setStyleSheet("font-size: 24px; color: #4a5568;")
+                pw.setStyleSheet("font-size: 24px; color: #a0aec0;")
             self.stack.addWidget(pw)
         root.addWidget(self.stack, 1)
 
@@ -127,4 +127,7 @@ class MainWindow(QWidget):
         self.stack.setCurrentIndex(index)
 
     def _on_well_clicked(self, well_name: str):
-        self._switch_page(1)  # Switch to well log page
+        if self.well_log_page.load_well(well_name):
+            self._switch_page(1)
+        else:
+            self._switch_page(1)  # still switch, shows placeholder

@@ -1,24 +1,11 @@
 import json
+import tempfile
+import os
+from urllib.parse import parse_qs
 
-from PySide6.QtCore import QUrl, Slot, QObject
-from PySide6.QtWebChannel import QWebChannel
+from PySide6.QtCore import QUrl
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
-
-
-class MapBridge(QObject):
-    """Bridge for JS→Python communication via WebChannel."""
-
-    def __init__(self):
-        super().__init__()
-        self._callback = None
-
-    def set_well_click_callback(self, callback):
-        self._callback = callback
-
-    @Slot(str)
-    def onWellClicked(self, well_name: str):
-        if self._callback:
-            self._callback(well_name)
 
 
 MAPLIBRE_HTML = """<!DOCTYPE html>
@@ -34,15 +21,15 @@ MAPLIBRE_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <div id="map"></div>
-<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script>
   const wells = {wells_json};
   const center_lat = {center_lat};
   const center_lng = {center_lng};
 
-  new QWebChannel(qt.webChannelTransport, function(channel) {{
-    window.bridge = channel.objects.bridge;
-  }});
+  function notifyWellClicked(name) {{
+    // Encode well name as query param to avoid host-encoding issues with CJK
+    window.location.href = 'well://click?name=' + encodeURIComponent(name);
+  }}
 
   const map = new maplibregl.Map({{
     container: 'map',
@@ -61,54 +48,109 @@ MAPLIBRE_HTML = """<!DOCTYPE html>
       type: 'circle',
       source: 'wells',
       paint: {{
-        'circle-radius': 6,
+        'circle-radius': 8,
         'circle-color': ['get', 'color'],
-        'circle-stroke-width': 1,
+        'circle-stroke-width': 1.5,
         'circle-stroke-color': '#fff'
+      }}
+    }});
+    map.addLayer({{
+      id: 'well-labels',
+      type: 'symbol',
+      source: 'wells',
+      layout: {{
+        'text-field': ['get', 'name'],
+        'text-size': 12,
+        'text-offset': [0, 1.5],
+        'text-anchor': 'top',
+        'text-allow-overlap': false
+      }},
+      paint: {{
+        'text-color': ['case', ['get', 'has_data'], '#e2e8f0', '#6b7280'],
+        'text-halo-color': '#1a202c',
+        'text-halo-width': 1
       }}
     }});
 
     map.on('click', 'well-stars', (e) => {{
-      const name = e.features[0].properties.name;
-      if (window.bridge) window.bridge.onWellClicked(name);
+      notifyWellClicked(e.features[0].properties.name);
+    }});
+    map.on('click', 'well-labels', (e) => {{
+      notifyWellClicked(e.features[0].properties.name);
     }});
 
-    map.on('mouseenter', 'well-stars', () => {{
-      map.getCanvas().style.cursor = 'pointer';
-    }});
-    map.on('mouseleave', 'well-stars', () => {{
-      map.getCanvas().style.cursor = '';
-    }});
+    map.on('mouseenter', 'well-stars', () => {{ map.getCanvas().style.cursor = 'pointer'; }});
+    map.on('mouseleave', 'well-stars', () => {{ map.getCanvas().style.cursor = ''; }});
+    map.on('mouseenter', 'well-labels', () => {{ map.getCanvas().style.cursor = 'pointer'; }});
+    map.on('mouseleave', 'well-labels', () => {{ map.getCanvas().style.cursor = ''; }});
   }});
 </script>
 </body>
 </html>"""
 
 
-def build_geojson(wells: list) -> str:
+def build_geojson(wells: list, data_wells: set[str] | None = None) -> str:
+    data_wells = data_wells or set()
     features = []
     for w in wells:
+        has_data = w.name in data_wells
         features.append({
             "type": "Feature",
-            "properties": {"name": w.name, "color": "#ef4444"},
+            "properties": {
+                "name": w.name,
+                "color": "#ef4444" if has_data else "#6b7280",
+                "has_data": has_data,
+            },
             "geometry": {"type": "Point", "coordinates": [w.longitude, w.latitude]},
         })
     return json.dumps({"type": "FeatureCollection", "features": features})
 
 
+class _MapPage(QWebEnginePage):
+    def __init__(self, well_click_callback, parent=None):
+        super().__init__(parent)
+        self._callback = well_click_callback
+        # Allow file:// page to load CDN scripts (maplibre-gl)
+        self.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True
+        )
+
+    def acceptNavigationRequest(self, url: QUrl, nav_type, is_main_frame: bool) -> bool:
+        scheme = url.scheme()
+        if scheme == "well":
+            params = parse_qs(url.query())
+            names = params.get("name", [])
+            if names and self._callback:
+                self._callback(names[0])
+            return False  # Block navigation — we handled it
+        return super().acceptNavigationRequest(url, nav_type, is_main_frame)
+
+
 class MapRenderer(QWebEngineView):
-    def __init__(self, wells: list, well_click_callback=None):
+    def __init__(self, wells: list, well_click_callback=None,
+                 data_wells: set[str] | None = None):
         super().__init__()
-        self._bridge = MapBridge()
-        if well_click_callback:
-            self._bridge.set_well_click_callback(well_click_callback)
+        self.setPage(_MapPage(well_click_callback, self))
 
-        channel = QWebChannel()
-        channel.registerObject("bridge", self._bridge)
-        self.page().setWebChannel(channel)
-
-        geojson = build_geojson(wells)
+        geojson = build_geojson(wells, data_wells)
         center_lat = sum(w.latitude for w in wells) / len(wells) if wells else 38
         center_lng = sum(w.longitude for w in wells) / len(wells) if wells else 117
-        html = MAPLIBRE_HTML.format(wells_json=geojson, center_lat=center_lat, center_lng=center_lng)
-        self.setHtml(html)
+        html = MAPLIBRE_HTML.format(
+            wells_json=geojson, center_lat=center_lat, center_lng=center_lng,
+        )
+
+        # Write HTML to a temp file and load via file:// so that custom-scheme
+        # navigation (well://) is not blocked by Chromium's data: URL security policy.
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".html", delete=False, encoding="utf-8"
+        )
+        tmp.write(html)
+        tmp.close()
+        self._tmp_html = tmp.name
+        self.load(QUrl.fromLocalFile(tmp.name))
+
+    def __del__(self):
+        try:
+            os.unlink(self._tmp_html)
+        except Exception:
+            pass
