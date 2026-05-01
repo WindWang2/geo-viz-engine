@@ -26,6 +26,7 @@ export class WellLogChart {
     }
 
     render(wellLogData) {
+        this._lastData = wellLogData;
         this.currentOptions = this._buildEChartsOption(wellLogData);
         this.chart.setOption(this.currentOptions, true);
     }
@@ -33,28 +34,34 @@ export class WellLogChart {
     exportToSvg() {
         // 1. 创建一个临时的、不可见的 DOM 容器
         const tempContainer = document.createElement('div');
+        tempContainer.style.position = 'absolute';
+        tempContainer.style.top = '-9999px'; // Hide off-screen
         // 必须设置确切的宽高，否则 ECharts 无法渲染
         tempContainer.style.width = this.container.clientWidth + 'px';
         tempContainer.style.height = this.container.scrollHeight + 'px'; // 导出全长
+        document.body.appendChild(tempContainer);
         
         // 2. 使用 'svg' 渲染器初始化
         const exportChart = echarts.init(tempContainer, null, { renderer: 'svg' });
         
-        // 3. 复制当前的 Option，为了防止全长压缩，移除 dataZoom 或设定起止
-        const exportOptions = JSON.parse(JSON.stringify(this.currentOptions));
+        // 3. 构建全新的 Option，避免 JSON 序列化导致函数丢失
+        const exportOptions = this._buildEChartsOption(this._lastData);
         if (exportOptions.dataZoom) {
             delete exportOptions.dataZoom; // 导出全图
         }
         // 强制确保全局字体包含中文字库，这很关键
         exportOptions.textStyle = { fontFamily: '"Microsoft YaHei", "SimHei", sans-serif' };
+        exportOptions.animation = false; // 保证同步渲染
 
         exportChart.setOption(exportOptions, true);
         
         // 4. 提取 SVG DOM
-        let svgString = tempContainer.querySelector('svg').outerHTML;
+        const svgNode = tempContainer.querySelector('svg');
+        const svgString = svgNode ? svgNode.outerHTML : '';
         
         // 清理
         exportChart.dispose();
+        tempContainer.remove();
         
         return svgString;
     }
