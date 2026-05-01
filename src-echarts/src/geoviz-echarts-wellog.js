@@ -91,6 +91,53 @@ export class WellLogChart {
                         lineStyle: { width: 1 }
                     });
                 });
+            } else if (track.type === 'LithologyTrack') {
+                // X 轴对岩性道无意义，隐藏
+                xAxes.push({
+                    type: 'value', gridIndex: index, show: false, min: 0, max: 1, position: 'top', name: '岩性'
+                });
+                
+                // 将岩性区间映射为 custom series 渲染矩形
+                const dataItems = track.data.map(item => {
+                    let imagePattern = null;
+                    const imgEl = document.getElementById(`pat-${item.lithology}`);
+                    if (imgEl) {
+                         imagePattern = { image: imgEl, repeat: 'repeat' };
+                    }
+                    return {
+                        name: item.description,
+                        value: [
+                            0, // x start
+                            1, // x end
+                            item.top, // y top
+                            item.bottom // y bot
+                        ],
+                        itemStyle: {
+                            color: imagePattern || item.color || '#ccc',
+                            borderColor: '#333',
+                            borderWidth: 1
+                        }
+                    };
+                });
+
+                series.push({
+                    type: 'custom',
+                    xAxisIndex: index,
+                    yAxisIndex: index,
+                    renderItem: (params, api) => {
+                        const yTop = api.coord([0, api.value(2)])[1];
+                        const yBot = api.coord([0, api.value(3)])[1];
+                        const xLeft = api.coord([0, 0])[0];
+                        const xRight = api.coord([1, 0])[0];
+                        
+                        return {
+                            type: 'rect',
+                            shape: { x: xLeft, y: yTop, width: xRight - xLeft, height: yBot - yTop },
+                            style: api.style()
+                        };
+                    },
+                    data: dataItems
+                });
             }
             
             currentLeft += trackWidthStr + 2; // +2% 为间隔

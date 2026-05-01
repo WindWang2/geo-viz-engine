@@ -15,6 +15,13 @@ const mockData = {
             series: [
                 { name: "RT", color: "blue", data: [[1000, 10], [1050, 50], [1100, 5]] }
             ]
+        },
+        {
+            type: "LithologyTrack",
+            data: [
+                { top: 1000, bottom: 1050, lithology: "sandstone", description: "细砂岩" },
+                { top: 1050, bottom: 1100, color: "#a52a2a", description: "泥岩(无纹理)" }
+            ]
         }
     ]
 };
