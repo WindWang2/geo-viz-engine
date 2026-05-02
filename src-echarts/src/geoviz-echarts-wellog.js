@@ -1,5 +1,15 @@
 import * as echarts from 'echarts';
 
+const THEME = {
+    headerHeight: 60, // px
+    subHeaderHeight: 30, // px
+    borderColor: '#94a3b8',
+    headerBg: '#f1f5f9',
+    subHeaderBg: '#ffffff',
+    textColor: '#1e293b',
+    gridLineColor: '#e2e8f0'
+};
+
 /**
  * Base class for all track types
  */
@@ -45,7 +55,7 @@ class BaseTrack {
     }
 
     getTitles(index, top, hasParent) {
-        const backgroundColor = hasParent ? '#ffffff' : '#f8fafc';
+        const backgroundColor = hasParent ? THEME.subHeaderBg : THEME.headerBg;
         return [{
             text: this.name,
             left: this._calculatedLeft + '%',
@@ -53,10 +63,10 @@ class BaseTrack {
             top: top,
             textAlign: 'center',
             backgroundColor: backgroundColor,
-            borderColor: '#cbd5e0',
+            borderColor: THEME.borderColor,
             borderWidth: 1,
             padding: [2, 0],
-            textStyle: { fontSize: 11 }
+            textStyle: { fontSize: 11, color: THEME.textColor }
         }];
     }
 }
@@ -87,7 +97,7 @@ class CurveTrack extends BaseTrack {
 
     getTitles(index, top, hasParent) {
         let headerText = '{title|' + (this.name || '') + '}\n';
-        const rich = { title: { fontWeight: 'bold', fontSize: 11 } };
+        const rich = { title: { fontWeight: 'bold', fontSize: 11, color: THEME.textColor } };
         
         (this.data.series || []).forEach(s => {
             const line = s.lineStyle === 'dashed' ? '- - ' : '— ';
@@ -96,7 +106,7 @@ class CurveTrack extends BaseTrack {
             rich[safeName] = { color: s.color, fontSize: 10, fontWeight: 'bold' };
         });
 
-        const backgroundColor = hasParent ? '#ffffff' : '#f8fafc';
+        const backgroundColor = hasParent ? THEME.subHeaderBg : THEME.headerBg;
         return [{
             text: headerText,
             left: this._calculatedLeft + '%',
@@ -104,7 +114,7 @@ class CurveTrack extends BaseTrack {
             top: top,
             textAlign: 'center',
             backgroundColor: backgroundColor,
-            borderColor: '#cbd5e0',
+            borderColor: THEME.borderColor,
             borderWidth: 1,
             padding: [2, 0],
             textStyle: { fontSize: 11, rich: rich }
@@ -118,7 +128,7 @@ class DepthTrack extends BaseTrack {
             ...commonY,
             gridIndex: index,
             show: true,
-            axisLabel: { show: true, fontWeight: 'bold' }
+            axisLabel: { show: true, fontWeight: 'bold', color: THEME.textColor }
         };
     }
 }
@@ -126,7 +136,7 @@ class DepthTrack extends BaseTrack {
 class LithologyTrack extends BaseTrack {
     getSeries(index) {
         const dataItems = (this.data.data || []).map(item => {
-            let style = { borderColor: '#94a3b8', borderWidth: 0.5 };
+            let style = { borderColor: THEME.borderColor, borderWidth: 0.5 };
             if (item.lithology) {
                 const img = document.getElementById(`pat-${item.lithology}`);
                 if (img) style.color = { image: img, repeat: 'repeat' };
@@ -177,7 +187,7 @@ class LithologyTrack extends BaseTrack {
                                 y: Math.min(yTop, yBot) + h / 2,
                                 textAlign: 'center', 
                                 textVerticalAlign: 'middle',
-                                fill: '#1e293b', 
+                                fill: THEME.textColor, 
                                 fontWeight: 'bold', 
                                 fontSize: 10
                             }
@@ -297,71 +307,87 @@ export class WellLogChart {
         const series = [];
         const titles = [];
         
-        let currentLeft = 1; // %
-        const TRACK_GAP = 0.2;
-        const GRID_TOP = '13%';
-        const HEADER_TOP_Y = '4%';
-        const HEADER_SUB_Y = '8.5%';
+        // --- 精确物理布局计算器 ---
+        const totalWeight = trackDatas.reduce((sum, t) => sum + (t.width || 10), 0);
+        const availableWidth = 98; // % 留出 2% 边距
+        let currentLeft = 1; // % 从 1% 开始
+        
+        const GRID_TOP = THEME.headerHeight + THEME.subHeaderHeight + 10; // px
+        const HEADER_TOP_Y = 5; // px
+        const HEADER_SUB_Y = THEME.headerHeight + 5; // px
 
-        // 1. Instantiate tracks and identify groups
+        // 1. 实例化轨道并计算位置
         const tracks = [];
         const groups = [];
         let activeGroup = null;
         
         trackDatas.forEach((trackData) => {
             const track = TrackFactory.createTrack(trackData);
+            
+            // 计算归一化后的百分比宽度
+            const actualWidth = ((trackData.width || 10) / totalWeight) * availableWidth;
+            track.width = actualWidth; 
+            
             const gName = track.parentGroup;
             if (gName) {
                 if (!activeGroup || activeGroup.name !== gName) {
                     activeGroup = { name: gName, startLeft: currentLeft, width: 0 };
                     groups.push(activeGroup);
                 }
-                activeGroup.width += track.width + TRACK_GAP;
+                activeGroup.width += actualWidth;
             } else {
                 activeGroup = null;
             }
+            
             track.setCalculatedLeft(currentLeft);
-            currentLeft += track.width + TRACK_GAP;
+            currentLeft += actualWidth;
             tracks.push(track);
         });
 
-        // 2. Render parent group titles
+        // 2. 渲染父组标题 (Group Headers)
         groups.forEach(g => {
             titles.push({
                 text: g.name,
                 left: g.startLeft + '%',
-                width: (g.width - TRACK_GAP) + '%',
+                width: g.width + '%',
                 top: HEADER_TOP_Y,
+                height: THEME.headerHeight,
                 textAlign: 'center',
-                backgroundColor: '#f1f5f9',
-                borderColor: '#94a3b8',
+                backgroundColor: THEME.headerBg,
+                borderColor: THEME.borderColor,
                 borderWidth: 1,
                 padding: [4, 0],
-                textStyle: { fontSize: 12, fontWeight: 'bold', color: '#1e293b' }
+                textStyle: { fontSize: 12, fontWeight: 'bold', color: THEME.textColor }
             });
         });
 
-        // 3. Common Y Axis config
+        // 3. 通用 Y 轴配置
         const commonY = {
             type: 'value',
             inverse: true,
             min: metadata.topDepth,
             max: metadata.bottomDepth,
-            axisLine: { show: true, lineStyle: { color: '#94a3b8' } },
+            axisLine: { show: true, lineStyle: { color: THEME.borderColor } },
             axisTick: { show: true },
             splitLine: { 
                 show: true, 
-                lineStyle: { color: '#e2e8f0', type: 'solid' } 
+                lineStyle: { color: THEME.gridLineColor, type: 'solid' } 
             }
         };
 
-        // 4. Process tracks
+        // 4. 处理各轨道配置
         tracks.forEach((track, index) => {
             const hasParent = !!track.parentGroup;
             
             grids.push(track.getGrid(index, GRID_TOP, '5%'));
             
-            const trackTitles = track.getTitles(index, hasParent ? HEADER_SUB_Y : HEADER_TOP_Y, hasParent);
+            const titleTop = hasParent ? HEADER_SUB_Y : HEADER_TOP_Y;
+            const titleHeight = hasParent ? THEME.subHeaderHeight : (THEME.headerHeight + THEME.subHeaderHeight);
+            
+            const trackTitles = track.getTitles(index, titleTop, hasParent);
+            trackTitles.forEach(t => {
+                t.height = titleHeight;
+            });
             titles.push(...trackTitles);
 
             yAxes.push(track.getYAxis(index, commonY));
