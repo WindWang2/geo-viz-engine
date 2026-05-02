@@ -54,20 +54,36 @@ class BaseTrack {
         return [];
     }
 
-    getTitles(index, top, hasParent) {
+    getGraphicElements(index, top, height, hasParent) {
         const backgroundColor = hasParent ? THEME.subHeaderBg : THEME.headerBg;
-        return [{
-            text: this.name,
+        return {
+            type: 'group',
             left: this._calculatedLeft + '%',
-            width: this.width + '%',
             top: top,
-            textAlign: 'center',
-            backgroundColor: backgroundColor,
-            borderColor: THEME.borderColor,
-            borderWidth: 1,
-            padding: [2, 0],
-            textStyle: { fontSize: 11, color: THEME.textColor }
-        }];
+            width: this.width + '%',
+            height: height,
+            children: [
+                {
+                    type: 'rect',
+                    shape: { width: '100%', height: '100%' },
+                    style: {
+                        fill: backgroundColor,
+                        stroke: THEME.borderColor,
+                        lineWidth: 1
+                    }
+                },
+                {
+                    type: 'text',
+                    left: 'center',
+                    top: 'middle',
+                    style: {
+                        text: this.name,
+                        fill: THEME.textColor,
+                        font: '11px sans-serif'
+                    }
+                }
+            ]
+        };
     }
 }
 
@@ -95,9 +111,10 @@ class CurveTrack extends BaseTrack {
         }));
     }
 
-    getTitles(index, top, hasParent) {
-        let headerText = '{title|' + (this.name || '') + '}\n';
+    getGraphicElements(index, top, height, hasParent) {
+        const backgroundColor = hasParent ? THEME.subHeaderBg : THEME.headerBg;
         const rich = { title: { fontWeight: 'bold', fontSize: 11, color: THEME.textColor } };
+        let headerText = '{title|' + (this.name || '') + '}\n';
         
         (this.data.series || []).forEach(s => {
             const line = s.lineStyle === 'dashed' ? '- - ' : '— ';
@@ -106,35 +123,77 @@ class CurveTrack extends BaseTrack {
             rich[safeName] = { color: s.color, fontSize: 10, fontWeight: 'bold' };
         });
 
-        const backgroundColor = hasParent ? THEME.subHeaderBg : THEME.headerBg;
-        return [{
-            text: headerText,
+        return {
+            type: 'group',
             left: this._calculatedLeft + '%',
-            width: this.width + '%',
             top: top,
-            textAlign: 'center',
-            backgroundColor: backgroundColor,
-            borderColor: THEME.borderColor,
-            borderWidth: 1,
-            padding: [2, 0],
-            textStyle: { fontSize: 11, rich: rich }
-        }];
+            width: this.width + '%',
+            height: height,
+            children: [
+                {
+                    type: 'rect',
+                    shape: { width: '100%', height: '100%' },
+                    style: {
+                        fill: backgroundColor,
+                        stroke: THEME.borderColor,
+                        lineWidth: 1
+                    }
+                },
+                {
+                    type: 'text',
+                    left: 'center',
+                    top: 'middle',
+                    style: {
+                        text: headerText,
+                        rich: rich,
+                        fill: THEME.textColor,
+                        font: '11px sans-serif',
+                        textAlign: 'center'
+                    }
+                }
+            ]
+        };
     }
 }
 
 class DepthTrack extends BaseTrack {
+    getXAxis(index) {
+        return { 
+            type: 'value', 
+            gridIndex: index, 
+            show: false, 
+            min: -1, 
+            max: 1 
+        };
+    }
+
     getYAxis(index, commonY) {
         return {
             ...commonY,
             gridIndex: index,
             show: true,
-            axisLabel: { show: true, fontWeight: 'bold', color: THEME.textColor }
+            position: 'left',
+            axisLine: { 
+                show: true,
+                onZero: true, 
+                symbol: ['none', 'none'], 
+                lineStyle: { color: THEME.borderColor } 
+            },
+            axisLabel: { 
+                show: true, 
+                fontWeight: 'bold', 
+                color: THEME.textColor,
+                margin: 4
+            },
+            axisTick: { show: true }
         };
     }
 }
 
 class LithologyTrack extends BaseTrack {
     getSeries(index) {
+        if (!this.data || !this.data.data) return [];
+
         const dataItems = (this.data.data || []).map(item => {
             let style = { borderColor: THEME.borderColor, borderWidth: 0.5 };
             if (item.lithology) {
@@ -157,6 +216,8 @@ class LithologyTrack extends BaseTrack {
             xAxisIndex: index, 
             yAxisIndex: index,
             renderItem: (params, api) => {
+                if (!params.data) return null;
+
                 const yTop = api.coord([0, api.value(2)])[1];
                 const yBot = api.coord([0, api.value(3)])[1];
                 const xLeft = api.coord([0, 0])[0];
@@ -305,7 +366,7 @@ export class WellLogChart {
         const xAxes = [];
         const yAxes = [];
         const series = [];
-        const titles = [];
+        const graphics = [];
         
         // --- 精确物理布局计算器 ---
         const totalWeight = trackDatas.reduce((sum, t) => sum + (t.width || 10), 0);
@@ -346,18 +407,33 @@ export class WellLogChart {
 
         // 2. 渲染父组标题 (Group Headers)
         groups.forEach(g => {
-            titles.push({
-                text: g.name,
+            graphics.push({
+                type: 'group',
                 left: g.startLeft + '%',
-                width: g.width + '%',
                 top: HEADER_TOP_Y,
+                width: g.width + '%',
                 height: THEME.headerHeight,
-                textAlign: 'center',
-                backgroundColor: THEME.headerBg,
-                borderColor: THEME.borderColor,
-                borderWidth: 1,
-                padding: [4, 0],
-                textStyle: { fontSize: 12, fontWeight: 'bold', color: THEME.textColor }
+                children: [
+                    {
+                        type: 'rect',
+                        shape: { width: '100%', height: '100%' },
+                        style: {
+                            fill: THEME.headerBg,
+                            stroke: THEME.borderColor,
+                            lineWidth: 1
+                        }
+                    },
+                    {
+                        type: 'text',
+                        left: 'center',
+                        top: 'middle',
+                        style: {
+                            text: g.name,
+                            fill: THEME.textColor,
+                            font: 'bold 12px sans-serif'
+                        }
+                    }
+                ]
             });
         });
 
@@ -384,11 +460,7 @@ export class WellLogChart {
             const titleTop = hasParent ? HEADER_SUB_Y : HEADER_TOP_Y;
             const titleHeight = hasParent ? THEME.subHeaderHeight : (THEME.headerHeight + THEME.subHeaderHeight);
             
-            const trackTitles = track.getTitles(index, titleTop, hasParent);
-            trackTitles.forEach(t => {
-                t.height = titleHeight;
-            });
-            titles.push(...trackTitles);
+            graphics.push(track.getGraphicElements(index, titleTop, titleHeight, hasParent));
 
             yAxes.push(track.getYAxis(index, commonY));
             xAxes.push(track.getXAxis(index));
@@ -396,7 +468,7 @@ export class WellLogChart {
         });
 
         return {
-            title: titles,
+            graphic: graphics,
             grid: grids,
             xAxis: xAxes,
             yAxis: yAxes,
