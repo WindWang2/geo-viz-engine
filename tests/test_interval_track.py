@@ -18,7 +18,7 @@ def test_interval_track_renders(qtbot):
     track = IntervalTrack(config, intervals, top_depth=0, bottom_depth=100)
     qtbot.addWidget(track)
     assert track._content is not None
-    assert len(track._content._pattern_brushes) == 0  # no pattern_dir set
+    assert len(track._content._pattern_pixmaps) == 0  # no pattern_dir set
 
 
 def test_interval_track_color_lookup():

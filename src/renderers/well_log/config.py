@@ -21,6 +21,7 @@ class TrackConfig(BaseModel):
     width: int = 80
     label: str = ""
     label2: str = ""
+    group: str = ""  # Group name for grouped headers
 
 
 class CurveTrackConfig(TrackConfig):

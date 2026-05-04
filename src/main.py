@@ -9,7 +9,6 @@ def main():
 
     font = QFont("Noto Sans CJK SC", 10)
     font.setStyleStrategy(QFont.StyleStrategy.NoFontMerging | QFont.StyleStrategy.PreferMatch)
-    font.setStyleStrategy(QFont.StyleStrategy.PreferMatch)
     app.setFont(font)
 
     app.setStyleSheet("""

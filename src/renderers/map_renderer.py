@@ -103,7 +103,9 @@ def build_geojson(wells: list, data_wells: set[str] | None = None) -> str:
             },
             "geometry": {"type": "Point", "coordinates": [w.longitude, w.latitude]},
         })
-    return json.dumps({"type": "FeatureCollection", "features": features})
+    raw = json.dumps({"type": "FeatureCollection", "features": features}, ensure_ascii=False)
+    # Prevent </script> injection when embedded in HTML
+    return raw.replace("</", "<\\/")
 
 
 class _MapPage(QWebEnginePage):
@@ -149,8 +151,17 @@ class MapRenderer(QWebEngineView):
         self._tmp_html = tmp.name
         self.load(QUrl.fromLocalFile(tmp.name))
 
+    def _cleanup_tmp(self):
+        if hasattr(self, "_tmp_html") and self._tmp_html:
+            try:
+                os.unlink(self._tmp_html)
+            except OSError:
+                pass
+            self._tmp_html = None
+
+    def closeEvent(self, event):
+        self._cleanup_tmp()
+        super().closeEvent(event)
+
     def __del__(self):
-        try:
-            os.unlink(self._tmp_html)
-        except Exception:
-            pass
+        self._cleanup_tmp()

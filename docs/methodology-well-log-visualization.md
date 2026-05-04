@@ -1207,9 +1207,36 @@ function useAdaptiveScale(svgRef: RefObject<SVGSVGElement>) {
 |------|------|---------|
 | `pixelRatio ≥ 4 px/m` | 文字最小 6pt 需要足够像素 | `gridHeight / depthRange ≥ 4` |
 | `minColumnWidth ≥ 30px` | 底纹图案最小可辨识尺寸 | `colWidths.every(w => w >= 30)` |
+| `visibleHeight ≥ textHeight` | 避免高度挤压下的文字重叠乱码 | 渲染前检测 `rect.height` |
 | `totalHeight = bodyStart + gridHeight + 2` | 底部不截断 | 渲染后检查最后一段 |
 | 图案 `patternUnits` 不随缩放变化 | 密度一致性 | `getComputedStyle(pattern)` |
-| 交互坐标通过 `getScreenCTM()` 获取 | 自动包含所有变换 | 鼠标悬停值验证 |
+| 交互坐标通过监听 `updateAxisPointer` 获取 | 确保非吸附模式下的丝滑连续深度 | 鼠标悬停值平滑度验证 |
+
+---
+
+## 9. 2026-05 架构升级：ECharts 迁移与交互优化
+
+在项目的第二阶段，我们引入了基于 ECharts 的渲染引擎，以提升在大数据量（>50,000 点曲线）下的性能和交互丝滑度。以下记录了在该阶段解决的关键技术挑战及最终方案。
+
+### 9.1 数据加载逻辑的语义对齐
+
+为了适配不同来源的 Excel 柱状图（如 HZ19、HZ25 系列），我们增强了 Python 层的 `loaders.py` 解析逻辑：
+- **地层单位解析**：优先匹配 `层号` 和 `层名` 字段作为区间显示值。
+- **层级映射**：包含“组”的数据映射至 `formation`，包含“段”的数据映射至 `member`，包含“砂层”的数据映射至 `sequence`，确保地质层级清晰。
+- **文本道解析**：作为沉积相的主要来源，优先抓取 `文本` 字段。
+
+### 9.2 文字显示的自适应剔除
+
+在小比例尺下，密集的岩性段会导致文字重叠。我们在 ECharts 的 `custom` 系列渲染器（`buildIntervalBlock`）中实现了如下约束：
+- **高度检测**：计算当前缩放级别下，色块的物理高度（像素）。
+- **动态隐藏**：若 `visibleHeight < charCount * lineHeight`（竖排）或 `visibleHeight < 14px`（横排），则自动忽略 `text` 元素的渲染，只保留底色和纹理。
+
+### 9.3 丝滑连续的深度捕捉
+
+传统的 ECharts Tooltip 依赖于数据点的“吸附（Snap）”，在曲线稀疏或无曲线区域会导致深度跳变。我们采用了**脱离数据点的全局监听方案**：
+1. **全局坐标劫持**：通过 `chart.on('updateAxisPointer')` 监听 ECharts 内部十字准星的实时像素坐标。
+2. **物理深度转换**：直接从 Y 轴的 `axisValue` 获取连续的物理深度，而不经过 series 的 data 解析。
+3. **数据反查插值**：在 `tooltipFormatter` 中基于上述物理深度，通过线性插值算法反查所有曲线的实时数值，实现了与曲线密度无关的、极速且丝滑的交互体验。
 
 ---
 

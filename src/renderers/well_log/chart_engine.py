@@ -1,5 +1,6 @@
 import json
 import os
+import base64
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
@@ -19,6 +20,10 @@ class Bridge(QObject):
     def receive_svg(self, svg_str: str):
         self.svg_received.emit(svg_str)
 
+    @Slot(str)
+    def log(self, message: str):
+        print(message)
+
 class ChartEngine(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -36,7 +41,12 @@ class ChartEngine(QWidget):
         
         self._is_web_ready = False
         self._js_queue = []
+        self._last_data_json = None
         self.bridge.ready.connect(self._on_web_ready)
+
+        # Restrict context menu to prevent manual reloading resets
+        from PySide6.QtCore import Qt
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         
         # 加载本地打包好的页面
         # 注意: 构建产物在 src-echarts/dist 中
@@ -46,12 +56,39 @@ class ChartEngine(QWidget):
         else:
             print(f"Warning: ECharts dist not found at {dist_path}")
 
+    def _build_patterns_json(self) -> str:
+        """Build a JSON object mapping pattern IDs to data URLs."""
+        patterns_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../src/patterns"))
+        patterns = {}
+        if not os.path.exists(patterns_dir):
+            return "{}"
+        
+        for filename in os.listdir(patterns_dir):
+            if filename.endswith(".svg"):
+                # e.g. "sand_flat.svg" → "sand-flat"
+                pattern_id = filename[:-4].replace("_", "-")
+                path = os.path.join(patterns_dir, filename)
+                with open(path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+                patterns[pattern_id] = f"data:image/svg+xml;base64,{b64}"
+        
+        return json.dumps(patterns)
+
     @Slot()
     def _on_web_ready(self):
         self._is_web_ready = True
+        # Step 1: Register all patterns — JS will pre-load Image objects
+        # and call onPatternsReady() when done.
+        patterns_json = self._build_patterns_json()
+        self.view.page().runJavaScript(f"window.registerPatterns({patterns_json});")
+        # Step 2: Run any queued JS commands (including render_data calls)
         for js in self._js_queue:
             self.view.page().runJavaScript(js)
         self._js_queue.clear()
+
+        # Step 3: If we had loaded data before, re-render it upon reload
+        if self._last_data_json:
+            self.view.page().runJavaScript(f"window.geoviz.render({self._last_data_json});")
 
     def _safe_run_js(self, js: str):
         if self._is_web_ready:
@@ -60,6 +97,7 @@ class ChartEngine(QWidget):
             self._js_queue.append(js)
             
     def render_data(self, well_data_json: str):
+        self._last_data_json = well_data_json
         # 调用 JS 函数 render()
         self._safe_run_js(f"window.geoviz.render({well_data_json});")
         

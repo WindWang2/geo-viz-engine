@@ -67,6 +67,8 @@ class WellLogData(BaseModel):
     lithology: list[LithologyInterval] = []
     facies: list[FaciesInterval] = []
     intervals: Optional[WellIntervals] = None
+    custom_tracks: list[dict] = []
+
 
 
 class WellCoordinates(BaseModel):

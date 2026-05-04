@@ -17,7 +17,7 @@ LITHOLOGY_MAPPING = PatternMapping(
         "泥岩": "mudstone", "泥质": "mudstone",
         "页岩": "shale",
         "灰岩": "limestone", "石灰岩": "limestone",
-        "煤": "shale",
+        "煤": "shale",  # TODO: create coal.svg per GB/T 附录M
     },
     colors={
         "白云岩": "#dbeafe", "白云质": "#bfdbfe",
@@ -45,11 +45,33 @@ FACIES_MAPPING = PatternMapping(
         "混积浅水陆棚": "mixed",
         "混积潮坪": "mixed",
         "云质砂坪": "dolomitic_flat",
+        "浅海陆棚": "shelf",
+        "滨外陆棚": "shelf",
+        "陆棚砂脊": "shelf",
+        "水下分流河道间": "mud_flat",
+        "分流河道间": "mud_flat",
+        "水下分流河道": "delta",
+        "分流河道": "delta",
+        "前三角洲泥": "mud_flat",
+        "前三角洲": "mud_flat",
+        "三角洲前缘": "delta",
+        "三角洲平原": "delta",
+        "扇三角洲平原": "delta",
+        "扇三角洲": "delta",
+        "三角洲": "delta",
+        "河口坝": "delta",
+        "席状砂": "delta",
+        "远砂坝": "delta",
+        "天然堤": "mud_flat",
+        "滨浅湖泥": "mud_flat",
+        "滨浅湖": "mud_flat",
+        "陆棚泥": "mud_flat",
         "潮坪": "tidal_flat",
         "陆棚": "shelf",
         "浅海": "shelf",
         "砂坪": "sand_flat",
         "泥坪": "mud_flat",
+        "湖泊": "mud_flat",
         "混积": "mixed",
         "碎屑岩": "clastic_shelf",
         "云质": "dolomitic_flat",
@@ -101,18 +123,18 @@ laolong1_config = ChartConfig(
     tracks=[
         # 地层系统 — 系, 统, 组
         IntervalTrackConfig(
-            type=TrackType.INTERVAL, width=35, label="地层系统", label2="系",
-            data_key="series", rotate_text=True,
+            type=TrackType.INTERVAL, width=35, label="系",
+            data_key="series", rotate_text=True, group="地层系统",
             color_mapping=PatternMapping(colors={"default": "#e5e7eb"}),
         ),
         IntervalTrackConfig(
             type=TrackType.INTERVAL, width=35, label="统",
-            data_key="system", rotate_text=True,
+            data_key="system", rotate_text=True, group="地层系统",
             color_mapping=PatternMapping(colors={"default": "#e5e7eb"}),
         ),
         IntervalTrackConfig(
             type=TrackType.INTERVAL, width=55, label="组",
-            data_key="formation", rotate_text=True,
+            data_key="formation", rotate_text=True, group="地层系统",
             color_mapping=PatternMapping(colors={"default": "#e5e7eb"}),
         ),
         # AC/GR curves (AC 40-80 dashed blue, GR 0-100 solid green)
@@ -143,18 +165,18 @@ laolong1_config = ChartConfig(
         ),
         # 沉积相 — 微相, 亚相, 相
         IntervalTrackConfig(
-            type=TrackType.INTERVAL, width=100, label="沉积相", label2="微相",
-            data_key="facies", facies_level="micro_phase",
+            type=TrackType.INTERVAL, width=100, label="微相",
+            data_key="facies", facies_level="micro_phase", group="沉积相",
             color_mapping=FACIES_MAPPING, pattern_dir=_PATTERNS_DIR,
         ),
         IntervalTrackConfig(
             type=TrackType.INTERVAL, width=90, label="亚相",
-            data_key="facies", facies_level="sub_phase",
+            data_key="facies", facies_level="sub_phase", group="沉积相",
             color_mapping=FACIES_MAPPING, pattern_dir=_PATTERNS_DIR,
         ),
         IntervalTrackConfig(
             type=TrackType.INTERVAL, width=60, label="相",
-            data_key="facies", facies_level="phase",
+            data_key="facies", facies_level="phase", group="沉积相",
             color_mapping=FACIES_MAPPING, pattern_dir=_PATTERNS_DIR,
         ),
         # 体系域 (HST/TST triangles)

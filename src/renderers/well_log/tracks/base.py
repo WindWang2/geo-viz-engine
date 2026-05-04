@@ -1,35 +1,8 @@
-from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 from src.data.models import IntervalItem
 from src.renderers.well_log.config import TrackConfig
-
-
-class DepthMappedContent(QWidget):
-    """
-    Paint-based content widget that maps depth ranges to screen pixels.
-
-    Subclasses must call set_depth_range(top, bottom) to initialize
-    _visible_top / _visible_bottom before the first paint.
-    """
-
-    def __init__(self, intervals: list, top_depth: float, bottom_depth: float, parent=None):
-        super().__init__(parent)
-        self._all_intervals = intervals
-        self._visible_top = top_depth
-        self._visible_bottom = bottom_depth
-        self._px_per_m: float = 0.0
-
-    def set_depth_range(self, top: float, bottom: float):
-        self._visible_top = top
-        self._visible_bottom = bottom
-        self.update()
-
-    def _visible_intervals(self):
-        """Yield intervals that overlap the visible depth range."""
-        for iv in self._all_intervals:
-            if iv.bottom > self._visible_top and iv.top < self._visible_bottom:
-                yield iv
 
 
 class TrackWidget(QWidget):
@@ -39,7 +12,9 @@ class TrackWidget(QWidget):
         super().__init__(parent)
         self._config = config
         self._header_height = header_height
-        self.setFixedWidth(config.width)
+        self._header_widget: QLabel | None = None
+        self._content_widget: QWidget | None = None
+        self.setMinimumWidth(config.width)
         self._build_layout()
 
     def _build_layout(self):
@@ -47,17 +22,17 @@ class TrackWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        header = QLabel(self._header_text())
-        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header.setFixedHeight(self._header_height)
-        header.setStyleSheet(
+        self._header_widget = QLabel(self._header_text())
+        self._header_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._header_widget.setFixedHeight(self._header_height)
+        self._header_widget.setStyleSheet(
             "background: #edf2f7; color: #2d3748; "
             "font-size: 10px; font-weight: bold;"
         )
-        layout.addWidget(header)
+        layout.addWidget(self._header_widget)
 
         self._content_widget = self._create_content()
-        layout.addWidget(self._content_widget)
+        layout.addWidget(self._content_widget, 1)  # stretch=1: expand to fill track height
 
     def _header_text(self) -> str:
         if self._config.label2:
@@ -74,14 +49,31 @@ class TrackWidget(QWidget):
     def config(self) -> TrackConfig:
         return self._config
 
+    @property
+    def header_widget(self) -> QLabel:
+        return self._header_widget
+
+    @property
+    def content_widget(self) -> QWidget:
+        return self._content_widget
+
     def preferred_width(self) -> int:
         return self._config.width
 
     def set_pixel_density(self, px_per_m: float):
-        pass  # override in subclasses that use _depth_to_y
+        pass
 
     def sync_depth(self, top_m: float, bottom_m: float):
-        pass  # override in subclasses to update visible range
+        pass
+
+    def export_vector(self, painter, width: int, height: int):
+        """Render track content as vector graphics for export."""
+        # Default: grab as pixmap
+        pix = self._content_widget.grab()
+        painter.drawPixmap(0, 0, pix.scaled(
+            width, height,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+        ))
 
 
 class DepthMappedContent(QWidget):
@@ -94,23 +86,12 @@ class DepthMappedContent(QWidget):
         self._intervals = intervals
         self._visible_top = top_depth
         self._visible_bottom = bottom_depth
+        self._px_per_m: float = 0.0
 
     def set_depth_range(self, top: float, bottom: float):
         self._visible_top = top
         self._visible_bottom = bottom
         self.update()
-
-    def _depth_to_y(self, depth: float) -> float:
-        span = self._visible_bottom - self._visible_top
-        if span <= 0:
-            return 0.0
-        return (depth - self._visible_top) / span * self.height()
-
-    def _depth_to_y_absolute(self, depth_m: float, canvas_h: float) -> float:
-        span = self._visible_bottom - self._visible_top
-        if span <= 0:
-            return 0.0
-        return (depth_m - self._visible_top) / span * canvas_h
 
     def _visible_intervals(self) -> list[IntervalItem]:
         return [

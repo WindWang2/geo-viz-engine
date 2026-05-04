@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -13,26 +13,27 @@ from src.data.cache import DataCache
 
 
 PAGES = [
-    ("map", "M", "地图总览"),
-    ("well_log", "W", "井剖面"),
-    ("seismic", "S", "地震3D"),
-    ("data", "D", "数据管理"),
+    ("map", "src/resources/icons/map.svg", "地图总览"),
+    ("well_log", "src/resources/icons/well_log.svg", "井剖面"),
+    ("seismic", "src/resources/icons/seismic.svg", "地震3D"),
+    ("data", "src/resources/icons/data.svg", "数据管理"),
 ]
 
 
 class SidebarButton(QPushButton):
-    def __init__(self, icon_text: str, tooltip: str, nav_key: str):
-        super().__init__(icon_text)
+    def __init__(self, icon_path: str, tooltip: str, nav_key: str):
+        super().__init__()
         self.nav_key = nav_key
         self.setProperty("nav_key", nav_key)
         self.setFixedSize(48, 48)
         self.setToolTip(tooltip)
         self.setCheckable(True)
+        self.setIcon(QIcon(icon_path))
+        self.setIconSize(QSize(24, 24))
         self.setStyleSheet("""
             SidebarButton {
                 border: none;
                 border-radius: 8px;
-                font-size: 20px;
                 background: transparent;
             }
             SidebarButton:checked {
@@ -127,7 +128,5 @@ class MainWindow(QWidget):
         self.stack.setCurrentIndex(index)
 
     def _on_well_clicked(self, well_name: str):
-        if self.well_log_page.load_well(well_name):
-            self._switch_page(1)
-        else:
-            self._switch_page(1)  # still switch, shows placeholder
+        self.well_log_page.load_well(well_name)
+        self._switch_page(1)

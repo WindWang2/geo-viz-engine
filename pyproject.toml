@@ -2,10 +2,9 @@
 name = "geo-viz-engine"
 version = "0.2.0"
 description = "地质数据可视化桌面引擎"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "PySide6>=6.6",
-    "PySide6-WebEngine>=6.6.0",
     "pyqtgraph>=0.13",
     "pyvista>=0.43",
     "lasio>=0.14",
@@ -27,6 +26,9 @@ dev = [
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv]
+environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

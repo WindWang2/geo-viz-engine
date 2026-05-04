@@ -1,47 +1,34 @@
-import { WellLogChart } from './geoviz-echarts-wellog.js';
+import { WellLogChart, registerPatterns } from './geoviz-echarts-wellog.js';
 
-const mockData = {
-    metadata: { wellName: "Test Well (Curves)", topDepth: 1000, bottomDepth: 1100 },
-    tracks: [
-        {
-            type: "CurveTrack",
-            series: [
-                { name: "GR", color: "green", data: [[1000, 45], [1050, 80], [1100, 30]] },
-                { name: "AC", color: "red", data: [[1000, 200], [1050, 180], [1100, 220]] }
-            ]
-        },
-        {
-            type: "CurveTrack",
-            series: [
-                { name: "RT", color: "blue", data: [[1000, 10], [1050, 50], [1100, 5]] }
-            ]
-        },
-        {
-            type: "LithologyTrack",
-            data: [
-                { top: 1000, bottom: 1050, lithology: "sandstone", description: "细砂岩" },
-                { top: 1050, bottom: 1100, color: "#a52a2a", description: "泥岩(无纹理)" }
-            ]
-        }
-    ]
+const chartEngine = new WellLogChart('chart-container');
+window.geoviz = chartEngine;
+
+// Expose registerPatterns globally for Python to call
+window.registerPatterns = function(patternsMap) {
+    registerPatterns(patternsMap).then(() => {
+        chartEngine.onPatternsReady();
+    });
 };
 
-document.addEventListener('DOMContentLoaded', () => {
-    const chartEngine = new WellLogChart('chart-container');
-    chartEngine.render(mockData);
-    // 挂载到 window 供控制台测试
-    window.geoviz = chartEngine;
-});
+function initBridge() {
+    if (typeof qt !== 'undefined' && qt.webChannelTransport) {
+        new QWebChannel(qt.webChannelTransport, function (channel) {
+            window.bridge = channel.objects.bridge;
+            
+            // Safe logging bridge
+            const log = (msg) => { if (window.bridge && window.bridge.log) window.bridge.log(msg); };
+            
+            window.console.log = (...args) => log("[JS LOG] " + args.join(' '));
+            window.console.error = (...args) => log("[JS ERROR] " + args.join(' '));
+
+            log("JS Bridge Ready");
+            window.bridge.web_ready();
+        });
+    }
+}
+
+document.addEventListener('DOMContentLoaded', initBridge);
 
 window.exportChartToSvg = function() {
-    return window.geoviz.exportToSvg();
+    return chartEngine.exportToSvg();
 };
-
-if (typeof qt !== 'undefined' && qt.webChannelTransport) {
-    new QWebChannel(qt.webChannelTransport, function (channel) {
-        window.bridge = channel.objects.bridge;
-        window.bridge.web_ready();
-    });
-} else {
-    console.warn("Qt WebChannel transport not found. Running in browser mode?");
-}
