@@ -37,9 +37,13 @@ Thumbs.db
 .vscode/
 *.iml
 
-# Generated mock data
-data/generated/*.json
+# Data
+data/*
+!data/generated/
+data/generated/*
+!data/generated/.gitkeep
 !data/generated/index.json
+!data/well_coordinates.json
 
 # Temp folder
 tmp/
