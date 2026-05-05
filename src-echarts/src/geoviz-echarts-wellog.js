@@ -184,14 +184,58 @@ class Track {
 class CurveTrack extends Track {
     getXAxis() { return { ...super.getXAxis(), min: this.data.min || 0, max: this.data.max || 150 }; }
     getSeries() {
-        return (this.data.series || []).map(s => ({
+        const seriesList = [];
+        
+        // Render background intervals if provided
+        if (this.data.bgIntervals && this.data.bgIntervals.length > 0) {
+            const items = this.data.bgIntervals;
+            const td = this.data;
+            seriesList.push({
+                type: 'custom', xAxisIndex: this.index, yAxisIndex: this.index,
+                clip: true,
+                encode: { x: 0, y: [1, 2] },
+                renderItem: (params, api) => {
+                    const item = items[params.dataIndex];
+                    if (!item) return null;
+                    const yTop = api.coord([0, item.top])[1];
+                    const yBot = api.coord([0, item.bottom])[1];
+                    const xLeft = api.coord([0, 0])[0];
+                    const xRight = api.coord([1, 0])[0];
+                    const w = xRight - xLeft;
+                    const rawH = Math.abs(yBot - yTop);
+                    const yMin = Math.min(yTop, yBot);
+                    
+                    const gridTop = params.coordSys.y;
+                    const gridBot = params.coordSys.y + params.coordSys.height;
+                    const clampedTop = Math.max(yMin, gridTop);
+                    const clampedBot = Math.min(yMin + rawH, gridBot);
+                    if (clampedBot <= clampedTop) return null;
+
+                    return {
+                        type: 'rect',
+                        shape: { x: xLeft, y: yMin, width: w, height: rawH },
+                        style: { fill: item.color || '#fff' },
+                        clipPath: {
+                            type: 'rect',
+                            shape: { x: xLeft, y: gridTop, width: w, height: gridBot - gridTop }
+                        }
+                    };
+                },
+                data: items.map(i => [0.5, i.top, i.bottom]),
+                z: -10 // Draw behind the curves
+            });
+        }
+
+        const lines = (this.data.series || []).map(s => ({
             name: s.name, type: 'line', xAxisIndex: this.index, yAxisIndex: this.index,
             data: (s.data || []).map(p => [p[1], p[0]]),
             lineStyle: { width: 1.5, color: s.color || '#3182ce', type: s.lineStyle || 'solid' },
             showSymbol: false, smooth: false, connectNulls: false,
             sampling: 'lttb', large: true, largeThreshold: 1000,
-            animation: false
+            animation: false, z: 10
         }));
+        
+        return seriesList.concat(lines);
     }
 }
 
@@ -200,9 +244,10 @@ class DepthTrack extends Track {
     getYAxis(commonY) {
         return {
             ...commonY, gridIndex: this.index, show: true, position: 'left',
-            axisLine: { show: true, onZero: true, lineStyle: { color: THEME.borderColor } },
-            axisLabel: { show: true, fontWeight: 'bold', fontSize: 11, margin: 4 },
-            axisTick: { show: true }
+            offset: -(this.layout.w / 2),
+            axisLine: { show: false },
+            axisLabel: { show: true, fontWeight: 'bold', fontSize: 11, align: 'center', margin: 0, verticalAlign: 'middle' },
+            axisTick: { show: false }
         };
     }
 }
@@ -360,7 +405,38 @@ export class WellLogChart {
                 }
             }, 100);
         });
+
+        // Sync support: emit zoom events to bridge
+        this.chart.on('datazoom', (params) => {
+            if (window.bridge && !this._isUpdatingFromSync) {
+                // Get absolute values from the first Y axis
+                const axis = this.chart.getModel().getComponent('yAxis', 0).axis;
+                const range = axis.scale.getExtent(); // Current visible absolute range [min, max]
+                window.bridge.on_zoom(range[0], range[1]);
+            }
+        });
+
         return dom;
+    }
+
+    setRange(start, end) {
+        if (!this.chart) return;
+        this._isUpdatingFromSync = true;
+        this.chart.dispatchAction({
+            type: 'dataZoom',
+            yAxisIndex: 'all',
+            startValue: start,
+            endValue: end
+        });
+        this._isUpdatingFromSync = false;
+    }
+
+    getDepthY(depth) {
+        if (!this.chart) return 0;
+        // The first Y axis is our master depth axis
+        const coord = this.chart.convertToPixel({ yAxisIndex: 0 }, [0, depth]);
+        // Add a small offset if needed, but the main issue is usually Qt coordinates vs Web coordinates.
+        return coord ? coord[1] : 0;
     }
 
     render(data) {
@@ -564,7 +640,7 @@ export class WellLogChart {
                         width: 24, right: 10,
                         startValue: keepStartValue !== null ? keepStartValue : data.metadata.topDepth,
                         endValue: keepEndValue !== null ? keepEndValue : Math.min(data.metadata.bottomDepth, data.metadata.topDepth + 50),
-                        labelFormatter: function (value) { return value.toFixed(0) + ' m'; },
+                        labelFormatter: function (value) { return (value - (data.metadata.depthOffset || 0)).toFixed(0) + ' m'; },
                         fillerColor: 'rgba(49, 130, 206, 0.2)',
                         borderColor: '#cbd5e1',
                         handleSize: '100%',

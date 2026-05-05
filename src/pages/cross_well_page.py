@@ -232,7 +232,28 @@ class CrossWellPage(QWidget):
                 )
 
     def _on_flatten_changed(self):
-        pass
+        text = self.flatten_combo.currentText()
+        if "拉平: " not in text:
+            target_marker = None
+        else:
+            target_marker = text.split("拉平: ")[1]
+
+        for engine in self.engines:
+            data = self._well_data_cache.get(engine._well_name)
+            if not data: continue
+
+            offset = 0.0
+            if target_marker and data.intervals:
+                seq_items = data.intervals.sequence if data.intervals.sequence else data.intervals.member
+                if seq_items:
+                    match = next((item for item in seq_items if item.name == target_marker), None)
+                    if match:
+                        offset = -match.top
+            
+            payload = self._build_engine_payload(data, offset)
+            engine.render_data(json.dumps(payload))
+            
+        self._auto_link()
 
     def _update_flatten_combo(self):
         markers = set()
