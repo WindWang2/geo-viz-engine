@@ -7,7 +7,7 @@ The objective is to implement a professional cross-well facies correlation secti
 The implementation follows a **Modular Component Assembly** approach (Approach 1), reusing the existing high-performance ECharts-based single-well engine.
 
 ### 2.1 Multi-Well Container (`CrossWellPage`)
-- A new top-level page in the application sidebar.
+- A new standalone tab in the sidebar navigation, completely independent of the existing "Well Log" (single well) page.
 - Uses `QScrollArea` to support horizontal scrolling of multiple wells.
 - Maintains a list of `ChartEngine` instances, one per well.
 - **Layout**: `QHBoxLayout` with fixed-width "Gaps" (100-150px) between well widgets.
