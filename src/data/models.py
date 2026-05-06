@@ -30,7 +30,6 @@ class FaciesData(BaseModel):
     sub_phase: list[IntervalItem] = []
     micro_phase: list[IntervalItem] = []
 
-
 class WellIntervals(BaseModel):
     series: list[IntervalItem] = []
     system: list[IntervalItem] = []
@@ -41,6 +40,15 @@ class WellIntervals(BaseModel):
     systems_tract: list[IntervalItem] = []
     sequence: list[IntervalItem] = []
     facies: FaciesData = FaciesData()
+
+
+class CorrelationLink(BaseModel):
+    source_well: str
+    target_well: str
+    source_interval_id: str  # Format: "top_bottom_name"
+    target_interval_id: str
+    color: str
+    is_manual: bool = False
 
 
 # Legacy models — kept for backward compatibility with existing loaders/tests
@@ -63,6 +71,7 @@ class WellLogData(BaseModel):
     well_name: str
     top_depth: float
     bottom_depth: float
+    datum_elevation: float = 0.0
     curves: list[CurveData] = []
     lithology: list[LithologyInterval] = []
     facies: list[FaciesInterval] = []

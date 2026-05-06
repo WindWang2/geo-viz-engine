@@ -15,6 +15,7 @@ from src.data.cache import DataCache
 PAGES = [
     ("map", "src/resources/icons/map.svg", "地图总览"),
     ("well_log", "src/resources/icons/well_log.svg", "井剖面"),
+    ("cross_well", "src/resources/icons/cross_well.svg", "连井对比"),
     ("seismic", "src/resources/icons/seismic.svg", "地震3D"),
     ("data", "src/resources/icons/data.svg", "数据管理"),
 ]
@@ -84,6 +85,9 @@ class MainWindow(QWidget):
         from src.pages.well_log_page import WellLogPage
         self.well_log_page = WellLogPage()
 
+        from src.pages.cross_well_page import CrossWellPage
+        self.cross_well_page = CrossWellPage()
+
         try:
             from src.pages.map_page import MapPage
             self.map_page = MapPage(self.cache, well_click_callback=self._on_well_clicked)
@@ -112,6 +116,7 @@ class MainWindow(QWidget):
         page_widgets = [
             map_widget,                            # map
             self.well_log_page,                   # well log
+            self.cross_well_page,                # cross well
             seismic_widget,                       # seismic
             self.data_page,                      # data
         ]

@@ -274,6 +274,7 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
     sub_phase = []
     micro_phase = []
     
+    datum_elevation = 0.0
     custom_tracks = []
     
     # 1. Depth Track
@@ -300,6 +301,20 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
                             break
                     if not depth_col:
                         depth_col = cols[1] if len(cols) > 1 else cols[0]
+                
+                # Extract datum_elevation from TVDSS
+                if datum_elevation == 0.0:
+                    tvdss_col = None
+                    for c in cols:
+                        if str(c).strip().upper() == "TVDSS":
+                            tvdss_col = c
+                            break
+                    if tvdss_col:
+                        # Find first valid row
+                        valid_df = df[[depth_col, tvdss_col]].dropna()
+                        if not valid_df.empty:
+                            row = valid_df.iloc[0]
+                            datum_elevation = float(row[depth_col]) - float(row[tvdss_col])
                         
                 depths = [float(x) for x in df[depth_col].tolist()]
                 
@@ -549,6 +564,7 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
         well_name=well_name or "NewWell",
         top_depth=top_d,
         bottom_depth=bot_d,
+        datum_elevation=datum_elevation,
         curves=curves,
         intervals=intervals,
         custom_tracks=custom_tracks

@@ -363,11 +363,17 @@ class WellLogPage(QWidget):
 
 
     def _create_merged_curve_track(self, curve_names):
+        import copy
         series = []
-        for name in curve_names:
+        # Predefined distinct colors for merged curves
+        palette = ["#1d4ed8", "#dc2626", "#15803d", "#ea580c", "#8b5cf6"]
+        
+        for idx, name in enumerate(curve_names):
             t = self._track_pool.get(name)
             if t and "series" in t:
-                series.extend(t["series"])
+                for s in copy.deepcopy(t["series"]):
+                    s["color"] = palette[idx % len(palette)]
+                    series.append(s)
         return {
             "type": "CurveTrack",
             "name": "/".join(curve_names),

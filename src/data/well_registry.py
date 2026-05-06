@@ -55,3 +55,7 @@ def get_well_data(well_name: str):
 def available_wells() -> set[str]:
     return set(_WELL_REGISTRY.keys())
 
+
+def list_wells() -> list[str]:
+    return sorted(list(_WELL_REGISTRY.keys()))
+

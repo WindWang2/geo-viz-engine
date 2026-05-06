@@ -242,11 +242,15 @@ class CurveTrack extends Track {
 class DepthTrack extends Track {
     getXAxis() { return { ...super.getXAxis(), min: -1, max: 1 }; }
     getYAxis(commonY) {
+        const offset = this.data.depthOffset || 0;
         return {
             ...commonY, gridIndex: this.index, show: true, position: 'left',
             offset: -(this.layout.w / 2),
             axisLine: { show: false },
-            axisLabel: { show: true, fontWeight: 'bold', fontSize: 11, align: 'center', margin: 0, verticalAlign: 'middle' },
+            axisLabel: { 
+                show: true, fontWeight: 'bold', fontSize: 11, align: 'center', margin: 0, verticalAlign: 'middle',
+                formatter: function (value) { return (value - offset).toFixed(0); }
+            },
             axisTick: { show: false }
         };
     }
@@ -559,7 +563,10 @@ export class WellLogChart {
                 
                 if (depth === undefined || depth === null) return '';
 
-                let lines = [`<div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#f1f5f9;border-bottom:1px solid rgba(148,163,184,0.3);padding-bottom:6px;">📍 深度: ${Number(depth).toFixed(2)} m</div>`];
+                const offset = data.metadata.depthOffset || 0;
+                let absoluteDepth = depth - offset;
+
+                let lines = [`<div style="font-weight:700;font-size:14px;margin-bottom:8px;color:#f1f5f9;border-bottom:1px solid rgba(148,163,184,0.3);padding-bottom:6px;">📍 深度: ${Number(absoluteDepth).toFixed(2)} m</div>`];
 
                 const curveValues = new Map();
 

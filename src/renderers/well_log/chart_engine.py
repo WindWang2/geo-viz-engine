@@ -11,10 +11,16 @@ class Bridge(QObject):
     ready = Signal()
     # 接收导出的 SVG
     svg_received = Signal(str)
+    # 接收深度缩放变化
+    zoom_changed = Signal(float, float)
 
     @Slot()
     def web_ready(self):
         self.ready.emit()
+
+    @Slot(float, float)
+    def on_zoom(self, start, end):
+        self.zoom_changed.emit(start, end)
 
     @Slot(str)
     def receive_svg(self, svg_str: str):
