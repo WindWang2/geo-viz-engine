@@ -104,27 +104,44 @@ class CrossWellPage(QWidget):
             d2 = self._well_data_cache.get(w2)
             if not d1 or not d2: continue
             
-            # Match sequences (砂层组) or member (段) for stratigraphic correlation
-            seq1 = d1.intervals.sequence if d1.intervals.sequence else d1.intervals.member
-            seq2 = d2.intervals.sequence if d2.intervals.sequence else d2.intervals.member
-            
-            for s1 in seq1:
-                match = next((s for s in seq2 if s.name == s1.name), None)
-                if match:
-                    # Determine dominant facies color for this sequence block from Well 1
-                    color = "#e2e8f0"
-                    if d1.intervals.facies and d1.intervals.facies.phase:
-                        mid = (s1.top + s1.bottom) / 2
-                        facies = next((f for f in d1.intervals.facies.phase if f.top <= mid <= f.bottom), None)
-                        if facies:
-                            color = get_facies_color(facies.name)
-                            
-                    self.links.append(CorrelationLink(
-                        source_well=w1, target_well=w2,
-                        source_interval_id=f"{s1.top}_{s1.bottom}_{s1.name}",
-                        target_interval_id=f"{match.top}_{match.bottom}_{match.name}",
-                        color=color
-                    ))
+            # Match stratigraphy from most detailed (sequence) to least detailed (formation)
+            matches_found = False
+            for source_seq, target_seq in [
+                (d1.intervals.sequence, d2.intervals.sequence),
+                (d1.intervals.member, d2.intervals.member),
+                (d1.intervals.formation, d2.intervals.formation)
+            ]:
+                if not source_seq or not target_seq: continue
+                
+                # Check for common names, ignoring empty names
+                valid_source_names = set(str(s.name).strip() for s in source_seq if str(s.name).strip())
+                valid_target_names = set(str(s.name).strip() for s in target_seq if str(s.name).strip())
+                common_names = valid_source_names & valid_target_names
+                
+                if not common_names: continue
+                
+                matches_found = True
+                for s1 in source_seq:
+                    s1_name = str(s1.name).strip()
+                    if s1_name not in common_names: continue
+                    # Find the first matching non-empty name
+                    match = next((s for s in target_seq if str(s.name).strip() == s1_name), None)
+                    if match:
+                        # Determine dominant facies color for this sequence block from Well 1
+                        color = "#e2e8f0"
+                        if d1.intervals.facies and d1.intervals.facies.phase:
+                            mid = (s1.top + s1.bottom) / 2
+                            facies = next((f for f in d1.intervals.facies.phase if f.top <= mid <= f.bottom), None)
+                            if facies:
+                                color = get_facies_color(facies.name)
+                                
+                        self.links.append(CorrelationLink(
+                            source_well=w1, target_well=w2,
+                            source_interval_id=f"{s1.top}_{s1.bottom}_{s1_name}",
+                            target_interval_id=f"{match.top}_{match.bottom}_{s1_name}",
+                            color=color
+                        ))
+                break # Stop searching coarser levels once we have matches
         
         self.overlay.set_links(self.links)
         self._refresh_overlay_coords()

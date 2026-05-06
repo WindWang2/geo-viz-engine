@@ -437,9 +437,8 @@ export class WellLogChart {
 
     getDepthY(depth) {
         if (!this.chart) return 0;
-        // The first Y axis is our master depth axis
-        const coord = this.chart.convertToPixel({ yAxisIndex: 0 }, [0, depth]);
-        // Add a small offset if needed, but the main issue is usually Qt coordinates vs Web coordinates.
+        // The first grid is always present and perfectly aligned vertically with others
+        const coord = this.chart.convertToPixel({ gridIndex: 0 }, [0, depth]);
         return coord ? coord[1] : 0;
     }
 
