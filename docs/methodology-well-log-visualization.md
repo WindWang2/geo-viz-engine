@@ -1240,6 +1240,39 @@ function useAdaptiveScale(svgRef: RefObject<SVGSVGElement>) {
 
 ---
 
+## 10. 连井地层对比与构造剖面 (Cross-Well Correlation)
+
+在单井分析的基础上，系统引入了专业的连井对比功能，旨在通过多井视口同步与动态拉平，还原地质结构的真实横向展布与沉积演化过程。
+
+### 10.1 模块化全画幅视口同步
+
+摒弃了将所有井合并入单一 ECharts 实例的紧耦合方案，连井剖面采用了**模块化组件拼装 (Modular Component Assembly)** 架构：
+- **布局容器**：以 `QHBoxLayout` 配合 `QScrollArea` 水平排布多个独立的 `ChartEngine`（单井）。
+- **事件桥接同步 (`SyncManager`)**：通过 `QWebChannel` 拦截单井内部的 ECharts `dataZoom` 事件。当用户在一口井中触发滚动或缩放时，系统立即广播绝对深度域（`startValue`, `endValue`）至所有平行井，实现毫秒级的横向锁步 (Lock-step) 同步。
+
+### 10.2 地层拉平与海拔对齐 (Stratigraphic Flattening & TVDSS)
+
+为支持沉积演化分析与真实构造形态展示，系统重构了 ECharts 渲染逻辑，支持了相对坐标系的动态偏移：
+- **标层拉平 (Flatten by Marker)**：自动提取加载井的共有层序（如 `HJ320` 砂层组）。选中标层后，系统在 Python 端获取该标层顶面深度，生成负向补偿量 `depthOffset`。
+- **海拔对齐 (TVDSS Alignment)**：从 Excel `TVDSS`（绝对海拔）数据列智能反推补心高/基准面高程作为 `depthOffset`。
+- **坐标补偿管线**：偏移量注入后，ECharts 的 `yAxis` 范围自动平移（例如 `min: depth + offset`），使指定的界面在屏幕上强制呈水平直线。同时，`DepthTrack`（深度道刻度）和交互层的 `Tooltip` 在显示时会反向补偿，确保视觉拉平的同时，绝对地质深度数据依旧精准无误。
+
+### 10.3 智能相连通建模与叠加层 (Connection Overlay)
+
+为重现核心期刊标准（如含有巨大沉积相色带的地质剖面），在底层 ChartEngine 之上增加了一个贯穿全局的透明 Qt 浮层 `ConnectionOverlay`：
+1. **启发式匹配 (Heuristic Correlation)**：系统基于层序地层学骨架（Sequence/Member）进行跨井层段匹配，而非零散的岩性。
+2. **优势相提取 (Dominant Facies Fill)**：检测两口井匹配地层内部的优势沉积相（如“河道”、“浅水三角洲”），并赋予地质学标准色彩（黄、橙等）以高亮其连通关系。
+3. **坐标映射桥接**：多边形连通带的绘制，利用了自研的跨屏映射机制：通过调用 Web 端的 `getDepthY(depth)` 实时获取物理像素坐标，经浮点数精度修正 (`round(val, 2)`) 消除 Python-JS IPC 序列化误差，最后将其投射至 Qt 全局画布。
+
+### 10.4 SVG 全画幅剖面缝合导出
+
+连井剖面由于宽度巨大，无法依靠传统的截图呈现。系统实现了所见即所得的超宽高清矢量图（SVG）直出能力：
+- 通过异步信号系统（`QEventLoop`）向所有嵌入的浏览器内核同时下发 `export_svg()` 指令并等待回传。
+- 收集到位后，主干程序将这些基于 Web 的 SVG 矢量代码片段，利用 `transform="translate(x, y)"` 按照其在 Qt 容器中的物理间隔，缝合入一个总控的 `<svg>` 容器中。
+- 最后将 `ConnectionOverlay` 动态生成的 Qt 多边形也翻译为原生的 `<polygon>` 标签插入图层，实现完美的地质长卷输出。
+
+---
+
 ## 附录 A: 老龙1井完整实例走查
 
 本附录通过一个完整的实例——老龙1井 2515-2610m 井段——将前文所有章节的内容串联起来。读者可以沿着数据流的路径，从原始 Excel 到最终渲染，验证每个方法论步骤的具体实现。
