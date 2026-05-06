@@ -607,7 +607,8 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
             pass
 
     file_hash = hashlib.md5(f"{path.name}_{mtime}_{xml_mtime}_{well_name}_{PARSER_VERSION}".encode()).hexdigest()
-    cache_file = cache_dir / f"{file_hash}.pkl"
+    safe_well_name = "".join([c if c.isalnum() else "_" for c in (well_name or "unknown")])
+    cache_file = cache_dir / f"{safe_well_name}_{file_hash}.pkl"
     
     if cache_file.exists():
         try:
@@ -615,6 +616,14 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
                 return pickle.load(f)
         except Exception as e:
             print(f"Failed to load cache for {well_name}: {e}")
+            
+    # Clean up old caches for this well to prevent directory bloat
+    try:
+        for old_cache in cache_dir.glob(f"{safe_well_name}_*.pkl"):
+            if old_cache != cache_file:
+                old_cache.unlink(missing_ok=True)
+    except OSError:
+        pass
             
     # Not cached, perform full load
     import pandas as pd

@@ -87,6 +87,9 @@ class CrossWellPage(QWidget):
         
         # ECharts has a 100ms resize debounce. Wait for it to finish, then refresh coords.
         QTimer.singleShot(150, self._refresh_overlay_coords)
+        
+        # ECharts has a 100ms resize debounce. Wait for it to finish, then refresh coords.
+        QTimer.singleShot(150, self._refresh_overlay_coords)
 
     def _auto_link(self):
         self.links = []
@@ -514,6 +517,7 @@ class CrossWellPage(QWidget):
         self.overlay.set_links([])
         self.sync_manager = SyncManager()
         self.overlay._engines = []
+        self.overlay._depth_cache.clear()
         self._well_data_cache = {}
         self._update_flatten_combo()
         self.location_map.hide()

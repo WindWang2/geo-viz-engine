@@ -29,7 +29,7 @@ def test_load_well_log_converted(monkeypatch):
     
     mock_excel_file = MagicMock()
     mock_excel_file.sheet_names = ["测井曲线", "岩性道"]
-    monkeypatch.setattr("pandas.ExcelFile", lambda path: mock_excel_file)
+    monkeypatch.setattr("pandas.ExcelFile", lambda path, engine=None: mock_excel_file)
     
     def mock_read_excel(path, sheet_name):
         if sheet_name == "测井曲线":

@@ -33,6 +33,9 @@ class Bridge(QObject):
 class ChartEngine(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._well_name = ""
+        self._flatten_offset = 0.0
+        
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
