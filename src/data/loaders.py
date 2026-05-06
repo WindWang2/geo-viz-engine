@@ -57,7 +57,7 @@ def parse_xml_facies(path: Path) -> WellIntervals:
 def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogData:
     import pandas as pd
     
-    excel_file = pd.ExcelFile(path)
+    excel_file = pd.ExcelFile(path, engine="calamine")
     sheet_names = excel_file.sheet_names
 
     def read_interval_sheet(df):
@@ -258,7 +258,7 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
                 
         return pat, col
 
-    excel_file = pd.ExcelFile(path)
+    excel_file = pd.ExcelFile(path, engine="calamine")
     sheet_names = excel_file.sheet_names
 
     curves = []
@@ -602,7 +602,7 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
             
     # Not cached, perform full load
     import pandas as pd
-    excel_file = pd.ExcelFile(path)
+    excel_file = pd.ExcelFile(path, engine="calamine")
     sheet_names = excel_file.sheet_names
     
     if any("测井曲线" in s or "离散曲线" in s or "岩性道" in s or "地层单位" in s for s in sheet_names):
