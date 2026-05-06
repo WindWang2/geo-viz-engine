@@ -87,24 +87,24 @@ def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogD
     
     # 1. AC and GR
     if "AC、GR" in sheet_names:
-        df = pd.read_excel(path, sheet_name="AC、GR")
+        df = pd.read_excel(excel_file, sheet_name="AC、GR")
         curves.append(CurveData(name="AC", depth=df["深度"].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df["AC"].tolist()], color="#1d4ed8", display_range=(40, 100), line_style=LineStyle.SOLID))
         curves.append(CurveData(name="GR", depth=df["深度"].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df["GR"].tolist()], color="#15803d", display_range=(0, 150)))
     else:
         if "GR" in sheet_names:
-            df = pd.read_excel(path, sheet_name="GR")
+            df = pd.read_excel(excel_file, sheet_name="GR")
             curves.append(CurveData(name="GR", depth=df.iloc[:, 0].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df.iloc[:, 1].tolist()], color="#15803d", display_range=(0, 150)))
         if "其他曲线" in sheet_names:
-            df = pd.read_excel(path, sheet_name="其他曲线")
+            df = pd.read_excel(excel_file, sheet_name="其他曲线")
             curves.append(CurveData(name="AC", depth=df.iloc[:, 0].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df.iloc[:, 1].tolist()], color="#1d4ed8", display_range=(40, 100), line_style=LineStyle.SOLID))
 
     # 2. RT and RXO
     if "RT、RXO" in sheet_names:
-        df = pd.read_excel(path, sheet_name="RT、RXO")
+        df = pd.read_excel(excel_file, sheet_name="RT、RXO")
         curves.append(CurveData(name="RT", depth=df["深度"].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df["RT"].tolist()], color="#b91c1c", display_range=(0.1, 1000), line_style=LineStyle.SOLID))
         curves.append(CurveData(name="RXO", depth=df["深度"].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df["RXO"].tolist()], color="#ea580c", display_range=(0.1, 1000), line_style=LineStyle.DASHED))
     elif "电阻率" in sheet_names:
-        df = pd.read_excel(path, sheet_name="电阻率")
+        df = pd.read_excel(excel_file, sheet_name="电阻率")
         curves.append(CurveData(name="RT", depth=df.iloc[:, 0].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df.iloc[:, 1].tolist()], color="#b91c1c", display_range=(0.1, 1000), line_style=LineStyle.SOLID))
         curves.append(CurveData(name="RXO", depth=df.iloc[:, 0].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df.iloc[:, 2].tolist()], color="#ea580c", display_range=(0.1, 1000), line_style=LineStyle.DASHED))
 
@@ -114,7 +114,7 @@ def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogD
     formation = []
     
     if "地层系统" in sheet_names:
-        df = pd.read_excel(path, sheet_name="地层系统")
+        df = pd.read_excel(excel_file, sheet_name="地层系统")
         cols = [str(c).strip() for c in df.columns]
         if "井号" in cols or (not df.empty and len(df.columns) > 0 and any(isinstance(val, str) and "井号" in val for val in df.iloc[:, 0].dropna())):
             all_rows = [df.columns.tolist()] + df.values.tolist()
@@ -140,29 +140,29 @@ def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogD
 
     lithology = []
     if "岩性剖面" in sheet_names:
-        lithology = read_interval_sheet(pd.read_excel(path, sheet_name="岩性剖面"))
+        lithology = read_interval_sheet(pd.read_excel(excel_file, sheet_name="岩性剖面"))
 
     lithology_desc = []
     if "岩性描述" in sheet_names:
-        lithology_desc = read_interval_sheet(pd.read_excel(path, sheet_name="岩性描述"))
+        lithology_desc = read_interval_sheet(pd.read_excel(excel_file, sheet_name="岩性描述"))
 
     micro_phase = []
     if "微相" in sheet_names:
-        micro_phase = read_interval_sheet(pd.read_excel(path, sheet_name="微相"))
+        micro_phase = read_interval_sheet(pd.read_excel(excel_file, sheet_name="微相"))
 
     sub_phase = []
     if "亚相" in sheet_names:
-        sub_phase = read_interval_sheet(pd.read_excel(path, sheet_name="亚相"))
+        sub_phase = read_interval_sheet(pd.read_excel(excel_file, sheet_name="亚相"))
 
     phase = []
     if "相" in sheet_names:
-        phase = read_interval_sheet(pd.read_excel(path, sheet_name="相"))
+        phase = read_interval_sheet(pd.read_excel(excel_file, sheet_name="相"))
 
     systems_tract = []
     sequence = []
     
     if "层序" in sheet_names:
-        df = pd.read_excel(path, sheet_name="层序")
+        df = pd.read_excel(excel_file, sheet_name="层序")
         cols = [str(c).strip() for c in df.columns]
         if "井号" in cols or (not df.empty and len(df.columns) > 0 and any(isinstance(val, str) and "井号" in val for val in df.iloc[:, 0].dropna())):
             all_rows = [df.columns.tolist()] + df.values.tolist()
@@ -284,7 +284,7 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
     for s in sheet_names:
         if "测井曲线" in s or "离散曲线" in s:
             try:
-                df = pd.read_excel(path, sheet_name=s)
+                df = pd.read_excel(excel_file, sheet_name=s)
                 if df.empty:
                     continue
                 cols = df.columns.tolist()
@@ -453,7 +453,7 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
             continue
             
         try:
-            df = pd.read_excel(path, sheet_name=s)
+            df = pd.read_excel(excel_file, sheet_name=s)
             if df.empty:
                 continue
                 
@@ -576,14 +576,48 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
     )
 
 def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path: Path | None = None) -> WellLogData:
+    import pickle
+    import hashlib
+    import os
+    
+    # Check cache first
+    cache_dir = path.parent / ".cache"
+    if not cache_dir.exists():
+        cache_dir.mkdir(exist_ok=True)
+        
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        mtime = 0
+        
+    file_hash = hashlib.md5(f"{path.name}_{mtime}_{well_name}".encode()).hexdigest()
+    cache_file = cache_dir / f"{file_hash}.pkl"
+    
+    if cache_file.exists():
+        try:
+            with open(cache_file, "rb") as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"Failed to load cache for {well_name}: {e}")
+            
+    # Not cached, perform full load
     import pandas as pd
     excel_file = pd.ExcelFile(path)
     sheet_names = excel_file.sheet_names
     
     if any("测井曲线" in s or "离散曲线" in s or "岩性道" in s or "地层单位" in s for s in sheet_names):
-        return load_well_log_converted(path, well_name)
+        data = load_well_log_converted(path, well_name)
     else:
-        return load_well_log_laolong1(path, well_name)
+        data = load_well_log_laolong1(path, well_name)
+        
+    # Save cache
+    try:
+        with open(cache_file, "wb") as f:
+            pickle.dump(data, f)
+    except Exception as e:
+        print(f"Failed to save cache for {well_name}: {e}")
+        
+    return data
 
 
 
