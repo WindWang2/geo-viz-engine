@@ -590,7 +590,23 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
     except OSError:
         mtime = 0
         
-    file_hash = hashlib.md5(f"{path.name}_{mtime}_{well_name}".encode()).hexdigest()
+    PARSER_VERSION = "v2"
+    xml_mtime = 0
+    if xml_path and xml_path.exists():
+        try:
+            xml_mtime = os.path.getmtime(xml_path)
+        except OSError:
+            pass
+    elif path.parent.glob("*.xml"):
+        # Fallback to checking any adjacent XML files for cache invalidation
+        try:
+            for x in path.parent.glob("*.xml"):
+                t = os.path.getmtime(x)
+                if t > xml_mtime: xml_mtime = t
+        except OSError:
+            pass
+
+    file_hash = hashlib.md5(f"{path.name}_{mtime}_{xml_mtime}_{well_name}_{PARSER_VERSION}".encode()).hexdigest()
     cache_file = cache_dir / f"{file_hash}.pkl"
     
     if cache_file.exists():

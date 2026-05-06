@@ -84,6 +84,9 @@ class CrossWellPage(QWidget):
         self.overlay.setGeometry(self.container.rect())
         self.location_map.move(10, self.height() - self.location_map.height() - 10)
         self.location_map.raise_()
+        
+        # ECharts has a 100ms resize debounce. Wait for it to finish, then refresh coords.
+        QTimer.singleShot(150, self._refresh_overlay_coords)
 
     def _auto_link(self):
         self.links = []
@@ -280,30 +283,61 @@ class CrossWellPage(QWidget):
         else:
             self.location_map.hide()
 
-    def _update_overlay_cache(self, engine, depth, y):
-        # Round to 2 decimal places to avoid float comparison issues
-        rounded_depth = round(float(depth), 2)
-        self.overlay.update_depth_cache(engine, rounded_depth, y)
+    def _update_overlay_cache_batch(self, engine, results_json):
+        try:
+            import json
+            results = json.loads(results_json)
+            for d_str, y in results.items():
+                self.overlay.update_depth_cache(engine, d_str, y)
+        except Exception:
+            pass
 
     def _refresh_overlay_coords(self):
         self.overlay.setGeometry(self.container.rect())
+        
+        # Batch collect depths per engine to reduce IPC overhead
+        engine_depths = {e: set() for e in self.engines}
+        
         for link in self.links:
             e1 = next((e for e in self.engines if e._well_name == link.source_well), None)
             e2 = next((e for e in self.engines if e._well_name == link.target_well), None)
             if not e1 or not e2: continue
             
-            p1_top, p1_bot = float(link.source_interval_id.split('_')[0]), float(link.source_interval_id.split('_')[1])
-            p2_top, p2_bot = float(link.target_interval_id.split('_')[0]), float(link.target_interval_id.split('_')[1])
+            p1_top, p1_bot = link.source_interval_id.split('_')[0], link.source_interval_id.split('_')[1]
+            p2_top, p2_bot = link.target_interval_id.split('_')[0], link.target_interval_id.split('_')[1]
             
-            # Execute synchronously-feeling callbacks to update depth cache
-            for engine, depth in [(e1, p1_top), (e1, p1_bot), (e2, p2_top), (e2, p2_bot)]:
-                rounded_depth = round(depth, 2)
-                offset = getattr(engine, '_flatten_offset', 0.0)
-                query_depth = depth + offset
-                engine.view.page().runJavaScript(
-                    f"window.geoviz ? window.geoviz.getDepthY({query_depth}) : 0",
-                    lambda y, e=engine, d=rounded_depth: self._update_overlay_cache(e, d, y)
-                )
+            engine_depths[e1].add(p1_top)
+            engine_depths[e1].add(p1_bot)
+            engine_depths[e2].add(p2_top)
+            engine_depths[e2].add(p2_bot)
+            
+        import json
+        for engine, depths in engine_depths.items():
+            if not depths: continue
+            offset = getattr(engine, '_flatten_offset', 0.0)
+            
+            # Map original string depths to offset float values for ECharts querying
+            query_map = {d_str: float(d_str) + offset for d_str in depths}
+            query_list = list(query_map.values())
+            
+            engine.view.page().runJavaScript(
+                f"window.geoviz ? window.geoviz.getBatchDepthY('{json.dumps(query_list)}') : '{{}}'",
+                lambda res, e=engine, qm=query_map: self._handle_batch_results(e, qm, res)
+            )
+
+    def _handle_batch_results(self, engine, query_map, results_json):
+        try:
+            import json
+            results = json.loads(results_json)
+            for original_str, query_float in query_map.items():
+                # ECharts returned mapping keyed by the queried float
+                # We store it back under the original exact string to avoid float mismatch
+                y = results.get(str(query_float), 0)
+                if y == 0 and float(query_float).is_integer():
+                     y = results.get(str(int(query_float)), 0)
+                self.overlay.update_depth_cache(engine, original_str, y)
+        except Exception:
+            pass
 
     def _on_flatten_changed(self):
         idx = self.flatten_combo.currentIndex()

@@ -38,8 +38,8 @@ class ConnectionOverlay(QWidget):
                 parts_t = link.target_interval_id.split('_')
                 if len(parts_s) < 2 or len(parts_t) < 2: continue
                 
-                s_top, s_bot = round(float(parts_s[0]), 2), round(float(parts_s[1]), 2)
-                t_top, t_bot = round(float(parts_t[0]), 2), round(float(parts_t[1]), 2)
+                s_top, s_bot = parts_s[0], parts_s[1]
+                t_top, t_bot = parts_t[0], parts_t[1]
 
                 # Get coordinates relative to the overlay parent (the container)
                 src_rect = src_engine.geometry()

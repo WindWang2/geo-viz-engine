@@ -442,6 +442,21 @@ export class WellLogChart {
         return coord ? coord[1] : 0;
     }
 
+    getBatchDepthY(depthsJson) {
+        if (!this.chart) return "{}";
+        try {
+            const depths = JSON.parse(depthsJson);
+            const result = {};
+            depths.forEach(d => {
+                const coord = this.chart.convertToPixel({ gridIndex: 0 }, [0, d]);
+                result[d] = coord ? coord[1] : 0;
+            });
+            return JSON.stringify(result);
+        } catch (e) {
+            return "{}";
+        }
+    }
+
     render(data) {
         if (!data) return;
         this._lastData = data;
