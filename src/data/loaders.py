@@ -465,6 +465,11 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
                 if not items:
                     continue
                     
+                # User constraint: In "文本道" sheets, ONLY read facies-related tracks
+                if "文本" in s:
+                    if not any(k in tn for k in ("相", "沉积")):
+                        continue
+                    
                 if "岩性道" in tn or "岩性" in tn or "岩性" in s:
                     lithology.extend(items)
                 elif "砂层" in tn or "砂层" in s:
