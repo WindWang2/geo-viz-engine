@@ -1,8 +1,8 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
-from src.data.models import IntervalItem
-from src.renderers.well_log.config import TrackConfig
+from geoviz_well_log.models import IntervalItem
+from geoviz_well_log.config import TrackConfig
 
 
 class TrackWidget(QWidget):

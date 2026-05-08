@@ -1,15 +1,12 @@
 from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QScrollArea, 
                              QPushButton, QMenu, QComboBox, QFileDialog, QMessageBox)
-from src.renderers.well_log.chart_engine import ChartEngine
+from geoviz_well_log import ChartEngine, SyncManager, ConnectionOverlay, LocationMapWidget
 from src.data.well_registry import get_well_data, list_wells
-from src.renderers.well_log.sync_manager import SyncManager
 import json
 from pathlib import Path
 from PySide6.QtCore import QEventLoop, QPointF, QTimer
 
 from src.data.models import CorrelationLink
-from src.renderers.well_log.connection_overlay import ConnectionOverlay
-from src.renderers.well_log.location_map import LocationMapWidget
 from src.data.loaders import load_well_coordinates
 
 class CrossWellPage(QWidget):
@@ -29,6 +26,11 @@ class CrossWellPage(QWidget):
         self.auto_link_btn.clicked.connect(self._auto_link)
         self.toolbar.addWidget(self.auto_link_btn)
 
+        self.manual_link_btn = QPushButton("手动关联 (0/2)")
+        self.manual_link_btn.setCheckable(True)
+        self.manual_link_btn.clicked.connect(self._toggle_manual_link)
+        self.toolbar.addWidget(self.manual_link_btn)
+
         self.flatten_combo = QComboBox()
         self.flatten_combo.addItem("按深度 0 对齐 (默认)", userData=None)
         self.flatten_combo.currentIndexChanged.connect(self._on_flatten_changed)
@@ -45,6 +47,8 @@ class CrossWellPage(QWidget):
 
         self.toolbar.addStretch()
         layout.addLayout(self.toolbar)
+        
+        self._manual_link_selection = []
         
         # Scroll Area
         self.scroll = QScrollArea()
@@ -265,11 +269,58 @@ class CrossWellPage(QWidget):
         
         engine.bridge.ready.connect(lambda: engine.render_data(json.dumps(payload)))
         engine.bridge.zoom_changed.connect(self._refresh_overlay_coords)
+        engine.bridge.interval_clicked.connect(lambda top, bot, e=engine: self._on_interval_clicked(e, top, bot))
         
         self.overlay.show()
         self.overlay.raise_()
         self._update_flatten_combo()
         self._update_location_map()
+
+    def _toggle_manual_link(self):
+        self._manual_link_selection = []
+        if self.manual_link_btn.isChecked():
+            self.manual_link_btn.setText("手动关联 (0/2) [请点击图层]")
+        else:
+            self.manual_link_btn.setText("手动关联 (0/2)")
+
+    def _on_interval_clicked(self, engine, top, bottom):
+        if not self.manual_link_btn.isChecked():
+            return
+            
+        data = self._well_data_cache.get(engine._well_name)
+        if not data: return
+        
+        # Determine actual absolute depth if there's an offset
+        offset = engine._flatten_offset
+        real_top = top - offset
+        real_bot = bottom - offset
+        
+        # Prevent picking from same well twice
+        if self._manual_link_selection and self._manual_link_selection[0][0] == engine._well_name:
+            return
+            
+        self._manual_link_selection.append((engine._well_name, real_top, real_bot))
+        self.manual_link_btn.setText(f"手动关联 ({len(self._manual_link_selection)}/2) [请点击另一口井]")
+        
+        if len(self._manual_link_selection) == 2:
+            w1, top1, bot1 = self._manual_link_selection[0]
+            w2, top2, bot2 = self._manual_link_selection[1]
+            
+            # create link
+            self.links.append(CorrelationLink(
+                source_well=w1, target_well=w2,
+                source_interval_id=f"{top1}_{bot1}_manual",
+                target_interval_id=f"{top2}_{bot2}_manual",
+                color="#f87171", # Red for manual
+                is_manual=True
+            ))
+            
+            self._manual_link_selection = []
+            self.manual_link_btn.setText("手动关联 (0/2)")
+            self.manual_link_btn.setChecked(False)
+            
+            self.overlay.set_links(self.links)
+            self._refresh_overlay_coords()
 
     def _update_location_map(self):
         selected_wells = []

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.renderers.well_log.config import (
+from geoviz_well_log.config import (
     ChartConfig, TrackConfig, TrackType,
     CurveTrackConfig, IntervalTrackConfig, SystemsTractTrackConfig,
     TextTrackConfig, PatternMapping,
@@ -41,6 +41,7 @@ FACIES_MAPPING = PatternMapping(
         "砂质陆棚": "sandy_shelf",
         "泥质陆棚": "muddy_shelf",
         "碎屑岩浅水陆棚": "clastic_shelf",
+        "碎屑岩浅水 陆棚": "clastic_shelf",
         "碎屑岩潮坪": "clastic_shelf",
         "混积浅水陆棚": "mixed",
         "混积潮坪": "mixed",
@@ -89,6 +90,7 @@ FACIES_MAPPING = PatternMapping(
         "混积潮坪": "#fde68a",
         "碎屑岩潮坪": "#fef08a",
         "碎屑岩浅水陆棚": "#86efac",
+        "碎屑岩浅水 陆棚": "#86efac",
         "混积浅水陆棚": "#bbf7d0",
         "潮坪相": "#fef9c3",
         "陆棚相": "#bfdbfe",

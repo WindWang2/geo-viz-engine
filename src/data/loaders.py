@@ -228,17 +228,27 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
     import numpy as np
     import math
 
-    def get_display_range(vals):
+    def get_display_range(vals, curve_name):
+        c_str = curve_name.upper()
+        if "GR" in c_str: return (0.0, 150.0)
+        if "AC" in c_str or "DT" in c_str: return (40.0, 140.0)
+        if "RT" in c_str or "RD" in c_str or "LLD" in c_str: return (0.1, 2000.0)
+        if "RXO" in c_str or "RS" in c_str or "LLS" in c_str: return (0.1, 2000.0)
+        if "SP" in c_str: return (-100.0, 50.0)
+        if "DEN" in c_str or "RHOB" in c_str: return (1.5, 3.0)
+        if "CNL" in c_str or "NPHI" in c_str: return (-15.0, 45.0)
+        if "CAL" in c_str: return (5.0, 15.0)
+
         valid = [v for v in vals if v == v and not math.isinf(v)]
         if not valid:
-            return (0, 100)
+            return (0.0, 100.0)
         mn, mx = min(valid), max(valid)
         if mn == mx:
-            mn -= 10
-            mx += 10
-        return (float(mn), float(mx))
+            mn -= 10.0
+            mx += 10.0
+        return (float(round(mn, 1)), float(round(mx, 1)))
 
-    from src.renderers.well_log.configs.laolong1 import LITHOLOGY_MAPPING, FACIES_MAPPING
+    from geoviz_well_log.configs.laolong1 import LITHOLOGY_MAPPING, FACIES_MAPPING
     
     def get_pattern_and_color(name, is_facies=False):
         if not name: return "", "#ffffff"
@@ -282,7 +292,8 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
 
     # 2. Process Curve Sheets
     for s in sheet_names:
-        if "测井曲线" in s or "离散曲线" in s:
+        is_curve_sheet = any(k in s for k in ("测井曲线", "离散曲线", "AC", "GR", "RT", "RXO", "POR", "电阻率", "其他曲线"))
+        if is_curve_sheet:
             try:
                 df = pd.read_excel(excel_file, sheet_name=s)
                 if df.empty:
@@ -343,12 +354,16 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
                     elif "RXO" in c_str.upper() or "RS" in c_str.upper() or "LLS" in c_str.upper(): color = "#ea580c"
                     elif "CAL" in c_str.upper(): color = "#d97706"
                     
-                    rng = get_display_range(vals)
+                    rng = get_display_range(vals, c_str)
                     curves.append(CurveData(
                         name=c_str, depth=depths, values=vals,
                         color=color, display_range=rng
                     ))
                     
+                    line_style = "solid"
+                    if any(k in c_str.upper() for k in ("RXO", "RS", "LLS", "AC", "DT")):
+                        line_style = "dashed"
+
                     curve_data = [[d, (v if not math.isnan(v) else None)] for d, v in zip(depths, vals)]
                     custom_tracks.append({
                         "type": "CurveTrack",
@@ -357,7 +372,7 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
                         "series": [{
                             "name": c_str,
                             "color": color,
-                            "lineStyle": "solid",
+                            "lineStyle": line_style,
                             "rangeLabel": f"{rng[0]} - {rng[1]}",
                             "data": curve_data
                         }]
@@ -449,7 +464,8 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
         return items_dict
 
     for s in sheet_names:
-        if "测井曲线" in s or "离散曲线" in s or "坐标" in s:
+        is_curve_sheet = any(k in s for k in ("测井曲线", "离散曲线", "AC", "GR", "RT", "RXO", "POR", "电阻率", "其他曲线"))
+        if is_curve_sheet or "坐标" in s:
             continue
             
         try:
@@ -564,6 +580,30 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
         all_depths = [iv.top for iv in intervals.lithology] + [iv.bottom for iv in intervals.lithology]
         
     top_d, bot_d = (min(all_depths), max(all_depths)) if all_depths else (0, 1000)
+
+    # Sort custom tracks based on Laolong's standard order
+    laolong_order = [
+        "系", "统", "组", "地层系统", 
+        "AC", "GR", 
+        "深度", 
+        "岩性", "岩性剖面", 
+        "RT", "RXO",
+        "岩性描述", 
+        "微相", "亚相", "沉积相", "相", 
+        "体系域", "层序"
+    ]
+    def get_track_order(track):
+        name = track["name"]
+        for i, ref in enumerate(laolong_order):
+            if name == ref:
+                return i
+            if ref in name:
+                if ref in ("AC", "GR", "RT", "RXO") and ref != name:
+                    continue
+                return i
+        return 999
+
+    custom_tracks.sort(key=lambda t: (get_track_order(t), t["name"]))
 
     return WellLogData(
         well_name=well_name or "NewWell",

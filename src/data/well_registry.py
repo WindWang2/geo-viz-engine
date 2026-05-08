@@ -43,7 +43,7 @@ _WELL_REGISTRY: dict[str, tuple] = _build_well_registry()
 
 def get_well_data(well_name: str):
     """Return (loader_fn, xls_path, config) or None."""
-    from src.renderers.well_log.configs.laolong1 import laolong1_config
+    from geoviz_well_log.configs.laolong1 import laolong1_config
 
     entry = _WELL_REGISTRY.get(well_name)
     if entry is None:

@@ -1,7 +1,7 @@
-from src.data.models import (
-    CurveData, IntervalItem, WellIntervals, WellLogData, WellCoordinates,
-    FaciesData,
+from geoviz_well_log.models import (
+    CurveData, IntervalItem, WellIntervals, WellLogData, FaciesData,
 )
+from src.data.models import WellCoordinates
 
 
 def test_curve_data_defaults():

@@ -4,9 +4,9 @@ from PySide6.QtGui import QFont, QPainter, QPen, QColor, QPolygonF
 from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QWidget
 
-from src.data.models import CurveData
-from src.renderers.well_log.config import CurveTrackConfig
-from src.renderers.well_log.tracks.base import TrackWidget
+from geoviz_well_log.models import CurveData
+from geoviz_well_log.config import CurveTrackConfig
+from geoviz_well_log.tracks.base import TrackWidget
 
 
 class CurveTrack(TrackWidget):

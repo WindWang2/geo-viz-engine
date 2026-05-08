@@ -1,6 +1,6 @@
 # ECharts OOP v2 Refactoring Task 2 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Enhance WellLogChart with graphic-based headers, fix potential JS errors in custom renderers, and implement a centered depth track.
 
@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `src-echarts/src/geoviz-echarts-wellog.js`
 
-- [ ] **Step 1: Update `BaseTrack` to include `getGraphicElements` and remove `getTitles`**
+- [x] **Step 1: Update `BaseTrack` to include `getGraphicElements` and remove `getTitles`**
 
 ```javascript
 // Add to BaseTrack
@@ -52,7 +52,7 @@ getGraphicElements(index, top, height, hasParent) {
 }
 ```
 
-- [ ] **Step 2: Update `CurveTrack` to override `getGraphicElements`**
+- [x] **Step 2: Update `CurveTrack` to override `getGraphicElements`**
 
 ```javascript
 // Add to CurveTrack
@@ -101,7 +101,7 @@ getGraphicElements(index, top, height, hasParent) {
 }
 ```
 
-- [ ] **Step 3: Update `WellLogChart._buildEChartsOption` to use `graphic` instead of `title`**
+- [x] **Step 3: Update `WellLogChart._buildEChartsOption` to use `graphic` instead of `title`**
 
 ```javascript
 // In _buildEChartsOption
@@ -161,7 +161,7 @@ return {
 **Files:**
 - Modify: `src-echarts/src/geoviz-echarts-wellog.js`
 
-- [ ] **Step 1: Add defensive checks to `LithologyTrack.getSeries` and `renderItem`**
+- [x] **Step 1: Add defensive checks to `LithologyTrack.getSeries` and `renderItem`**
 
 ```javascript
 getSeries(index) {
@@ -191,7 +191,7 @@ getSeries(index) {
 **Files:**
 - Modify: `src-echarts/src/geoviz-echarts-wellog.js`
 
-- [ ] **Step 1: Modify `DepthTrack` methods**
+- [x] **Step 1: Modify `DepthTrack` methods**
 
 ```javascript
 class DepthTrack extends BaseTrack {
@@ -231,7 +231,7 @@ class DepthTrack extends BaseTrack {
 
 ### Task 4: Verification and Commit
 
-- [ ] **Step 1: Commit changes**
+- [x] **Step 1: Commit changes**
 
 ```bash
 git add src-echarts/src/geoviz-echarts-wellog.js

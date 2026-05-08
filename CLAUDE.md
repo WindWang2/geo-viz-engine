@@ -34,22 +34,24 @@ source .venv/bin/activate && python scripts/build.py
 ```
 PySide6 (Qt for Python) — Single Process
 ├── MainWindow (app.py)
-│   ├── Sidebar (4 icon buttons)
-│   └── QStackedWidget (4 pages)
+│   ├── Sidebar (6 icon+text buttons)
+│   └── QStackedWidget (6 pages)
 │       ├── MapPage        → QWebEngineView + MapLibre GL
-│       ├── WellLogPage    → pyqtgraph + QGraphicsScene
+│       ├── WellLogPage    → ECharts + WebEngine
+│       ├── CrossWellPage  → Multi-ECharts + Correlation Polygons
 │       ├── SeismicPage    → PyVista + VTK
-│       └── DataPage       → QTableWidget + file dialogs
-├── data/ (loaders, models, cache)
-└── renderers/
-    ├── well_log/ (curve, lithology, facies, depth, chart_engine)
-    ├── map_renderer.py
-    └── seismic_renderer.py
+│       ├── DataPage       → QTableWidget + file dialogs
+│       └── ToolsPage      → Standalone utilities (e.g. XML Converter)
+├── packages/
+│   └── geoviz-well-log/   → Standalone well log rendering engine (ECharts-based)
+├── src/data/              → (loaders, models, cache)
+└── src/pages/             → (Page UI implementations)
 ```
 
 - **No IPC, no HTTP, no token auth** — all data flows through direct Python function calls within a single process.
+- **Standalone Package**: The `geoviz-well-log` package is a decoupled rendering engine used by both `WellLogPage` and `CrossWellPage`.
 - **Data layer**: `src/data/loaders.py` handles lasio (LAS), segyio (SEGY), openpyxl (Excel), and JSON loading. `src/data/models.py` defines Pydantic models. `src/data/cache.py` provides in-memory caching.
-- **Well log rendering**: Hybrid approach — pyqtgraph for curve tracks (GPU-accelerated), QGraphicsScene + SVG for lithology and facies tracks. `chart_engine.py` orchestrates multi-track layout and scroll sync.
+- **Well log rendering**: Modular ECharts-based engine (packaged in `packages/geoviz_well_log`) renders both curves (SVG) and interval tracks (Lithology/Facies). Orchestrated by `SyncManager` for multi-well lock-step scroll/zoom.
 - **Map**: QWebEngineView embeds MapLibre GL JS. Well click events relay from JS → Qt WebChannel → Python.
 - **Seismic**: PyVista Qt interactor renders VTK volumes and slices. Supports SEGY loading via segyio.
 

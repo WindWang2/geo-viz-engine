@@ -2,9 +2,9 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPolygonF
 from PySide6.QtWidgets import QWidget
 
-from src.data.models import IntervalItem
-from src.renderers.well_log.config import SystemsTractTrackConfig
-from src.renderers.well_log.tracks.base import DepthMappedContent, TrackWidget
+from geoviz_well_log.models import IntervalItem
+from geoviz_well_log.config import SystemsTractTrackConfig
+from geoviz_well_log.tracks.base import DepthMappedContent, TrackWidget
 
 
 class _SystemsTractContent(DepthMappedContent):

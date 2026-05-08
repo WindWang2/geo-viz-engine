@@ -1,6 +1,6 @@
 # Cross-Well Facies Correlation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement a standalone "Cross-Well" tab for correlating sedimentary facies across multiple wells with smooth vertical synchronization and interactive linking.
 
@@ -17,7 +17,7 @@
 - Modify: `src/app.py`
 - Create: `src/resources/icons/cross_well.svg`
 
-- [ ] **Step 1: Define the CorrelationLink model in `src/data/models.py`**
+- [x] **Step 1: Define the CorrelationLink model in `src/data/models.py`**
 
 ```python
 class CorrelationLink(BaseModel):
@@ -29,7 +29,7 @@ class CorrelationLink(BaseModel):
     is_manual: bool = False
 ```
 
-- [ ] **Step 2: Add sidebar icon `src/resources/icons/cross_well.svg`**
+- [x] **Step 2: Add sidebar icon `src/resources/icons/cross_well.svg`**
 
 ```xml
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -39,7 +39,7 @@ class CorrelationLink(BaseModel):
 </svg>
 ```
 
-- [ ] **Step 3: Register the new page in `src/app.py`**
+- [x] **Step 3: Register the new page in `src/app.py`**
 
 ```python
 # Update PAGES list
@@ -63,7 +63,7 @@ page_widgets = [
 ]
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 ```bash
 git add src/data/models.py src/app.py src/resources/icons/cross_well.svg
 git commit -m "feat(nav): add Cross-Well tab and data models"
@@ -76,7 +76,7 @@ git commit -m "feat(nav): add Cross-Well tab and data models"
 **Files:**
 - Create: `src/pages/cross_well_page.py`
 
-- [ ] **Step 1: Create a basic `CrossWellPage` with well loading capabilities**
+- [x] **Step 1: Create a basic `CrossWellPage` with well loading capabilities**
 
 ```python
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QScrollArea, QPushButton, QLabel
@@ -113,7 +113,7 @@ class CrossWellPage(QWidget):
         # Placeholder data load...
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 ```bash
 git add src/pages/cross_well_page.py
 git commit -m "feat(ui): implement basic Cross-Well page container"
@@ -127,7 +127,7 @@ git commit -m "feat(ui): implement basic Cross-Well page container"
 - Create: `src/renderers/well_log/sync_manager.py`
 - Modify: `src/pages/cross_well_page.py`
 
-- [ ] **Step 1: Implement `SyncManager` to bridge ECharts dataZoom events**
+- [x] **Step 1: Implement `SyncManager` to bridge ECharts dataZoom events**
 
 ```python
 from PySide6.QtCore import QObject, Slot
@@ -147,9 +147,9 @@ class SyncManager(QObject):
         self._is_syncing = False
 ```
 
-- [ ] **Step 2: Connect ECharts events to SyncManager in `CrossWellPage`**
+- [x] **Step 2: Connect ECharts events to SyncManager in `CrossWellPage`**
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 ```bash
 git add src/renderers/well_log/sync_manager.py src/pages/cross_well_page.py
 git commit -m "feat(sync): implement vertical viewport synchronization"
@@ -163,7 +163,7 @@ git commit -m "feat(sync): implement vertical viewport synchronization"
 - Create: `src/renderers/well_log/connection_overlay.py`
 - Modify: `src/pages/cross_well_page.py`
 
-- [ ] **Step 1: Implement `ConnectionOverlay` with QPainter**
+- [x] **Step 1: Implement `ConnectionOverlay` with QPainter**
 
 ```python
 from PySide6.QtWidgets import QWidget
@@ -183,9 +183,9 @@ class ConnectionOverlay(QWidget):
         # and draw polygons between adjacent engines.
 ```
 
-- [ ] **Step 2: Update overlay on scroll/zoom events**
+- [x] **Step 2: Update overlay on scroll/zoom events**
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 ```bash
 git add src/renderers/well_log/connection_overlay.py
 git commit -m "feat(render): implement connection overlay for correlation polygons"
@@ -199,9 +199,9 @@ git commit -m "feat(render): implement connection overlay for correlation polygo
 - Modify: `src/pages/cross_well_page.py`
 - Modify: `src/renderers/well_log/connection_overlay.py`
 
-- [ ] **Step 1: Implement "Auto-Suggest" algorithm for facies linking**
-- [ ] **Step 2: Implement manual "Click to Link" mode**
-- [ ] **Step 3: Verify and Commit**
+- [x] **Step 1: Implement "Auto-Suggest" algorithm for facies linking**
+- [x] **Step 2: Implement manual "Click to Link" mode**
+- [x] **Step 3: Verify and Commit**
 ```bash
 git add .
 git commit -m "feat(correlation): add auto-suggest and manual linking interaction"

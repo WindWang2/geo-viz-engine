@@ -1,6 +1,6 @@
 # Stratigraphic Flattening Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement a "Flatten by Marker" feature in the Cross-Well tool to align multiple wells perfectly along a chosen stratigraphic sequence or member by applying dynamic depth offsets.
 
@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `src/pages/cross_well_page.py`
 
-- [ ] **Step 1: Add a ComboBox to the CrossWellPage toolbar**
+- [x] **Step 1: Add a ComboBox to the CrossWellPage toolbar**
 
 ```python
 from PySide6.QtWidgets import QComboBox
@@ -28,7 +28,7 @@ self.toolbar.addWidget(QLabel("对齐层位:"))
 self.toolbar.addWidget(self.flatten_combo)
 ```
 
-- [ ] **Step 2: Implement marker harvesting when wells are added**
+- [x] **Step 2: Implement marker harvesting when wells are added**
 
 ```python
 # In CrossWellPage (add a new method)
@@ -61,7 +61,7 @@ def _update_flatten_combo(self):
 # self._update_flatten_combo()
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 ```bash
 git add src/pages/cross_well_page.py
 git commit -m "feat(cross-well): add marker selection combobox for flattening"
@@ -75,7 +75,7 @@ git commit -m "feat(cross-well): add marker selection combobox for flattening"
 - Modify: `src/pages/cross_well_page.py`
 - Modify: `src-echarts/src/geoviz-echarts-wellog.js`
 
-- [ ] **Step 1: Update ECharts renderer to support `depthOffset`**
+- [x] **Step 1: Update ECharts renderer to support `depthOffset`**
 
 ```javascript
 // In src-echarts/src/geoviz-echarts-wellog.js, around line 550, update _doRender
@@ -105,7 +105,7 @@ function getYAxis(commonY) {
 ```
 *(Wait, shifting data in JS is brittle. It's safer to shift data in Python before sending the payload!)*
 
-- [ ] **Step 2: Implement Depth Shifting in Python `_on_flatten_changed`**
+- [x] **Step 2: Implement Depth Shifting in Python `_on_flatten_changed`**
 
 ```python
 # In src/pages/cross_well_page.py
@@ -135,7 +135,7 @@ def _on_flatten_changed(self):
         # (See next step for the unified payload builder)
 ```
 
-- [ ] **Step 3: Extract a `_build_payload(data, offset)` method**
+- [x] **Step 3: Extract a `_build_payload(data, offset)` method**
 
 ```python
 # In src/pages/cross_well_page.py
@@ -202,7 +202,7 @@ def _build_engine_payload(self, data, offset=0.0):
     }
 ```
 
-- [ ] **Step 4: Call `_build_payload` in `add_well` and `_on_flatten_changed`**
+- [x] **Step 4: Call `_build_payload` in `add_well` and `_on_flatten_changed`**
 
 ```python
 # Replace the inline track building in add_well with:
@@ -229,7 +229,7 @@ def _on_flatten_changed(self):
         self._auto_link()
 ```
 
-- [ ] **Step 5: Modify `DepthTrack` in ECharts to format absolute labels**
+- [x] **Step 5: Modify `DepthTrack` in ECharts to format absolute labels**
 
 ```javascript
 // In src-echarts/src/geoviz-echarts-wellog.js -> DepthTrack.getYAxis
@@ -254,7 +254,7 @@ class DepthTrack extends Track {
 let absoluteDepth = depth - (t.depthOffset || 0); // Need to adjust the exactMouseDepth reporting too!
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 ```bash
 git add src/pages/cross_well_page.py src-echarts/src/geoviz-echarts-wellog.js
 git commit -m "feat(cross-well): implement python-side depth shifting for stratigraphic flattening"

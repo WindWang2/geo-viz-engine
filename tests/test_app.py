@@ -14,16 +14,16 @@ def test_main_window_title(window):
     assert window.windowTitle() == "GeoViz Engine"
 
 
-def test_sidebar_has_four_buttons(window):
+def test_sidebar_has_six_buttons(window):
     buttons = window.sidebar.findChildren(object)
     nav_buttons = [b for b in buttons if hasattr(b, "property") and b.property("nav_key") is not None]
-    assert len(nav_buttons) == 4
+    assert len(nav_buttons) == 6
 
 
-def test_stacked_widget_has_four_pages(window):
+def test_stacked_widget_has_six_pages(window):
     stack = window.findChild(QStackedWidget)
     assert stack is not None
-    assert stack.count() == 4
+    assert stack.count() == 6
 
 
 def test_sidebar_click_switches_page(window, qtbot):

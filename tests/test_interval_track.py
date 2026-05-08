@@ -1,6 +1,6 @@
-from src.data.models import IntervalItem
-from src.renderers.well_log.config import IntervalTrackConfig, TrackType, PatternMapping
-from src.renderers.well_log.tracks.interval_track import IntervalTrack, _lookup_color, _lookup_pattern
+from geoviz_well_log.models import IntervalItem
+from geoviz_well_log.config import IntervalTrackConfig, TrackType, PatternMapping
+from geoviz_well_log.tracks.interval_track import IntervalTrack, _lookup_color, _lookup_pattern
 
 
 def test_interval_track_renders(qtbot):
@@ -35,8 +35,8 @@ def test_interval_track_color_lookup():
 
 
 def test_interval_track_dynamic_density(qtbot):
-    from src.data.models import IntervalItem
-    from src.renderers.well_log.config import IntervalTrackConfig, TrackType, PatternMapping
+    from geoviz_well_log.models import IntervalItem
+    from geoviz_well_log.config import IntervalTrackConfig, TrackType, PatternMapping
 
     intervals = [
         IntervalItem(top=0, bottom=50, name="砂岩"),

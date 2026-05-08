@@ -10,6 +10,12 @@ supported-markers = [
     "sys_platform == 'darwin'",
 ]
 
+[manifest]
+members = [
+    "geo-viz-engine",
+    "geoviz-well-log",
+]
+
 [[package]]
 name = "altgraph"
 version = "0.17.5"
@@ -167,6 +173,7 @@ name = "geo-viz-engine"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "geoviz-well-log", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "lasio", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "numpy", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "openpyxl", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
@@ -174,6 +181,7 @@ dependencies = [
     { name = "pydantic", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pyqtgraph", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pyside6", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "pytest-qt", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "python-calamine", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pyvista", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "segyio", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
@@ -189,6 +197,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "geoviz-well-log", editable = "packages/geoviz_well_log" },
     { name = "lasio", specifier = ">=0.14" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "openpyxl", specifier = ">=3.1" },
@@ -198,6 +207,7 @@ requires-dist = [
     { name = "pyqtgraph", specifier = ">=0.13" },
     { name = "pyside6", specifier = ">=6.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-qt", specifier = ">=4.5.0" },
     { name = "pytest-qt", marker = "extra == 'dev'", specifier = ">=4.4" },
     { name = "python-calamine", specifier = ">=0.2.0" },
     { name = "pyvista", specifier = ">=0.43" },
@@ -205,6 +215,23 @@ requires-dist = [
     { name = "xlrd", specifier = ">=2.0" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "geoviz-well-log"
+version = "0.1.0"
+source = { editable = "packages/geoviz_well_log" }
+dependencies = [
+    { name = "pydantic", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "pyqtgraph", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "pyside6", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic" },
+    { name = "pyqtgraph" },
+    { name = "pyside6" },
+]
 
 [[package]]
 name = "idna"

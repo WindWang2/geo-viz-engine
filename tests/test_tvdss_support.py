@@ -1,4 +1,4 @@
-from src.data.models import WellLogData
+from geoviz_well_log.models import WellLogData
 import pandas as pd
 import pytest
 from pathlib import Path

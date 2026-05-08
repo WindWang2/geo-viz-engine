@@ -18,27 +18,36 @@ PAGES = [
     ("cross_well", "src/resources/icons/cross_well.svg", "连井对比"),
     ("seismic", "src/resources/icons/seismic.svg", "地震3D"),
     ("data", "src/resources/icons/data.svg", "数据管理"),
+    ("tools", "src/resources/icons/tools.svg", "工具箱"),
 ]
 
 
 class SidebarButton(QPushButton):
     def __init__(self, icon_path: str, tooltip: str, nav_key: str):
         super().__init__()
+        self.setText(" " + tooltip)  # Space for visual padding between icon and text
         self.nav_key = nav_key
         self.setProperty("nav_key", nav_key)
-        self.setFixedSize(48, 48)
+        self.setFixedHeight(48)
         self.setToolTip(tooltip)
         self.setCheckable(True)
         self.setIcon(QIcon(icon_path))
-        self.setIconSize(QSize(24, 24))
+        self.setIconSize(QSize(20, 20))
         self.setStyleSheet("""
             SidebarButton {
                 border: none;
                 border-radius: 8px;
                 background: transparent;
+                text-align: left;
+                padding-left: 12px;
+                font-size: 14px;
+                font-weight: 500;
+                color: #4a5568;
             }
             SidebarButton:checked {
                 background: #edf2f7;
+                color: #2b6cb0;
+                font-weight: bold;
             }
             SidebarButton:hover {
                 background: #e2e8f0;
@@ -61,11 +70,11 @@ class MainWindow(QWidget):
 
         # Sidebar
         self.sidebar = QWidget()
-        self.sidebar.setFixedWidth(56)
-        self.sidebar.setStyleSheet("background: #f7fafc;")
+        self.sidebar.setFixedWidth(140)
+        self.sidebar.setStyleSheet("background: #f7fafc; border-right: 1px solid #e2e8f0;")
         sidebar_layout = QVBoxLayout(self.sidebar)
-        sidebar_layout.setContentsMargins(4, 8, 4, 8)
-        sidebar_layout.setSpacing(4)
+        sidebar_layout.setContentsMargins(8, 12, 8, 12)
+        sidebar_layout.setSpacing(6)
 
         self.sidebar_buttons: list[SidebarButton] = []
         for i, (key, icon, tooltip) in enumerate(PAGES):
@@ -113,12 +122,16 @@ class MainWindow(QWidget):
         from src.pages.data_page import DataPage
         self.data_page = DataPage(self.cache)
 
+        from src.pages.tools_page import ToolsPage
+        self.tools_page = ToolsPage()
+
         page_widgets = [
             map_widget,                            # map
             self.well_log_page,                   # well log
             self.cross_well_page,                # cross well
             seismic_widget,                       # seismic
             self.data_page,                      # data
+            self.tools_page,                     # tools
         ]
         for pw in page_widgets:
             if isinstance(pw, QLabel):

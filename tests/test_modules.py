@@ -1,5 +1,5 @@
 # tests/test_modules.py
-from src.renderers.well_log.modules import CompositeModule, LayoutCoordinator
+from geoviz_well_log.modules import CompositeModule, LayoutCoordinator
 from unittest.mock import MagicMock, patch
 import pytest
 

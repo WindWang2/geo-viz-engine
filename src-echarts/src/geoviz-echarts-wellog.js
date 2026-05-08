@@ -420,6 +420,17 @@ export class WellLogChart {
             }
         });
 
+        // Click support for manual linking
+        this.chart.on('click', (params) => {
+            if (window.bridge && window.bridge.on_click) {
+                if (params.seriesType === 'custom' && params.data && params.data.length >= 3) {
+                    const top = params.data[1];
+                    const bottom = params.data[2];
+                    window.bridge.on_click(top, bottom);
+                }
+            }
+        });
+
         return dom;
     }
 

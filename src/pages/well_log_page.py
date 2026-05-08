@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QFileDialog, QGroupBox, QListWidget, QAbstractItemView, QListWidgetItem
 )
 from src.data.well_registry import get_well_data
-from src.renderers.well_log.chart_engine import ChartEngine
+from geoviz_well_log import ChartEngine
 
 
 class WellLogPage(QWidget):
@@ -167,6 +167,18 @@ class WellLogPage(QWidget):
         if hasattr(data, "custom_tracks") and data.custom_tracks:
             self._track_pool = {t["name"]: t for t in data.custom_tracks}
 
+            # Laolong default active tracks
+            default_active = {
+                "系", "统", "组", "地层系统", 
+                "AC", "GR", 
+                "深度", 
+                "岩性", "岩性剖面", 
+                "RT", "RXO",
+                "岩性描述", 
+                "微相", "亚相", "相", 
+                "体系域", "层序"
+            }
+
             # Populate ListWidget for track ordering
             self._track_list_widget.blockSignals(True)
             self._track_list_widget.clear()
@@ -175,7 +187,16 @@ class WellLogPage(QWidget):
                 if t.get("type") == "CurveTrack":
                     item.setIcon(QIcon("src/resources/icons/curve.svg"))
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(Qt.CheckState.Checked)
+                
+                # Set checked state based on default active list
+                name = t["name"]
+                is_active = False
+                for ref in default_active:
+                    if name == ref or (ref in name and ref not in ("AC", "GR", "RT", "RXO")):
+                        is_active = True
+                        break
+                
+                item.setCheckState(Qt.CheckState.Checked if is_active else Qt.CheckState.Unchecked)
                 self._track_list_widget.addItem(item)
             self._track_list_widget.blockSignals(False)
 

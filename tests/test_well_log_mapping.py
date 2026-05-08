@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from PySide6.QtWidgets import QWidget
 from src.pages.well_log_page import WellLogPage
-from src.data.models import WellLogData, WellIntervals, IntervalItem, CurveData, FaciesData
+from geoviz_well_log.models import WellLogData, WellIntervals, IntervalItem, CurveData, FaciesData
 
 class MockChartEngineWidget(QWidget):
     def __init__(self, parent=None):
@@ -81,7 +81,7 @@ def test_well_log_page_mapping(qtbot, mock_well_data, monkeypatch):
     assert any(any(s["name"] == "RT" for s in ct["series"]) for ct in curve_tracks)
 
 def test_systems_tract_shapes(qtbot, monkeypatch):
-    from src.data.models import WellLogData, WellIntervals, IntervalItem
+    from geoviz_well_log.models import WellLogData, WellIntervals, IntervalItem
     intervals = WellIntervals(
         systems_tract=[
             IntervalItem(top=1000, bottom=1050, name="TST1"),
@@ -113,7 +113,7 @@ def test_systems_tract_shapes(qtbot, monkeypatch):
     assert hst_item["shape"] == "triangle-down"
 
 def test_stratigraphy_vertical_text(qtbot, monkeypatch):
-    from src.data.models import WellLogData, WellIntervals, IntervalItem
+    from geoviz_well_log.models import WellLogData, WellIntervals, IntervalItem
     intervals = WellIntervals(
         system=[IntervalItem(top=1000, bottom=1100, name="系")]
     )

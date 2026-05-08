@@ -3,8 +3,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QPainter, QPen, QColor
 from PySide6.QtWidgets import QWidget
 
-from src.renderers.well_log.config import TrackConfig
-from src.renderers.well_log.tracks.base import TrackWidget
+from geoviz_well_log.config import TrackConfig
+from geoviz_well_log.tracks.base import TrackWidget
 
 
 class DepthTrack(TrackWidget):

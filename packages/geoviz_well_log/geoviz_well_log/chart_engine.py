@@ -13,6 +13,8 @@ class Bridge(QObject):
     svg_received = Signal(str)
     # 接收深度缩放变化
     zoom_changed = Signal(float, float)
+    # 接收点击区间事件
+    interval_clicked = Signal(float, float)
 
     @Slot()
     def web_ready(self):
@@ -21,6 +23,10 @@ class Bridge(QObject):
     @Slot(float, float)
     def on_zoom(self, start, end):
         self.zoom_changed.emit(start, end)
+
+    @Slot(float, float)
+    def on_click(self, top, bottom):
+        self.interval_clicked.emit(top, bottom)
 
     @Slot(str)
     def receive_svg(self, svg_str: str):
@@ -58,8 +64,10 @@ class ChartEngine(QWidget):
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         
         # 加载本地打包好的页面
-        # 注意: 构建产物在 src-echarts/dist 中
-        dist_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../src-echarts/dist/index.html"))
+        # 路径现在指向包内部的 web_dist 目录
+        base_dir = os.path.dirname(__file__)
+        dist_path = os.path.abspath(os.path.join(base_dir, "web_dist", "index.html"))
+        
         if os.path.exists(dist_path):
             self.view.load(f"file://{dist_path}")
         else:
@@ -67,7 +75,8 @@ class ChartEngine(QWidget):
 
     def _build_patterns_json(self) -> str:
         """Build a JSON object mapping pattern IDs to data URLs."""
-        patterns_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../src/patterns"))
+        base_dir = os.path.dirname(__file__)
+        patterns_dir = os.path.abspath(os.path.join(base_dir, "assets", "patterns"))
         patterns = {}
         if not os.path.exists(patterns_dir):
             return "{}"
@@ -109,6 +118,14 @@ class ChartEngine(QWidget):
         self._last_data_json = well_data_json
         # 调用 JS 函数 render()
         self._safe_run_js(f"window.geoviz.render({well_data_json});")
+
+    def render_well_log_data(self, data, offset: float = 0.0):
+        """
+        Convenience method to render from a WellLogData model directly.
+        """
+        from .utils import build_default_payload
+        payload = build_default_payload(data, offset)
+        self.render_data(json.dumps(payload))
         
     def export_svg(self):
         # 调用 JS，然后把返回值发给 Python

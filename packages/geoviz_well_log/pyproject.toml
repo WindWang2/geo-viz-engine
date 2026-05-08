@@ -1,0 +1,27 @@
+[project]
+name = "geoviz-well-log"
+version = "0.1.0"
+description = "Modular well log visualization package"
+authors = [{ name = "Kevin", email = "kevin@example.com" }]
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6",
+    "pyqtgraph",
+    "pydantic"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["geoviz_well_log"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/geoviz_well_log",
+]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"geoviz_well_log/web_dist" = "geoviz_well_log/web_dist"
+"geoviz_well_log/assets" = "geoviz_well_log/assets"

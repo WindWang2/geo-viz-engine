@@ -5,9 +5,9 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QWidget
 
-from src.data.models import IntervalItem
-from src.renderers.well_log.config import IntervalTrackConfig, PatternMapping
-from src.renderers.well_log.tracks.base import DepthMappedContent, TrackWidget
+from geoviz_well_log.models import IntervalItem
+from geoviz_well_log.config import IntervalTrackConfig, PatternMapping
+from geoviz_well_log.tracks.base import DepthMappedContent, TrackWidget
 
 
 def _lookup_color(name: str, mapping: PatternMapping) -> str:

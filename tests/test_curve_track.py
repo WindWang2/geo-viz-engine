@@ -1,6 +1,6 @@
-from src.data.models import CurveData
-from src.renderers.well_log.config import CurveTrackConfig, TrackType
-from src.renderers.well_log.tracks.curve_track import CurveTrack
+from geoviz_well_log.models import CurveData
+from geoviz_well_log.config import CurveTrackConfig, TrackType
+from geoviz_well_log.tracks.curve_track import CurveTrack
 
 
 def test_curve_track_single_curve(qtbot):

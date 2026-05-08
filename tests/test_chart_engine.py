@@ -1,6 +1,6 @@
 import pytest
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from src.renderers.well_log.chart_engine import ChartEngine, Bridge
+from geoviz_well_log.chart_engine import ChartEngine, Bridge
 
 def test_chart_engine_initializes(qtbot):
     engine = ChartEngine()
