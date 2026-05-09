@@ -248,6 +248,7 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
             mx += 10.0
         return (float(round(mn, 1)), float(round(mx, 1)))
 
+    from src.utils.constants import PATTERN_MAP
     from geoviz_well_log.configs.laolong1 import LITHOLOGY_MAPPING, FACIES_MAPPING
     
     def get_pattern_and_color(name, is_facies=False):
@@ -255,9 +256,9 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
         mapping = FACIES_MAPPING if is_facies else LITHOLOGY_MAPPING
         
         pat = ""
-        for k in sorted(mapping.patterns.keys(), key=len, reverse=True):
+        for k in sorted(PATTERN_MAP.keys(), key=len, reverse=True):
             if k in name:
-                pat = mapping.patterns[k]
+                pat = PATTERN_MAP[k]
                 break
                 
         col = "#ffffff"

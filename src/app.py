@@ -14,6 +14,7 @@ from src.data.cache import DataCache
 
 PAGES = [
     ("map", "src/resources/icons/map.svg", "地图总览"),
+    ("paleo_map", "src/resources/icons/map.svg", "古地理图"),
     ("well_log", "src/resources/icons/well_log.svg", "井剖面"),
     ("cross_well", "src/resources/icons/cross_well.svg", "连井对比"),
     ("seismic", "src/resources/icons/seismic.svg", "地震3D"),
@@ -108,6 +109,15 @@ class MainWindow(QWidget):
         map_widget = self.map_page if self.map_page else QLabel("地图总览 (WebEngine unavailable)")
 
         try:
+            from src.pages.paleo_map_page import PaleoMapPage
+            self.paleo_map_page = PaleoMapPage()
+            paleo_map_widget = self.paleo_map_page
+        except Exception as e:
+            paleo_map_widget = QLabel(f"古地理图 (unavailable: {e})")
+            paleo_map_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            paleo_map_widget.setStyleSheet("font-size: 24px; color: #a0aec0;")
+
+        try:
             from src.renderers.seismic_renderer import _check_pyvista_qt_available
             if not _check_pyvista_qt_available():
                 raise RuntimeError("pyvistaqt QtInteractor unavailable (no OpenGL)")
@@ -127,6 +137,7 @@ class MainWindow(QWidget):
 
         page_widgets = [
             map_widget,                            # map
+            paleo_map_widget,                      # paleo map
             self.well_log_page,                   # well log
             self.cross_well_page,                # cross well
             seismic_widget,                       # seismic

@@ -8,6 +8,7 @@ from PySide6.QtCore import QEventLoop, QPointF, QTimer
 
 from src.data.models import CorrelationLink
 from src.data.loaders import load_well_coordinates
+from src.utils.constants import PATTERN_MAP
 
 class CrossWellPage(QWidget):
     def __init__(self):
@@ -203,14 +204,10 @@ class CrossWellPage(QWidget):
         tracks.append({"type": "DepthTrack", "name": "深度", "width": 6, "depthOffset": offset})
 
         # 4. Lithology with Facies background colors
-        PATTERN_MAP = {
-            "砂岩": "sandstone", "泥岩": "mudstone", "灰岩": "limestone",
-            "白云岩": "dolomite", "页岩": "shale", "粉砂岩": "siltstone"
-        }
         def get_pattern(name):
             if not name: return ""
-            for k, v in PATTERN_MAP.items():
-                if k in name: return v
+            for k in sorted(PATTERN_MAP.keys(), key=len, reverse=True):
+                if k in name: return PATTERN_MAP[k]
             return ""
 
         litho_track_data = []

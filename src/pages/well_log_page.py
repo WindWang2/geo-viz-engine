@@ -7,33 +7,11 @@ from PySide6.QtWidgets import (
     QStackedWidget, QFileDialog, QGroupBox, QListWidget, QAbstractItemView, QListWidgetItem
 )
 from src.data.well_registry import get_well_data
+from src.utils.constants import PATTERN_MAP
 from geoviz_well_log import ChartEngine
 
 
 class WellLogPage(QWidget):
-    PATTERN_MAP = {
-        "砂岩": "sandstone",
-        "泥岩": "mudstone",
-        "灰岩": "limestone",
-        "白云岩": "dolomite",
-        "页岩": "shale",
-        "粉砂岩": "siltstone",
-        "砂坪": "sand-flat",
-        "泥坪": "mud-flat",
-        "云质坪": "dolomitic-flat",
-        "混积潮坪": "dolomitic-flat",
-        "碎屑岩潮坪": "tidal-flat",
-        "潮坪": "tidal-flat",
-        "泥质陆棚": "muddy-shelf",
-        "砂质陆棚": "sandy-shelf",
-        "砂泥质陆棚": "sand-mud-shelf",
-        "碎屑岩浅水陆棚": "clastic-shelf",
-        "混积浅水陆棚": "mixed",
-        "陆棚": "shelf",
-        "混积": "mixed",
-        "三角洲": "delta",
-    }
-
     def __init__(self):
         super().__init__()
         outer = QVBoxLayout(self)
@@ -218,8 +196,8 @@ class WellLogPage(QWidget):
 
         def get_pattern_id(name):
             if not name: return ""
-            for k in sorted(self.PATTERN_MAP.keys(), key=len, reverse=True):
-                if k in name: return self.PATTERN_MAP[k]
+            for k in sorted(PATTERN_MAP.keys(), key=len, reverse=True):
+                if k in name: return PATTERN_MAP[k]
             return ""
 
         def create_curve_track(curve_names, label, width=15):
