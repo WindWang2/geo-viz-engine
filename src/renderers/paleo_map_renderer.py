@@ -4,8 +4,8 @@ import os
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QUrl, QByteArray, QBuffer, QIODevice
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings, QWebEngineUrlSchemeHandler, QWebEngineProfile
+from PySide6.QtCore import QUrl
+from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from src.utils.constants import PATTERN_MAP
@@ -118,43 +118,11 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
 </html>"""
 
 
-class LocalFileSchemeHandler(QWebEngineUrlSchemeHandler):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-    def requestStarted(self, job):
-        url = job.requestUrl()
-        # Ensure it's our scheme and has a path
-        if url.scheme() != "localfile":
-            job.fail(QWebEngineUrlRequestJob.Error.UrlNotFound)
-            return
-
-        file_path = url.path()
-        if not os.path.exists(file_path):
-            job.fail(QWebEngineUrlRequestJob.Error.UrlNotFound)
-            return
-
-        # QWebEngineUrlRequestJob takes ownership of the QIODevice, so we create a QBuffer
-        try:
-            with open(file_path, "rb") as f:
-                data = f.read()
-            buf = QBuffer(parent=self)
-            buf.setData(data)
-            buf.open(QIODevice.OpenModeFlag.ReadOnly)
-            job.reply(b"application/json", buf)
-        except Exception:
-            job.fail(QWebEngineUrlRequestJob.Error.RequestFailed)
-
-
 class PaleoMapRenderer(QWebEngineView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
         self.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
-
-        # Register custom scheme handler to profile
-        self.scheme_handler = LocalFileSchemeHandler(self)
-        self.page().profile().installUrlSchemeHandler(b"localfile", self.scheme_handler)
 
         self._tmp_html = None
         
@@ -180,8 +148,7 @@ class PaleoMapRenderer(QWebEngineView):
         
         geojson_url = ""
         if file_path and os.path.exists(file_path):
-            # Pass via localfile scheme to avoid blocking Python string IPC
-            geojson_url = f"localfile://{os.path.abspath(file_path)}"
+            geojson_url = QUrl.fromLocalFile(os.path.abspath(file_path)).toString()
 
         html = ECHARTS_HTML_TEMPLATE.format(
             svg_patterns_json=svg_patterns_json,

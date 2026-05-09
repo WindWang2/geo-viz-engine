@@ -39,7 +39,7 @@ def test_renderer_load_valid_geojson(qtbot, tmp_path):
     assert os.path.exists(renderer._tmp_html)
     with open(renderer._tmp_html, "r", encoding="utf-8") as f:
         html = f.read()
-        assert "localfile://" in html
+        assert "file://" in html
 
 
 def test_renderer_missing_svg_fallback(qtbot, tmp_path):
