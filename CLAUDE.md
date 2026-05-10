@@ -37,32 +37,41 @@ PySide6 (Qt for Python) — Single Process
 │   ├── Sidebar (6 icon+text buttons)
 │   └── QStackedWidget (6 pages)
 │       ├── MapPage        → QWebEngineView + MapLibre GL
-│       ├── WellLogPage    → ECharts + WebEngine
+│       ├── WellLogPage    → ECharts (via geoviz-well-log package)
 │       ├── CrossWellPage  → Multi-ECharts + Correlation Polygons
 │       ├── SeismicPage    → PyVista + VTK
 │       ├── DataPage       → QTableWidget + file dialogs
 │       └── ToolsPage      → Standalone utilities (e.g. XML Converter)
 ├── packages/
-│   └── geoviz-well-log/   → Standalone well log rendering engine (ECharts-based)
-├── src/data/              → (loaders, models, cache)
+│   └── geoviz-well-log/   → Independent ECharts-based well log visualization engine
+│       ├── chart_engine.py      → ChartEngine widget (QWebEngineView + Bridge)
+│       ├── payload_builder.py   → WellLogData → ECharts JSON transforms
+│       ├── track_manager.py     → Track ordering/visibility/merge/split
+│       ├── export.py            → SVG/PDF/PNG vector export
+│       ├── pattern_map.py       → Lithology/Facies → SVG pattern mapping
+│       ├── models.py            → Pydantic data models
+│       ├── sync_manager.py      → Multi-well zoom sync
+│       └── connection_overlay.py → Cross-well correlation polygons
+├── src/data/              → (loaders, models, cache, well_registry)
 └── src/pages/             → (Page UI implementations)
 ```
 
 - **No IPC, no HTTP, no token auth** — all data flows through direct Python function calls within a single process.
-- **Standalone Package**: The `geoviz-well-log` package is a decoupled rendering engine used by both `WellLogPage` and `CrossWellPage`.
-- **Data layer**: `src/data/loaders.py` handles lasio (LAS), segyio (SEGY), openpyxl (Excel), and JSON loading. `src/data/models.py` defines Pydantic models. `src/data/cache.py` provides in-memory caching.
-- **Well log rendering**: Modular ECharts-based engine (packaged in `packages/geoviz_well_log`) renders both curves (SVG) and interval tracks (Lithology/Facies). Orchestrated by `SyncManager` for multi-well lock-step scroll/zoom.
+- **Independent Package**: `geoviz-well-log` is a fully decoupled rendering engine. It contains all data transformation (`payload_builder`), track management (`TrackManager`), vector export (`export`), and rendering (`ChartEngine`) logic. It can be `pip install`-ed and used in any PySide6 project.
+- **WellLogPage is thin**: Only ~350 lines of UI orchestration. Calls `build_tracks_from_data()` and `TrackManager` from the package. AI prediction business logic (API calls, Excel writing) stays in the page layer.
+- **Data layer**: `src/data/loaders.py` handles lasio (LAS), segyio (SEGY), openpyxl (Excel), and JSON loading. `src/data/models.py` defines Pydantic models. `src/data/cache.py` provides in-memory caching. `src/data/well_registry.py` maps well names to loader functions.
+- **Well log rendering flow**: `WellLogData` → `build_tracks_from_data()` → track pool → `TrackManager.build_payload()` → JSON → `ChartEngine.render_data()` → ECharts SVG rendering.
 - **Map**: QWebEngineView embeds MapLibre GL JS. Well click events relay from JS → Qt WebChannel → Python.
 - **Seismic**: PyVista Qt interactor renders VTK volumes and slices. Supports SEGY loading via segyio.
 
 ## Key Code Patterns
 
-- **Well log chart engine** (modular, data-driven): `src/renderers/well_log/chart_engine.py` — orchestrates multiple track renderers (CurveRenderer, LithologyRenderer, FaciesRenderer, DepthRenderer) in a horizontal layout with QScrollArea. Each renderer is an independent QWidget.
-  - 7 column types from legacy engine now mapped to: curves (pyqtgraph), lithology (QGraphicsScene+SVG), facies (QGraphicsScene+SVG), depth (pyqtgraph axis), intervals/description/systems_tract (future)
-  - Lithology SVG patterns (6 types): sandstone, siltstone, mudstone, shale, limestone, dolomite — SVG files in `src/patterns/`
-  - Sedimentary facies SVG patterns (10 types): tidal_flat, shelf, sand_flat, mud_flat, mixed, clastic_shelf, dolomitic_flat, muddy_shelf, sandy_shelf, sand_mud_shelf
-  - Pattern spec: GB/T 勘探管理图件图册编制规范 附录M (岩石图式) + 附录O (沉积相图式)
+- **Package API surface** (`geoviz_well_log/__init__.py`): All public APIs exported — `ChartEngine`, `TrackManager`, `build_tracks_from_data`, `build_ai_prediction_tracks`, `PATTERN_MAP`, `export_dialog`, etc.
+- **Track building** (`payload_builder.py`): Pure functions, no Qt dependency. `build_tracks_from_data(data: WellLogData) -> dict[str, dict]` auto-detects converted vs legacy format.
+- **Track management** (`track_manager.py`): `TrackManager` wraps a track pool dict. `build_payload(metadata, display_items)` resolves grouped tracks (地层系统, 沉积相) and merged curves into flat JSON.
+- **Vector export** (`export.py`): SVG via ECharts `getDataURL({type:'svg'})` — identical to display. PDF via `QWebEngineView.printToPdf()` — vector from same SVG renderer. PNG via `grab()` — raster fallback.
 - **Map well markers**: MapLibre GL renders GeoJSON well features as circles. Click events sent via Qt WebChannel bridge (`MapBridge.onWellClicked`).
+- **Well selection**: Two paths — map click (`_on_well_clicked`) or combo box in toolbar (`_on_well_selected`). Both call `WellLogPage.load_well()`.
 - **Seismic rendering**: `SeismicRenderer` wraps `pyvistaqt.QtInteractor`. `load_volume()` for 3D volumes, `add_slice()` for inline/crossline/timeline sections.
 - **Data models**: Pydantic `BaseModel` — `WellLogData`, `CurveData`, `LithologyInterval`, `FaciesInterval`, `WellCoordinates`, `SeismicVolumeMeta`.
 - **Navigation**: `MainWindow._switch_page(index)` — sidebar buttons are checkable, clicking switches `QStackedWidget` index.
@@ -70,16 +79,25 @@ PySide6 (Qt for Python) — Single Process
 
 ## Project Layout
 
+- `packages/geoviz_well_log/` — Independent well log visualization package
+  - `geoviz_well_log/chart_engine.py` — ChartEngine + Bridge
+  - `geoviz_well_log/payload_builder.py` — Data → ECharts JSON transforms
+  - `geoviz_well_log/track_manager.py` — Track ordering/visibility/merge/split
+  - `geoviz_well_log/export.py` — SVG/PDF/PNG vector export
+  - `geoviz_well_log/pattern_map.py` — PATTERN_MAP (lithology/facies → SVG ID)
+  - `geoviz_well_log/models.py` — WellLogData, CurveData, etc.
+  - `geoviz_well_log/sync_manager.py` — Multi-well zoom sync
+  - `geoviz_well_log/connection_overlay.py` — Cross-well correlation overlay
+  - `geoviz_well_log/assets/patterns/` — 16 SVG pattern files
+  - `geoviz_well_log/web_dist/` — ECharts + custom well-log JS
+  - `geoviz_well_log/configs/` — Preset configs (laolong1)
 - `src/` — Main application code
   - `main.py` — Entry point (QApplication)
   - `app.py` — MainWindow + sidebar navigation
-  - `pages/` — 4 page widgets (map, well_log, seismic, data)
-  - `renderers/` — Rendering components
-    - `well_log/` — chart_engine, curve/lithology/facies/depth renderers
-    - `map_renderer.py` — QWebEngineView + MapLibre
-    - `seismic_renderer.py` — PyVista Qt interactor
-  - `data/` — loaders, Pydantic models, cache
-  - `patterns/` — SVG pattern files (lithology + facies)
+  - `pages/` — Page widgets (map, well_log, cross_well, seismic, data, tools)
+  - `renderers/` — Rendering components (map, seismic, paleo_map)
+  - `data/` — loaders, Pydantic models, cache, well_registry
+  - `utils/` — constants (re-exports PATTERN_MAP from package)
   - `resources/` — Icons, Qt resource files
 - `data/` — Well coordinates JSON, well log Excel, XML data files
 - `tests/` — pytest test files
@@ -92,6 +110,7 @@ PySide6 (Qt for Python) — Single Process
 - **Sedimentary facies patterns**: Based on 附录O (沉积相图式). Carbonate platform facies (潮坪/陆棚/砂坪 etc.) use composite patterns reflecting their lithologic character.
 - **PyVista offscreen**: On headless CI, set `PYVISTA_OFFSCREEN=true`. For local dev, PyVista uses Qt interactor directly.
 - **QWebEngineView**: Requires `PySide6.QtWebEngineWidgets`. MapLibre GL JS loads from CDN — first load requires internet.
+- **Package can be used standalone**: `from geoviz_well_log import ChartEngine, TrackManager, build_tracks_from_data` works without the main app.
 
 ## gstack
 Use the /browse skill from gstack for all web browsing.

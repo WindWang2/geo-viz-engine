@@ -1,22 +1,3 @@
-PATTERN_MAP = {
-    "砂岩": "sandstone",
-    "泥岩": "mudstone",
-    "灰岩": "limestone",
-    "白云岩": "dolomite",
-    "页岩": "shale",
-    "粉砂岩": "siltstone",
-    "砂坪": "sand-flat",
-    "泥坪": "mud-flat",
-    "云质坪": "dolomitic-flat",
-    "混积潮坪": "dolomitic-flat",
-    "碎屑岩潮坪": "tidal-flat",
-    "潮坪": "tidal-flat",
-    "泥质陆棚": "muddy-shelf",
-    "砂质陆棚": "sandy-shelf",
-    "砂泥质陆棚": "sand-mud-shelf",
-    "碎屑岩浅水陆棚": "clastic-shelf",
-    "混积浅水陆棚": "mixed",
-    "陆棚": "shelf",
-    "混积": "mixed",
-    "三角洲": "delta",
-}
+from geoviz_well_log.pattern_map import PATTERN_MAP
+
+__all__ = ["PATTERN_MAP"]

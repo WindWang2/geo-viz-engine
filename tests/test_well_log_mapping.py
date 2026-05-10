@@ -160,7 +160,7 @@ def test_ai_facies_prediction_applies_tracks(qtbot, monkeypatch, tmp_path):
     
     # Let's mock applying AI tracks directly
     records = [{"深度": 1000.0, "预测相": "1", "置信度": 0.95}]
-    page._apply_ai_tracks(records)
+    page._apply_ai_prediction(records)
     
     payload = json.loads(mock_instance.render_data.call_args[0][0])
     track_names = [t.get("name") for t in payload["tracks"]]
