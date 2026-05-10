@@ -33,3 +33,29 @@ def small_segy_path(tmp_path):
         f.bin[segyio.BinField.Samples] = n_samples
 
     return path
+
+
+@pytest.fixture
+def dense_horizon_path(tmp_path):
+    """Create a small dense horizon file: 10 ilines x 20 xlines."""
+    path = str(tmp_path / "horizon_dense.txt")
+    lines = []
+    for il in range(100, 110):
+        for xl in range(200, 220):
+            lines.append(f"{il}\t{xl}\t{(il - 100) * 10.0}\n")
+    with open(path, "w") as f:
+        f.writelines(lines)
+    return path
+
+
+@pytest.fixture
+def sparse_horizon_path(tmp_path):
+    """Create a sparse horizon file with gaps."""
+    path = str(tmp_path / "horizon_sparse.txt")
+    lines = []
+    for il in range(100, 110, 2):
+        for xl in range(200, 220, 3):
+            lines.append(f"{il}\t{xl}\t{(il - 100) * 10.0}\n")
+    with open(path, "w") as f:
+        f.writelines(lines)
+    return path
