@@ -34,8 +34,40 @@ class Renderer3D(QWidget):
             grid, cmap="seismic", opacity="sigmoid",
             name="volume",
         )
+        # Interactive slice widgets
+        ni, nx, nt = data.shape
+        self._plotter.add_plane_widget(
+            self._make_slice_callback("inline"),
+            normal="x", origin=(ni // 2 * spacing[0], 0, 0),
+            bounds=(0, ni * spacing[0], 0, nx * spacing[1], 0, nt * spacing[2]),
+            color="red", tubing=True,
+        )
+        self._plotter.add_plane_widget(
+            self._make_slice_callback("crossline"),
+            normal="y", origin=(0, nx // 2 * spacing[1], 0),
+            bounds=(0, ni * spacing[0], 0, nx * spacing[1], 0, nt * spacing[2]),
+            color="green", tubing=True,
+        )
+        self._plotter.add_plane_widget(
+            self._make_slice_callback("time"),
+            normal="z", origin=(0, 0, nt // 2 * spacing[2]),
+            bounds=(0, ni * spacing[0], 0, nx * spacing[1], 0, nt * spacing[2]),
+            color="blue", tubing=True,
+        )
         self._plotter.reset_camera()
         self._loaded = True
+
+    def _make_slice_callback(self, slice_type: str):
+        def callback(normal, origin):
+            if slice_type == "inline":
+                pos = int(round(origin[0]))
+            elif slice_type == "crossline":
+                pos = int(round(origin[1]))
+            else:
+                pos = int(round(origin[2]))
+            if pos >= 0:
+                self.slice_changed.emit(slice_type, pos)
+        return callback
 
     def add_horizon(self, horizon_data: np.ndarray, origin=(0, 0, 0),
                     spacing=(1, 1)):
