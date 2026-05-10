@@ -36,10 +36,12 @@ environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'"]
 [tool.uv.workspace]
 members = [
     "packages/geoviz_well_log",
+    "packages/geoviz_seismic",
 ]
 
 [tool.uv.sources]
 geoviz-well-log = { workspace = true }
+geoviz-seismic = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,24 @@
+[project]
+name = "geoviz-seismic"
+version = "0.1.0"
+description = "Seismic volume visualization package"
+authors = [{ name = "Kevin", email = "kevin@example.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "PySide6>=6.6",
+    "pyvista>=0.43",
+    "segyio>=1.9",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+wiggle = ["vispy>=0.14"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["geoviz_seismic"]
