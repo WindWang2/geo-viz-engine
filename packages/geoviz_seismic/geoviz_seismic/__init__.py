@@ -7,6 +7,7 @@ from .profile_vd import ProfileVD
 from .profile_wiggle import ProfileWiggle
 from .profile_widget import ProfileWidget
 from .renderer_3d import Renderer3D
+from .seismic_view import SeismicView
 
 __version__ = "0.1.0"
 
@@ -19,6 +20,7 @@ __all__ = [
     "Renderer3D",
     "SeismicCache",
     "SeismicLoader",
+    "SeismicView",
     "SeismicVolumeMeta",
     "SliceInfo",
     "HorizonData",
