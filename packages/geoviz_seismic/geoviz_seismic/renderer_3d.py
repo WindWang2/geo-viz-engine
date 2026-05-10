@@ -89,11 +89,15 @@ class Renderer3D(QWidget):
         )
 
     def set_colormap(self, cmap_name: str):
-        if self._loaded:
-            self._plotter.update_scalars(
-                self._volume_data.flatten(order="F"),
-                name="amplitude",
+        if self._loaded and self._volume_data is not None:
+            grid = pv.ImageData(
+                dimensions=np.array(self._volume_data.shape) + 1,
             )
+            grid["amplitude"] = self._volume_data.flatten(order="F")
+            self._plotter.add_volume(
+                grid, cmap=cmap_name, opacity="sigmoid", name="volume",
+            )
+            self._plotter.reset_camera()
 
     def clear(self):
         self._plotter.clear()

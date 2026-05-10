@@ -105,6 +105,8 @@ class SeismicView(QWidget):
 
     def load_segy(self, path: str):
         """Load a SEGY file, down-sample for 3-D display, and show mid-inline."""
+        if self._loader is not None:
+            self._loader.close()
         self._loader = SeismicLoader(path)
         self._meta = self._loader.inspect()
         self._log.info("SEGY inspected: %s (%dx%dx%d)", path,
@@ -148,7 +150,7 @@ class SeismicView(QWidget):
         # Add a normal fault at inline 30, offsetting by 5 samples
         fault_il = n_inlines // 2
         offset = 5
-        field[fault_il:, :, offset:] = field[fault_il:, :, :-offset]
+        field[fault_il:, :, offset:] = field[fault_il:, :, :-offset].copy()
         field[fault_il:, :, :offset] = 0
         # Add Gaussian noise
         rng = np.random.default_rng(42)
@@ -281,12 +283,18 @@ class SeismicView(QWidget):
         else:
             self._log.debug("Cache miss: %s %d, reading from disk",
                             slice_type, actual_pos)
-            if slice_type == "inline":
-                data = self._loader.read_inline(actual_pos)
-            elif slice_type == "crossline":
-                data = self._loader.read_crossline(actual_pos)
-            else:
-                data = self._loader.read_timeslice(actual_pos)
+            try:
+                if slice_type == "inline":
+                    data = self._loader.read_inline(actual_pos)
+                elif slice_type == "crossline":
+                    data = self._loader.read_crossline(actual_pos)
+                else:
+                    data = self._loader.read_timeslice(actual_pos)
+            except Exception as exc:
+                self._log.error("Failed to read %s %d: %s",
+                                slice_type, actual_pos, exc)
+                self._slice_label.setText(f"Read error: {slice_type} {actual_pos}")
+                return
             self._cache.put(cache_key, data)
 
         info = self._build_slice_info(slice_type, actual_pos, data.shape)
