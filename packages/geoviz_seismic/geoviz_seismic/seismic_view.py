@@ -98,8 +98,9 @@ class SeismicView(QWidget):
         )
         self._renderer_3d.load_volume(data)
         mid = data.shape[0] // 2
-        info = self._build_slice_info("inline", mid, data[mid].shape)
-        self._profile_widget.update_profile(data[mid], slice_info=info)
+        slice_2d = data[mid].T  # (n_xlines, n_samples) → (n_samples, n_xlines)
+        info = self._build_slice_info("inline", mid, slice_2d.shape)
+        self._profile_widget.update_profile(slice_2d, slice_info=info)
         self._slice_label.setText(f"Inline {mid}")
         self._log.info("Demo loaded: shape=%s", data.shape)
 
@@ -118,9 +119,10 @@ class SeismicView(QWidget):
         self._renderer_3d.load_volume(vol)
         mid_il = (self._meta.iline_start
                   + self._meta.n_inlines // 2 * self._meta.iline_step)
-        data = self._loader.read_inline(mid_il)
-        info = self._build_slice_info("inline", mid_il, data.shape)
-        self._profile_widget.update_profile(data, slice_info=info)
+        raw = self._loader.read_inline(mid_il)
+        slice_2d = raw.T  # (n_xlines, n_samples) → (n_samples, n_xlines)
+        info = self._build_slice_info("inline", mid_il, slice_2d.shape)
+        self._profile_widget.update_profile(slice_2d, slice_info=info)
         self._slice_label.setText(f"Inline {mid_il}")
 
     def set_display_mode(self, mode: str):
@@ -261,7 +263,24 @@ class SeismicView(QWidget):
             return
         slice_type, position = self._pending_slice
         self._pending_slice = None
-        if self._loader is None or self._meta is None:
+        if self._meta is None:
+            return
+
+        # Demo mode: slice from cached volume data directly
+        if self._loader is None:
+            vol = self._renderer_3d._volume_data
+            if vol is None:
+                return
+            if slice_type == "inline":
+                raw = vol[position, :, :]
+            elif slice_type == "crossline":
+                raw = vol[:, position, :]
+            else:
+                raw = vol[:, :, position]
+            slice_2d = raw.T
+            info = self._build_slice_info(slice_type, position, slice_2d.shape)
+            self._profile_widget.update_profile(slice_2d, slice_info=info)
+            self._slice_label.setText(f"{slice_type.capitalize()} {position}")
             return
 
         # Plane widget gives downsampled voxel indices.
@@ -278,27 +297,28 @@ class SeismicView(QWidget):
         cache_key = (slice_type, actual_pos)
         cached = self._cache.get(cache_key)
         if cached is not None:
-            data = cached
+            raw = cached
             self._log.debug("Cache hit: %s %d", slice_type, actual_pos)
         else:
             self._log.debug("Cache miss: %s %d, reading from disk",
                             slice_type, actual_pos)
             try:
                 if slice_type == "inline":
-                    data = self._loader.read_inline(actual_pos)
+                    raw = self._loader.read_inline(actual_pos)
                 elif slice_type == "crossline":
-                    data = self._loader.read_crossline(actual_pos)
+                    raw = self._loader.read_crossline(actual_pos)
                 else:
-                    data = self._loader.read_timeslice(actual_pos)
+                    raw = self._loader.read_timeslice(actual_pos)
             except Exception as exc:
                 self._log.error("Failed to read %s %d: %s",
                                 slice_type, actual_pos, exc)
                 self._slice_label.setText(f"Read error: {slice_type} {actual_pos}")
                 return
-            self._cache.put(cache_key, data)
+            self._cache.put(cache_key, raw)
 
-        info = self._build_slice_info(slice_type, actual_pos, data.shape)
-        self._profile_widget.update_profile(data, slice_info=info)
+        slice_2d = raw.T  # (n_traces, n_samples) → (n_samples, n_traces)
+        info = self._build_slice_info(slice_type, actual_pos, slice_2d.shape)
+        self._profile_widget.update_profile(slice_2d, slice_info=info)
         self._slice_label.setText(
             f"{slice_type.capitalize()} {actual_pos}"
         )
