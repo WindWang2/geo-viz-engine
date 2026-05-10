@@ -118,9 +118,15 @@ class MainWindow(QWidget):
             paleo_map_widget.setStyleSheet("font-size: 24px; color: #a0aec0;")
 
         try:
-            from src.renderers.seismic_renderer import _check_pyvista_qt_available
-            if not _check_pyvista_qt_available():
-                raise RuntimeError("pyvistaqt QtInteractor unavailable (no OpenGL)")
+            import subprocess, sys
+            result = subprocess.run(
+                [sys.executable, "-c",
+                 "import os; os.environ.setdefault('PYVISTA_OFF_SCREEN','true'); "
+                 "from pyvistaqt import QtInteractor; print('ok')"],
+                capture_output=True, timeout=10,
+            )
+            if result.returncode != 0 or b"ok" not in result.stdout:
+                raise RuntimeError("pyvistaqt unavailable")
             from src.pages.seismic_page import SeismicPage
             self.seismic_page = SeismicPage()
             seismic_widget = self.seismic_page
