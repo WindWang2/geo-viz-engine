@@ -62,25 +62,25 @@ class PaleoMapPage(QWidget):
         map_layout.addWidget(self.map_view)
 
         # Floating Toolbar (Overlay)
-        # In PySide6, floating overlays can be achieved by parenting to the container and positioning manually, 
-        # or using a layout on top. For simplicity, we use an absolute positioned widget over map_container.
         self.floating_toolbar = QWidget(self.map_container)
+        self.floating_toolbar.setMinimumWidth(200)
         self.floating_toolbar.setStyleSheet("""
             QWidget {
-                background: rgba(255, 255, 255, 0.9);
-                border: 1px solid #e2e8f0;
-                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.95);
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
             }
         """)
         float_layout = QHBoxLayout(self.floating_toolbar)
-        float_layout.setContentsMargins(8, 8, 8, 8)
+        float_layout.setContentsMargins(10, 10, 10, 10)
+        float_layout.setSpacing(8)
         
         self.load_btn = QPushButton("重新加载")
         self.load_btn.setStyleSheet("""
             QPushButton {
-                background: #edf2f7; color: #1e293b;
+                background: #f1f5f9; color: #334155;
                 border: 1px solid #cbd5e1; border-radius: 4px;
-                padding: 6px 12px; font-size: 13px; font-weight: bold;
+                padding: 8px 16px; font-size: 14px; font-weight: 500;
             }
             QPushButton:hover { background: #e2e8f0; }
         """)
@@ -89,20 +89,26 @@ class PaleoMapPage(QWidget):
         self.export_btn = QPushButton("导出图片")
         self.export_btn.setStyleSheet("""
             QPushButton {
-                background: #3182ce; color: white;
+                background: #2563eb; color: #ffffff;
                 border: none; border-radius: 4px;
-                padding: 6px 12px; font-size: 13px; font-weight: bold;
+                padding: 8px 16px; font-size: 14px; font-weight: 600;
             }
-            QPushButton:hover { background: #2b6cb0; }
-            QPushButton:pressed { background: #2c5282; }
+            QPushButton:hover { background: #1d4ed8; }
+            QPushButton:pressed { background: #1e40af; }
         """)
         self.export_btn.clicked.connect(self._on_export_clicked)
 
         float_layout.addWidget(self.load_btn)
         float_layout.addWidget(self.export_btn)
         
+        # Ensure buttons have correct font (inherited from app)
+        self.load_btn.setFont(self.font())
+        self.export_btn.setFont(self.font())
+
+        self.floating_toolbar.adjustSize()
         self.floating_toolbar.move(20, 20)
         self.floating_toolbar.show()
+        self.floating_toolbar.raise_()
 
         self.stack.addWidget(self.map_container)
         self.stack.setCurrentWidget(self.empty_widget)

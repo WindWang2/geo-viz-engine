@@ -1,14 +1,146 @@
 import json
 import math
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, QObject, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QStackedWidget, QFileDialog, QGroupBox, QListWidget, QAbstractItemView, QListWidgetItem
+    QStackedWidget, QFileDialog, QGroupBox, QListWidget, QAbstractItemView, QListWidgetItem,
+    QMessageBox, QProgressDialog
 )
 from src.data.well_registry import get_well_data
 from src.utils.constants import PATTERN_MAP
 from geoviz_well_log import ChartEngine
+
+
+class PredictionWorker(QObject):
+    progress = Signal(int, str)
+    finished = Signal(list)
+    error = Signal(str)
+
+    def __init__(self, well_name, xls_path, current_data):
+        super().__init__()
+        self.well_name = well_name
+        self.xls_path = xls_path
+        self.current_data = current_data
+
+    def run(self):
+        try:
+            import urllib.request
+            import json
+            import pandas as pd
+            
+            self.progress.emit(10, "正在准备预测数据...")
+            
+            # Unique depths from curves
+            depth_set = set()
+            for curve in self.current_data.curves:
+                depth_set.update(curve.depth)
+            sorted_depths = sorted(list(depth_set))
+
+            if not sorted_depths:
+                self.error.emit("当前井无测井曲线深度数据！")
+                return
+
+            curve_maps = {}
+            for curve in self.current_data.curves:
+                curve_maps[curve.name] = dict(zip(curve.depth, curve.values))
+
+            formation_items = self.current_data.intervals.formation if hasattr(self.current_data.intervals, 'formation') else []
+            member_items = self.current_data.intervals.member if hasattr(self.current_data.intervals, 'member') else []
+            lithology_items = self.current_data.intervals.lithology if hasattr(self.current_data.intervals, 'lithology') else []
+
+            def find_interval_name(items, depth):
+                for item in items:
+                    if item.top <= depth <= item.bottom:
+                        return item.name
+                return ""
+
+            rows = []
+            for d in sorted_depths:
+                row = {
+                    "井号": self.well_name,
+                    "深度": d,
+                    "组": find_interval_name(formation_items, d) or "恩平组", 
+                    "段": find_interval_name(member_items, d) or "恩平一-二段",
+                    "岩性": find_interval_name(lithology_items, d) or "泥岩"
+                }
+                for curve_name, mapping in curve_maps.items():
+                    val = mapping.get(d, None)
+                    row[curve_name] = val if (val == val and val is not None) else None
+                rows.append(row)
+
+            # Filter out rows where GR is None or NaN
+            rows = [r for r in rows if r.get("GR") is not None]
+
+            if not rows:
+                self.error.emit("没有找到有效的GR曲线数据，无法进行预测！")
+                return
+
+            self.progress.emit(30, "正在调用 AI 模型推理...")
+
+            payload = {
+                "request_id": f"PUBLIC-TEST-{self.well_name}-{int(pd.Timestamp.now().timestamp())}",
+                "well_id": self.well_name,
+                "interval_top": min(r["深度"] for r in rows),
+                "interval_bottom": max(r["深度"] for r in rows),
+                "model_version_lithology": None,
+                "model_version_microfacies": "single-well-facies-20260507-fold15-HZ27-5-3",
+                "rows": rows
+            }
+
+            # Send request
+            req = urllib.request.Request(
+                "http://api-test.deeptime.world/api/v1/inference/single-well/json",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+
+            with urllib.request.urlopen(req, timeout=120) as response:
+                res_data = json.loads(response.read().decode("utf-8"))
+
+            if not res_data or res_data.get("task_status") != "success":
+                self.error.emit(f"推理未成功: {res_data.get('warnings', '未知错误')}")
+                return
+
+            self.progress.emit(70, "保存预测结果到 Excel...")
+
+            microfacies = res_data.get("microfacies_results", [])
+            if not microfacies:
+                self.error.emit("未返回任何沉积相预测结果！")
+                return
+
+            # Prepare records for saving
+            records = []
+            for item in microfacies:
+                records.append({
+                    "深度": item["depth"],
+                    "预测相": item["label_name"],
+                    "置信度": item["confidence"]
+                })
+
+            df_ai = pd.DataFrame(records)
+
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(self.xls_path)
+                if "AI预测结果" in wb.sheetnames:
+                    del wb["AI预测结果"]
+                wb.save(self.xls_path)
+                wb.close()
+            except Exception as e:
+                print(f"Failed to clear sheet using openpyxl: {e}")
+
+            try:
+                with pd.ExcelWriter(self.xls_path, engine="openpyxl", mode="a") as writer:
+                    df_ai.to_excel(writer, sheet_name="AI预测结果", index=False)
+            except Exception as e:
+                print(f"Failed to append sheet: {e}")
+                df_ai.to_excel(self.xls_path, sheet_name="AI预测结果", index=False)
+
+            self.progress.emit(100, "完成")
+            self.finished.emit(records)
+        except Exception as e:
+            self.error.emit(f"请求发生异常: {str(e)}")
 
 
 class WellLogPage(QWidget):
@@ -103,11 +235,27 @@ class WellLogPage(QWidget):
         btn_layout.addWidget(self._split_btn)
         panel_layout.addLayout(btn_layout)
 
+        self._predict_btn = QPushButton("🤖 AI预测沉积相")
+        self._predict_btn.setStyleSheet("""
+            QPushButton {
+                background: #3182ce; color: white;
+                border: none; border-radius: 4px;
+                padding: 6px 12px; font-size: 12px; font-weight: bold;
+                margin-top: 6px;
+            }
+            QPushButton:hover { background: #2b6cb0; }
+            QPushButton:pressed { background: #2c5282; }
+        """)
+        self._predict_btn.clicked.connect(self._on_predict_facies)
+        panel_layout.addWidget(self._predict_btn)
+
         self._control_panel.setVisible(False)
         self._content_layout.addWidget(self._control_panel)
 
         self._chart_widget: ChartEngine | None = None
         self._current_well: str | None = None
+        self._current_xls_path = None
+        self._current_data = None
         self._track_pool = {}
         self._cached_metadata = {}
 
@@ -139,6 +287,8 @@ class WellLogPage(QWidget):
         self._stack.addWidget(self._chart_widget)
         self._stack.setCurrentWidget(self._chart_widget)
         self._current_well = well_name
+        self._current_xls_path = xls_path
+        self._current_data = data
         
         self._cached_metadata = { "wellName": data.well_name, "topDepth": data.top_depth, "bottomDepth": data.bottom_depth }
 
@@ -478,3 +628,265 @@ class WellLogPage(QWidget):
             with open(export_path, "w", encoding="utf-8") as f:
                 f.write(svg_str)
             self._export_path = None
+
+    def _on_predict_facies(self):
+        if not self._current_well or not self._current_xls_path:
+            QMessageBox.warning(self, "AI 预测", "当前未加载任何井数据！")
+            return
+
+        # Check existing
+        import pandas as pd
+        has_existing = False
+        df_ai = None
+        try:
+            excel_file = pd.ExcelFile(self._current_xls_path)
+            if "AI预测结果" in excel_file.sheet_names:
+                df_ai = pd.read_excel(excel_file, sheet_name="AI预测结果")
+                if not df_ai.empty and "深度" in df_ai.columns and "预测相" in df_ai.columns and "置信度" in df_ai.columns:
+                    has_existing = True
+        except Exception as e:
+            print(f"Error checking existing AI sheet: {e}")
+
+        if has_existing:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("AI预测提示")
+            msg_box.setText("检测到该井已有AI预测结果。")
+            msg_box.setInformativeText("是否重新预测还是直接加载已有结果？")
+            btn_load = msg_box.addButton("直接加载", QMessageBox.ButtonRole.YesRole)
+            btn_repredict = msg_box.addButton("重新预测", QMessageBox.ButtonRole.NoRole)
+            msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            msg_box.exec()
+
+            if msg_box.clickedButton() == btn_load:
+                self._load_existing_ai_prediction(df_ai)
+                return
+            elif msg_box.clickedButton() == btn_repredict:
+                # Delete previous tracks from pool and widget
+                if "AI预测相" in self._track_pool:
+                    del self._track_pool["AI预测相"]
+                if "AI预测置信度" in self._track_pool:
+                    del self._track_pool["AI预测置信度"]
+
+                for idx in range(self._track_list_widget.count() - 1, -1, -1):
+                    item = self._track_list_widget.item(idx)
+                    if item.text() in ("AI预测相", "AI预测置信度"):
+                        self._track_list_widget.takeItem(idx)
+
+                self._update_chart_order()
+            else:
+                return
+
+        self._run_ai_prediction()
+
+    def _load_existing_ai_prediction(self, df_ai):
+        records = df_ai.to_dict(orient="records")
+        if not records:
+            return
+        self._apply_ai_tracks(records)
+
+    def _apply_ai_tracks(self, records):
+        # First, calculate bottom for each raw record
+        data_len = len(records)
+        for i in range(data_len):
+            depth = records[i]["深度"]
+            if i < data_len - 1:
+                records[i]["bottom"] = records[i+1]["深度"]
+            else:
+                records[i]["bottom"] = depth + 0.125
+
+        # Merge contiguous records for AI预测相 (Facies) ONLY when '预测相' is identical
+        merged_facies_records = []
+        if records:
+            group_top = records[0]["深度"]
+            group_bottom = records[0]["bottom"]
+            group_facies = records[0]["预测相"]
+
+            for i in range(1, data_len):
+                r = records[i]
+                r_facies = r["预测相"]
+                if r_facies == group_facies:
+                    group_bottom = r["bottom"]
+                else:
+                    merged_facies_records.append({
+                        "top": group_top,
+                        "bottom": group_bottom,
+                        "预测相": group_facies
+                    })
+                    group_top = r["深度"]
+                    group_bottom = r["bottom"]
+                    group_facies = r_facies
+
+            merged_facies_records.append({
+                "top": group_top,
+                "bottom": group_bottom,
+                "预测相": group_facies
+            })
+
+        def get_facies_color(facies_name):
+            colors = {
+                "1": "#2563eb", "2": "#3b82f6", "3": "#60a5fa",
+                "砂岩": "#fef08a", "泥岩": "#94a3b8", "灰岩": "#fca5a5"
+            }
+            return colors.get(str(facies_name), "#cbd5e1")
+
+        def get_confidence_color(val):
+            try:
+                val = max(0.0, min(1.0, float(val)))
+            except (ValueError, TypeError):
+                val = 0.5
+            
+            # Smooth transition: Blue -> Cyan -> Green -> Yellow -> Red (Scientific Jet/Rainbow colormap)
+            if val < 0.25:
+                r = 0
+                g = int(val * 4.0 * 255)
+                b = 255
+            elif val < 0.5:
+                r = 0
+                g = 255
+                b = int((0.5 - val) * 4.0 * 255)
+            elif val < 0.75:
+                r = int((val - 0.5) * 4.0 * 255)
+                g = 255
+                b = 0
+            else:
+                r = 255
+                g = int((1.0 - val) * 4.0 * 255)
+                b = 0
+            return f"#{r:02x}{g:02x}{b:02x}"
+
+        track_facies = {
+            "type": "IntervalTrack",
+            "name": "AI预测相",
+            "width": 8,
+            "textOrientation": "vertical",
+            "data": [
+                {
+                    "top": r["top"],
+                    "bottom": r["bottom"],
+                    "name": str(r["预测相"]),
+                    "color": get_facies_color(r["预测相"]),
+                    "lithology": ""
+                }
+                for r in merged_facies_records
+            ]
+        }
+
+        # Build confidence data
+        conf_data = []
+
+        # 1. Raw unthinned lookup items (transparent, no rendering, but matched first by tooltip .find())
+        for r in records:
+            conf_data.append({
+                "top": r["深度"],
+                "bottom": r["bottom"],
+                "name": f"{float(r.get('置信度', 0.5))*100:.1f}%",
+                "color": "transparent",
+                "lithology": ""
+            })
+
+        # 2. Display items: merge adjacent records whose confidence is within 1% difference (abs(val1 - val2) <= 0.01)
+        # This keeps the color transitions extremely smooth and continuous without discrete segment lines!
+        if records:
+            group_top = records[0]["深度"]
+            group_bottom = records[0]["bottom"]
+            group_conf = records[0].get("置信度", 0.5)
+
+            for r in records[1:]:
+                r_conf = r.get("置信度", 0.5)
+                if abs(r_conf - group_conf) <= 0.01:
+                    group_bottom = r["bottom"]
+                else:
+                    conf_data.append({
+                        "top": group_top,
+                        "bottom": group_bottom,
+                        "name": "",  # Empty name so it is ignored by tooltip lookup
+                        "color": get_confidence_color(group_conf),
+                        "lithology": ""
+                    })
+                    group_top = r["深度"]
+                    group_bottom = r["bottom"]
+                    group_conf = r_conf
+
+            conf_data.append({
+                "top": group_top,
+                "bottom": group_bottom,
+                "name": "",
+                "color": get_confidence_color(group_conf),
+                "lithology": ""
+            })
+
+        track_confidence = {
+            "type": "IntervalTrack",
+            "name": "AI预测置信度",
+            "width": 8,
+            "textOrientation": "horizontal",
+            "data": conf_data
+        }
+
+        self._track_pool["AI预测相"] = track_facies
+        self._track_pool["AI预测置信度"] = track_confidence
+
+        # Add to the track list widget if not already present
+        found_facies = False
+        found_conf = False
+        for i in range(self._track_list_widget.count()):
+            txt = self._track_list_widget.item(i).text()
+            if txt == "AI预测相": found_facies = True
+            if txt == "AI预测置信度": found_conf = True
+
+        if not found_facies:
+            item = QListWidgetItem("AI预测相")
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            self._track_list_widget.addItem(item)
+        if not found_conf:
+            item = QListWidgetItem("AI预测置信度")
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            self._track_list_widget.addItem(item)
+
+        self._update_chart_order()
+
+    def _run_ai_prediction(self):
+        # Create progress dialog
+        self._progress_dialog = QProgressDialog("正在准备预测数据...", "取消", 0, 100, self)
+        self._progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self._progress_dialog.show()
+
+        # Create worker & thread
+        self._thread = QThread()
+        self._worker = PredictionWorker(self._current_well, self._current_xls_path, self._current_data)
+        self._worker.moveToThread(self._thread)
+
+        # Connect signals
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self._on_prediction_progress)
+        self._worker.finished.connect(self._on_prediction_finished)
+        self._worker.error.connect(self._on_prediction_error)
+        
+        # Cleanup
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.error.connect(self._thread.quit)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._worker.error.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+
+        self._thread.start()
+
+    def _on_prediction_progress(self, val, msg):
+        if hasattr(self, "_progress_dialog") and self._progress_dialog:
+            self._progress_dialog.setValue(val)
+            self._progress_dialog.setLabelText(msg)
+
+    def _on_prediction_finished(self, records):
+        if hasattr(self, "_progress_dialog") and self._progress_dialog:
+            self._progress_dialog.close()
+            self._progress_dialog = None
+        self._apply_ai_tracks(records)
+        QMessageBox.information(self, "AI 预测", "AI 预测完成！已成功渲染并写入 Excel。")
+
+    def _on_prediction_error(self, err_msg):
+        if hasattr(self, "_progress_dialog") and self._progress_dialog:
+            self._progress_dialog.close()
+            self._progress_dialog = None
+        QMessageBox.critical(self, "AI 预测错误", err_msg)

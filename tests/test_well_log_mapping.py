@@ -134,3 +134,39 @@ def test_stratigraphy_vertical_text(qtbot, monkeypatch):
     system_track = next(t for t in payload["tracks"] if t.get("name") == "系")
     
     assert system_track["textOrientation"] == "vertical"
+
+def test_ai_facies_prediction_applies_tracks(qtbot, monkeypatch, tmp_path):
+    import pandas as pd
+    from geoviz_well_log.models import WellLogData, CurveData, WellIntervals
+    
+    mock_well_data = WellLogData(
+        well_name="TestWell", top_depth=1000, bottom_depth=1100,
+        curves=[CurveData(name="GR", depth=[1000, 1010], values=[40, 50])],
+        intervals=WellIntervals()
+    )
+    
+    # Mock excel file
+    xls_path = tmp_path / "test.xlsx"
+    pd.DataFrame().to_excel(xls_path) # create empty excel
+    
+    mock_entry = (lambda path, well_name: mock_well_data, str(xls_path), {})
+    monkeypatch.setattr("src.pages.well_log_page.get_well_data", lambda name: mock_entry)
+    
+    mock_instance = MockChartEngineWidget()
+    monkeypatch.setattr("src.pages.well_log_page.ChartEngine", lambda parent: mock_instance)
+    
+    page = WellLogPage()
+    page.load_well("TestWell")
+    
+    # Let's mock applying AI tracks directly
+    records = [{"深度": 1000.0, "预测相": "1", "置信度": 0.95}]
+    page._apply_ai_tracks(records)
+    
+    payload = json.loads(mock_instance.render_data.call_args[0][0])
+    track_names = [t.get("name") for t in payload["tracks"]]
+    assert "AI预测相" in track_names
+    assert "AI预测置信度" in track_names
+    
+    ai_track = next(t for t in payload["tracks"] if t.get("name") == "AI预测相")
+    assert ai_track["data"][0]["name"] == "1"
+    assert ai_track["data"][0]["color"] == "#2563eb"

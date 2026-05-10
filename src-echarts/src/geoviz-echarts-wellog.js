@@ -306,10 +306,15 @@ function buildIntervalBlock(item, api, params, trackData, applyPattern) {
     const requiredTextHeight = isVertical ? (item.name || '').length * 14 : 14;
     const showText = visibleH >= requiredTextHeight && w >= 10;
 
+    const isConfidence = trackData.name === "AI预测置信度";
     const children = [
         {
             ...gs,
-            style: { ...gs.style, stroke: THEME.borderColor, lineWidth: 0.5 },
+            style: { 
+                ...gs.style, 
+                stroke: isConfidence ? 'transparent' : THEME.borderColor, 
+                lineWidth: isConfidence ? 0 : 0.5 
+            },
             clipPath: {
                 type: 'rect',
                 shape: { x: xLeft, y: gridTop, width: w, height: gridBot - gridTop }
@@ -353,6 +358,7 @@ class LithologyTrack extends Track {
             renderItem: (params, api) => {
                 const item = items[params.dataIndex];
                 if (!item) return null;
+                if (item.color === 'transparent') return null;
                 return buildIntervalBlock(item, api, params, td, true);
             },
             data: items.map(i => [0.5, i.top, i.bottom])
@@ -371,6 +377,7 @@ class IntervalTrack extends Track {
             renderItem: (params, api) => {
                 const item = items[params.dataIndex];
                 if (!item) return null;
+                if (item.color === 'transparent') return null;
                 return buildIntervalBlock(item, api, params, td, false);
             },
             data: items.map(i => [0.5, i.top, i.bottom])

@@ -29,90 +29,109 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
   const svgPatterns = {svg_patterns_json};
   const geojsonUrl = "{geojson_url}";
 
-  const chart = echarts.init(document.getElementById('map'));
-  
-  // Create HTMLImageElements for patterns
-  const patternImages = {{}};
-  for (const [key, base64] of Object.entries(svgPatterns)) {{
-      const img = new Image();
-      img.src = base64;
-      patternImages[key] = img;
-  }}
+  window.onload = function() {{
+      if (typeof echarts === 'undefined') {{
+          document.getElementById('loading').style.display = 'block';
+          document.getElementById('loading').innerHTML = '错误: 无法加载 ECharts 库 (CDN Error)';
+          return;
+      }}
 
-  if (geojsonUrl) {{
-      document.getElementById('loading').style.display = 'block';
-      fetch(geojsonUrl)
-          .then(res => res.json())
-          .then(geoJson => {{
-              document.getElementById('loading').style.display = 'none';
-              echarts.registerMap('paleo', geoJson);
+      const chart = echarts.init(document.getElementById('map'));
+      window.chart = chart;
 
-              // Extract facies to assign pattern
-              const regions = geoJson.features.map(feature => {{
-                  const faciesName = feature.properties.facies || feature.properties.name || '';
+      // Create HTMLImageElements for patterns
+      const patternImages = {{}};
+      for (const [key, base64] of Object.entries(svgPatterns)) {{
+          const img = new Image();
+          img.src = base64;
+          patternImages[key] = img;
+      }}
+
+      if (geojsonUrl) {{
+          document.getElementById('loading').style.display = 'block';
+          fetch(geojsonUrl)
+              .then(res => {{
+                  if (!res.ok) throw new Error('网络请求失败 (Fetch failed): ' + res.status);
+                  return res.json();
+              }})
+              .then(geoJson => {{
+                  document.getElementById('loading').style.display = 'none';
+                  console.log("Parsed GeoJSON:", geoJson);
                   
-                  // Match logic: same as python get_pattern
-                  let matchedPattern = '';
-                  const keys = Object.keys(patternImages).sort((a,b) => b.length - a.length);
-                  for (let k of keys) {{
-                      if (faciesName.includes(k)) {{
-                          matchedPattern = k;
-                          break;
-                      }}
+                  if (!geoJson || (!geoJson.features && geoJson.type !== 'Feature')) {{
+                      throw new Error('无效的 GeoJSON 格式 (Invalid GeoJSON)');
                   }}
 
-                  if (matchedPattern) {{
-                      return {{
-                          name: feature.properties.name || faciesName,
-                          itemStyle: {{
-                              areaColor: {{
-                                  image: patternImages[matchedPattern],
-                                  repeat: 'repeat'
-                              }}
+                  echarts.registerMap('paleo', geoJson);
+
+                  // Extract facies to assign pattern
+                  const features = geoJson.features || (geoJson.type === 'Feature' ? [geoJson] : []);
+                  const regions = features.map(feature => {{
+                      const props = feature.properties || {{}};
+                      const faciesName = props.facies || props.name || '';
+                      
+                      let matchedPattern = '';
+                      const keys = Object.keys(patternImages).sort((a,b) => b.length - a.length);
+                      for (let k of keys) {{
+                          if (faciesName.includes(k)) {{
+                              matchedPattern = k;
+                              break;
                           }}
-                      }};
-                  }} else {{
-                      return {{ name: feature.properties.name || faciesName }};
-                  }}
-              }});
-
-              const option = {{
-                  tooltip: {{
-                      trigger: 'item',
-                      formatter: '{{b}}'
-                  }},
-                  toolbox: {{
-                      show: false
-                  }},
-                  series: [
-                      {{
-                          type: 'map',
-                          map: 'paleo',
-                          roam: true,
-                          itemStyle: {{
-                              borderColor: '#cbd5e0',
-                              borderWidth: 1,
-                              areaColor: '#2d3748' // Default color
-                          }},
-                          emphasis: {{
-                              itemStyle: {{
-                                  areaColor: '#4a5568'
-                              }}
-                          }},
-                          data: regions
                       }}
-                  ]
-              }};
 
-              chart.setOption(option);
-          }})
-          .catch(err => {{
-              document.getElementById('loading').innerHTML = '加载失败 (Error Loading JSON)';
-              console.error(err);
-          }});
-  }}
+                      if (matchedPattern && patternImages[matchedPattern]) {{
+                          return {{
+                              name: props.name || faciesName,
+                              itemStyle: {{
+                                  areaColor: {{
+                                      image: patternImages[matchedPattern],
+                                      repeat: 'repeat'
+                                  }}
+                              }}
+                          }};
+                      }} else {{
+                          return {{ name: props.name || faciesName }};
+                      }}
+                  }});
+
+                  const option = {{
+                      tooltip: {{
+                          trigger: 'item',
+                          formatter: '{{b}}'
+                      }},
+                      series: [
+                          {{
+                              type: 'map',
+                              map: 'paleo',
+                              roam: true,
+                              itemStyle: {{
+                                  borderColor: '#cbd5e0',
+                                  borderWidth: 1,
+                                  areaColor: '#2d3748'
+                              }},
+                              emphasis: {{
+                                  itemStyle: {{
+                                      areaColor: '#4a5568'
+                                  }}
+                              }},
+                              data: regions
+                          }}
+                      ]
+                  }};
+
+                  chart.setOption(option);
+              }})
+              .catch(err => {{
+                  document.getElementById('loading').style.display = 'block';
+                  document.getElementById('loading').innerHTML = '加载失败: ' + err.message;
+                  console.error(err);
+              }});
+      }}
+  }};
   
-  window.addEventListener('resize', () => chart.resize());
+  window.addEventListener('resize', () => {{
+      if (window.chart) window.chart.resize();
+  }});
 </script>
 </body>
 </html>"""

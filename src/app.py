@@ -158,4 +158,4 @@ class MainWindow(QWidget):
 
     def _on_well_clicked(self, well_name: str):
         self.well_log_page.load_well(well_name)
-        self._switch_page(1)
+        self._switch_page(2)
