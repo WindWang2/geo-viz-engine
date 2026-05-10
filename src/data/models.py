@@ -84,11 +84,3 @@ class WellCoordinates(BaseModel):
     name: str
     latitude: float
     longitude: float
-
-
-class SeismicVolumeMeta(BaseModel):
-    filename: str
-    n_inlines: int
-    n_crosslines: int
-    n_samples: int
-    sample_interval: float
