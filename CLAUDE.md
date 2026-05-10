@@ -43,21 +43,33 @@ PySide6 (Qt for Python) — Single Process
 │       ├── DataPage       → QTableWidget + file dialogs
 │       └── ToolsPage      → Standalone utilities (e.g. XML Converter)
 ├── packages/
-│   └── geoviz-well-log/   → Independent ECharts-based well log visualization engine
-│       ├── chart_engine.py      → ChartEngine widget (QWebEngineView + Bridge)
-│       ├── payload_builder.py   → WellLogData → ECharts JSON transforms
-│       ├── track_manager.py     → Track ordering/visibility/merge/split
-│       ├── export.py            → SVG/PDF/PNG vector export
-│       ├── pattern_map.py       → Lithology/Facies → SVG pattern mapping
-│       ├── models.py            → Pydantic data models
-│       ├── sync_manager.py      → Multi-well zoom sync
-│       └── connection_overlay.py → Cross-well correlation polygons
+│   ├── geoviz-well-log/   → Independent ECharts-based well log visualization engine
+│   │   ├── chart_engine.py      → ChartEngine widget (QWebEngineView + Bridge)
+│   │   ├── payload_builder.py   → WellLogData → ECharts JSON transforms
+│   │   ├── track_manager.py     → Track ordering/visibility/merge/split
+│   │   ├── export.py            → SVG/PDF/PNG vector export
+│   │   ├── pattern_map.py       → Lithology/Facies → SVG pattern mapping
+│   │   ├── models.py            → Pydantic data models
+│   │   ├── sync_manager.py      → Multi-well zoom sync
+│   │   └── connection_overlay.py → Cross-well correlation polygons
+│   └── geoviz-seismic/    → Independent PyVista-based seismic visualization engine
+│       ├── renderer_3d.py       → Renderer3D (PyVista Qt + interactive slice planes)
+│       ├── seismic_view.py      → SeismicView (3D + 2D profile + toolbar)
+│       ├── loader.py            → SeismicLoader (segyio on-demand slicing)
+│       ├── profile_vd.py        → VD heatmap profile rendering
+│       ├── profile_wiggle.py    → Wiggle trace rendering (VisPy fallback)
+│       ├── profile_widget.py    → Unified VD/Wiggle switcher
+│       ├── horizon.py           → HorizonParser (nearest/RBF fill)
+│       ├── colormap.py          → ColormapManager (seismic/gray/jet/hsv)
+│       ├── cache.py             → SeismicCache (LRU slice cache)
+│       └── models.py            → SeismicVolumeMeta, SliceInfo, HorizonData
 ├── src/data/              → (loaders, models, cache, well_registry)
 └── src/pages/             → (Page UI implementations)
 ```
 
 - **No IPC, no HTTP, no token auth** — all data flows through direct Python function calls within a single process.
 - **Independent Package**: `geoviz-well-log` is a fully decoupled rendering engine. It contains all data transformation (`payload_builder`), track management (`TrackManager`), vector export (`export`), and rendering (`ChartEngine`) logic. It can be `pip install`-ed and used in any PySide6 project.
+- **Independent Package**: `geoviz-seismic` is a fully decoupled seismic visualization engine. It contains 3D volume rendering (`Renderer3D`), SEGY loading (`SeismicLoader`), 2D profile display (`ProfileVD`/`ProfileWiggle`), horizon parsing (`HorizonParser`), and composite widget (`SeismicView`). It can be `pip install`-ed and used in any PySide6 project.
 - **WellLogPage is thin**: Only ~350 lines of UI orchestration. Calls `build_tracks_from_data()` and `TrackManager` from the package. AI prediction business logic (API calls, Excel writing) stays in the page layer.
 - **Data layer**: `src/data/loaders.py` handles lasio (LAS), segyio (SEGY), openpyxl (Excel), and JSON loading. `src/data/models.py` defines Pydantic models. `src/data/cache.py` provides in-memory caching. `src/data/well_registry.py` maps well names to loader functions.
 - **Well log rendering flow**: `WellLogData` → `build_tracks_from_data()` → track pool → `TrackManager.build_payload()` → JSON → `ChartEngine.render_data()` → ECharts SVG rendering.
@@ -72,8 +84,8 @@ PySide6 (Qt for Python) — Single Process
 - **Vector export** (`export.py`): SVG via ECharts `getDataURL({type:'svg'})` — identical to display. PDF via `QWebEngineView.printToPdf()` — vector from same SVG renderer. PNG via `grab()` — raster fallback.
 - **Map well markers**: MapLibre GL renders GeoJSON well features as circles. Click events sent via Qt WebChannel bridge (`MapBridge.onWellClicked`).
 - **Well selection**: Two paths — map click (`_on_well_clicked`) or combo box in toolbar (`_on_well_selected`). Both call `WellLogPage.load_well()`.
-- **Seismic rendering**: `SeismicRenderer` wraps `pyvistaqt.QtInteractor`. `load_volume()` for 3D volumes, `add_slice()` for inline/crossline/timeline sections.
-- **Data models**: Pydantic `BaseModel` — `WellLogData`, `CurveData`, `LithologyInterval`, `FaciesInterval`, `WellCoordinates`, `SeismicVolumeMeta`.
+- **Seismic rendering**: `SeismicView` (in `geoviz-seismic` package) combines `Renderer3D` (PyVista 3D volume + interactive slice planes) with `ProfileWidget` (VD heatmap / Wiggle trace) and toolbar. `SeismicPage` is a thin wrapper (~5 lines) inheriting `SeismicView`. Data transposed from segyio convention `(n_traces, n_samples)` to display convention `(n_samples, n_traces)` before rendering.
+- **Data models**: Pydantic `BaseModel` — `WellLogData`, `CurveData`, `LithologyInterval`, `FaciesInterval`, `WellCoordinates`. Seismic models (`SeismicVolumeMeta`, `SliceInfo`, `HorizonData`) live in `geoviz-seismic` package.
 - **Navigation**: `MainWindow._switch_page(index)` — sidebar buttons are checkable, clicking switches `QStackedWidget` index.
 - **Tests**: pytest + pytest-qt. Test files in `tests/`. Qt widget tests use `qtbot` fixture.
 
@@ -91,11 +103,22 @@ PySide6 (Qt for Python) — Single Process
   - `geoviz_well_log/assets/patterns/` — 16 SVG pattern files
   - `geoviz_well_log/web_dist/` — ECharts + custom well-log JS
   - `geoviz_well_log/configs/` — Preset configs (laolong1)
+- `packages/geoviz_seismic/` — Independent seismic visualization package
+  - `geoviz_seismic/renderer_3d.py` — Renderer3D (PyVista 3D + slice planes)
+  - `geoviz_seismic/seismic_view.py` — SeismicView composite widget
+  - `geoviz_seismic/loader.py` — SeismicLoader (segyio on-demand slicing)
+  - `geoviz_seismic/profile_vd.py` — VD heatmap rendering
+  - `geoviz_seismic/profile_wiggle.py` — Wiggle trace rendering (VisPy fallback)
+  - `geoviz_seismic/profile_widget.py` — Unified VD/Wiggle switcher
+  - `geoviz_seismic/horizon.py` — HorizonParser (nearest/RBF fill)
+  - `geoviz_seismic/colormap.py` — ColormapManager (seismic/gray/jet/hsv)
+  - `geoviz_seismic/cache.py` — SeismicCache (LRU slice cache)
+  - `geoviz_seismic/models.py` — SeismicVolumeMeta, SliceInfo, HorizonData
 - `src/` — Main application code
   - `main.py` — Entry point (QApplication)
   - `app.py` — MainWindow + sidebar navigation
   - `pages/` — Page widgets (map, well_log, cross_well, seismic, data, tools)
-  - `renderers/` — Rendering components (map, seismic, paleo_map)
+  - `renderers/` — Rendering components (map, paleo_map)
   - `data/` — loaders, Pydantic models, cache, well_registry
   - `utils/` — constants (re-exports PATTERN_MAP from package)
   - `resources/` — Icons, Qt resource files
@@ -111,6 +134,7 @@ PySide6 (Qt for Python) — Single Process
 - **PyVista offscreen**: On headless CI, set `PYVISTA_OFFSCREEN=true`. For local dev, PyVista uses Qt interactor directly.
 - **QWebEngineView**: Requires `PySide6.QtWebEngineWidgets`. MapLibre GL JS loads from CDN — first load requires internet.
 - **Package can be used standalone**: `from geoviz_well_log import ChartEngine, TrackManager, build_tracks_from_data` works without the main app.
+- **Seismic package can be used standalone**: `from geoviz_seismic import SeismicView, SeismicLoader, Renderer3D` works without the main app. `pyvistaqt` is optional — `Renderer3D` shows a fallback `QLabel` when unavailable.
 
 ## gstack
 Use the /browse skill from gstack for all web browsing.

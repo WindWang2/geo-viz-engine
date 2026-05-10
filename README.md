@@ -54,6 +54,17 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质
 │  │  └── PatternMap     岩性/沉积相 SVG 图案         │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                         │
+│  packages/geoviz-seismic/                               │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  独立地震可视化引擎 (PyVista + segyio)           │    │
+│  │  ├── Renderer3D     PyVista 3D 体渲染            │    │
+│  │  ├── SeismicLoader  SEGY 按需切片读取            │    │
+│  │  ├── ProfileVD/Wiggle 2D 剖面显示               │    │
+│  │  ├── SeismicView    组合 3D+2D+工具栏            │    │
+│  │  ├── HorizonParser  层位解析与插值               │    │
+│  │  └── ColormapManager 色标管理                    │    │
+│  └─────────────────────────────────────────────────┘    │
+│                                                         │
 │  src/   data/ loaders & models │ pages/ UI              │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -107,10 +118,14 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质
 
 ### 地震 3D
 
+- **独立渲染引擎**：底层 `geoviz-seismic` 包可脱离主应用独立使用，支持 `pip install` 后在任何 PySide6 项目中集成。
 - SEGY 文件加载（segyio）→ PyVista UniformGrid → 三维体渲染
-- 任意方向切片（inline/crossline/timeline）
-- 等值面提取、层位显示
-- 交互旋转/缩放/拾取
+- 交互式切片平面（inline/crossline/time），拖拽实时更新 2D 剖面
+- 2D 剖面双模式：VD 热图（Variable Density）与 Wiggle 波形，支持 VisPy GPU 加速
+- 层位文件加载与 3D 曲面叠加，支持 nearest/RBF 插值
+- 内置合成地震数据演示（含断层、倾斜反射层、噪声）
+- 4 种色标：seismic、gray、jet、hsv
+- LRU 切片缓存（默认 50 条），拖拽切片 200ms 防抖
 
 ### 数据管理
 
@@ -128,8 +143,9 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质
 | Phase 1 | ✅ 已完成 | PySide6 骨架、导航、单井剖面、地图、地震3D、数据管理 |
 | Phase 2 | ✅ 已完成 | 多井对比、相变连通模型、地层拉平、TVDSS对齐、全画幅SVG导出、Calamine解析加速 |
 | Phase 3 | ✅ 已完成 | 测井引擎独立化、轨道管理器、矢量导出、AI预测集成、测井选择器 |
-| Phase 4 | 📋 待规划 | LAS 上传与解析、层序地层分析工具、交互编辑连线 |
-| Phase 5 | 📋 待规划 | 地震属性分析、井震结合 |
+| Phase 4 | ✅ 已完成 | 地震可视化独立化、3D体渲染+2D剖面、SEGY按需切片、层位解析 |
+| Phase 5 | 📋 待规划 | LAS 上传与解析、层序地层分析工具、交互编辑连线 |
+| Phase 6 | 📋 待规划 | 地震属性分析、井震结合 |
 
 ---
 
@@ -170,23 +186,36 @@ python scripts/build.py
 ```
 geo-viz-engine/
 ├── packages/
-│   └── geoviz_well_log/           # 独立测井可视化包 (pip installable)
-│       ├── geoviz_well_log/
-│       │   ├── chart_engine.py    # ChartEngine (QWebEngineView + ECharts)
-│       │   ├── payload_builder.py # 数据→ECharts JSON 变换
-│       │   ├── track_manager.py   # 轨道排序/可见性/合并/拆分
-│       │   ├── export.py          # SVG/PDF/PNG 矢量导出
-│       │   ├── pattern_map.py     # 岩性/沉积相 SVG 图案映射
-│       │   ├── models.py          # Pydantic 数据模型
-│       │   ├── sync_manager.py    # 多井深度同步
-│       │   ├── connection_overlay.py # 井间对比连线
-│       │   ├── config.py          # 轨道配置类
-│       │   ├── utils.py           # 便捷构建方法
-│       │   ├── configs/           # 预置配置
-│       │   ├── assets/patterns/   # 16 种 SVG 图案
-│       │   └── web_dist/          # ECharts JS 打包
-│       ├── pyproject.toml
-│       └── README.md              # 包使用指南 + API 参考 + 示例
+│   ├── geoviz_well_log/           # 独立测井可视化包 (pip installable)
+│   │   ├── geoviz_well_log/
+│   │   │   ├── chart_engine.py    # ChartEngine (QWebEngineView + ECharts)
+│   │   │   ├── payload_builder.py # 数据→ECharts JSON 变换
+│   │   │   ├── track_manager.py   # 轨道排序/可见性/合并/拆分
+│   │   │   ├── export.py          # SVG/PDF/PNG 矢量导出
+│   │   │   ├── pattern_map.py     # 岩性/沉积相 SVG 图案映射
+│   │   │   ├── models.py          # Pydantic 数据模型
+│   │   │   ├── sync_manager.py    # 多井深度同步
+│   │   │   ├── connection_overlay.py # 井间对比连线
+│   │   │   ├── config.py          # 轨道配置类
+│   │   │   ├── utils.py           # 便捷构建方法
+│   │   │   ├── configs/           # 预置配置
+│   │   │   ├── assets/patterns/   # 16 种 SVG 图案
+│   │   │   └── web_dist/          # ECharts JS 打包
+│   │   ├── pyproject.toml
+│   │   └── README.md              # 包使用指南 + API 参考 + 示例
+│   └── geoviz_seismic/            # 独立地震可视化包 (pip installable)
+│       ├── geoviz_seismic/
+│       │   ├── renderer_3d.py     # PyVista 3D 体渲染 + 交互切片
+│       │   ├── seismic_view.py    # 组合 3D+2D+工具栏完整组件
+│       │   ├── loader.py          # SEGY 按需切片 (segyio)
+│       │   ├── profile_vd.py      # VD 热图渲染
+│       │   ├── profile_wiggle.py  # Wiggle 波形渲染 (VisPy 回退)
+│       │   ├── profile_widget.py  # VD/Wiggle 统一切换
+│       │   ├── horizon.py         # 层位解析 + nearest/RBF 填充
+│       │   ├── colormap.py        # seismic/gray/jet/hsv 色标
+│       │   ├── cache.py           # LRU 切片缓存
+│       │   └── models.py          # SeismicVolumeMeta, SliceInfo 等
+│       └── pyproject.toml
 ├── src/                           # 主应用代码
 │   ├── main.py                    # 入口 (QApplication)
 │   ├── app.py                     # MainWindow + 侧栏导航
@@ -194,12 +223,12 @@ geo-viz-engine/
 │   │   ├── map_page.py            # 地图总览 (MapLibre GL)
 │   │   ├── well_log_page.py       # 井剖面 (UI 编排，调用 geoviz-well-log)
 │   │   ├── cross_well_page.py     # 连井对比
-│   │   ├── seismic_page.py        # 地震3D (PyVista)
+│   │   ├── seismic_page.py        # 地震3D (薄封装 SeismicView)
+│   │   ├── paleo_map_page.py      # 古地理图
 │   │   ├── data_page.py           # 数据管理
 │   │   └── tools_page.py          # 工具箱
 │   ├── renderers/
 │   │   ├── map_renderer.py        # QWebEngineView + MapLibre
-│   │   ├── seismic_renderer.py    # PyVista 3D
 │   │   └── paleo_map_renderer.py  # 古地理图
 │   ├── data/                      # 数据层
 │   │   ├── loaders.py             # 数据加载器
