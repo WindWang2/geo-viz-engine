@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import numpy as np
 import pyvista as pv
-from pyvistaqt import QtInteractor
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+
+try:
+    from pyvistaqt import QtInteractor
+    _HAS_PYVISTAQT = True
+except ImportError:
+    _HAS_PYVISTAQT = False
 
 
 class Renderer3D(QWidget):
@@ -14,15 +19,27 @@ class Renderer3D(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self._plotter = QtInteractor(self)
-        layout.addWidget(self._plotter.interactor)
+        if _HAS_PYVISTAQT:
+            self._plotter = QtInteractor(self)
+            layout.addWidget(self._plotter.interactor)
+        else:
+            self._fallback = QLabel("3D 渲染不可用 (pyvistaqt 未安装)")
+            self._fallback.setStyleSheet("color: #a0aec0; font-size: 16px;")
+            layout.addWidget(self._fallback)
+            self._plotter = None
         self._loaded = False
         self._volume_data: np.ndarray | None = None
+        self._volume_spacing = (1, 1, 1)
+        self._volume_origin = (0, 0, 0)
         self._meta = None
 
     def load_volume(self, data: np.ndarray, origin=(0, 0, 0),
                     spacing=(1, 1, 1)):
         self._volume_data = data
+        self._volume_spacing = spacing
+        self._volume_origin = origin
+        if self._plotter is None:
+            return
         self._plotter.clear()
         grid = pv.ImageData(
             dimensions=np.array(data.shape) + 1,
@@ -71,7 +88,7 @@ class Renderer3D(QWidget):
 
     def add_horizon(self, horizon_data: np.ndarray, origin=(0, 0, 0),
                     spacing=(1, 1)):
-        if horizon_data is None:
+        if horizon_data is None or self._plotter is None:
             return
         nI, nX = horizon_data.shape
         x = np.arange(nX, dtype=np.float64) * spacing[1] + origin[0]
@@ -89,17 +106,21 @@ class Renderer3D(QWidget):
         )
 
     def set_colormap(self, cmap_name: str):
-        if self._loaded and self._volume_data is not None:
-            grid = pv.ImageData(
-                dimensions=np.array(self._volume_data.shape) + 1,
-            )
-            grid["amplitude"] = self._volume_data.flatten(order="F")
-            self._plotter.add_volume(
-                grid, cmap=cmap_name, opacity="sigmoid", name="volume",
-            )
-            self._plotter.reset_camera()
+        if not self._loaded or self._volume_data is None or self._plotter is None:
+            return
+        grid = pv.ImageData(
+            dimensions=np.array(self._volume_data.shape) + 1,
+            spacing=self._volume_spacing,
+            origin=self._volume_origin,
+        )
+        grid["amplitude"] = self._volume_data.flatten(order="F")
+        self._plotter.add_volume(
+            grid, cmap=cmap_name, opacity="sigmoid", name="volume",
+        )
+        self._plotter.reset_camera()
 
     def clear(self):
-        self._plotter.clear()
+        if self._plotter is not None:
+            self._plotter.clear()
         self._loaded = False
         self._volume_data = None
