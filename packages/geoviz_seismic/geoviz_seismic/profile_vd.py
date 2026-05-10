@@ -1,3 +1,5 @@
+"""Variable-density heatmap profile renderer."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -17,6 +19,8 @@ class ProfileVD(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._image: QPixmap | None = None
+        self._data: np.ndarray | None = None
+        self._normalized: np.ndarray | None = None
         self._has_data = False
         self._colormap_name = "seismic"
         self._slice_info = None
@@ -38,9 +42,8 @@ class ProfileVD(QWidget):
         if name == self._colormap_name and self._has_data:
             return
         self._colormap_name = name
-        if self._has_data:
-            # Re-apply the new colormap to the stored float data.
-            self._build_image()
+        if self._has_data and self._normalized is not None:
+            self._build_image_from_normalized()
 
     def slice_info(self):
         """Return the :class:`SliceInfo` passed to the last render, or ``None``."""
@@ -69,17 +72,26 @@ class ProfileVD(QWidget):
             self._colormap_name = colormap
         self._slice_info = slice_info
         self._has_data = True
-        self._build_image()
+        # Cache normalized data for fast colormap switches
+        dmin, dmax = np.nanmin(self._data), np.nanmax(self._data)
+        if dmax == dmin:
+            self._normalized = np.zeros_like(self._data, dtype=np.float32)
+        else:
+            self._normalized = (self._data - dmin) / (dmax - dmin)
+        self._build_image_from_normalized()
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
 
-    def _build_image(self) -> None:
-        """Map stored float data through the colour LUT into a QPixmap."""
-        rgba = ColormapManager.apply_to_data(self._data, self._colormap_name)
+    def _build_image_from_normalized(self) -> None:
+        """Map cached normalized data through the colour LUT into a QPixmap."""
+        lut = ColormapManager.get_colormap(self._colormap_name)
+        indices = (self._normalized * (len(lut) - 1)).astype(np.int32)
+        indices = np.clip(indices, 0, len(lut) - 1)
+        rgba = lut[indices]
+
         n_samples, n_traces, _ = rgba.shape
-        # QImage expects (width, height) with rows going top-to-bottom.
         img = QImage(
             rgba.tobytes(),
             n_traces,
@@ -87,15 +99,18 @@ class ProfileVD(QWidget):
             n_traces * 4,
             QImage.Format.Format_RGBA8888,
         )
-        # Must keep a reference so the buffer outlives the QImage.
         self._image = QPixmap.fromImage(img.copy())
         self.setMinimumSize(n_traces, n_samples)
         self.update()
+
+    # Keep old method name as alias for backward compat
+    _build_image = _build_image_from_normalized
 
     def paintEvent(self, event) -> None:  # noqa: N802
         if self._image is None:
             super().paintEvent(event)
             return
         painter = QPainter(self)
-        painter.drawPixmap(0, 0, self._image)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.drawPixmap(self.rect(), self._image)
         painter.end()

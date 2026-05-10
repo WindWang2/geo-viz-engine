@@ -11,6 +11,7 @@ from PySide6.QtGui import (
     QPainter,
     QPen,
     QPolygonF,
+    QPixmap,
 )
 from PySide6.QtWidgets import QWidget
 
@@ -42,6 +43,7 @@ class ProfileWiggle(QWidget):
         super().__init__(parent)
         self._data: np.ndarray | None = None
         self._trace_step: int = 1
+        self._cached_pixmap: QPixmap | None = None
         self._vispy_canvas: SceneCanvas | None = None
         self._vispy_view = None
 
@@ -79,6 +81,7 @@ class ProfileWiggle(QWidget):
         """
         self._data = data.astype(np.float32, copy=False)
         self._trace_step = trace_step
+        self._cached_pixmap = None  # invalidate
 
         if _HAS_VISPY and self._vispy_view is not None:
             self._render_vispy()
@@ -115,19 +118,28 @@ class ProfileWiggle(QWidget):
         from vispy.scene import LineVisual
 
         n_samples, n_traces = self._data.shape
-        # Normalise amplitudes to a fixed pixel width.
         amax = np.nanmax(np.abs(self._data))
         if amax == 0:
             amax = 1.0
-        scale = 0.4  # fraction of trace spacing
+        scale = 0.4
 
-        for t in range(0, n_traces, self._trace_step):
+        traces = range(0, n_traces, self._trace_step)
+        n_draw = len(traces)
+        # Each trace: n_samples points + 1 NaN separator
+        total_pts = n_draw * (n_samples + 1)
+        pos = np.empty((total_pts, 2), dtype=np.float32)
+
+        for idx, t in enumerate(traces):
             trace = self._data[:, t] / amax * scale
-            x = np.full(n_samples, t, dtype=np.float32)
-            y = np.arange(n_samples, dtype=np.float32) + trace * self._trace_step
-            pos = np.column_stack([x, y]).astype(np.float32)
-            LineVisual(pos=pos, parent=self._vispy_view.scene, color="black")
+            base = idx * (n_samples + 1)
+            pos[base:base + n_samples, 0] = t
+            pos[base:base + n_samples, 1] = (np.arange(n_samples, dtype=np.float32)
+                                              + trace * self._trace_step)
+            # NaN break between traces
+            pos[base + n_samples] = [np.nan, np.nan]
 
+        LineVisual(pos=pos, parent=self._vispy_view.scene, color="black",
+                   connect="strip")
         self._vispy_canvas.draw()
 
     # ------------------------------------------------------------------
@@ -139,11 +151,20 @@ class ProfileWiggle(QWidget):
             super().paintEvent(event)
             return
 
+        if self._cached_pixmap is not None:
+            painter = QPainter(self)
+            painter.drawPixmap(0, 0, self._cached_pixmap)
+            painter.end()
+            return
+
         n_samples, n_traces = self._data.shape
         w = max(self.width(), n_traces)
         h = max(self.height(), n_samples)
 
-        painter = QPainter(self)
+        # Render to pixmap for caching
+        pixmap = QPixmap(w, h)
+        pixmap.fill(QColor("white"))
+        painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         amax = np.nanmax(np.abs(self._data))
@@ -175,11 +196,9 @@ class ProfileWiggle(QWidget):
 
             polygon.append(QPointF(centre_x, h - 1))
 
-            # Fill positive excursions only.
             painter.setBrush(fill_brush)
             painter.drawPolygon(polygon)
 
-            # Draw the wiggle line on top.
             painter.setBrush(neg_brush)
             line_poly = QPolygonF()
             for s in range(n_samples):
@@ -189,7 +208,15 @@ class ProfileWiggle(QWidget):
 
         painter.end()
 
+        self._cached_pixmap = pixmap
+        # Blit the freshly rendered pixmap
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.end()
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        self._cached_pixmap = None  # invalidate on resize
+        self.update()
         if _HAS_VISPY and self._vispy_canvas is not None:
             self._vispy_canvas.resize(event.size().width(), event.size().height())

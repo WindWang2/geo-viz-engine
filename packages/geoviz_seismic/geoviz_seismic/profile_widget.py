@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
+from typing import Literal
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from .profile_vd import ProfileVD
 from .profile_wiggle import ProfileWiggle
@@ -28,6 +31,14 @@ class ProfileWidget(QWidget):
         self._wiggle = ProfileWiggle()
         self._stack.addWidget(self._vd)
         self._stack.addWidget(self._wiggle)
+
+        # Overlay label for loading states
+        self._overlay = QLabel(self)
+        self._overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._overlay.setStyleSheet(
+            "background: rgba(255,255,255,200); color: #4a5568; font-size: 16px;"
+        )
+        self._overlay.hide()
 
         self._mode = "vd"
 
@@ -61,7 +72,11 @@ class ProfileWidget(QWidget):
         else:
             self._wiggle.render(data, trace_step=trace_step)
 
-    def set_display_mode(self, mode: str) -> None:
+    def mode(self) -> str:
+        """Return the current display mode (``"vd"`` or ``"wiggle"``)."""
+        return self._mode
+
+    def set_display_mode(self, mode: Literal["vd", "wiggle"]) -> None:
         """Switch between ``"vd"`` and ``"wiggle"`` display modes."""
         if mode == "vd":
             self._stack.setCurrentIndex(0)
@@ -70,7 +85,9 @@ class ProfileWidget(QWidget):
             self._stack.setCurrentIndex(1)
             self._mode = "wiggle"
         else:
-            raise ValueError(f"Unknown display mode: {mode!r}")
+            raise ValueError(
+                f"Unknown display mode: {mode!r}. Expected 'vd' or 'wiggle'."
+            )
 
     def set_colormap(self, name: str) -> None:
         """Change the VD colormap."""
@@ -79,3 +96,18 @@ class ProfileWidget(QWidget):
     def set_wiggle_density(self, trace_step: int) -> None:
         """Change the wiggle trace subsampling step."""
         self._wiggle.set_trace_step(trace_step)
+
+    def set_overlay_text(self, text: str | None) -> None:
+        """Show a centered overlay message, or hide it if *text* is ``None``."""
+        if text is None:
+            self._overlay.hide()
+        else:
+            self._overlay.setText(text)
+            self._overlay.setGeometry(self.rect())
+            self._overlay.raise_()
+            self._overlay.show()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self._overlay.isVisible():
+            self._overlay.setGeometry(self.rect())

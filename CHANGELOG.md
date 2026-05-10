@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-05-11
+
+### Changed
+- **性能优化**：异步 QThread 加载 SEGY 和合成数据（不再阻塞 UI）；QPixmap 缓存减少重复渲染；ColormapManager LUT 缓存避免重建色标；ProfileVD 归一化数据缓存加速色标切换；VisPy 批量渲染合并所有 wiggle 道为单次 draw call。
+- **代码质量**：horizon.py 修复 `_read_points` 错误列读取（`nums[-1]` → `nums[2]`）；移除 `src/app.py` 中 10 秒超时的 subprocess 探测；为所有公共类和方法添加 docstring；Literal 类型替代字符串枚举；SeismicLoader 支持 context manager。
+- **线程安全**：修复 segyio 文件句柄跨线程传递问题（worker 关闭句柄，主线程重新打开）；防止异步 worker 重复触发。
+- 删除冗余方法 `is_loaded()`（与 `is_ready()` 相同）。
+- 添加 `ColormapManager.clear_cache()` 用于测试和内存受限场景。
+
 ## [0.5.0] - 2026-05-11
 
 ### Added
@@ -15,15 +24,13 @@ All notable changes to this project will be documented in this file.
   - 新增 `colormap.py`：`ColormapManager` seismic/gray/jet/hsv 色标生成与数据映射。
   - 新增 `horizon.py`：`HorizonParser` 层位文件解析，支持 nearest/RBF 插值填充。
   - 新增 `models.py`：`SeismicVolumeMeta`、`SliceInfo`、`HorizonData` 数据模型。
-- **合成地震数据生成**：`SeismicView._generate_synthetic()` 生成含倾斜反射层、断层和噪声的合成数据用于演示。
+- **合成地震数据生成**：生成含倾斜反射层、断层和噪声的合成数据用于演示。
 - **100 条测试覆盖**：包含数据模型、缓存、色标、层位、加载器、剖面渲染、3D 渲染、视图集成等完整测试。
 
 ### Changed
 - `SeismicPage` 从独立渲染器改为 `SeismicView` 薄封装（~40 行）。
 - 删除旧的 `src/renderers/seismic_renderer.py`，功能已完全迁移到 `geoviz-seismic` 包。
 - `src/data/models.py` 移除 `SeismicVolumeMeta`（已迁移到包内）。
-- `src/app.py` 新增 subprocess 安全探测，防止无 OpenGL 环境下 pyvistaqt 导致 C-level 崩溃。
-- 版本号升级到 0.5.0。
 
 ## [0.4.0] - 2026-05-10
 

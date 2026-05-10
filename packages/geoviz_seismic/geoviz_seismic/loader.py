@@ -12,6 +12,18 @@ logger = logging.getLogger(__name__)
 
 
 class SeismicLoader:
+    """On-demand SEGY file reader built on segyio.
+
+    Opens the file lazily on first access. Supports inline, crossline,
+    and time-slice reads with optional down-sampled volume extraction.
+
+    Usage::
+
+        with SeismicLoader("cube.sgy") as loader:
+            meta = loader.inspect()
+            inline_100 = loader.read_inline(100)
+    """
+
     def __init__(self, path: str):
         self._path = path
         self._f: segyio.SegyFile | None = None
@@ -19,6 +31,10 @@ class SeismicLoader:
         self._downsampled: np.ndarray | None = None
 
     def inspect(self) -> SeismicVolumeMeta:
+        """Read SEGY headers and return volume metadata.
+
+        Caches the result; safe to call repeatedly.
+        """
         if self._meta is not None:
             return self._meta
         f = self._open()
@@ -52,6 +68,7 @@ class SeismicLoader:
         return self._meta
 
     def read_inline(self, iline: int) -> np.ndarray:
+        """Read one inline slice. Returns shape ``(n_xlines, n_samples)``."""
         try:
             t0 = time.monotonic()
             f = self._open()
@@ -67,6 +84,7 @@ class SeismicLoader:
             ) from e
 
     def read_crossline(self, xline: int) -> np.ndarray:
+        """Read one crossline slice. Returns shape ``(n_inlines, n_samples)``."""
         try:
             t0 = time.monotonic()
             f = self._open()
@@ -82,6 +100,7 @@ class SeismicLoader:
             ) from e
 
     def read_timeslice(self, sample_idx: int) -> np.ndarray:
+        """Read one time slice (zero-based index). Returns ``(n_inlines, n_xlines)``."""
         try:
             t0 = time.monotonic()
             f = self._open()
@@ -107,6 +126,15 @@ class SeismicLoader:
             ) from e
 
     def get_volume_downsampled(self, factor: tuple[int, int, int] = (4, 4, 2)) -> np.ndarray:
+        """Read the full volume with stride-based downsampling.
+
+        Args:
+            factor: Stride ``(inline, crossline, sample)``. ``(4, 4, 2)``
+                reads every 4th inline, every 4th crossline, every 2nd sample.
+
+        Returns:
+            ``float32`` array of shape ``(n_il // fi, n_xl // fx, n_s // ft)``.
+        """
         if self._downsampled is not None:
             return self._downsampled
         meta = self.inspect()
@@ -124,6 +152,7 @@ class SeismicLoader:
         return vol
 
     def close(self):
+        """Close the underlying SEGY file handle."""
         if self._f is not None:
             self._f.close()
             self._f = None
@@ -135,3 +164,10 @@ class SeismicLoader:
 
     def __del__(self):
         self.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False

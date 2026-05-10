@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QSplitter,
     QPushButton, QComboBox, QLabel, QFileDialog, QToolBar,
@@ -14,6 +14,63 @@ from .loader import SeismicLoader
 from .horizon import HorizonParser
 from .cache import SeismicCache
 from .models import SeismicVolumeMeta, SliceInfo
+
+
+def _generate_synthetic(
+    n_inlines: int = 60, n_crosslines: int = 80,
+    n_samples: int = 100,
+) -> np.ndarray:
+    """Generate synthetic seismic with geologically realistic structure:
+    horizontal reflectors with gentle dip, a fault offset, and noise."""
+    t = np.linspace(0, 4 * np.pi, n_samples, dtype=np.float32)
+    il = np.arange(n_inlines, dtype=np.float32)
+    dip = 0.02 * il[:, np.newaxis]
+    reflector = np.sin(t + dip) + 0.5 * np.sin(2.3 * t + dip)
+    field = np.broadcast_to(reflector[:, np.newaxis, :],
+                            (n_inlines, n_crosslines, n_samples)).copy()
+    fault_il = n_inlines // 2
+    offset = 5
+    field[fault_il:, :, offset:] = field[fault_il:, :, :-offset].copy()
+    field[fault_il:, :, :offset] = 0
+    rng = np.random.default_rng(42)
+    noise = rng.normal(0, 0.15, field.shape).astype(np.float32)
+    return field + noise
+
+
+class _SyntheticWorker(QThread):
+    """Background thread for synthetic data generation."""
+    done = Signal(object)  # np.ndarray
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def run(self):
+        data = _generate_synthetic()
+        self.done.emit(data)
+
+
+class _SegyLoadWorker(QThread):
+    """Background thread for SEGY file loading."""
+    done = Signal(object, object)  # (volume ndarray, slice ndarray)
+    error = Signal(str)
+
+    def __init__(self, path: str, parent=None):
+        super().__init__(parent)
+        self._path = path
+
+    def run(self):
+        try:
+            loader = SeismicLoader(self._path)
+            meta = loader.inspect()
+            vol = loader.get_volume_downsampled(factor=(4, 4, 2))
+            mid_il = (meta.iline_start
+                      + meta.n_inlines // 2 * meta.iline_step)
+            raw = loader.read_inline(mid_il)
+            # Close file handle on worker thread; main thread re-opens lazily
+            loader.close()
+            self.done.emit((meta, vol, raw, self._path))
+        except Exception as exc:
+            self.error.emit(str(exc))
 
 
 class SeismicView(QWidget):
@@ -59,27 +116,26 @@ class SeismicView(QWidget):
 
         self._renderer_3d.slice_changed.connect(self._on_slice_changed)
 
-        # Auto-load: SEGY file if path given, else synthetic demo
+        # Auto-load: SEGY file if path given, else synthetic demo (async)
         if path is not None:
-            self.load_segy(path)
+            self.load_segy_async(path)
         else:
-            self.load_demo(self._generate_synthetic())
+            self._profile_widget.set_overlay_text("生成合成数据...")
+            self._synth_worker = _SyntheticWorker(self)
+            self._synth_worker.done.connect(self._on_synthetic_ready)
+            self._synth_worker.start()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:
-        """Return ``True`` once the widget is fully initialised."""
-        return True
-
-    def is_loaded(self) -> bool:
-        """Return ``True`` when a volume has been loaded."""
+        """Return ``True`` once volume data has been loaded."""
         return self._meta is not None
 
     def display_mode(self) -> str:
         """Current profile display mode (``"vd"`` or ``"wiggle"``)."""
-        return self._profile_widget._mode
+        return self._profile_widget.mode()
 
     def load_demo(self, data: np.ndarray):
         """Load a synthetic or pre-computed 3-D volume for quick demo."""
@@ -105,7 +161,7 @@ class SeismicView(QWidget):
         self._log.info("Demo loaded: shape=%s", data.shape)
 
     def load_segy(self, path: str):
-        """Load a SEGY file, down-sample for 3-D display, and show mid-inline."""
+        """Load a SEGY file synchronously (for backward compat)."""
         if self._loader is not None:
             self._loader.close()
         self._loader = SeismicLoader(path)
@@ -120,44 +176,63 @@ class SeismicView(QWidget):
         mid_il = (self._meta.iline_start
                   + self._meta.n_inlines // 2 * self._meta.iline_step)
         raw = self._loader.read_inline(mid_il)
-        slice_2d = raw.T  # (n_xlines, n_samples) → (n_samples, n_xlines)
+        slice_2d = raw.T
         info = self._build_slice_info("inline", mid_il, slice_2d.shape)
         self._profile_widget.update_profile(slice_2d, slice_info=info)
         self._slice_label.setText(f"Inline {mid_il}")
+
+    def load_segy_async(self, path: str):
+        """Load a SEGY file in a background thread."""
+        if self._loader is not None:
+            self._loader.close()
+        if hasattr(self, '_segy_worker') and self._segy_worker is not None and self._segy_worker.isRunning():
+            self._segy_worker.done.disconnect(self._on_segy_ready)
+            self._segy_worker.error.disconnect(self._on_segy_error)
+        self._profile_widget.set_overlay_text("加载 SEGY...")
+        self._segy_worker = _SegyLoadWorker(path, self)
+        self._segy_worker.done.connect(self._on_segy_ready)
+        self._segy_worker.error.connect(self._on_segy_error)
+        self._segy_worker.start()
 
     def set_display_mode(self, mode: str):
         """Switch the profile display mode (``"vd"`` or ``"wiggle"``)."""
         self._profile_widget.set_display_mode(mode)
 
     # ------------------------------------------------------------------
-    # Synthetic data generation
+    # Async callbacks
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _generate_synthetic(
-        n_inlines: int = 60, n_crosslines: int = 80,
-        n_samples: int = 100,
-    ) -> np.ndarray:
-        """Generate synthetic seismic with geologically realistic structure:
-        horizontal reflectors with gentle dip, a fault offset, and noise."""
-        t = np.linspace(0, 4 * np.pi, n_samples, dtype=np.float32)
-        il = np.arange(n_inlines, dtype=np.float32)
-        xl = np.arange(n_crosslines, dtype=np.float32)
-        # Reflector field: sine waves with gentle dip along inline
-        field = np.zeros((n_inlines, n_crosslines, n_samples), dtype=np.float32)
-        for i in range(n_inlines):
-            dip = 0.02 * i  # gentle dip
-            reflector = np.sin(t + dip) + 0.5 * np.sin(2.3 * t + dip)
-            field[i, :] = reflector[np.newaxis, :]
-        # Add a normal fault at inline 30, offsetting by 5 samples
-        fault_il = n_inlines // 2
-        offset = 5
-        field[fault_il:, :, offset:] = field[fault_il:, :, :-offset].copy()
-        field[fault_il:, :, :offset] = 0
-        # Add Gaussian noise
-        rng = np.random.default_rng(42)
-        noise = rng.normal(0, 0.15, field.shape).astype(np.float32)
-        return field + noise
+    @Slot(object)
+    def _on_synthetic_ready(self, data: np.ndarray):
+        self.load_demo(data)
+        self._profile_widget.set_overlay_text(None)
+
+    @Slot(object)
+    def _on_segy_ready(self, result: tuple):
+        meta, vol, raw, path = result
+        self._loader = SeismicLoader(path)
+        self._meta = meta
+        self._ds_factor = (4, 4, 2)
+        self._log.info("SEGY loaded async: (%dx%dx%d), vol shape=%s",
+                       meta.n_inlines, meta.n_crosslines, meta.n_samples,
+                       vol.shape)
+        self._renderer_3d.load_volume(vol)
+        slice_2d = raw.T
+        mid_il = (meta.iline_start
+                  + meta.n_inlines // 2 * meta.iline_step)
+        info = self._build_slice_info("inline", mid_il, slice_2d.shape)
+        self._profile_widget.update_profile(slice_2d, slice_info=info)
+        self._slice_label.setText(f"Inline {mid_il}")
+        self._profile_widget.set_overlay_text(None)
+
+    @Slot(str)
+    def _on_segy_error(self, msg: str):
+        self._log.error("SEGY load failed: %s", msg)
+        self._profile_widget.set_overlay_text(f"加载失败: {msg}")
+
+    # ------------------------------------------------------------------
+    # Synthetic data generation
+    # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -213,39 +288,35 @@ class SeismicView(QWidget):
                 axis_h_values=[0.0], axis_v_values=[0.0],
             )
         m = self._meta
+        n_h = data_shape[1] if len(data_shape) > 1 else data_shape[0]
+        n_v = data_shape[0]
+
         if slice_type == "inline":
-            h_vals = [m.xline_start + i * m.xline_step
-                      for i in range(data_shape[1] if len(data_shape) > 1
-                                     else data_shape[0])]
-            v_vals = [m.t0_ms + i * m.dt_ms for i in range(data_shape[0])]
+            h_arr = np.arange(n_h) * m.xline_step + m.xline_start
+            v_arr = np.arange(n_v) * m.dt_ms + m.t0_ms
             return SliceInfo(
                 slice_type=slice_type, position=position,
                 axis_h_label="Crossline", axis_v_label="Time (ms)",
-                axis_h_values=[float(v) for v in h_vals],
-                axis_v_values=[float(v) for v in v_vals],
+                axis_h_values=h_arr.tolist(),
+                axis_v_values=v_arr.tolist(),
             )
         elif slice_type == "crossline":
-            h_vals = [m.iline_start + i * m.iline_step
-                      for i in range(data_shape[1] if len(data_shape) > 1
-                                     else data_shape[0])]
-            v_vals = [m.t0_ms + i * m.dt_ms for i in range(data_shape[0])]
+            h_arr = np.arange(n_h) * m.iline_step + m.iline_start
+            v_arr = np.arange(n_v) * m.dt_ms + m.t0_ms
             return SliceInfo(
                 slice_type=slice_type, position=position,
                 axis_h_label="Inline", axis_v_label="Time (ms)",
-                axis_h_values=[float(v) for v in h_vals],
-                axis_v_values=[float(v) for v in v_vals],
+                axis_h_values=h_arr.tolist(),
+                axis_v_values=v_arr.tolist(),
             )
         else:  # time
-            h_vals = [m.iline_start + i * m.iline_step
-                      for i in range(data_shape[1] if len(data_shape) > 1
-                                     else data_shape[0])]
-            v_vals = [m.xline_start + i * m.xline_step
-                      for i in range(data_shape[0])]
+            h_arr = np.arange(n_h) * m.iline_step + m.iline_start
+            v_arr = np.arange(n_v) * m.xline_step + m.xline_start
             return SliceInfo(
                 slice_type=slice_type, position=position,
                 axis_h_label="Inline", axis_v_label="Crossline",
-                axis_h_values=[float(v) for v in h_vals],
-                axis_v_values=[float(v) for v in v_vals],
+                axis_h_values=h_arr.tolist(),
+                axis_v_values=v_arr.tolist(),
             )
 
     # ------------------------------------------------------------------
@@ -328,10 +399,17 @@ class SeismicView(QWidget):
             self, "选择 SEGY 文件", "", "SEGY Files (*.sgy *.segy)"
         )
         if path:
-            self.load_segy(path)
+            self.load_segy_async(path)
 
     def _load_demo_data(self):
-        self.load_demo(self._generate_synthetic())
+        if (hasattr(self, '_synth_worker')
+                and self._synth_worker is not None
+                and self._synth_worker.isRunning()):
+            self._synth_worker.done.disconnect(self._on_synthetic_ready)
+        self._profile_widget.set_overlay_text("生成合成数据...")
+        self._synth_worker = _SyntheticWorker(self)
+        self._synth_worker.done.connect(self._on_synthetic_ready)
+        self._synth_worker.start()
 
     def _load_horizon(self):
         if self._meta is None:

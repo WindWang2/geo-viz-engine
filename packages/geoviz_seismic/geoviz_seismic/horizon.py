@@ -1,7 +1,10 @@
+"""Horizon file parsing and interpolation (nearest / RBF)."""
+
 from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TypedDict
 
 import numpy as np
 from scipy.ndimage import distance_transform_edt
@@ -9,7 +12,33 @@ from scipy.ndimage import distance_transform_edt
 _NUM_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
 
 
+class HorizonAxes(TypedDict):
+    """Axes definition expected by :meth:`HorizonParser.parse`.
+
+    Attributes:
+        ilines: 1-D array of inline numbers.
+        xlines: 1-D array of crossline numbers.
+        nI: Number of inlines (``len(ilines)``).
+        nX: Number of crosslines (``len(xlines)``).
+    """
+
+    ilines: np.ndarray
+    xlines: np.ndarray
+    nI: int
+    nX: int
+
+
 class HorizonParser:
+    """Parse tab-separated horizon files (inline, crossline, time/depth).
+
+    Args:
+        path: Path to horizon file.
+        unit: Depth/time unit (``"ms"``, ``"m"``, ``"ft"``).
+        scale: Multiplier applied to the third column.
+        iline_offset: Offset added to inline numbers before matching.
+        xline_offset: Offset added to crossline numbers before matching.
+    """
+
     def __init__(self, path: str, unit: str = "ms", scale: float = 1.0,
                  iline_offset: int = 0, xline_offset: int = 0):
         self._path = path
@@ -18,13 +47,21 @@ class HorizonParser:
         self._il_offset = iline_offset
         self._xl_offset = xline_offset
 
-    def parse(self, axes: dict) -> np.ndarray:
+    def parse(self, axes: HorizonAxes) -> np.ndarray:
+        """Parse the horizon file into a 2-D grid with NaN gaps.
+
+        Args:
+            axes: Inline/crossline axes definition (see :class:`HorizonAxes`).
+
+        Returns:
+            ``(nI, nX)`` float64 array with ``NaN`` where no data matches.
+        """
         points = self._read_points()
         if not points:
             raise ValueError(
                 f"No valid data points found in {self._path}. "
                 f"Expected format: inline crossline time_ms (tab-separated). "
-                f"Each line should have exactly 3 numeric columns."
+                f"Each line should have at least 3 numeric columns."
             )
         ilines = axes["ilines"]
         xlines = axes["xlines"]
@@ -54,6 +91,15 @@ class HorizonParser:
         return grid
 
     def fill_nearest(self, grid: np.ndarray, max_dist: float = 0) -> np.ndarray:
+        """Fill NaN gaps using nearest-neighbour interpolation.
+
+        Args:
+            grid: ``(nI, nX)`` array with NaN gaps.
+            max_dist: Maximum pixel distance to fill. ``0`` means unlimited.
+
+        Returns:
+            Filled copy of *grid*.
+        """
         mask = np.isfinite(grid)
         if mask.all():
             return grid.copy()
@@ -65,6 +111,17 @@ class HorizonParser:
 
     def fill_rbf(self, grid: np.ndarray, max_dist: float = 0,
                  neighbors: int = 24, smoothing: float = 0.0) -> np.ndarray:
+        """Fill NaN gaps using RBF (radial basis function) interpolation.
+
+        Args:
+            grid: ``(nI, nX)`` array with NaN gaps.
+            max_dist: Maximum pixel distance to fill. ``0`` means unlimited.
+            neighbors: Number of nearest neighbours for RBF fitting.
+            smoothing: Smoothing factor (0 = exact interpolation).
+
+        Returns:
+            Interpolated copy of *grid*.
+        """
         from scipy.interpolate import RBFInterpolator
         mask = np.isfinite(grid)
         if mask.all():
@@ -97,6 +154,6 @@ class HorizonParser:
                 continue
             il = int(float(nums[0]))
             xl = int(float(nums[1]))
-            val = float(nums[-1]) * self._scale
+            val = float(nums[2]) * self._scale
             points[(il, xl)] = val
         return points

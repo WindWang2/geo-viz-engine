@@ -13,6 +13,11 @@ except ImportError:
 
 
 class Renderer3D(QWidget):
+    """PyVista-based 3-D seismic volume renderer with interactive slice planes.
+
+    Falls back to a ``QLabel`` placeholder when pyvistaqt is unavailable.
+    """
+
     slice_changed = Signal(str, int)  # (slice_type, position)
 
     def __init__(self, parent=None):
@@ -35,6 +40,13 @@ class Renderer3D(QWidget):
 
     def load_volume(self, data: np.ndarray, origin=(0, 0, 0),
                     spacing=(1, 1, 1)):
+        """Load a 3-D numpy array as a volume rendering.
+
+        Args:
+            data: ``(n_inlines, n_crosslines, n_samples)`` float32 array.
+            origin: ``(x, y, z)`` world-space origin.
+            spacing: ``(dx, dy, dz)`` voxel spacing.
+        """
         self._volume_data = data
         self._volume_spacing = spacing
         self._volume_origin = origin
@@ -106,6 +118,7 @@ class Renderer3D(QWidget):
         )
 
     def set_colormap(self, cmap_name: str):
+        """Change the 3-D volume colormap (e.g. ``"seismic"``, ``"gray"``)."""
         if not self._loaded or self._volume_data is None or self._plotter is None:
             return
         grid = pv.ImageData(
@@ -117,7 +130,6 @@ class Renderer3D(QWidget):
         self._plotter.add_volume(
             grid, cmap=cmap_name, opacity="sigmoid", name="volume",
         )
-        self._plotter.reset_camera()
 
     def clear(self):
         if self._plotter is not None:

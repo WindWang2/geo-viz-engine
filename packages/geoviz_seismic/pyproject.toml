@@ -1,9 +1,19 @@
 [project]
 name = "geoviz-seismic"
 version = "0.1.0"
-description = "Seismic volume visualization package"
-authors = [{ name = "Kevin", email = "kevin@example.com" }]
+description = "3D seismic volume visualization + 2D profile display (VD/Wiggle) for PySide6"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
+authors = [{ name = "Kevin", email = "kevin@example.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Scientific/Engineering :: GIS",
+]
 dependencies = [
     "PySide6>=6.6",
     "pyvista>=0.43",
@@ -15,6 +25,11 @@ dependencies = [
 
 [project.optional-dependencies]
 wiggle = ["vispy>=0.14"]
+
+[project.urls]
+Homepage = "https://github.com/WindWang2/geo-viz-engine"
+Repository = "https://github.com/WindWang2/geo-viz-engine/tree/main/packages/geoviz_seismic"
+Issues = "https://github.com/WindWang2/geo-viz-engine/issues"
 
 [build-system]
 requires = ["hatchling"]

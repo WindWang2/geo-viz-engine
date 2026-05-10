@@ -1,3 +1,5 @@
+"""Seismic colour-map generation and data-to-RGBA mapping."""
+
 import numpy as np
 
 
@@ -39,16 +41,30 @@ def _build_jet(n: int) -> np.ndarray:
 
 
 def _build_hsv(n: int) -> np.ndarray:
-    import colorsys
+    h = np.linspace(0, 1, n, endpoint=False)
+    # Vectorised HSV→RGB for S=1, V=1
+    i = (h * 6).astype(int) % 6
+    f = h * 6 - np.floor(h * 6)
+    rgb = np.zeros((n, 3), dtype=np.uint8)
+    for idx, (r, g, b) in enumerate([(1, f, 0), (1 - f, 1, 0), (0, 1, f),
+                                      (0, 1 - f, 1), (f, 0, 1), (1, 0, 1 - f)]):
+        mask = i == idx
+        rgb[mask, 0] = (np.broadcast_to(np.asarray(r), mask.shape) * 255)[mask].astype(np.uint8)
+        rgb[mask, 1] = (np.broadcast_to(np.asarray(g), mask.shape) * 255)[mask].astype(np.uint8)
+        rgb[mask, 2] = (np.broadcast_to(np.asarray(b), mask.shape) * 255)[mask].astype(np.uint8)
     rgba = np.zeros((n, 4), dtype=np.uint8)
-    for i in range(n):
-        h = i / n
-        r, g, b = colorsys.hsv_to_rgb(h, 1.0, 1.0)
-        rgba[i] = [int(r * 255), int(g * 255), int(b * 255), 255]
+    rgba[:, :3] = rgb
+    rgba[:, 3] = 255
     return rgba
 
 
 class ColormapManager:
+    """Registry of seismic colour maps with LUT caching.
+
+    Built-in colormaps: ``seismic`` (red-blue diverging), ``gray``,
+    ``jet``, ``hsv``. Lookup tables are built once and cached per name.
+    """
+
     SEISMIC = "seismic"
     GRAY = "gray"
     JET = "jet"
@@ -61,15 +77,33 @@ class ColormapManager:
         "hsv": _build_hsv,
     }
 
+    _LUT_CACHE: dict[str, np.ndarray] = {}
+
     @staticmethod
     def get_colormap(name: str, n_colors: int = 256) -> np.ndarray:
+        """Return an ``(n_colors, 4)`` RGBA look-up table. Results are cached."""
+        cache_key = f"{name}:{n_colors}"
+        cached = ColormapManager._LUT_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
         builder = ColormapManager._COLORMAPS.get(name)
         if builder is None:
-            raise ValueError(f"Unknown colormap: {name}")
-        return builder(n_colors)
+            raise ValueError(
+                f"Unknown colormap: {name!r}. "
+                f"Available: {sorted(ColormapManager._COLORMAPS)}"
+            )
+        lut = builder(n_colors)
+        ColormapManager._LUT_CACHE[cache_key] = lut
+        return lut
+
+    @staticmethod
+    def clear_cache() -> None:
+        """Clear all cached LUTs (useful for testing or memory-constrained scenarios)."""
+        ColormapManager._LUT_CACHE.clear()
 
     @staticmethod
     def apply_to_data(data: np.ndarray, name: str) -> np.ndarray:
+        """Map float32 data through a colour LUT to RGBA (min-max normalised)."""
         dmin, dmax = np.nanmin(data), np.nanmax(data)
         if dmax == dmin:
             normalized = np.zeros_like(data, dtype=np.float32)
