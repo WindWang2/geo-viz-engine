@@ -6,13 +6,17 @@ import numpy as np
 def _build_seismic(n: int) -> np.ndarray:
     t = np.linspace(0, 1, n)
     rgba = np.zeros((n, 4), dtype=np.uint8)
-    mid = n // 2
-    rgba[:mid, 0] = np.clip(t[:mid] * 2 * 255, 0, 255).astype(np.uint8)
-    rgba[:mid, 1] = np.clip(t[:mid] * 2 * 255, 0, 255).astype(np.uint8)
-    rgba[:mid, 2] = 255
-    rgba[mid:, 0] = 255
-    rgba[mid:, 1] = np.clip((1 - (t[mid:] - 0.5) * 2) * 255, 0, 255).astype(np.uint8)
-    rgba[mid:, 2] = np.clip((1 - (t[mid:] - 0.5) * 2) * 255, 0, 255).astype(np.uint8)
+    
+    # Professional Petrel/OpendTect style smooth seismic colormap
+    # Keypoints: Dark Blue -> Blue -> White -> Red -> Dark Red
+    xp = [0.0, 0.25, 0.5, 0.75, 1.0]
+    fp_r = [0, 0, 255, 255, 128]
+    fp_g = [0, 0, 255, 0, 0]
+    fp_b = [128, 255, 255, 0, 0]
+    
+    rgba[:, 0] = np.interp(t, xp, fp_r).astype(np.uint8)
+    rgba[:, 1] = np.interp(t, xp, fp_g).astype(np.uint8)
+    rgba[:, 2] = np.interp(t, xp, fp_b).astype(np.uint8)
     rgba[:, 3] = 255
     return rgba
 

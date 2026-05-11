@@ -17,8 +17,8 @@ from .models import SeismicVolumeMeta, SliceInfo
 
 
 def _generate_synthetic(
-    n_inlines: int = 60, n_crosslines: int = 80,
-    n_samples: int = 100,
+    n_inlines: int = 200, n_crosslines: int = 200,
+    n_samples: int = 200,
 ) -> np.ndarray:
     """Generate synthetic seismic with geologically realistic structure:
     horizontal reflectors with gentle dip, a fault offset, and noise."""
@@ -176,7 +176,7 @@ class SeismicView(QWidget):
         self._log.info("SEGY inspected: %s (%dx%dx%d)", path,
                        self._meta.n_inlines, self._meta.n_crosslines,
                        self._meta.n_samples)
-        self._ds_factor = (4, 4, 2)
+        self._ds_factor = (1, 1, 1)
         vol = self._loader.get_volume_downsampled(factor=self._ds_factor)
         self._log.info("Volume downsampled: shape=%s", vol.shape)
         self._renderer_3d.load_volume(vol)
@@ -219,7 +219,7 @@ class SeismicView(QWidget):
         meta, vol, raw, path = result
         self._loader = SeismicLoader(path)
         self._meta = meta
-        self._ds_factor = (4, 4, 2)
+        self._ds_factor = (1, 1, 1)
         self._log.info("SEGY loaded async: (%dx%dx%d), vol shape=%s",
                        meta.n_inlines, meta.n_crosslines, meta.n_samples,
                        vol.shape)
@@ -240,6 +240,11 @@ class SeismicView(QWidget):
     # ------------------------------------------------------------------
     # Synthetic data generation
     # ------------------------------------------------------------------
+
+    @Slot(int)
+    def _on_3d_mode_changed(self, index: int):
+        mode = "planes" if index == 0 else "volume"
+        self._renderer_3d.set_render_mode(mode)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -271,12 +276,18 @@ class SeismicView(QWidget):
             self._profile_widget.set_colormap
         )
 
+        self._3d_mode_combo = QComboBox()
+        self._3d_mode_combo.addItems(["正交切片", "三维体"])
+        self._3d_mode_combo.currentIndexChanged.connect(self._on_3d_mode_changed)
+
         self._slice_label = QLabel("未加载")
         self._slice_label.setStyleSheet("color: #888; padding: 0 8px;")
 
         bar.addWidget(load_btn)
         bar.addWidget(demo_btn)
         bar.addWidget(horizon_btn)
+        bar.addWidget(QLabel(" 3D模式:"))
+        bar.addWidget(self._3d_mode_combo)
         bar.addWidget(QLabel(" 剖面:"))
         bar.addWidget(self._slice_type_combo)
         bar.addWidget(QLabel(" 显示:"))

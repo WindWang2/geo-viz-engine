@@ -112,6 +112,16 @@ class Renderer3D(QWidget):
     # Public API
     # ------------------------------------------------------------------
 
+    def set_render_mode(self, mode: str):
+        """Set the 3D display mode: 'planes' or 'volume'"""
+        self._mode = mode
+        if self._volume_visual is not None:
+            if mode == "volume":
+                self._volume_visual.show()
+            else:
+                self._volume_visual.hide()
+        self._view.update()
+
     def load_volume(self, data: np.ndarray, origin=(0, 0, 0),
                     spacing=(1, 1, 1)):
         """Load volume into renderer, automatically syncing to GPU if available."""
@@ -150,27 +160,29 @@ class Renderer3D(QWidget):
         # Update grid to floor
         self._base_grid.translate(cx, cy, 0)
 
-        # 1. Try 3D Texture Volume rendering first
+        self._mode = getattr(self, "_mode", "planes")
+        self._volume_visual = None
+        
+        # 1. 3D Volume Item (Hidden by default, shown when mode="volume")
         try:
-            # Prepare volume item color table (alpha ramped)
             cmap_data = ColormapManager.get_colormap(self._cmap_name).copy()
-            # Add custom alpha logic (transparent near zero/middle values for volume peek-thru)
-            # This gives the VTK-style translucent cloud effect for seismic reflectors
+            # Custom alpha logic for volume peek-thru
             alpha_curve = np.abs(np.linspace(-1, 1, 256)) ** 1.5 * 100
             cmap_data[:, 3] = alpha_curve.astype(np.uint8)
-            
-            # Use GPU accelerated colormap mapping for the entire 3D volume
             vol_data = self._volume_data_gpu if self._volume_data_gpu is not None else data
-            vol_rgba = apply_colormap_gpu(vol_data, cmap_data)
             
-            # GLVolumeItem expects shape (x, y, z, 4) of ubytes
+            # Using downsampled data for volume rendering to avoid GPU VRAM crash on huge datasets
+            # Slices remain 1x1x1 resolution, volume is purely visual
+            from .gpu_ops import apply_colormap_gpu
+            vol_rgba = apply_colormap_gpu(vol_data[::2, ::2, ::2], cmap_data)
+            
             self._volume_visual = gl.GLVolumeItem(vol_rgba, sliceDensity=1, smooth=True)
-            self._volume_visual.scale(si, sx, st)
+            self._volume_visual.scale(si*2, sx*2, st*2)
             self._view.addItem(self._volume_visual)
-            self._use_volume = True
+            if self._mode != "volume":
+                self._volume_visual.hide()
         except Exception as e:
             logger.warning(f"GLVolumeItem preparation failed: {e}")
-            self._use_volume = False
 
         # 2. Bounding Box setup
         self._create_bbox(ni, nx, nt, spacing)
@@ -336,13 +348,18 @@ class Renderer3D(QWidget):
 
         # 1. Inline — Perpendicular to IL axis (x)
         il_raw = self._get_sliced_data(0, self._il_pos) # returns GPU or CPU array
-        # Perform full normalization + mapping on the GPU device directly!
         img_il_rgb = apply_colormap_gpu(il_raw, lut)
         self._img_il = gl.GLImageItem(img_il_rgb)
         self._img_il.scale(sx, st, 1)
         self._img_il.rotate(90, 0, 1, 0) 
         self._img_il.translate(self._il_pos * si, 0, 0)
         self._view.addItem(self._img_il)
+        
+        # Red Border for Inline
+        il_pts = np.array([[0, 0, 0], [0, nx*sx, 0], [0, nx*sx, nt*st], [0, 0, nt*st], [0, 0, 0]])
+        self._line_il = gl.GLLinePlotItem(pos=il_pts, color=(1, 0, 0, 1), width=2, antialias=True)
+        self._line_il.translate(self._il_pos * si, 0, 0)
+        self._view.addItem(self._line_il)
 
         # 2. Crossline — Perpendicular to XL axis (y)
         xl_raw = self._get_sliced_data(1, self._xl_pos)
@@ -352,6 +369,12 @@ class Renderer3D(QWidget):
         self._img_xl.rotate(90, 1, 0, 0)
         self._img_xl.translate(0, self._xl_pos * sx, 0)
         self._view.addItem(self._img_xl)
+        
+        # Green Border for Crossline
+        xl_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, 0, nt*st], [0, 0, nt*st], [0, 0, 0]])
+        self._line_xl = gl.GLLinePlotItem(pos=xl_pts, color=(0, 1, 0, 1), width=2, antialias=True)
+        self._line_xl.translate(0, self._xl_pos * sx, 0)
+        self._view.addItem(self._line_xl)
 
         # 3. Time — Perpendicular to T axis (z)
         t_raw = self._get_sliced_data(2, self._t_pos)
@@ -360,19 +383,25 @@ class Renderer3D(QWidget):
         self._img_t.scale(si, sx, 1)
         self._img_t.translate(0, 0, self._t_pos * st)
         self._view.addItem(self._img_t)
+        
+        # Blue Border for Time
+        t_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, nx*sx, 0], [0, nx*sx, 0], [0, 0, 0]])
+        self._line_t = gl.GLLinePlotItem(pos=t_pts, color=(0, 0, 1, 1), width=2, antialias=True)
+        self._line_t.translate(0, 0, self._t_pos * st)
+        self._view.addItem(self._line_t)
 
     def _update_slice_planes(self):
         # Clear existing plane visuals from item graph
-        for v in (self._img_il, self._img_xl, self._img_t):
+        for v in (getattr(self, "_img_il", None), getattr(self, "_img_xl", None), getattr(self, "_img_t", None),
+                  getattr(self, "_line_il", None), getattr(self, "_line_xl", None), getattr(self, "_line_t", None)):
             if v is not None:
                 try:
                     self._view.removeItem(v)
                 except Exception:
                     pass
         
-        self._img_il = None
-        self._img_xl = None
-        self._img_t = None
+        self._img_il = self._img_xl = self._img_t = None
+        self._line_il = self._line_xl = self._line_t = None
         
         # Recreate instantly (leveraging GPU accelerated slicing cached results)
         self._create_slice_planes()
