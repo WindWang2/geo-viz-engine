@@ -340,7 +340,7 @@ class SeismicView(QWidget):
 
         # Demo mode: slice from cached volume data directly
         if self._loader is None:
-            vol = self._renderer_3d._volume_data
+            vol = self._renderer_3d._volume_data_cpu
             if vol is None:
                 return
             if slice_type == "inline":

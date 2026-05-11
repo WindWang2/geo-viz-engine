@@ -45,15 +45,17 @@ def to_cpu(arr: cp.ndarray | np.ndarray) -> np.ndarray:
 
 def slice_volume_gpu(volume: cp.ndarray | np.ndarray, 
                      axis: int, 
-                     index: int) -> np.ndarray:
+                     index: int,
+                     keep_on_gpu: bool = False) -> cp.ndarray | np.ndarray:
     """
-    Perform efficient slicing on the GPU if volume is a CuPy array,
-    returning a standard CPU NumPy array optimized for visualization engines.
+    Perform efficient slicing on the GPU if volume is a CuPy array.
     
     Args:
         volume: 3D volume array (may be CuPy or NumPy).
         axis: Slicing axis index (0=IL, 1=XL, 2=T).
         index: Integer coordinate position along axis.
+        keep_on_gpu: If True and volume is CuPy, returns CuPy array. 
+                     If False, explicitly transfers to CPU NumPy.
     """
     if axis == 0:
         sl = volume[index, :, :]
@@ -62,5 +64,48 @@ def slice_volume_gpu(volume: cp.ndarray | np.ndarray,
     else:
         sl = volume[:, :, index]
         
-    # Convert explicitly back to numpy for renderers demanding standard memory mapping
+    if keep_on_gpu:
+        return sl
     return to_cpu(sl)
+
+
+def apply_colormap_gpu(data: cp.ndarray | np.ndarray, 
+                       lut: np.ndarray) -> np.ndarray:
+    """
+    Perform min-max normalization and LUT lookup entirely on the GPU if possible.
+    
+    Args:
+        data: The 2D seismic data slice (could be CuPy or NumPy).
+        lut: The (N, 4) unit8 RGBA lookup table (CPU NumPy).
+        
+    Returns:
+        np.ndarray: Final RGBA CPU image ready for GUI texture upload.
+    """
+    if not _CUPY_AVAILABLE or not isinstance(data, cp.ndarray):
+        # Standard NumPy fallback logic if not on GPU
+        xp = np
+        dmin, dmax = xp.nanmin(data), xp.nanmax(data)
+    else:
+        xp = cp
+        dmin, dmax = xp.nanmin(data), xp.nanmax(data)
+
+    # 1. Min-Max Normalization
+    if dmax == dmin:
+        norm = xp.zeros_like(data, dtype=xp.float32)
+    else:
+        norm = (data - dmin) / (dmax - dmin)
+        
+    # 2. Convert to LUT indices
+    lut_len = len(lut)
+    idx = (norm * (lut_len - 1)).astype(xp.int32)
+    idx = xp.clip(idx, 0, lut_len - 1)
+    
+    # 3. Map via LUT
+    if xp is cp:
+        # Upload LUT to GPU briefly for lightning fast vector lookup
+        gpu_lut = cp.asarray(lut)
+        rgba_gpu = gpu_lut[idx]
+        # Finally, pull small final RGBA image to CPU
+        return cp.asnumpy(rgba_gpu)
+    else:
+        return lut[idx]

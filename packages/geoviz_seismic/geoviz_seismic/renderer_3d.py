@@ -12,7 +12,7 @@ from PySide6.QtGui import QVector3D
 
 # Internal imports
 from .colormap import ColormapManager
-from .gpu_ops import is_gpu_available, to_gpu, slice_volume_gpu
+from .gpu_ops import is_gpu_available, to_gpu, slice_volume_gpu, apply_colormap_gpu
 
 logger = logging.getLogger(__name__)
 
@@ -322,7 +322,8 @@ class Renderer3D(QWidget):
         vol = self._volume_data_gpu if self._volume_data_gpu is not None else self._volume_data_cpu
         if vol is None:
             return np.zeros((1,1))
-        return slice_volume_gpu(vol, axis, index)
+        # Optimization: Request to KEEP the array reference on the GPU device
+        return slice_volume_gpu(vol, axis, index, keep_on_gpu=True)
 
     def _create_slice_planes(self):
         if self._volume_data_cpu is None:
@@ -330,37 +331,34 @@ class Renderer3D(QWidget):
             
         ni, nx, nt = self._volume_data_cpu.shape
         si, sx, st = self._volume_spacing
+        
+        # Pre-fetch color lookup table for hardware upload reuse
+        lut = ColormapManager.get_colormap(self._cmap_name)
 
         # 1. Inline — Perpendicular to IL axis (x)
-        il_raw = self._get_sliced_data(0, self._il_pos) # returns (nx, nt)
-        img_il_rgb = ColormapManager.apply_to_data(il_raw, self._cmap_name)
+        il_raw = self._get_sliced_data(0, self._il_pos) # returns GPU or CPU array
+        # Perform full normalization + mapping on the GPU device directly!
+        img_il_rgb = apply_colormap_gpu(il_raw, lut)
         self._img_il = gl.GLImageItem(img_il_rgb)
-        # The base ImageItem lies in XY plane. We scale to correct (sx, st) and rotate around Y axis by 90deg to place it perpendicular to X.
         self._img_il.scale(sx, st, 1)
-        # Note: standard rotation is clockwise/counter dependent. 
-        # To make it YZ facing: default is XY. Rotate around Y axis by 90 brings it to XZ. No, rotate around Y to get parallel to YZ?
-        # Easier: Direct rotation matrix or sequential rotates.
-        # We want the image local X mapped to world Y, local Y mapped to world Z.
-        self._img_il.rotate(90, 0, 1, 0) # Rotates XY plane around Y-axis by 90 deg -> now lies in YZ plane at x=0.
+        self._img_il.rotate(90, 0, 1, 0) 
         self._img_il.translate(self._il_pos * si, 0, 0)
         self._view.addItem(self._img_il)
 
         # 2. Crossline — Perpendicular to XL axis (y)
-        xl_raw = self._get_sliced_data(1, self._xl_pos) # returns (ni, nt)
-        img_xl_rgb = ColormapManager.apply_to_data(xl_raw, self._cmap_name)
+        xl_raw = self._get_sliced_data(1, self._xl_pos)
+        img_xl_rgb = apply_colormap_gpu(xl_raw, lut)
         self._img_xl = gl.GLImageItem(img_xl_rgb)
         self._img_xl.scale(si, st, 1)
-        # To place in XZ plane: Rotate around X-axis by 90 deg.
         self._img_xl.rotate(90, 1, 0, 0)
         self._img_xl.translate(0, self._xl_pos * sx, 0)
         self._view.addItem(self._img_xl)
 
         # 3. Time — Perpendicular to T axis (z)
-        t_raw = self._get_sliced_data(2, self._t_pos) # returns (ni, nx)
-        img_t_rgb = ColormapManager.apply_to_data(t_raw, self._cmap_name)
+        t_raw = self._get_sliced_data(2, self._t_pos)
+        img_t_rgb = apply_colormap_gpu(t_raw, lut)
         self._img_t = gl.GLImageItem(img_t_rgb)
         self._img_t.scale(si, sx, 1)
-        # Lies in XY plane by default. Just translate up in Z.
         self._img_t.translate(0, 0, self._t_pos * st)
         self._view.addItem(self._img_t)
 
