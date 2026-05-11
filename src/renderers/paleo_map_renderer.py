@@ -15,7 +15,7 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="{echarts_url}"></script>
 <style>
   body {{ margin: 0; padding: 0; background: #1a202c; overflow: hidden; }}
   #map {{ position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }}
@@ -169,9 +169,13 @@ class PaleoMapRenderer(QWebEngineView):
         if file_path and os.path.exists(file_path):
             geojson_url = QUrl.fromLocalFile(os.path.abspath(file_path)).toString()
 
+        echarts_js = Path(__file__).parent.parent / "resources" / "js" / "echarts.min.js"
+        echarts_url = QUrl.fromLocalFile(str(echarts_js)).toString()
+
         html = ECHARTS_HTML_TEMPLATE.format(
             svg_patterns_json=svg_patterns_json,
-            geojson_url=geojson_url
+            geojson_url=geojson_url,
+            echarts_url=echarts_url,
         )
 
         self._cleanup_tmp()
