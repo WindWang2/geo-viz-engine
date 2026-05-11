@@ -24,10 +24,15 @@ def _generate_synthetic(
     horizontal reflectors with gentle dip, a fault offset, and noise."""
     t = np.linspace(0, 4 * np.pi, n_samples, dtype=np.float32)
     il = np.arange(n_inlines, dtype=np.float32)
-    dip = 0.02 * il[:, np.newaxis]
-    reflector = np.sin(t + dip) + 0.5 * np.sin(2.3 * t + dip)
-    field = np.broadcast_to(reflector[:, np.newaxis, :],
-                            (n_inlines, n_crosslines, n_samples)).copy()
+    xl = np.arange(n_crosslines, dtype=np.float32)
+    
+    dip_il = 0.02 * il[:, np.newaxis, np.newaxis]
+    dip_xl = 0.015 * xl[np.newaxis, :, np.newaxis]
+    t_3d = t[np.newaxis, np.newaxis, :]
+    
+    reflector = np.sin(t_3d + dip_il + dip_xl) + 0.5 * np.sin(2.3 * t_3d + dip_il + dip_xl)
+    field = reflector.copy()
+    
     fault_il = n_inlines // 2
     offset = 5
     field[fault_il:, :, offset:] = field[fault_il:, :, :-offset].copy()
@@ -108,11 +113,12 @@ class SeismicView(QWidget):
         layout.addWidget(splitter)
 
         # Throttle slice updates: only refresh 2D profile after
-        # 200ms of no new slice_changed signals (drag release)
+        # a short delay of no new slice_changed signals (drag release)
         self._pending_slice: tuple[str, int] | None = None
         self._slice_timer = QTimer(self)
         self._slice_timer.setSingleShot(True)
-        self._slice_timer.setInterval(200)
+        # With GPU slicing, we can reduce this from 200ms to near-instant (10ms)
+        self._slice_timer.setInterval(10)
         self._slice_timer.timeout.connect(self._apply_pending_slice)
 
         self._renderer_3d.slice_changed.connect(self._on_slice_changed)

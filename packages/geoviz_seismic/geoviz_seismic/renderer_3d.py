@@ -152,25 +152,24 @@ class Renderer3D(QWidget):
 
         # 1. Try 3D Texture Volume rendering first
         try:
-            # PyQtGraph GLVolumeItem expect specific transpose for slicing order usually
-            # We normalize data range for visualization
-            vol_min = float(data.min())
-            vol_max = float(data.max())
-            norm_data = (data - vol_min) / (vol_max - vol_min)
-            
             # Prepare volume item color table (alpha ramped)
-            cmap_data = ColormapManager.get_colormap(self._cmap_name)
-            # Add custom alpha logic (transparent near zero values for volume peek-thru)
-            # shape=(256, 4)
+            cmap_data = ColormapManager.get_colormap(self._cmap_name).copy()
+            # Add custom alpha logic (transparent near zero/middle values for volume peek-thru)
+            # This gives the VTK-style translucent cloud effect for seismic reflectors
+            alpha_curve = np.abs(np.linspace(-1, 1, 256)) ** 1.5 * 100
+            cmap_data[:, 3] = alpha_curve.astype(np.uint8)
             
-            self._volume_visual = gl.GLVolumeItem(norm_data, sliceDensity=1)
+            # Use GPU accelerated colormap mapping for the entire 3D volume
+            vol_data = self._volume_data_gpu if self._volume_data_gpu is not None else data
+            vol_rgba = apply_colormap_gpu(vol_data, cmap_data)
+            
+            # GLVolumeItem expects shape (x, y, z, 4) of ubytes
+            self._volume_visual = gl.GLVolumeItem(vol_rgba, sliceDensity=1, smooth=True)
             self._volume_visual.scale(si, sx, st)
-            # Direct volume item can be intensive, off by default unless requested or explicitly coded.
-            # In this project logic, we will follow the visual structure of manual planes + opt volume.
-            # For performance stability on ES environments, we prefer sharp slice planes.
-            self._use_volume = False # Set false for native slice perf
+            self._view.addItem(self._volume_visual)
+            self._use_volume = True
         except Exception as e:
-            logger.warning(f"GLVolumeItem preparation skipped: {e}")
+            logger.warning(f"GLVolumeItem preparation failed: {e}")
             self._use_volume = False
 
         # 2. Bounding Box setup
