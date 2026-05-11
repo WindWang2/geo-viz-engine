@@ -25,7 +25,7 @@ class PaleoMapPage(QWidget):
         layout.setSpacing(0)
 
         self.stack = QStackedWidget()
-        layout.addWidget(self.stack)
+        layout.addWidget(self.stack, 1)
 
         # 1. Empty State
         self.empty_widget = QWidget()
@@ -94,7 +94,7 @@ class PaleoMapPage(QWidget):
         self._map_layout.setContentsMargins(0, 0, 0, 0)
         self.map_view = PaleoMapRenderer(self)
         self._map_layout.addWidget(self.map_view)
-        map_layout.addLayout(self._map_layout)
+        map_layout.addLayout(self._map_layout, 1)
 
         self.stack.addWidget(self.map_container)
         self.stack.setCurrentWidget(self.empty_widget)

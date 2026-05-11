@@ -41,6 +41,8 @@ class ProfileWidget(QWidget):
         self._overlay.hide()
 
         self._mode = "vd"
+        self._current_data = None
+        self._current_slice_info = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -52,17 +54,9 @@ class ProfileWidget(QWidget):
         trace_step: int = 2,
         slice_info=None,
     ) -> None:
-        """Forward data to the active renderer.
+        self._current_data = data
+        self._current_slice_info = slice_info
 
-        Parameters
-        ----------
-        data:
-            2-D ``float32`` array of shape ``(n_samples, n_traces)``.
-        trace_step:
-            Trace subsampling for wiggle mode (ignored in VD mode).
-        slice_info:
-            Optional :class:`SliceInfo` metadata forwarded to VD mode.
-        """
         if self._mode == "vd":
             self._vd.render(
                 data,
@@ -77,7 +71,10 @@ class ProfileWidget(QWidget):
         return self._mode
 
     def set_display_mode(self, mode: Literal["vd", "wiggle"]) -> None:
-        """Switch between ``"vd"`` and ``"wiggle"`` display modes."""
+        """Switch between ``"vd"`` and ``"wiggle"`` display modes and refresh display."""
+        if mode == self._mode:
+            return
+            
         if mode == "vd":
             self._stack.setCurrentIndex(0)
             self._mode = "vd"
@@ -88,6 +85,10 @@ class ProfileWidget(QWidget):
             raise ValueError(
                 f"Unknown display mode: {mode!r}. Expected 'vd' or 'wiggle'."
             )
+            
+        # Re-render immediately with currently cached data if available
+        if self._current_data is not None:
+            self.update_profile(self._current_data, slice_info=self._current_slice_info)
 
     def set_colormap(self, name: str) -> None:
         """Change the VD colormap."""
