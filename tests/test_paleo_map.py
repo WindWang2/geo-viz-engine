@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt
 
 from src.renderers.paleo_map_renderer import PaleoMapRenderer
 from src.pages.paleo_map_page import PaleoMapPage
+from geoviz_well_log.pattern_map import PATTERN_MAP, FACIES_COLORS
 
 
 def test_renderer_initialization(qtbot):
@@ -108,3 +109,14 @@ def test_page_export_image(mock_get_save, qtbot, tmp_path):
     page._on_export_clicked()
 
     mock_pixmap.save.assert_called_once_with(str(export_path), "PNG")
+
+
+def test_facies_colors_has_entry_for_every_pattern():
+    for facies_keyword in PATTERN_MAP:
+        assert facies_keyword in FACIES_COLORS, f"Missing color for {facies_keyword}"
+
+
+def test_facies_colors_are_valid_hex():
+    import re
+    for facies, color in FACIES_COLORS.items():
+        assert re.match(r'^#[0-9a-f]{6}$', color), f"Invalid color {color} for {facies}"
