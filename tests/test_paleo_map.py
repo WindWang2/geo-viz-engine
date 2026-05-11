@@ -3,8 +3,8 @@ import os
 from unittest.mock import patch, MagicMock
 from PySide6.QtCore import Qt
 
-from src.renderers.paleo_map_renderer import PaleoMapRenderer
-from src.pages.paleo_map_page import PaleoMapPage
+from src.pages.paleo_map.renderer import PaleoMapRenderer
+from src.pages.paleo_map import PaleoMapPage
 from geoviz_well_log.pattern_map import PATTERN_MAP, FACIES_COLORS
 
 
@@ -69,7 +69,7 @@ def test_renderer_missing_svg_fallback(qtbot, tmp_path):
     assert renderer._tmp_html is not None
 
 
-@patch('src.pages.paleo_map_page.QMessageBox.information')
+@patch('src.pages.paleo_map.page.QMessageBox.information')
 def test_page_empty_state_and_load(mock_info, qtbot, tmp_path):
     page = PaleoMapPage()
     qtbot.addWidget(page)
@@ -109,7 +109,7 @@ def test_page_empty_state_and_load(mock_info, qtbot, tmp_path):
     assert page.stack.currentWidget() == page.map_container
 
 
-@patch('src.pages.paleo_map_page.QMessageBox.warning')
+@patch('src.pages.paleo_map.page.QMessageBox.warning')
 def test_page_load_invalid_file(mock_warning, qtbot):
     page = PaleoMapPage()
     qtbot.addWidget(page)
@@ -120,7 +120,7 @@ def test_page_load_invalid_file(mock_warning, qtbot):
     assert page.stack.currentWidget() == page.empty_widget
 
 
-@patch('src.pages.paleo_map_page.QFileDialog.getSaveFileName')
+@patch('src.pages.paleo_map.page.QFileDialog.getSaveFileName')
 def test_page_export_image(mock_get_save, qtbot, tmp_path):
     page = PaleoMapPage()
     qtbot.addWidget(page)
@@ -203,7 +203,7 @@ def test_page_compare_mode_rejects_single_period(qtbot, tmp_path):
     qtbot.addWidget(page)
     page._load_file(str(geo_file))
 
-    with patch('src.pages.paleo_map_page.QMessageBox.information') as mock_msg:
+    with patch('src.pages.paleo_map.page.QMessageBox.information') as mock_msg:
         page._toggle_compare(True)
         mock_msg.assert_called_once()
         assert not page._compare_btn.isChecked()

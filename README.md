@@ -33,9 +33,10 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质
 │                                                         │
 │  MainWindow                                             │
 │  ┌──────┬──────────────────────────────────────────┐    │
-│  │ 侧栏 │  QStackedWidget (6 页面)                  │    │
+│  │ 侧栏 │  QStackedWidget (7 页面)                  │    │
 │  │      │                                          │    │
 │  │ 🗺   │  MapPage     QWebEngineView + MapLibre   │    │
+│  │ 🌍   │  PaleoMap    ECharts + GeoJSON           │    │
 │  │ ⛏   │  WellLogPage ECharts + WebEngine         │    │
 │  │ ⛓   │  CrossWell   Multi-ECharts + Sync        │    │
 │  │ 🧊   │  SeismicPage PyVista + VTK               │    │
@@ -219,17 +220,24 @@ geo-viz-engine/
 ├── src/                           # 主应用代码
 │   ├── main.py                    # 入口 (QApplication)
 │   ├── app.py                     # MainWindow + 侧栏导航
-│   ├── pages/                     # 页面
-│   │   ├── map_page.py            # 地图总览 (MapLibre GL)
-│   │   ├── well_log_page.py       # 井剖面 (UI 编排，调用 geoviz-well-log)
-│   │   ├── cross_well_page.py     # 连井对比
-│   │   ├── seismic_page.py        # 地震3D (薄封装 SeismicView)
-│   │   ├── paleo_map_page.py      # 古地理图
-│   │   ├── data_page.py           # 数据管理
-│   │   └── tools_page.py          # 工具箱
-│   ├── renderers/
-│   │   ├── map_renderer.py        # QWebEngineView + MapLibre
-│   │   └── paleo_map_renderer.py  # 古地理图
+│   ├── pages/                     # 页面 (每页独立文件夹)
+│   │   ├── map/                   # 地图总览
+│   │   │   ├── page.py            #   MapPage (MapLibre GL)
+│   │   │   └── renderer.py        #   QWebEngineView + MapLibre
+│   │   ├── paleo_map/             # 古地理图
+│   │   │   ├── page.py            #   PaleoMapPage
+│   │   │   ├── renderer.py        #   ECharts QWebEngineView 渲染
+│   │   │   └── loader.py          #   CSV/Excel/GeoJSON 数据加载
+│   │   ├── well_log/              # 井剖面 (UI 编排，调用 geoviz-well-log)
+│   │   │   └── page.py
+│   │   ├── cross_well/            # 连井对比
+│   │   │   └── page.py
+│   │   ├── seismic/               # 地震3D (薄封装 SeismicView)
+│   │   │   └── page.py
+│   │   ├── data/                  # 数据管理
+│   │   │   └── page.py
+│   │   └── tools/                 # 工具箱
+│   │       └── page.py
 │   ├── data/                      # 数据层
 │   │   ├── loaders.py             # 数据加载器
 │   │   ├── models.py              # Pydantic 模型

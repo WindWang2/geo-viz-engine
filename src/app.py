@@ -92,14 +92,14 @@ class MainWindow(QWidget):
         self.stack = QStackedWidget()
 
         # Lazy-import pages to avoid heavy imports at startup
-        from src.pages.well_log_page import WellLogPage
+        from src.pages.well_log import WellLogPage
         self.well_log_page = WellLogPage()
 
-        from src.pages.cross_well_page import CrossWellPage
+        from src.pages.cross_well import CrossWellPage
         self.cross_well_page = CrossWellPage()
 
         try:
-            from src.pages.map_page import MapPage
+            from src.pages.map import MapPage
             self.map_page = MapPage(self.cache, well_click_callback=self._on_well_clicked)
         except ImportError:
             self.map_page = None
@@ -109,7 +109,7 @@ class MainWindow(QWidget):
         map_widget = self.map_page if self.map_page else QLabel("地图总览 (WebEngine unavailable)")
 
         try:
-            from src.pages.paleo_map_page import PaleoMapPage
+            from src.pages.paleo_map import PaleoMapPage
             self.paleo_map_page = PaleoMapPage()
             paleo_map_widget = self.paleo_map_page
         except Exception as e:
@@ -118,7 +118,7 @@ class MainWindow(QWidget):
             paleo_map_widget.setStyleSheet("font-size: 24px; color: #a0aec0;")
 
         try:
-            from src.pages.seismic_page import SeismicPage
+            from src.pages.seismic import SeismicPage
             self.seismic_page = SeismicPage()
             seismic_widget = self.seismic_page
         except Exception:
@@ -126,10 +126,10 @@ class MainWindow(QWidget):
             seismic_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
             seismic_widget.setStyleSheet("font-size: 24px; color: #a0aec0;")
 
-        from src.pages.data_page import DataPage
+        from src.pages.data import DataPage
         self.data_page = DataPage(self.cache)
 
-        from src.pages.tools_page import ToolsPage
+        from src.pages.tools import ToolsPage
         self.tools_page = ToolsPage()
 
         page_widgets = [

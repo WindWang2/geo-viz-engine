@@ -1,6 +1,6 @@
 [project]
 name = "geo-viz-engine"
-version = "0.5.0"
+version = "0.6.0.0"
 description = "地质数据可视化桌面引擎"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -16,7 +16,6 @@ dependencies = [
     "xlrd>=2.0",
     "pydantic>=2.0",
     "shapely>=2.0",
-    "pytest-qt>=4.5.0",
     "geoviz-well-log",
     "geoviz-seismic",
 ]
@@ -24,7 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "pytest-qt>=4.4",
+    "pytest-qt>=4.5.0",
     "PyInstaller>=6.0",
 ]
 

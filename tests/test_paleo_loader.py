@@ -1,6 +1,6 @@
 import json
 import pytest
-from src.data.paleo_loader import PaleoDataLoader
+from src.pages.paleo_map.loader import PaleoDataLoader
 
 
 def test_load_csv_with_period_and_bbox(tmp_path):

@@ -34,9 +34,10 @@ source .venv/bin/activate && python scripts/build.py
 ```
 PySide6 (Qt for Python) — Single Process
 ├── MainWindow (app.py)
-│   ├── Sidebar (6 icon+text buttons)
-│   └── QStackedWidget (6 pages)
+│   ├── Sidebar (7 icon+text buttons)
+│   └── QStackedWidget (7 pages)
 │       ├── MapPage        → QWebEngineView + MapLibre GL
+│       ├── PaleoMapPage   → ECharts + GeoJSON (paleo_map/ folder)
 │       ├── WellLogPage    → ECharts (via geoviz-well-log package)
 │       ├── CrossWellPage  → Multi-ECharts + Correlation Polygons
 │       ├── SeismicPage    → PyVista + VTK
@@ -64,7 +65,7 @@ PySide6 (Qt for Python) — Single Process
 │       ├── cache.py             → SeismicCache (LRU slice cache)
 │       └── models.py            → SeismicVolumeMeta, SliceInfo, HorizonData
 ├── src/data/              → (loaders, models, cache, well_registry)
-└── src/pages/             → (Page UI implementations)
+└── src/pages/             → (each page in its own subfolder with renderer/loader)
 ```
 
 - **No IPC, no HTTP, no token auth** — all data flows through direct Python function calls within a single process.
@@ -117,8 +118,14 @@ PySide6 (Qt for Python) — Single Process
 - `src/` — Main application code
   - `main.py` — Entry point (QApplication)
   - `app.py` — MainWindow + sidebar navigation
-  - `pages/` — Page widgets (map, well_log, cross_well, seismic, data, tools)
-  - `renderers/` — Rendering components (map, paleo_map)
+  - `pages/` — Page widgets, each in its own subfolder
+    - `map/` — MapPage + MapRenderer
+    - `paleo_map/` — PaleoMapPage + PaleoMapRenderer + PaleoDataLoader
+    - `well_log/` — WellLogPage (calls geoviz-well-log package)
+    - `cross_well/` — CrossWellPage
+    - `seismic/` — SeismicPage (thin wrapper around SeismicView)
+    - `data/` — DataPage
+    - `tools/` — ToolsPage
   - `data/` — loaders, Pydantic models, cache, well_registry
   - `utils/` — constants (re-exports PATTERN_MAP from package)
   - `resources/` — Icons, Qt resource files

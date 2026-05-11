@@ -3,7 +3,7 @@ import math
 from unittest.mock import MagicMock
 import pytest
 from PySide6.QtWidgets import QWidget
-from src.pages.well_log_page import WellLogPage
+from src.pages.well_log import WellLogPage
 from geoviz_well_log.models import WellLogData, WellIntervals, IntervalItem, CurveData, FaciesData
 
 class MockChartEngineWidget(QWidget):
@@ -40,7 +40,7 @@ def mock_well_data():
 def test_well_log_page_mapping(qtbot, mock_well_data, monkeypatch):
     # Mock get_well_data to return our mock data
     mock_entry = (lambda path, well_name: mock_well_data, "fake_path", {})
-    monkeypatch.setattr("src.pages.well_log_page.get_well_data", lambda name: mock_entry)
+    monkeypatch.setattr("src.pages.well_log.page.get_well_data", lambda name: mock_entry)
     
     page = WellLogPage()
     qtbot.addWidget(page)
@@ -48,7 +48,7 @@ def test_well_log_page_mapping(qtbot, mock_well_data, monkeypatch):
     mock_instance = MockChartEngineWidget()
     
     # We need to bypass the creation of real ChartEngine in load_well
-    monkeypatch.setattr("src.pages.well_log_page.ChartEngine", lambda parent: mock_instance)
+    monkeypatch.setattr("src.pages.well_log.page.ChartEngine", lambda parent: mock_instance)
     
     page.load_well("TestWell")
     
@@ -93,10 +93,10 @@ def test_systems_tract_shapes(qtbot, monkeypatch):
         curves=[], intervals=intervals
     )
     mock_entry = (lambda path, well_name: mock_well_data, "fake_path", {})
-    monkeypatch.setattr("src.pages.well_log_page.get_well_data", lambda name: mock_entry)
+    monkeypatch.setattr("src.pages.well_log.page.get_well_data", lambda name: mock_entry)
     
     mock_instance = MockChartEngineWidget()
-    monkeypatch.setattr("src.pages.well_log_page.ChartEngine", lambda parent: mock_instance)
+    monkeypatch.setattr("src.pages.well_log.page.ChartEngine", lambda parent: mock_instance)
     
     page = WellLogPage()
     page.load_well("TestWell")
@@ -122,10 +122,10 @@ def test_stratigraphy_vertical_text(qtbot, monkeypatch):
         curves=[], intervals=intervals
     )
     mock_entry = (lambda path, well_name: mock_well_data, "fake_path", {})
-    monkeypatch.setattr("src.pages.well_log_page.get_well_data", lambda name: mock_entry)
+    monkeypatch.setattr("src.pages.well_log.page.get_well_data", lambda name: mock_entry)
     
     mock_instance = MockChartEngineWidget()
-    monkeypatch.setattr("src.pages.well_log_page.ChartEngine", lambda parent: mock_instance)
+    monkeypatch.setattr("src.pages.well_log.page.ChartEngine", lambda parent: mock_instance)
     
     page = WellLogPage()
     page.load_well("TestWell")
@@ -150,10 +150,10 @@ def test_ai_facies_prediction_applies_tracks(qtbot, monkeypatch, tmp_path):
     pd.DataFrame().to_excel(xls_path) # create empty excel
     
     mock_entry = (lambda path, well_name: mock_well_data, str(xls_path), {})
-    monkeypatch.setattr("src.pages.well_log_page.get_well_data", lambda name: mock_entry)
+    monkeypatch.setattr("src.pages.well_log.page.get_well_data", lambda name: mock_entry)
     
     mock_instance = MockChartEngineWidget()
-    monkeypatch.setattr("src.pages.well_log_page.ChartEngine", lambda parent: mock_instance)
+    monkeypatch.setattr("src.pages.well_log.page.ChartEngine", lambda parent: mock_instance)
     
     page = WellLogPage()
     page.load_well("TestWell")

@@ -7,8 +7,8 @@ from PySide6.QtWidgets import (
     QSplitter, QDialog, QRadioButton, QButtonGroup, QDialogButtonBox,
 )
 
-from src.renderers.paleo_map_renderer import PaleoMapRenderer
-from src.data.paleo_loader import PaleoDataLoader
+from src.pages.paleo_map.renderer import PaleoMapRenderer
+from src.pages.paleo_map.loader import PaleoDataLoader
 
 
 class PaleoMapPage(QWidget):
