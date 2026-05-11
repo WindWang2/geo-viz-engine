@@ -1500,3 +1500,31 @@ git commit -m "docs: update changelog and bump version to 0.6.0"
 **Placeholder scan:** No TBDs, TODOs, or "implement later" found. All steps have complete code.
 
 **Type consistency:** `PaleoDataLoader.load()` returns `dict[str, list[dict]]` consistently. `load_geojson()` signature extended with `period_name`, `show_labels`, `map_title` — all used consistently. `_periods` dict in page uses same structure.
+
+## CEO Review Amendments (2026-05-11)
+
+The following fixes must be applied during implementation. Found by `/plan-ceo-review` in HOLD SCOPE mode.
+
+| # | Issue | Fix | Where |
+|---|-------|-----|-------|
+| 1 | Period switching doesn't filter GeoJSON features | Use `_write_period_geojsons` for GeoJSON input too (same as CSV) | Task 6 `_load_file` |
+| 2 | Compare mode leaks old renderers | Call `deleteLater()` on old renderers before replacing | Task 6 `_start_compare`/`_stop_compare` |
+| 3 | Pattern overlay replaces base color | Use ECharts `renderItem` custom series to draw base color + pattern on top | Task 5 JS template |
+| 4 | Wells JSON has no error handling | Wrap `_get_wells_json` in try/except, return `[]` on failure | Task 5 renderer |
+| 5 | Empty data has no user feedback | Check if periods dict is empty after load, show QMessageBox | Task 6 `_load_file` |
+| 6 | `printToPdf(path)` API wrong for PySide6 | Use `QPrinter` + `grab()` for PDF export | Task 6 `_export_pdf` |
+| 7 | No compare mode test | Add smoke test for compare toggle | Task 7 tests |
+| 8 | `shapely` not in pyproject.toml | Add to project dependencies | Task 4 |
+| 9 | Scale bar hardcoded "100 km" | Compute dynamically from coordinate extent in JS | Task 5 JS template |
+| 10 | Pattern image race condition | Ensure images loaded before ECharts renders | Task 5 JS template |
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | clean | HOLD SCOPE, 10 issues, 0 critical gaps |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 2 | stale | Last ran on commit 7543f7f1, 7 commits behind |
+| Design Review | `/plan-design-review` | UI/UX gaps | 1 | stale | Last ran on commit 7543f7f1, 7 commits behind |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 1 | clean | 7 findings, 7 fixes applied |
+
+**VERDICT:** CEO REVIEW CLEARED — 10 issues identified and amendments documented above. Eng review stale (pre-dates this plan) — recommend re-running `/plan-eng-review` after incorporating amendments.
