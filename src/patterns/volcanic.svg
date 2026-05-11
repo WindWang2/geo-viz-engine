@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+  <defs>
+    <pattern id="pat-volcanic" patternUnits="userSpaceOnUse" width="20" height="20">
+      <circle cx="4" cy="4" r="2.5" stroke="#4a3728" stroke-width="0.8" fill="none"/>
+      <circle cx="14" cy="3" r="1.8" stroke="#4a3728" stroke-width="0.8" fill="none"/>
+      <circle cx="9" cy="10" r="3" stroke="#4a3728" stroke-width="0.8" fill="none"/>
+      <circle cx="2" cy="15" r="2" stroke="#4a3728" stroke-width="0.8" fill="none"/>
+      <circle cx="16" cy="14" r="2.5" stroke="#4a3728" stroke-width="0.8" fill="none"/>
+      <circle cx="10" cy="18" r="1.5" stroke="#4a3728" stroke-width="0.8" fill="none"/>
+    </pattern>
+  </defs>
+  <rect width="20" height="20" fill="url(#pat-volcanic)"/>
+</svg>

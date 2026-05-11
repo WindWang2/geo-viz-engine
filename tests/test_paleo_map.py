@@ -116,6 +116,16 @@ def test_facies_colors_has_entry_for_every_pattern():
         assert facies_keyword in FACIES_COLORS, f"Missing color for {facies_keyword}"
 
 
+def test_new_patterns_have_svg_files():
+    from pathlib import Path
+    patterns_dir = Path(__file__).parent.parent / "src" / "patterns"
+    from geoviz_well_log.pattern_map import PATTERN_MAP
+    for facies, pattern_name in PATTERN_MAP.items():
+        svg_filename = pattern_name.replace("-", "_") + ".svg"
+        svg_path = patterns_dir / svg_filename
+        assert svg_path.exists(), f"Missing SVG for {facies} -> {svg_filename}"
+
+
 def test_facies_colors_are_valid_hex():
     import re
     for facies, color in FACIES_COLORS.items():

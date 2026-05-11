@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+  <defs>
+    <pattern id="pat-evaporite" patternUnits="userSpaceOnUse" width="20" height="20">
+      <rect x="2" y="2" width="4" height="4" fill="#7c6f64" transform="rotate(45,4,4)"/>
+      <rect x="12" y="1" width="3" height="3" fill="#7c6f64" transform="rotate(45,13.5,2.5)"/>
+      <rect x="7" y="9" width="3.5" height="3.5" fill="#7c6f64" transform="rotate(45,8.75,10.75)"/>
+      <rect x="1" y="13" width="3" height="3" fill="#7c6f64" transform="rotate(45,2.5,14.5)"/>
+      <rect x="14" y="12" width="4" height="4" fill="#7c6f64" transform="rotate(45,16,14)"/>
+    </pattern>
+  </defs>
+  <rect width="20" height="20" fill="url(#pat-evaporite)"/>
+</svg>
