@@ -65,21 +65,43 @@ def test_renderer_missing_svg_fallback(qtbot, tmp_path):
     assert renderer._tmp_html is not None
 
 
-def test_page_empty_state_and_load(qtbot, tmp_path):
+@patch('src.pages.paleo_map_page.QMessageBox.information')
+def test_page_empty_state_and_load(mock_info, qtbot, tmp_path):
     page = PaleoMapPage()
     qtbot.addWidget(page)
 
     # Initial state should be empty widget
     assert page.stack.currentWidget() == page.empty_widget
 
-    valid_json = {"type": "FeatureCollection", "features": []}
-    geo_file = tmp_path / "empty.geojson"
+    # Empty FeatureCollection: new page detects "no valid data" and stays on empty_widget
+    empty_json = {"type": "FeatureCollection", "features": []}
+    empty_file = tmp_path / "empty.geojson"
+    with open(empty_file, "w", encoding="utf-8") as f:
+        json.dump(empty_json, f)
+
+    page._load_file(str(empty_file))
+    assert page.stack.currentWidget() == page.empty_widget
+    mock_info.assert_called_once()
+
+    # Valid FeatureCollection with a real feature: switches to map_container
+    valid_json = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"facies": "砂岩"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+                },
+            }
+        ],
+    }
+    geo_file = tmp_path / "valid.geojson"
     with open(geo_file, "w", encoding="utf-8") as f:
         json.dump(valid_json, f)
 
     page._load_file(str(geo_file))
-    
-    # Should switch to map container
     assert page.stack.currentWidget() == page.map_container
 
 
@@ -106,7 +128,8 @@ def test_page_export_image(mock_get_save, qtbot, tmp_path):
     mock_pixmap = MagicMock()
     page.map_view.grab = MagicMock(return_value=mock_pixmap)
 
-    page._on_export_clicked()
+    # Call _export_png directly (new _on_export_clicked shows a dialog)
+    page._export_png()
 
     mock_pixmap.save.assert_called_once_with(str(export_path), "PNG")
 
