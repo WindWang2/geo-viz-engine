@@ -89,7 +89,7 @@ class PredictionWorker(QObject):
             }
 
             req = urllib.request.Request(
-                "http://api-test.deeptime.world/api/v1/inference/single-well/json",
+                "https://api-test.deeptime.world/api/v1/inference/single-well/json",
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"}
             )

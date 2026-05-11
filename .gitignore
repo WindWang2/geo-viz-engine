@@ -43,7 +43,7 @@ data/*
 data/generated/*
 !data/generated/.gitkeep
 !data/generated/index.json
-!data/well_coordinates.json
+!data/well_coordinates.example.json
 
 # Temp folder
 tmp/

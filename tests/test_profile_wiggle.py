@@ -52,9 +52,3 @@ def test_profile_wiggle_paint_event_no_crash(qtbot):
     qtbot.waitExposed(widget)
     widget.update()
 
-
-def test_profile_wiggle_fallback_warned_once(qtbot):
-    """The fallback warning should only be logged once (class-level flag)."""
-    # The first widget already triggered the warning in earlier tests,
-    # so _fallback_warned should be True now.
-    assert ProfileWiggle._fallback_warned or hasattr(ProfileWiggle, "_fallback_warned")

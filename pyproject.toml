@@ -1,6 +1,6 @@
 [project]
 name = "geo-viz-engine"
-version = "0.6.1.0"
+version = "0.6.2"
 description = "地质数据可视化桌面引擎"
 requires-python = ">=3.12,<3.13"
 dependencies = [

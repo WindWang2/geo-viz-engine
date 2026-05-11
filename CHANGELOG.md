@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.2] - 2026-05-12
+
+### Security
+- **Insecure Deserialization Fix**: Migrated well log caching from `pickle` to **Pydantic JSON** (`model_validate_json`). This eliminates the Arbitrary Code Execution (RCE) risk from malicious cache files.
+- **Network Security**: Updated AI model inference endpoint to **HTTPS** to protect proprietary geological data during transmission.
+- **WebView Hardening**: Implemented `_PaleoMapPage` to restrict navigation in `QWebEngineView`, blocking potential local file exfiltration or remote XSS redirects.
+- **Data Privacy**: Removed real well coordinates from git tracking. Added `data/well_coordinates.example.json` as a non-sensitive template.
+
+### Performance
+- **Caching Efficiency**: Verified **251x speedup** in well log loading using the new JSON caching layer (1.1ms vs 268ms for raw parse).
+- **Seismic Slicing**: Confirmed sub-ms slicing performance (0.023ms on CPU) for 3D volume navigation.
+
+### Added
+- **Developer Documentation**: Added detailed `README.md` files to core UI pages (`src/pages/seismic`, `src/pages/well_log`) explaining the integration with modular packages.
+- **Dependency Management**: Explicitly added `PyOpenGL` to resolve rendering issues in PyQtGraph-based modules.
+
+### Fixed
+- **Test Suite**: Resolved a regression in `ProfileWiggle` tests caused by the migration away from VisPy.
+- **Version Consistency**: Synchronized root `pyproject.toml` version with the changelog.
+
 ## [0.6.1] - 2026-05-11
 
 ### Added

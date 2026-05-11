@@ -1,0 +1,19 @@
+{
+  "wells": [
+    {
+      "well_name": "TEST-WELL-1",
+      "longitude": 114.5,
+      "latitude": 21.5
+    },
+    {
+      "well_name": "TEST-WELL-2",
+      "longitude": 114.6,
+      "latitude": 21.6
+    },
+    {
+      "well_name": "TEST-WELL-3",
+      "longitude": 114.7,
+      "latitude": 21.7
+    }
+  ]
+}

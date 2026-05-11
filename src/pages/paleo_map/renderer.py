@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QUrl
-from PySide6.QtWebEngineCore import QWebEngineSettings
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from src.utils.constants import PATTERN_MAP
@@ -309,11 +309,25 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
 </html>"""
 
 
+class _PaleoMapPage(QWebEnginePage):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Required for loading ECharts from local file and GeoJSON from user's disk
+        self.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        self.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
+
+    def acceptNavigationRequest(self, url: QUrl, nav_type, is_main_frame: bool) -> bool:
+        # Only allow navigation to local files (temp HTML, GeoJSON)
+        # and ignore navigation to "about:blank"
+        if url.scheme() == "file" or url.toString() == "about:blank":
+            return True
+        return False
+
+
 class PaleoMapRenderer(QWebEngineView):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-        self.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
+        self.setPage(_PaleoMapPage(self))
         self._tmp_html = None
         self._show_labels = True
         self._map_title = ""

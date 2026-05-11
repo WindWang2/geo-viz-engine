@@ -617,7 +617,6 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
     )
 
 def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path: Path | None = None) -> WellLogData:
-    import pickle
     import hashlib
     import os
     
@@ -649,20 +648,21 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
 
     file_hash = hashlib.md5(f"{path.name}_{mtime}_{xml_mtime}_{well_name}_{PARSER_VERSION}".encode()).hexdigest()
     safe_well_name = "".join([c if c.isalnum() else "_" for c in (well_name or "unknown")])
-    cache_file = cache_dir / f"{safe_well_name}_{file_hash}.pkl"
+    cache_file = cache_dir / f"{safe_well_name}_{file_hash}.json"
     
     if cache_file.exists():
         try:
-            with open(cache_file, "rb") as f:
-                return pickle.load(f)
+            with open(cache_file, "r", encoding="utf-8") as f:
+                return WellLogData.model_validate_json(f.read())
         except Exception as e:
             print(f"Failed to load cache for {well_name}: {e}")
             
     # Clean up old caches for this well to prevent directory bloat
     try:
-        for old_cache in cache_dir.glob(f"{safe_well_name}_*.pkl"):
-            if old_cache != cache_file:
-                old_cache.unlink(missing_ok=True)
+        for ext in ["*.pkl", "*.json"]:
+            for old_cache in cache_dir.glob(f"{safe_well_name}_{ext}"):
+                if old_cache != cache_file:
+                    old_cache.unlink(missing_ok=True)
     except OSError:
         pass
             
@@ -678,8 +678,8 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
         
     # Save cache
     try:
-        with open(cache_file, "wb") as f:
-            pickle.dump(data, f)
+        with open(cache_file, "w", encoding="utf-8") as f:
+            f.write(data.model_dump_json())
     except Exception as e:
         print(f"Failed to save cache for {well_name}: {e}")
         
