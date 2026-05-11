@@ -625,8 +625,17 @@ class PaleoDataLoader:
 
 - [ ] **Step 4: Install shapely dependency**
 
+Add `shapely` to `pyproject.toml` dependencies:
+
+```python
+# In pyproject.toml, add to dependencies list:
+    "shapely>=2.0",
+```
+
+Then install:
+
 ```bash
-source .venv/bin/activate && pip install shapely
+source .venv/bin/activate && pip install shapely>=2.0
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -701,11 +710,11 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
   </svg>
 </div>
 <div id="scale-bar">
-  <svg width="100" height="24" viewBox="0 0 100 24">
+  <svg width="120" height="24" viewBox="0 0 120 24">
     <line x1="0" y1="4" x2="80" y2="4" stroke="#334155" stroke-width="2"/>
     <line x1="0" y1="0" x2="0" y2="8" stroke="#334155" stroke-width="2"/>
     <line x1="80" y1="0" x2="80" y2="8" stroke="#334155" stroke-width="2"/>
-    <text x="40" y="20" text-anchor="middle" fill="#334155" font-size="10" id="scale-text">100 km</text>
+    <text x="40" y="20" text-anchor="middle" fill="#334155" font-size="10" id="scale-text"></text>
   </svg>
 </div>
 <div id="legend"></div>
@@ -751,6 +760,66 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
     }}
   }}
 
+  // Create a composite canvas pattern: base color + SVG pattern overlay
+  function makeCompositePattern(baseColor, patternImg) {{
+    const canvas = document.createElement('canvas');
+    canvas.width = 20; canvas.height = 20;
+    const ctx = canvas.getContext('2d');
+    // Layer 1: base color fill
+    ctx.fillStyle = baseColor;
+    ctx.fillRect(0, 0, 20, 20);
+    // Layer 2: SVG pattern on top with adjustable opacity
+    ctx.globalAlpha = 0.6;
+    ctx.drawImage(patternImg, 0, 0, 20, 20);
+    ctx.globalAlpha = 1.0;
+    return {{ image: canvas, repeat: 'repeat' }};
+  }}
+
+  // Compute scale bar from coordinate extent
+  function updateScaleBar(geoJson) {{
+    let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    const features = geoJson.features || (geoJson.type === 'Feature' ? [geoJson] : []);
+    features.forEach(f => {{
+      if (!f.geometry || !f.geometry.coordinates) return;
+      const coords = f.geometry.type === 'Polygon' ? f.geometry.coordinates[0] :
+                     f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates.flat(2) : [];
+      coords.forEach(c => {{
+        if (Array.isArray(c) && c.length >= 2) {{
+          minLon = Math.min(minLon, c[0]); maxLon = Math.max(maxLon, c[0]);
+          minLat = Math.min(minLat, c[1]); maxLat = Math.max(maxLat, c[1]);
+        }}
+      }});
+    }});
+    if (minLon === Infinity) return;
+    const midLat = (minLat + maxLat) / 2;
+    const degToKm = 111.32 * Math.cos(midLat * Math.PI / 180);
+    const extentKm = (maxLon - minLon) * degToKm;
+    // Pick a nice round scale: 1, 2, 5, 10, 20, 50, 100, 200, 500...
+    const niceSteps = [1,2,5,10,20,50,100,200,500,1000,2000,5000];
+    let scaleKm = niceSteps[0];
+    for (const s of niceSteps) {{
+      if (s < extentKm * 0.3) scaleKm = s;
+    }}
+    document.getElementById('scale-text').textContent = scaleKm >= 1 ? scaleKm + ' km' : (scaleKm * 1000) + ' m';
+  }}
+
+  // Preload all pattern images via Promises to avoid race conditions
+  function preloadPatterns() {{
+    const promises = Object.entries(svgPatterns).map(([key, base64]) => {{
+      return new Promise(resolve => {{
+        const img = new Image();
+        img.onload = () => resolve([key, img]);
+        img.onerror = () => resolve([key, null]);
+        img.src = base64;
+      }});
+    }});
+    return Promise.all(promises).then(entries => {{
+      const images = {{}};
+      entries.forEach(([k, v]) => {{ if (v) images[k] = v; }});
+      return images;
+    }});
+  }}
+
   window.onload = function() {{
     if (typeof echarts === 'undefined') {{
       document.getElementById('loading').style.display = 'block';
@@ -761,26 +830,21 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
     const chart = echarts.init(document.getElementById('map'), null, {{ renderer: 'canvas' }});
     window.chart = chart;
 
-    const patternImages = {{}};
-    for (const [key, base64] of Object.entries(svgPatterns)) {{
-      const img = new Image();
-      img.src = base64;
-      patternImages[key] = img;
-    }}
-
     if (geojsonUrl) {{
       document.getElementById('loading').style.display = 'block';
-      fetch(geojsonUrl)
-        .then(res => {{
+      // Preload patterns first, then fetch GeoJSON
+      preloadPatterns().then(patternImages => {{
+        window.patternImages = patternImages;
+        return fetch(geojsonUrl).then(res => {{
           if (!res.ok) throw new Error('Fetch failed: ' + res.status);
           return res.json();
-        }})
-        .then(geoJson => {{
+        }}).then(geoJson => {{
           document.getElementById('loading').style.display = 'none';
           if (!geoJson || (!geoJson.features && geoJson.type !== 'Feature')) {{
             throw new Error('Invalid GeoJSON');
           }}
 
+          updateScaleBar(geoJson);
           echarts.registerMap('paleo', geoJson);
           const features = geoJson.features || (geoJson.type === 'Feature' ? [geoJson] : []);
 
@@ -802,12 +866,9 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
               }}
             }};
 
-            // Overlay SVG pattern if matched
+            // Composite: base color + pattern overlay
             if (matchedPattern && patternImages[matchedPattern]) {{
-              region.itemStyle.areaColor = {{
-                image: patternImages[matchedPattern],
-                repeat: 'repeat'
-              }};
+              region.itemStyle.areaColor = makeCompositePattern(baseColor, patternImages[matchedPattern]);
             }}
 
             if (showLabels) {{
@@ -867,23 +928,32 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
           chart.setOption(option);
 
           // Build legend
-          buildLegend(seenFacies);
-        }})
-        .catch(err => {{
-          document.getElementById('loading').style.display = 'block';
-          document.getElementById('loading').innerHTML = 'Error: ' + err.message;
+          buildLegend(seenFacies, patternImages);
         }});
+      }})
+      .catch(err => {{
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('loading').innerHTML = 'Error: ' + err.message;
+      }});
     }}
 
-    function buildLegend(seenFacies) {{
+    function buildLegend(seenFacies, patternImages) {{
       const legendDiv = document.getElementById('legend');
       let html = '<h4>图例</h4>';
       seenFacies.forEach(faciesName => {{
         const color = matchColor(faciesName);
         const matched = matchFacies(faciesName);
+        // Use composite pattern for legend swatch too
         let swatchStyle = `background: ${{color}};`;
         if (matched && patternImages[matched]) {{
-          swatchStyle += `background-image: url(${{patternImages[matched].src}}); background-size: 18px 12px;`;
+          const canvas = document.createElement('canvas');
+          canvas.width = 18; canvas.height = 12;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = color;
+          ctx.fillRect(0, 0, 18, 12);
+          ctx.globalAlpha = 0.6;
+          ctx.drawImage(patternImages[matched], 0, 0, 18, 12);
+          swatchStyle = `background: url(${{canvas.toDataURL()}}); background-size: 18px 12px;`;
         }}
         html += `<div class="legend-item"><div class="legend-swatch" style="${{swatchStyle}}"></div><span>${{faciesName}}</span></div>`;
       }});
@@ -934,18 +1004,21 @@ class PaleoMapRenderer(QWebEngineView):
         return svg_dict
 
     def _get_wells_json(self):
-        wells_path = Path(__file__).parent.parent.parent / "data" / "well_coordinates.json"
-        if not wells_path.exists():
+        try:
+            wells_path = Path(__file__).parent.parent.parent / "data" / "well_coordinates.json"
+            if not wells_path.exists():
+                return "[]"
+            with open(wells_path, encoding="utf-8") as f:
+                data = json.load(f)
+            wells = data.get("wells", [])
+            return json.dumps([{"name": w["well_name"], "longitude": w["longitude"], "latitude": w["latitude"]} for w in wells])
+        except (json.JSONDecodeError, KeyError, OSError):
             return "[]"
-        with open(wells_path, encoding="utf-8") as f:
-            data = json.load(f)
-        wells = data.get("wells", [])
-        return json.dumps([{"name": w["well_name"], "longitude": w["longitude"], "latitude": w["latitude"]} for w in wells])
 
     def load_geojson(self, file_path: str | None, period_name: str = "",
                      show_labels: bool = True, map_title: str = ""):
         self._show_labels = show_labels
-        self._map_title = map_title or period_name + "岩相古地理图" if period_name else ""
+        self._map_title = map_title or (period_name + "岩相古地理图" if period_name else "")
 
         svg_patterns_json = json.dumps(self._get_svg_base64_dict())
         from src.utils.constants import FACIES_COLORS
@@ -1148,6 +1221,13 @@ class PaleoMapPage(QWidget):
     # --- Period Management ---
 
     def _add_periods(self, periods: dict[str, list[dict]], geojson_files: dict[str, str]):
+        # Clean up stale temp files from previous loads
+        for name, path in list(self._period_geojson_files.items()):
+            if name not in periods:
+                try: os.unlink(path)
+                except OSError: pass
+                del self._period_geojson_files[name]
+
         for name, features in periods.items():
             self._periods[name] = features
             if name in geojson_files:
@@ -1190,13 +1270,14 @@ class PaleoMapPage(QWidget):
             self._stop_compare()
 
     def _start_compare(self):
-        self.map_view.setParent(None)
+        old_view = self.map_view
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
         self.map_view = PaleoMapRenderer(self)
         self.map_view_b = PaleoMapRenderer(self)
         self._splitter.addWidget(self.map_view)
         self._splitter.addWidget(self.map_view_b)
         self._map_layout.addWidget(self._splitter)
+        old_view.deleteLater()
         self._on_period_changed(self._current_period)
 
     def _stop_compare(self):
@@ -1248,10 +1329,15 @@ class PaleoMapPage(QWidget):
             elif fmt == "geojson":
                 loader = PaleoDataLoader(file_path)
                 periods = loader.load()
-                geojson_files = {name: file_path for name in periods}
+                # Filter features per period into temp files (same as CSV path)
+                geojson_files = self._write_period_geojsons(periods, file_path)
                 self._add_periods(periods, geojson_files)
             else:
                 QMessageBox.critical(self, "格式错误", "不支持的文件格式。请使用 GeoJSON 或 CSV 文件。")
+                return
+
+            if not periods or all(len(f) == 0 for f in periods.values()):
+                QMessageBox.information(self, "提示", "文件中没有有效的地理数据。")
                 return
 
             self.stack.setCurrentWidget(self.map_container)
@@ -1313,17 +1399,20 @@ class PaleoMapPage(QWidget):
         if not path.lower().endswith(".svg"):
             path += ".svg"
 
-        js = f"typeof chart !== 'undefined' ? chart.getDataURL({{type: 'svg'}}) : ''"
-        self.map_view.page().runJavaScript(js, lambda data_url: self._save_data_url(data_url, path))
-
-    def _save_data_url(self, data_url: str, path: str):
-        if not data_url or not data_url.startswith("data:"):
-            QMessageBox.warning(self, "导出失败", "无法获取 SVG 数据")
-            return
+        # ECharts canvas renderer doesn't support getDataURL('svg').
+        # Use grab() to get a high-res PNG and save as SVG with embedded image.
+        # For true SVG vector output, would need a separate SVG renderer instance.
+        pixmap = self.map_view.grab()
+        import io
+        buffer = io.BytesIO()
+        pixmap.save(buffer, "PNG")
         import base64
-        _, encoded = data_url.split(",", 1)
-        with open(path, "wb") as f:
-            f.write(base64.b64decode(encoded))
+        b64 = base64.b64encode(buffer.getvalue()).decode()
+        svg_content = f'<svg xmlns="http://www.w3.org/2000/svg" width="{pixmap.width()}" height="{pixmap.height()}">'
+        svg_content += f'<image href="data:image/png;base64,{b64}" width="{pixmap.width()}" height="{pixmap.height()}"/>'
+        svg_content += '</svg>'
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(svg_content)
 
     def _export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "导出 PDF", "paleomap.pdf", "PDF (*.pdf)")
@@ -1331,7 +1420,18 @@ class PaleoMapPage(QWidget):
             return
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
-        self.map_view.page().printToPdf(path)
+        from PySide6.QtGui import QPageSize, QPageLayout
+        from PySide6.QtPrintSupport import QPrinter
+        pixmap = self.map_view.grab()
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setOutputFileName(path)
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        page_size = QPageSize(QPageSize.PageSizeId.A4)
+        printer.setPageSize(page_size)
+        from PySide6.QtGui import QPainter
+        painter = QPainter(printer)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.end()
 
     def _export_png(self):
         path, _ = QFileDialog.getSaveFileName(self, "导出 PNG", "paleomap.png", "PNG (*.png)")
@@ -1398,9 +1498,43 @@ def test_renderer_load_valid_geojson(qtbot, tmp_path):
         assert "file://" in html
         assert "faciesColors" in html
         assert "boundaryStyle" in html
+        assert "makeCompositePattern" in html
+        assert "preloadPatterns" in html
 ```
 
-- [ ] **Step 2: Add test for export dialog formats**
+- [ ] **Step 2: Add test for boundary style rendering**
+
+Verify boundary_type properties appear in the rendered HTML template:
+
+```python
+def test_renderer_boundary_styles_in_template(qtbot, tmp_path):
+    renderer = PaleoMapRenderer()
+    qtbot.addWidget(renderer)
+
+    valid_json = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": {"facies": "砂岩", "boundary_type": "confirmed"},
+             "geometry": {"type": "Polygon", "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]]}},
+            {"type": "Feature", "properties": {"facies": "灰岩", "boundary_type": "inferred"},
+             "geometry": {"type": "Polygon", "coordinates": [[[1,1],[2,1],[2,2],[1,2],[1,1]]]}},
+            {"type": "Feature", "properties": {"facies": "深水盆地", "boundary_type": "fault"},
+             "geometry": {"type": "Polygon", "coordinates": [[[2,2],[3,2],[3,3],[2,3],[2,2]]]}}
+        ]
+    }
+    geo_file = tmp_path / "boundaries.geojson"
+    geo_file.write_text(json.dumps(valid_json), encoding="utf-8")
+    renderer.load_geojson(str(geo_file))
+
+    with open(renderer._tmp_html, "r", encoding="utf-8") as f:
+        html = f.read()
+        assert "confirmed" in html
+        assert "inferred" in html
+        assert "fault" in html
+        assert "#e53e3e" in html  # fault color
+```
+
+- [ ] **Step 3: Add test for export dialog formats**
 
 ```python
 @patch('src.pages.paleo_map_page.QFileDialog.getSaveFileName')
@@ -1409,7 +1543,13 @@ def test_page_export_png(mock_save, qtbot, tmp_path):
     qtbot.addWidget(page)
 
     # Load a file first so the page is in map state
-    valid_json = {"type": "FeatureCollection", "features": []}
+    valid_json = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": {"facies": "砂岩"},
+             "geometry": {"type": "Polygon", "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]]}}
+        ]
+    }
     geo_file = tmp_path / "test.geojson"
     geo_file.write_text(json.dumps(valid_json), encoding="utf-8")
     page._load_file(str(geo_file))
@@ -1422,6 +1562,51 @@ def test_page_export_png(mock_save, qtbot, tmp_path):
     # Simulate PNG export by calling directly
     page._export_png()
     mock_pixmap.save.assert_called_once()
+```
+
+- [ ] **Step 4: Add compare mode smoke test**
+
+```python
+def test_page_compare_mode_toggle(qtbot, tmp_path):
+    csv_content = "period,facies,lon_min,lon_max,lat_min,lat_max\n"
+    csv_content += "期A,砂岩,100,105,30,35\n"
+    csv_content += "期B,灰岩,100,105,30,35\n"
+    csv_file = tmp_path / "compare.csv"
+    csv_file.write_text(csv_content, encoding="utf-8")
+
+    page = PaleoMapPage()
+    qtbot.addWidget(page)
+    page._load_file(str(csv_file))
+
+    assert page.stack.currentWidget() == page.map_container
+    assert page._period_combo.count() == 2
+
+    # Toggle compare mode on
+    page._toggle_compare(True)
+    assert hasattr(page, 'map_view_b')
+    assert hasattr(page, '_splitter')
+
+    # Toggle compare mode off
+    page._toggle_compare(False)
+    assert not hasattr(page, 'map_view_b')
+```
+
+- [ ] **Step 5: Add empty data test**
+
+```python
+def test_page_load_empty_geojson_shows_message(qtbot, tmp_path):
+    page = PaleoMapPage()
+    qtbot.addWidget(page)
+
+    empty_json = {"type": "FeatureCollection", "features": []}
+    geo_file = tmp_path / "empty.geojson"
+    geo_file.write_text(json.dumps(empty_json), encoding="utf-8")
+
+    with patch('src.pages.paleo_map_page.QMessageBox.information') as mock_msg:
+        page._load_file(str(geo_file))
+        mock_msg.assert_called_once()
+        # Should stay on empty widget
+        assert page.stack.currentWidget() == page.empty_widget
 ```
 
 - [ ] **Step 3: Run full test suite**
@@ -1523,8 +1708,6 @@ The following fixes must be applied during implementation. Found by `/plan-ceo-r
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | clean | HOLD SCOPE, 10 issues, 0 critical gaps |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 2 | stale | Last ran on commit 7543f7f1, 7 commits behind |
-| Design Review | `/plan-design-review` | UI/UX gaps | 1 | stale | Last ran on commit 7543f7f1, 7 commits behind |
-| DX Review | `/plan-devex-review` | Developer experience gaps | 1 | clean | 7 findings, 7 fixes applied |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | **fixed** | 4 HIGH, 6 MEDIUM, 8 LOW — all fixed inline |
 
-**VERDICT:** CEO REVIEW CLEARED — 10 issues identified and amendments documented above. Eng review stale (pre-dates this plan) — recommend re-running `/plan-eng-review` after incorporating amendments.
+**VERDICT:** ENG REVIEW PASSED — 18 findings (4 HIGH). All CEO amendments and new eng findings applied inline to the plan. Key fixes: (E1) GeoJSON per-period filtering, (E2) composite pattern rendering, (E3) QPrinter PDF export, (E4) deleteLater on renderer swap, (E11) SVG export via embedded PNG. Plan is implementation-ready.
