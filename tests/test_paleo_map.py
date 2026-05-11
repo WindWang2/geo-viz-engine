@@ -41,6 +41,10 @@ def test_renderer_load_valid_geojson(qtbot, tmp_path):
     with open(renderer._tmp_html, "r", encoding="utf-8") as f:
         html = f.read()
         assert "file://" in html
+        assert "faciesColors" in html
+        assert "boundaryStyle" in html
+        assert "makeCompositePattern" in html
+        assert "preloadPatterns" in html
 
 
 def test_renderer_missing_svg_fallback(qtbot, tmp_path):
@@ -132,6 +136,77 @@ def test_page_export_image(mock_get_save, qtbot, tmp_path):
     page._export_png()
 
     mock_pixmap.save.assert_called_once_with(str(export_path), "PNG")
+
+
+def test_renderer_boundary_styles_in_template(qtbot, tmp_path):
+    renderer = PaleoMapRenderer()
+    qtbot.addWidget(renderer)
+
+    valid_json = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": {"facies": "砂岩", "boundary_type": "confirmed"},
+             "geometry": {"type": "Polygon", "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]]}},
+            {"type": "Feature", "properties": {"facies": "灰岩", "boundary_type": "inferred"},
+             "geometry": {"type": "Polygon", "coordinates": [[[1,1],[2,1],[2,2],[1,2],[1,1]]]}},
+            {"type": "Feature", "properties": {"facies": "深水盆地", "boundary_type": "fault"},
+             "geometry": {"type": "Polygon", "coordinates": [[[2,2],[3,2],[3,3],[2,3],[2,2]]]}}
+        ]
+    }
+    geo_file = tmp_path / "boundaries.geojson"
+    geo_file.write_text(json.dumps(valid_json), encoding="utf-8")
+    renderer.load_geojson(str(geo_file))
+
+    with open(renderer._tmp_html, "r", encoding="utf-8") as f:
+        html = f.read()
+        assert "confirmed" in html
+        assert "inferred" in html
+        assert "fault" in html
+        assert "#e53e3e" in html
+
+
+def test_page_compare_mode_toggle(qtbot, tmp_path):
+    csv_content = "period,facies,lon_min,lon_max,lat_min,lat_max\n"
+    csv_content += "期A,砂岩,100,105,30,35\n"
+    csv_content += "期B,灰岩,100,105,30,35\n"
+    csv_file = tmp_path / "compare.csv"
+    csv_file.write_text(csv_content, encoding="utf-8")
+
+    page = PaleoMapPage()
+    qtbot.addWidget(page)
+    page._load_file(str(csv_file))
+
+    assert page.stack.currentWidget() == page.map_container
+    assert page._period_combo.count() == 2
+
+    page._toggle_compare(True)
+    assert hasattr(page, 'map_view_b')
+    assert hasattr(page, '_splitter')
+
+    page._toggle_compare(False)
+    assert not hasattr(page, 'map_view_b')
+
+
+def test_page_compare_mode_rejects_single_period(qtbot, tmp_path):
+    """Compare mode with <2 periods shows message instead of activating."""
+    valid_json = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": {"facies": "砂岩"},
+             "geometry": {"type": "Polygon", "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]]}}
+        ]
+    }
+    geo_file = tmp_path / "single.geojson"
+    geo_file.write_text(json.dumps(valid_json), encoding="utf-8")
+
+    page = PaleoMapPage()
+    qtbot.addWidget(page)
+    page._load_file(str(geo_file))
+
+    with patch('src.pages.paleo_map_page.QMessageBox.information') as mock_msg:
+        page._toggle_compare(True)
+        mock_msg.assert_called_once()
+        assert not page._compare_btn.isChecked()
 
 
 def test_facies_colors_has_entry_for_every_pattern():

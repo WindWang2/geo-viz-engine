@@ -168,12 +168,15 @@ class PaleoMapPage(QWidget):
         self._on_period_changed(self._current_period)
 
     def _stop_compare(self):
+        if hasattr(self, 'map_view_b'):
+            try:
+                self.map_view_b.deleteLater()
+            except RuntimeError:
+                pass  # C++ object already deleted by Qt parent cleanup
+            del self.map_view_b
         if hasattr(self, '_splitter'):
             self._splitter.setParent(None)
             del self._splitter
-        if hasattr(self, 'map_view_b'):
-            self.map_view_b.deleteLater()
-            del self.map_view_b
         self.map_view = PaleoMapRenderer(self)
         self._map_layout.addWidget(self.map_view)
         self._on_period_changed(self._current_period)
