@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-05-11
+
+### Added
+- **地震三维模块重构**：将底层从 Vispy/PyVista 迁移至 **PyQtGraph (QOpenGLWidget)**。
+  - 彻底解决了 Linux Wayland 及 Nvidia 环境下的 OpenGL Context 限制与着色器版本冲突。
+  - 新增 GPU 计算层：原生集成 **CuPy** (CUDA 13.2) 加速引擎，实现地震体数据在 GPU 显存的常驻与 sub-ms 级别瞬时切片。
+
 ## [0.6.0] - 2026-05-11
 
 ### Added

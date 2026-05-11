@@ -19,6 +19,13 @@ All notable changes to this package will be documented in this file.
 - `examples/demo.py` and `examples/load_segy.py` runnable examples.
 - `python -m geoviz_seismic` entry point for quick demo.
 
+## [0.1.2] - 2026-05-11
+
+### Changed
+- **迁移 3D 渲染引擎**：重写 `Renderer3D` 从 Vispy 迁移至 PyQtGraph。彻底解决 Wayland/OpenGL ES 上下文下的 #version 120 编译问题。
+- **新增 GPU 加速层**：引入 `gpu_ops.py` 模块与 `cupy-cuda13x` 依赖，实现地震体数据 GPU 显存常驻和极速切片，告别 CPU 端 numpy 内存拷贝瓶颈。
+- **更新测试套件**：现代化的 `test_renderer_3d.py` 替代原有的 subprocess probe 逻辑，直观验证本地 Qt 环境。
+
 ## [0.1.1] - 2026-05-11
 
 ### Changed

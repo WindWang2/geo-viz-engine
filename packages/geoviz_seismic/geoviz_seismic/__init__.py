@@ -16,7 +16,7 @@ from .profile_widget import ProfileWidget
 from .renderer_3d import Renderer3D
 from .seismic_view import SeismicView
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = [
     "ColormapManager",

@@ -195,11 +195,19 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
               itemStyle: {{
                 areaColor: baseColor,
                 ...boundaryStyle(boundaryType)
+              }},
+              emphasis: {{
+                itemStyle: {{
+                  areaColor: baseColor,
+                  opacity: 0.85
+                }}
               }}
             }};
 
             if (matchedPattern && patternImages[matchedPattern]) {{
-              region.itemStyle.areaColor = makeCompositePattern(baseColor, patternImages[matchedPattern]);
+              const pattern = makeCompositePattern(baseColor, patternImages[matchedPattern]);
+              region.itemStyle.areaColor = pattern;
+              region.emphasis.itemStyle.areaColor = pattern;
             }}
 
             if (showLabels) {{
@@ -227,7 +235,7 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
                 borderColor: '#cbd5e1',
                 borderWidth: 0.5
               }},
-              emphasis: {{ itemStyle: {{ areaColor: '#edf2f7' }} }},
+              emphasis: {{ itemStyle: {{ borderColor: '#3182ce', borderWidth: 2 }} }},
               regions: regions
             }},
             series: [
@@ -313,7 +321,7 @@ class PaleoMapRenderer(QWebEngineView):
 
     def _get_svg_base64_dict(self):
         svg_dict = {}
-        patterns_dir = Path(__file__).parent.parent / "patterns"
+        patterns_dir = Path(__file__).parent.parent.parent / "patterns"
         for facies_keyword, pattern_name in PATTERN_MAP.items():
             svg_filename = pattern_name.replace("-", "_") + ".svg"
             svg_path = patterns_dir / svg_filename
@@ -325,7 +333,7 @@ class PaleoMapRenderer(QWebEngineView):
 
     def _get_wells_json(self):
         try:
-            wells_path = Path(__file__).parent.parent.parent / "data" / "well_coordinates.json"
+            wells_path = Path(__file__).parent.parent.parent.parent / "data" / "well_coordinates.json"
             if not wells_path.exists():
                 return "[]"
             with open(wells_path, encoding="utf-8") as f:
@@ -346,7 +354,7 @@ class PaleoMapRenderer(QWebEngineView):
         from src.utils.constants import FACIES_COLORS
         facies_colors_json = json.dumps(FACIES_COLORS).replace("</script>", r"<\/script>")
 
-        echarts_js = Path(__file__).parent.parent / "resources" / "js" / "echarts.min.js"
+        echarts_js = Path(__file__).parent.parent.parent / "resources" / "js" / "echarts.min.js"
         echarts_url = QUrl.fromLocalFile(str(echarts_js)).toString()
 
         geojson_url = ""

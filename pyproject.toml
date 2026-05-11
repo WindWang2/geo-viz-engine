@@ -1,6 +1,6 @@
 [project]
 name = "geo-viz-engine"
-version = "0.6.0.0"
+version = "0.6.1.0"
 description = "地质数据可视化桌面引擎"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -26,13 +26,16 @@ dev = [
     "pytest-qt>=4.5.0",
     "PyInstaller>=6.0",
 ]
+gpu = [
+    "cupy-cuda13x",
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv]
-environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'"]
+environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'", "sys_platform == 'win32'"]
 
 [tool.uv.workspace]
 members = [

@@ -4,12 +4,20 @@ import os
 # Ensure the project root is in the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 from src.app import MainWindow
 
 
 def main():
+    # Request desktop OpenGL 3.3 core profile so vispy/VTK shaders work.
+    # Must be set before QApplication is created.
+    fmt = QSurfaceFormat()
+    fmt.setVersion(3, 3)
+    fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+    fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
+    QSurfaceFormat.setDefaultFormat(fmt)
+
     app = QApplication(sys.argv)
 
     font = QFont("Noto Sans CJK SC", 10)

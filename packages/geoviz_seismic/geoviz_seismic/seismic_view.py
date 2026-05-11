@@ -95,12 +95,13 @@ class SeismicView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        self._renderer_3d = Renderer3D()
+        self._profile_widget = ProfileWidget()
+
         toolbar = self._build_toolbar()
         layout.addWidget(toolbar)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
-        self._renderer_3d = Renderer3D()
-        self._profile_widget = ProfileWidget()
         splitter.addWidget(self._renderer_3d)
         splitter.addWidget(self._profile_widget)
         splitter.setSizes([400, 300])
