@@ -166,8 +166,9 @@ class Renderer3D(QWidget):
         # 1. 3D Volume Item (Hidden by default, shown when mode="volume")
         try:
             cmap_data = ColormapManager.get_colormap(self._cmap_name).copy()
-            # Custom alpha logic for volume peek-thru
-            alpha_curve = np.abs(np.linspace(-1, 1, 256)) ** 1.5 * 100
+            # To avoid the "foggy" look and make it solid/substantial, use a harsh step-like alpha curve 
+            # where only the absolute zero crossing is transparent, and everything else is solid.
+            alpha_curve = np.clip(np.abs(np.linspace(-1, 1, 256)) * 400, 0, 255)
             cmap_data[:, 3] = alpha_curve.astype(np.uint8)
             vol_data = self._volume_data_gpu if self._volume_data_gpu is not None else data
             
@@ -176,7 +177,8 @@ class Renderer3D(QWidget):
             from .gpu_ops import apply_colormap_gpu
             vol_rgba = apply_colormap_gpu(vol_data[::2, ::2, ::2], cmap_data)
             
-            self._volume_visual = gl.GLVolumeItem(vol_rgba, sliceDensity=1, smooth=True)
+            # sliceDensity=3 makes the raycaster cast more rays, making it look dense and solid
+            self._volume_visual = gl.GLVolumeItem(vol_rgba, sliceDensity=3, smooth=True)
             self._volume_visual.scale(si*2, sx*2, st*2)
             self._view.addItem(self._volume_visual)
             if self._mode != "volume":
@@ -184,8 +186,9 @@ class Renderer3D(QWidget):
         except Exception as e:
             logger.warning(f"GLVolumeItem preparation failed: {e}")
 
-        # 2. Bounding Box setup
+        # 2. Bounding Box & labeled Axis setup
         self._create_bbox(ni, nx, nt, spacing)
+        self._create_axis_labels(ni, nx, nt, spacing)
         
         # 3. Interactive slice planes
         self._create_slice_planes()
@@ -285,6 +288,22 @@ class Renderer3D(QWidget):
                     self._view.removeItem(v)
                 except Exception:
                     pass
+        # Clear axis labels
+        for v in getattr(self, '_axis_labels', []):
+            try:
+                self._view.removeItem(v)
+            except Exception:
+                pass
+        self._axis_labels = []
+        # Clear line items from borders
+        for attr in ('_line_il', '_line_xl', '_line_t'):
+            v = getattr(self, attr, None)
+            if v is not None:
+                try:
+                    self._view.removeItem(v)
+                except Exception:
+                    pass
+                setattr(self, attr, None)
         self._volume_visual = None
         self._img_il = None
         self._img_xl = None
@@ -328,6 +347,74 @@ class Renderer3D(QWidget):
         )
         self._view.addItem(self._bbox_visual)
 
+    def _create_axis_labels(self, ni, nx, nt, sp):
+        """Create labeled coordinate axes with tick marks along bounding box edges."""
+        si, sx, st = sp
+        max_dim = max(ni * si, nx * sx, nt * st)
+        font_size = max(10, int(max_dim / 25))
+        
+        self._axis_labels = []
+        
+        # Axis label text items at end of each axis
+        try:
+            il_label = gl.GLTextItem(
+                pos=np.array([ni * si * 1.05, 0, 0]),
+                text=f'Inline (0-{ni-1})',
+                color=(255, 80, 80, 255)
+            )
+            xl_label = gl.GLTextItem(
+                pos=np.array([0, nx * sx * 1.05, 0]),
+                text=f'Xline (0-{nx-1})',
+                color=(80, 200, 80, 255)
+            )
+            t_label = gl.GLTextItem(
+                pos=np.array([0, 0, nt * st * 1.05]),
+                text=f'Time (0-{nt-1})',
+                color=(80, 130, 255, 255)
+            )
+            for lbl in (il_label, xl_label, t_label):
+                self._view.addItem(lbl)
+                self._axis_labels.append(lbl)
+        except Exception:
+            pass
+        
+        # Tick marks along each axis (5 ticks per axis)
+        n_ticks = 5
+        for i in range(n_ticks + 1):
+            frac = i / n_ticks
+            try:
+                # Inline axis ticks (along X)
+                pos_il = np.array([frac * ni * si, -max_dim * 0.02, 0])
+                tick_il = gl.GLTextItem(
+                    pos=pos_il,
+                    text=str(int(frac * ni)),
+                    color=(200, 200, 200, 200)
+                )
+                self._view.addItem(tick_il)
+                self._axis_labels.append(tick_il)
+                
+                # Crossline axis ticks (along Y)
+                pos_xl = np.array([-max_dim * 0.02, frac * nx * sx, 0])
+                tick_xl = gl.GLTextItem(
+                    pos=pos_xl,
+                    text=str(int(frac * nx)),
+                    color=(200, 200, 200, 200)
+                )
+                self._view.addItem(tick_xl)
+                self._axis_labels.append(tick_xl)
+                
+                # Time axis ticks (along Z)
+                pos_t = np.array([-max_dim * 0.02, -max_dim * 0.02, frac * nt * st])
+                tick_t = gl.GLTextItem(
+                    pos=pos_t,
+                    text=str(int(frac * nt)),
+                    color=(200, 200, 200, 200)
+                )
+                self._view.addItem(tick_t)
+                self._axis_labels.append(tick_t)
+            except Exception:
+                pass
+
     def _get_sliced_data(self, axis: int, index: int) -> np.ndarray:
         """Retrieves slice, prioritizing GPU cached volume memory if accessible."""
         vol = self._volume_data_gpu if self._volume_data_gpu is not None else self._volume_data_cpu
@@ -351,7 +438,8 @@ class Renderer3D(QWidget):
         img_il_rgb = apply_colormap_gpu(il_raw, lut)
         self._img_il = gl.GLImageItem(img_il_rgb)
         self._img_il.scale(sx, st, 1)
-        self._img_il.rotate(90, 0, 1, 0) 
+        self._img_il.rotate(90, 1, 0, 0)  # Puts Time (Height) on Z axis
+        self._img_il.rotate(90, 0, 0, 1)  # Puts Crossline (Width) on Y axis
         self._img_il.translate(self._il_pos * si, 0, 0)
         self._view.addItem(self._img_il)
         

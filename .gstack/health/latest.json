@@ -1,0 +1,30 @@
+{
+  "timestamp": "2026-05-11T12:36:21.632408",
+  "branch": "main",
+  "version": "0.6.0.0",
+  "tests": {
+    "total": 118,
+    "passed": 113,
+    "skipped": 5,
+    "failed": 0
+  },
+  "source": {
+    "files": 21,
+    "lines": 3411,
+    "functions": 105,
+    "classes": 25
+  },
+  "test_files": 22,
+  "security": {
+    "critical": 0,
+    "high": 2,
+    "medium": 2
+  },
+  "linting": {
+    "ruff": false,
+    "mypy": false
+  },
+  "ci": false,
+  "coverage_tool": false,
+  "deps": 14
+}

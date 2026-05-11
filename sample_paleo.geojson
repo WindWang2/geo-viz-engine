@@ -1,0 +1,100 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "北部陆棚区",
+        "facies": "泥质陆棚"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [110.0, 40.0],
+            [116.0, 40.0],
+            [116.0, 43.0],
+            [110.0, 43.0],
+            [110.0, 40.0]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "中央三角洲前缘",
+        "facies": "三角洲"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [112.0, 37.0],
+            [115.0, 37.0],
+            [114.5, 40.0],
+            [112.5, 40.0],
+            [112.0, 37.0]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "西部滨岸相",
+        "facies": "砂岩"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [108.0, 34.0],
+            [112.0, 34.0],
+            [112.0, 40.0],
+            [108.0, 40.0],
+            [108.0, 34.0]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "东部碳酸盐岩台地",
+        "facies": "灰岩"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [115.0, 34.0],
+            [119.0, 34.0],
+            [119.0, 40.0],
+            [115.0, 40.0],
+            [115.0, 34.0]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "南部深水盆地",
+        "facies": "页岩"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [108.0, 31.0],
+            [119.0, 31.0],
+            [119.0, 34.0],
+            [108.0, 34.0],
+            [108.0, 31.0]
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -4,9 +4,10 @@ import logging
 import numpy as np
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QSplitter,
+    QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QComboBox, QLabel, QFileDialog, QToolBar,
 )
+from PySide6.QtGui import QPainter, QLinearGradient, QColor
 
 from .renderer_3d import Renderer3D
 from .profile_widget import ProfileWidget
@@ -78,6 +79,45 @@ class _SegyLoadWorker(QThread):
             self.error.emit(str(exc))
 
 
+class ColorbarWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(60)
+        self._cmap_name = "seismic"
+        self._min_val = -1.0
+        self._max_val = 1.0
+
+    def set_colormap(self, name: str):
+        self._cmap_name = name
+        self.update()
+
+    def set_range(self, min_val: float, max_val: float):
+        self._min_val = min_val
+        self._max_val = max_val
+        self.update()
+
+    def paintEvent(self, event):
+        from .colormap import ColormapManager
+        painter = QPainter(self)
+        rect = self.rect()
+        
+        # Draw gradient
+        grad = QLinearGradient(0, rect.bottom() - 20, 0, 20)
+        lut = ColormapManager.get_colormap(self._cmap_name)
+        for i in range(len(lut)):
+            pos = i / (len(lut) - 1)
+            r, g, b, a = lut[i]
+            grad.setColorAt(pos, QColor(r, g, b, 255))
+        
+        bar_rect = rect.adjusted(10, 20, -30, -20)
+        painter.fillRect(bar_rect, grad)
+        
+        # Draw text labels
+        painter.setPen(QColor(100, 100, 100))
+        painter.drawText(bar_rect.right() + 5, bar_rect.top() + 10, f"{self._max_val:.1f}")
+        painter.drawText(bar_rect.right() + 5, bar_rect.bottom(), f"{self._min_val:.1f}")
+        painter.drawText(bar_rect.right() + 5, bar_rect.center().y() + 5, f"{(self._max_val+self._min_val)/2:.1f}")
+
 class SeismicView(QWidget):
     """High-level composite widget for seismic data visualization.
 
@@ -97,20 +137,80 @@ class SeismicView(QWidget):
         self._ds_factor: tuple[int, int, int] = (1, 1, 1)
         self._log = logging.getLogger(__name__)
 
+        # Store raw slice data for export
+        self._slice_data: dict[str, np.ndarray | None] = {
+            "inline": None, "crossline": None, "time": None
+        }
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._renderer_3d = Renderer3D()
-        self._profile_widget = ProfileWidget()
+        self._colorbar = ColorbarWidget()
+
+        # Create 3 separate profile panels for Inline, Crossline, Time
+        self._profile_il = ProfileWidget()
+        self._profile_xl = ProfileWidget()
+        self._profile_t = ProfileWidget()
+        # Keep backward compat reference
+        self._profile_widget = self._profile_il
 
         toolbar = self._build_toolbar()
         layout.addWidget(toolbar)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(self._renderer_3d)
-        splitter.addWidget(self._profile_widget)
-        splitter.setSizes([400, 300])
-        layout.addWidget(splitter)
+        # --- Main content: 3D view (top) + 3 profiles (bottom) ---
+        main_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Top: 3D renderer
+        main_splitter.addWidget(self._renderer_3d)
+
+        # Bottom: 3 profile panels side by side
+        profiles_container = QWidget()
+        profiles_layout = QHBoxLayout(profiles_container)
+        profiles_layout.setContentsMargins(0, 0, 0, 0)
+        profiles_layout.setSpacing(2)
+
+        for label, color, profile, key in [
+            ("Inline 剖面", "#e53e3e", self._profile_il, "inline"),
+            ("Crossline 剖面", "#38a169", self._profile_xl, "crossline"),
+            ("Time 剖面", "#3182ce", self._profile_t, "time"),
+        ]:
+            panel = QWidget()
+            panel_layout = QVBoxLayout(panel)
+            panel_layout.setContentsMargins(2, 0, 2, 0)
+            panel_layout.setSpacing(2)
+
+            # Header bar with label + export button
+            header = QWidget()
+            header.setStyleSheet(f"background: #f0f4f8; border-bottom: 2px solid {color};")
+            header_layout = QHBoxLayout(header)
+            header_layout.setContentsMargins(6, 2, 6, 2)
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 12px;")
+            header_layout.addWidget(lbl)
+            header_layout.addStretch()
+
+            export_btn = QPushButton("导出")
+            export_btn.setFixedSize(50, 22)
+            export_btn.setStyleSheet(
+                "QPushButton { background: #edf2f7; border: 1px solid #cbd5e0; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background: #e2e8f0; }"
+            )
+            export_btn.clicked.connect(lambda checked, k=key: self._export_slice(k))
+            header_layout.addWidget(export_btn)
+
+            panel_layout.addWidget(header)
+            panel_layout.addWidget(profile, 1)
+            profiles_layout.addWidget(panel, 1)
+
+        main_splitter.addWidget(profiles_container)
+        main_splitter.setSizes([450, 250])
+
+        # Horizontal layout for splitter + colorbar
+        h_layout = QHBoxLayout()
+        h_layout.addWidget(main_splitter, stretch=1)
+        h_layout.addWidget(self._colorbar)
+        layout.addLayout(h_layout)
 
         # Throttle slice updates: only refresh 2D profile after
         # a short delay of no new slice_changed signals (drag release)
@@ -127,7 +227,7 @@ class SeismicView(QWidget):
         if path is not None:
             self.load_segy_async(path)
         else:
-            self._profile_widget.set_overlay_text("生成合成数据...")
+            self._profile_il.set_overlay_text("生成合成数据...")
             self._synth_worker = _SyntheticWorker(self)
             self._synth_worker.done.connect(self._on_synthetic_ready)
             self._synth_worker.start()
@@ -160,11 +260,18 @@ class SeismicView(QWidget):
             dt_ms=4.0,
         )
         self._renderer_3d.load_volume(data)
-        mid = data.shape[0] // 2
-        slice_2d = data[mid].T  # (n_xlines, n_samples) → (n_samples, n_xlines)
-        info = self._build_slice_info("inline", mid, slice_2d.shape)
-        self._profile_widget.update_profile(slice_2d, slice_info=info)
-        self._slice_label.setText(f"Inline {mid}")
+        self._colorbar.set_range(float(np.nanmin(data)), float(np.nanmax(data)))
+
+        # Populate all 3 profile panels
+        mid_il = data.shape[0] // 2
+        mid_xl = data.shape[1] // 2
+        mid_t = data.shape[2] // 2
+
+        self._update_profile_panel("inline", mid_il, data[mid_il, :, :].T)
+        self._update_profile_panel("crossline", mid_xl, data[:, mid_xl, :].T)
+        self._update_profile_panel("time", mid_t, data[:, :, mid_t].T)
+
+        self._slice_label.setText(f"IL:{mid_il} XL:{mid_xl} T:{mid_t}")
         self._log.info("Demo loaded: shape=%s", data.shape)
 
     def load_segy(self, path: str):
@@ -183,9 +290,7 @@ class SeismicView(QWidget):
         mid_il = (self._meta.iline_start
                   + self._meta.n_inlines // 2 * self._meta.iline_step)
         raw = self._loader.read_inline(mid_il)
-        slice_2d = raw.T
-        info = self._build_slice_info("inline", mid_il, slice_2d.shape)
-        self._profile_widget.update_profile(slice_2d, slice_info=info)
+        self._update_profile_panel("inline", mid_il, raw.T)
         self._slice_label.setText(f"Inline {mid_il}")
 
     def load_segy_async(self, path: str):
@@ -195,7 +300,7 @@ class SeismicView(QWidget):
         if hasattr(self, '_segy_worker') and self._segy_worker is not None and self._segy_worker.isRunning():
             self._segy_worker.done.disconnect(self._on_segy_ready)
             self._segy_worker.error.disconnect(self._on_segy_error)
-        self._profile_widget.set_overlay_text("加载 SEGY...")
+        self._profile_il.set_overlay_text("加载 SEGY...")
         self._segy_worker = _SegyLoadWorker(path, self)
         self._segy_worker.done.connect(self._on_segy_ready)
         self._segy_worker.error.connect(self._on_segy_error)
@@ -203,7 +308,8 @@ class SeismicView(QWidget):
 
     def set_display_mode(self, mode: str):
         """Switch the profile display mode (``"vd"`` or ``"wiggle"``)."""
-        self._profile_widget.set_display_mode(mode)
+        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+            pw.set_display_mode(mode)
 
     # ------------------------------------------------------------------
     # Async callbacks
@@ -212,7 +318,7 @@ class SeismicView(QWidget):
     @Slot(object)
     def _on_synthetic_ready(self, data: np.ndarray):
         self.load_demo(data)
-        self._profile_widget.set_overlay_text(None)
+        self._profile_il.set_overlay_text(None)
 
     @Slot(object)
     def _on_segy_ready(self, result: tuple):
@@ -224,18 +330,17 @@ class SeismicView(QWidget):
                        meta.n_inlines, meta.n_crosslines, meta.n_samples,
                        vol.shape)
         self._renderer_3d.load_volume(vol)
-        slice_2d = raw.T
+        self._colorbar.set_range(float(np.nanmin(vol)), float(np.nanmax(vol)))
         mid_il = (meta.iline_start
                   + meta.n_inlines // 2 * meta.iline_step)
-        info = self._build_slice_info("inline", mid_il, slice_2d.shape)
-        self._profile_widget.update_profile(slice_2d, slice_info=info)
+        self._update_profile_panel("inline", mid_il, raw.T)
         self._slice_label.setText(f"Inline {mid_il}")
-        self._profile_widget.set_overlay_text(None)
+        self._profile_il.set_overlay_text(None)
 
     @Slot(str)
     def _on_segy_error(self, msg: str):
         self._log.error("SEGY load failed: %s", msg)
-        self._profile_widget.set_overlay_text(f"加载失败: {msg}")
+        self._profile_il.set_overlay_text(f"加载失败: {msg}")
 
     # ------------------------------------------------------------------
     # Synthetic data generation
@@ -273,7 +378,10 @@ class SeismicView(QWidget):
         self._cmap_combo = QComboBox()
         self._cmap_combo.addItems(["seismic", "gray", "jet"])
         self._cmap_combo.currentTextChanged.connect(
-            self._profile_widget.set_colormap
+            lambda name: [pw.set_colormap(name) for pw in (self._profile_il, self._profile_xl, self._profile_t)]
+        )
+        self._cmap_combo.currentTextChanged.connect(
+            self._colorbar.set_colormap
         )
 
         self._3d_mode_combo = QComboBox()
@@ -366,10 +474,7 @@ class SeismicView(QWidget):
                 raw = vol[:, position, :]
             else:
                 raw = vol[:, :, position]
-            slice_2d = raw.T
-            info = self._build_slice_info(slice_type, position, slice_2d.shape)
-            self._profile_widget.update_profile(slice_2d, slice_info=info)
-            self._slice_label.setText(f"{slice_type.capitalize()} {position}")
+            self._update_profile_panel(slice_type, position, raw.T)
             return
 
         # Plane widget gives downsampled voxel indices.
@@ -405,12 +510,42 @@ class SeismicView(QWidget):
                 return
             self._cache.put(cache_key, raw)
 
-        slice_2d = raw.T  # (n_traces, n_samples) → (n_samples, n_traces)
-        info = self._build_slice_info(slice_type, actual_pos, slice_2d.shape)
-        self._profile_widget.update_profile(slice_2d, slice_info=info)
-        self._slice_label.setText(
-            f"{slice_type.capitalize()} {actual_pos}"
+        self._update_profile_panel(slice_type, actual_pos, raw.T)
+
+    def _update_profile_panel(self, slice_type: str, position: int, slice_2d: np.ndarray):
+        """Route slice data to the correct profile panel and cache raw data for export."""
+        info = self._build_slice_info(slice_type, position, slice_2d.shape)
+        self._slice_data[slice_type] = slice_2d.copy()
+
+        if slice_type == "inline":
+            self._profile_il.update_profile(slice_2d, slice_info=info)
+        elif slice_type == "crossline":
+            self._profile_xl.update_profile(slice_2d, slice_info=info)
+        else:
+            self._profile_t.update_profile(slice_2d, slice_info=info)
+
+        self._slice_label.setText(f"{slice_type.capitalize()} {position}")
+
+    def _export_slice(self, slice_type: str):
+        """Export the current slice data for the given type as CSV."""
+        data = self._slice_data.get(slice_type)
+        if data is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, f"导出 {slice_type.capitalize()} 剖面数据",
+            f"{slice_type}_slice.csv",
+            "CSV Files (*.csv);;NumPy Files (*.npy)"
         )
+        if not path:
+            return
+        try:
+            if path.endswith(".npy"):
+                np.save(path, data)
+            else:
+                np.savetxt(path, data, delimiter=",", fmt="%.6f")
+            self._log.info("Exported %s slice to %s", slice_type, path)
+        except Exception as exc:
+            self._log.error("Export failed: %s", exc)
 
     def _load_segy(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -460,10 +595,9 @@ class SeismicView(QWidget):
         self._renderer_3d.add_horizon(filled)
 
     def _on_mode_changed(self, index: int):
-        if index == 0:
-            self._profile_widget.set_display_mode("vd")
-        else:
-            self._profile_widget.set_display_mode("wiggle")
+        mode = "vd" if index == 0 else "wiggle"
+        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+            pw.set_display_mode(mode)
 
     def _on_slice_type_changed(self, index: int):
         pass  # Slice type is controlled by 3D plane widgets

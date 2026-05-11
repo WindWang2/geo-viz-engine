@@ -1,0 +1,140 @@
+{
+  "version": "2.0.0",
+  "date": "2026-05-11T15:30:00+08:00",
+  "mode": "daily",
+  "scope": "full",
+  "diff_mode": false,
+  "phases_run": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+  "attack_surface": {
+    "code": {
+      "public_endpoints": 0,
+      "authenticated": 0,
+      "admin": 0,
+      "api": 1,
+      "uploads": 2,
+      "integrations": 1,
+      "background_jobs": 0,
+      "websockets": 0
+    },
+    "infrastructure": {
+      "ci_workflows": 0,
+      "webhook_receivers": 0,
+      "container_configs": 0,
+      "iac_configs": 0,
+      "deploy_targets": 0,
+      "secret_management": "env_vars"
+    }
+  },
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "confidence": 9,
+      "status": "VERIFIED",
+      "phase": 9,
+      "phase_name": "OWASP Top 10",
+      "category": "A08 Software and Data Integrity Failures",
+      "fingerprint": "pickle-load-rce-loaders",
+      "title": "Arbitrary code execution via pickle deserialization of cache files",
+      "file": "src/data/loaders.py",
+      "line": 657,
+      "commit": "current",
+      "description": "pickle.load() deserializes cache files from a predictable .cache/ directory next to user data files. No integrity check or RestrictedUnpickler is used. Cache filename is derived from MD5 hash of path+mtime+well_name, which is predictable.",
+      "exploit_scenario": "Attacker places a crafted .pkl file in the .cache/ directory alongside data files. When user opens the corresponding well log, pickle.load() executes arbitrary Python code with the user's full privileges.",
+      "impact": "Full remote code execution in the user's desktop session — file access, network access, process execution.",
+      "recommendation": "Replace pickle with JSON or MessagePack for cache serialization. If pickle is needed for performance, implement a RestrictedUnpickler with a strict allowlist.",
+      "playbook": "1. Replace pickle.load/dump with json.load/dump or msgpack\n2. If keeping pickle, add RestrictedUnpickler\n3. Optionally add HMAC signature to cache files",
+      "verification": "independently verified"
+    },
+    {
+      "id": 2,
+      "severity": "HIGH",
+      "confidence": 9,
+      "status": "VERIFIED",
+      "phase": 6,
+      "phase_name": "Webhook & Integration Audit",
+      "category": "A02 Cryptographic Failures",
+      "fingerprint": "plaintext-http-deeptime-api",
+      "title": "Plaintext HTTP to external AI inference API leaks geological data",
+      "file": "src/pages/well_log_page.py",
+      "line": 92,
+      "commit": "current",
+      "description": "Well log data (depths, curve values, formation names, well names) is sent over plaintext HTTP to api-test.deeptime.world. Response containing AI predictions is written directly to user's Excel file without schema validation.",
+      "exploit_scenario": "Network-level attacker intercepts HTTP traffic. Reads proprietary well log data (geological survey data). Alternatively, MITM injects false predictions into response, which are written to the user's Excel file and displayed as AI-generated analysis.",
+      "impact": "Data exfiltration of proprietary geological survey data. Integrity compromise of user's dataset via injected false predictions.",
+      "recommendation": "Change URL from http:// to https://. Add response schema validation before writing to Excel.",
+      "playbook": "1. Change http://api-test.deeptime.world to https://api-test.deeptime.world\n2. Add JSON schema validation on response\n3. Verify TLS certificate pinning if available",
+      "verification": "independently verified"
+    },
+    {
+      "id": 3,
+      "severity": "MEDIUM",
+      "confidence": 8,
+      "status": "VERIFIED",
+      "phase": 5,
+      "phase_name": "Infrastructure Shadow Surface",
+      "category": "A05 Security Misconfiguration",
+      "fingerprint": "localcontent-remote-urls-paleo",
+      "title": "QWebEngineView allows local file reads and remote network access",
+      "file": "src/renderers/paleo_map_renderer.py",
+      "line": 307,
+      "commit": "current",
+      "description": "LocalContentCanAccessRemoteUrls and LocalContentCanAccessFileUrls are both enabled. If JS injection occurs via crafted GeoJSON, attacker JS can read local files and exfiltrate data to remote servers.",
+      "exploit_scenario": "User loads a crafted GeoJSON file. Content flows into ECharts rendering. If a JS injection occurs (e.g., via template literal breakout), the injected JS can fetch('file:///etc/passwd') and exfiltrate to attacker server.",
+      "impact": "Local file exfiltration and remote data exfiltration from a successful XSS in the WebView.",
+      "recommendation": "Override acceptNavigationRequest() like map_renderer.py does. Consider if LocalContentCanAccessFileUrls is truly needed (GeoJSON is loaded via JS fetch from file:// URL).",
+      "playbook": "1. Add acceptNavigationRequest override to PaleoMapRenderer\n2. Audit if LocalContentCanAccessFileUrls can be removed\n3. Consider Content-Security-Policy header in temp HTML",
+      "verification": "independently verified"
+    },
+    {
+      "id": 4,
+      "severity": "MEDIUM",
+      "confidence": 8,
+      "status": "VERIFIED",
+      "phase": 2,
+      "phase_name": "Secrets Archaeology",
+      "category": "Data Sensitivity",
+      "fingerprint": "well-coordinates-tracked",
+      "title": "Real oil/gas well names and precise coordinates tracked in git",
+      "file": "data/well_coordinates.json",
+      "line": 1,
+      "commit": "tracked",
+      "description": "57 wells with real CNOOC naming conventions (HZ19-1-1A, XJ24-3-1AX) and precise lat/lon coordinates (6 decimal places) in the Pearl River Mouth Basin, South China Sea. This file is explicitly tracked via .gitignore exception.",
+      "exploit_scenario": "If this repository becomes public, proprietary well location data is exposed. Competitor or adversary gains precise coordinates of exploration/production wells.",
+      "impact": "Exposure of proprietary geological survey data. Potential competitive and regulatory implications.",
+      "recommendation": "Replace with obfuscated/mock coordinates for the tracked version. Load real coordinates from a separate non-tracked source.",
+      "playbook": "1. Create data/well_coordinates.example.json with mock coordinates\n2. Remove well_coordinates.json from git tracking\n3. Add to .gitignore (remove the ! exception)",
+      "verification": "independently verified"
+    }
+  ],
+  "supply_chain_summary": {
+    "direct_deps": 14,
+    "transitive_deps": 0,
+    "critical_cves": 0,
+    "high_cves": 0,
+    "install_scripts": 0,
+    "lockfile_present": true,
+    "lockfile_tracked": true,
+    "tools_skipped": ["pip-audit (not installed)"]
+  },
+  "filter_stats": {
+    "candidates_scanned": 18,
+    "hard_exclusion_filtered": 9,
+    "confidence_gate_filtered": 3,
+    "verification_filtered": 0,
+    "reported": 4
+  },
+  "totals": {
+    "critical": 0,
+    "high": 2,
+    "medium": 2,
+    "tentative": 0
+  },
+  "trend": {
+    "prior_report_date": null,
+    "resolved": 0,
+    "persistent": 0,
+    "new": 4,
+    "direction": "first_run"
+  }
+}
