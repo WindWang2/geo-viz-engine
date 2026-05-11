@@ -1,13 +1,11 @@
 import json
 import os
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QStackedWidget, QMessageBox, QComboBox,
     QSplitter, QDialog, QRadioButton, QButtonGroup, QDialogButtonBox,
-    QSpinBox,
 )
-from PySide6.QtCore import QUrl
 
 from src.renderers.paleo_map_renderer import PaleoMapRenderer
 from src.data.paleo_loader import PaleoDataLoader
@@ -114,16 +112,23 @@ class PaleoMapPage(QWidget):
         for name, features in periods.items():
             self._periods[name] = features
             if name in geojson_files:
-                self._period_geojson_files[name] = geojson_files[name]
+                old_path = self._period_geojson_files.get(name)
+                new_path = geojson_files[name]
+                if old_path and old_path != new_path:
+                    try: os.unlink(old_path)
+                    except OSError: pass
+                self._period_geojson_files[name] = new_path
 
         self._period_combo.blockSignals(True)
         self._period_combo.clear()
         for name in self._periods:
             self._period_combo.addItem(name)
-        self._period_combo.blockSignals(False)
 
         if self._current_period not in self._periods and self._period_combo.count() > 0:
             self._period_combo.setCurrentIndex(0)
+        self._period_combo.blockSignals(False)
+
+        if self._period_combo.count() > 0:
             self._on_period_changed(self._period_combo.currentText())
 
     def _on_period_changed(self, period_name: str):
@@ -164,15 +169,17 @@ class PaleoMapPage(QWidget):
         self._splitter.addWidget(self.map_view)
         self._splitter.addWidget(self.map_view_b)
         self._map_layout.addWidget(self._splitter)
+        old_view._cleanup_tmp()
         old_view.deleteLater()
         self._on_period_changed(self._current_period)
 
     def _stop_compare(self):
         if hasattr(self, 'map_view_b'):
             try:
+                self.map_view_b._cleanup_tmp()
                 self.map_view_b.deleteLater()
             except RuntimeError:
-                pass  # C++ object already deleted by Qt parent cleanup
+                pass
             del self.map_view_b
         if hasattr(self, '_splitter'):
             self._splitter.setParent(None)
@@ -213,19 +220,14 @@ class PaleoMapPage(QWidget):
         self.setCursor(QCursor(Qt.CursorShape.WaitCursor))
         try:
             fmt = PaleoDataLoader.detect_format(file_path)
-            if fmt == "csv":
-                loader = PaleoDataLoader(file_path)
-                periods = loader.load()
-                geojson_files = self._write_period_geojsons(periods, file_path)
-                self._add_periods(periods, geojson_files)
-            elif fmt == "geojson":
-                loader = PaleoDataLoader(file_path)
-                periods = loader.load()
-                geojson_files = self._write_period_geojsons(periods, file_path)
-                self._add_periods(periods, geojson_files)
-            else:
+            if fmt is None:
                 QMessageBox.critical(self, "格式错误", "不支持的文件格式。请使用 GeoJSON 或 CSV 文件。")
                 return
+
+            loader = PaleoDataLoader(file_path)
+            periods = loader.load()
+            geojson_files = self._write_period_geojsons(periods, file_path)
+            self._add_periods(periods, geojson_files)
 
             if not periods or all(len(f) == 0 for f in periods.values()):
                 QMessageBox.information(self, "提示",
@@ -313,17 +315,19 @@ class PaleoMapPage(QWidget):
             return
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
-        from PySide6.QtGui import QPageSize, QPageLayout
+        from PySide6.QtGui import QPageSize, QPageLayout, QPainter
         from PySide6.QtPrintSupport import QPrinter
         pixmap = self.map_view.grab()
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setOutputFileName(path)
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
-        page_size = QPageSize(QPageSize.PageSizeId.A4)
-        printer.setPageSize(page_size)
-        from PySide6.QtGui import QPainter
+        printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
         painter = QPainter(printer)
-        painter.drawPixmap(0, 0, pixmap)
+        page_rect = printer.pageRect(QPrinter.DevicePixel)
+        scaled = pixmap.scaled(page_rect.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        x = (page_rect.width() - scaled.width()) // 2
+        y = (page_rect.height() - scaled.height()) // 2
+        painter.drawPixmap(x, y, scaled)
         painter.end()
 
     def _export_png(self):

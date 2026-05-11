@@ -54,7 +54,7 @@ class PaleoDataLoader:
             df = pd.read_csv(self._path)
 
         result: dict[str, list[dict]] = {}
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
             period = str(row.get("period", Path(self._path).stem))
             facies = str(row.get("facies", ""))
             boundary = row.get("boundary_type", None)
@@ -62,13 +62,17 @@ class PaleoDataLoader:
 
             # Build geometry
             if "geometry" in row and pd.notna(row["geometry"]):
-                from shapely import from_wkt
-
-                geom = from_wkt(str(row["geometry"]))
-                coordinates = json.loads(
-                    json.dumps(geom.__geo_interface__["coordinates"])
-                )
-                geom_type = geom.geom_type
+                try:
+                    from shapely import from_wkt
+                    geom = from_wkt(str(row["geometry"]))
+                    coordinates = json.loads(
+                        json.dumps(geom.__geo_interface__["coordinates"])
+                    )
+                    geom_type = geom.geom_type
+                except Exception as e:
+                    raise ValueError(
+                        f"Row {idx}: invalid WKT geometry '{row['geometry']}': {e}"
+                    ) from e
             elif all(c in row for c in ("lon_min", "lon_max", "lat_min", "lat_max")):
                 lon_min = float(row["lon_min"])
                 lon_max = float(row["lon_max"])

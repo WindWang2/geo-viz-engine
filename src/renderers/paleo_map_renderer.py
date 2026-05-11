@@ -1,4 +1,5 @@
 import base64
+import html as html_module
 import json
 import os
 import tempfile
@@ -55,6 +56,12 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
   const faciesColors = {facies_colors_json};
   const geojsonUrl = "{geojson_url}";
   const showLabels = {show_labels};
+
+  function escapeHtml(str) {{
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }}
 
   function luminance(hex) {{
     const r = parseInt(hex.slice(1,3), 16) / 255;
@@ -274,7 +281,7 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
           ctx.drawImage(patternImages[matched], 0, 0, 18, 12);
           swatchStyle = `background: url(${{canvas.toDataURL()}}); background-size: 18px 12px;`;
         }}
-        html += `<div class="legend-item"><div class="legend-swatch" style="${{swatchStyle}}"></div><span>${{faciesName}}</span></div>`;
+        html += `<div class="legend-item"><div class="legend-swatch" style="${{swatchStyle}}"></div><span>${{escapeHtml(faciesName)}}</span></div>`;
       }});
       html += '<div style="border-top:1px solid #e2e8f0;margin:6px 0;padding-top:6px;">';
       html += '<div class="legend-item"><div class="legend-line" style="border-top:2px solid #555;"></div><span>实测界线</span></div>';
@@ -331,11 +338,13 @@ class PaleoMapRenderer(QWebEngineView):
     def load_geojson(self, file_path: str | None, period_name: str = "",
                      show_labels: bool = True, map_title: str = ""):
         self._show_labels = show_labels
-        self._map_title = map_title or (period_name + "岩相古地理图" if period_name else "")
+        self._map_title = html_module.escape(
+            map_title or (period_name + "岩相古地理图" if period_name else "")
+        )
 
-        svg_patterns_json = json.dumps(self._get_svg_base64_dict())
+        svg_patterns_json = json.dumps(self._get_svg_base64_dict()).replace("</script>", r"<\/script>")
         from src.utils.constants import FACIES_COLORS
-        facies_colors_json = json.dumps(FACIES_COLORS)
+        facies_colors_json = json.dumps(FACIES_COLORS).replace("</script>", r"<\/script>")
 
         echarts_js = Path(__file__).parent.parent / "resources" / "js" / "echarts.min.js"
         echarts_url = QUrl.fromLocalFile(str(echarts_js)).toString()
@@ -351,7 +360,7 @@ class PaleoMapRenderer(QWebEngineView):
             geojson_url=geojson_url,
             show_labels="true" if show_labels else "false",
             map_title=self._map_title,
-            wells_json=self._get_wells_json(),
+            wells_json=self._get_wells_json().replace("</script>", r"<\/script>"),
         )
 
         self._cleanup_tmp()
