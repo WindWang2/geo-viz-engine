@@ -1183,19 +1183,23 @@ class PaleoMapPage(QWidget):
         tb_layout.setContentsMargins(10, 6, 10, 6)
 
         load_btn = QPushButton("加载")
+        load_btn.setToolTip("加载 GeoJSON 或 CSV 文件 (支持拖拽)")
         load_btn.setStyleSheet("QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:4px;padding:6px 12px;}QPushButton:hover{background:#e2e8f0;}")
         load_btn.clicked.connect(self._on_load_clicked)
 
         self._period_combo = QComboBox()
+        self._period_combo.setToolTip("选择地质时期")
         self._period_combo.setStyleSheet("QComboBox{padding:4px 8px;border:1px solid #cbd5e1;border-radius:4px;}")
         self._period_combo.currentTextChanged.connect(self._on_period_changed)
 
         self._compare_btn = QPushButton("对比")
+        self._compare_btn.setToolTip("并排对比两个时期（需至少2个时期数据）")
         self._compare_btn.setCheckable(True)
         self._compare_btn.setStyleSheet("QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:4px;padding:6px 12px;}QPushButton:checked{background:#dbeafe;color:#1d4ed8;}")
         self._compare_btn.clicked.connect(self._toggle_compare)
 
         export_btn = QPushButton("导出")
+        export_btn.setToolTip("导出为 SVG / PDF / PNG")
         export_btn.setStyleSheet("QPushButton{background:#2563eb;color:#fff;border:none;border-radius:4px;padding:6px 14px;font-weight:600;}QPushButton:hover{background:#1d4ed8;}")
         export_btn.clicked.connect(self._on_export_clicked)
 
@@ -1263,8 +1267,12 @@ class PaleoMapPage(QWidget):
     # --- Compare Mode ---
 
     def _toggle_compare(self, checked: bool):
+        if checked and len(self._periods) < 2:
+            self._compare_btn.setChecked(False)
+            QMessageBox.information(self, "提示", "对比模式需要至少加载2个时期的数据。")
+            return
         self._compare_mode = checked
-        if checked and len(self._periods) >= 2:
+        if checked:
             self._start_compare()
         else:
             self._stop_compare()
@@ -1319,6 +1327,8 @@ class PaleoMapPage(QWidget):
             QMessageBox.warning(self, "错误", "文件不存在！")
             return
 
+        from PySide6.QtGui import QCursor
+        self.setCursor(QCursor(Qt.CursorShape.WaitCursor))
         try:
             fmt = PaleoDataLoader.detect_format(file_path)
             if fmt == "csv":
@@ -1337,12 +1347,17 @@ class PaleoMapPage(QWidget):
                 return
 
             if not periods or all(len(f) == 0 for f in periods.values()):
-                QMessageBox.information(self, "提示", "文件中没有有效的地理数据。")
+                QMessageBox.information(self, "提示",
+                    "文件中没有有效的地理数据。\n\n"
+                    "GeoJSON 需包含 FeatureCollection 且 features 非空。\n"
+                    "CSV 需含 period, facies 列及 geometry (WKT) 或 lon_min/lon_max/lat_min/lat_max 列。")
                 return
 
             self.stack.setCurrentWidget(self.map_container)
         except Exception as e:
             QMessageBox.critical(self, "加载失败", f"无法加载数据:\n{e}")
+        finally:
+            self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
 
     def _write_period_geojsons(self, periods: dict, source_path: str) -> dict[str, str]:
         import tempfile
@@ -1366,7 +1381,7 @@ class PaleoMapPage(QWidget):
         layout = QVBoxLayout(dialog)
 
         group = QButtonGroup(dialog)
-        rb_svg = QRadioButton("SVG (矢量)")
+        rb_svg = QRadioButton("SVG (嵌入栅格)")
         rb_pdf = QRadioButton("PDF (矢量)")
         rb_png = QRadioButton("PNG (栅格)")
         rb_png.setChecked(True)
@@ -1589,6 +1604,27 @@ def test_page_compare_mode_toggle(qtbot, tmp_path):
     # Toggle compare mode off
     page._toggle_compare(False)
     assert not hasattr(page, 'map_view_b')
+
+def test_page_compare_mode_rejects_single_period(qtbot, tmp_path):
+    """Compare mode with <2 periods shows message instead of activating."""
+    valid_json = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": {"facies": "砂岩"},
+             "geometry": {"type": "Polygon", "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]]}}
+        ]
+    }
+    geo_file = tmp_path / "single.geojson"
+    geo_file.write_text(json.dumps(valid_json), encoding="utf-8")
+
+    page = PaleoMapPage()
+    qtbot.addWidget(page)
+    page._load_file(str(geo_file))
+
+    with patch('src.pages.paleo_map_page.QMessageBox.information') as mock_msg:
+        page._toggle_compare(True)
+        mock_msg.assert_called_once()
+        assert not page._compare_btn.isChecked()
 ```
 
 - [ ] **Step 5: Add empty data test**
@@ -1709,5 +1745,20 @@ The following fixes must be applied during implementation. Found by `/plan-ceo-r
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | clean | HOLD SCOPE, 10 issues, 0 critical gaps |
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | **fixed** | 4 HIGH, 6 MEDIUM, 8 LOW — all fixed inline |
+| DX Review | `/plan-devex-review` | User-facing friction | 1 | **fixed** | 2 HIGH, 3 MEDIUM, 2 LOW — all fixed inline |
 
-**VERDICT:** ENG REVIEW PASSED — 18 findings (4 HIGH). All CEO amendments and new eng findings applied inline to the plan. Key fixes: (E1) GeoJSON per-period filtering, (E2) composite pattern rendering, (E3) QPrinter PDF export, (E4) deleteLater on renderer swap, (E11) SVG export via embedded PNG. Plan is implementation-ready.
+**VERDICT:** ALL REVIEWS PASSED — CEO (10 issues), Eng (18 findings), DX (7 findings). All amendments applied inline. Key DX fixes: (DX1) honest SVG export label, (DX2) compare mode feedback with <2 periods, (DX3) toolbar tooltips on all buttons, (DX4) actionable empty-data error message, (DX5) wait cursor during file load.
+
+## DX Review Amendments (2026-05-11)
+
+Developer experience review via `/plan-devex-review` in DX POLISH mode. Persona: dual GUI researcher + Python developer. TTHW target: champion tier (< 2 min).
+
+| # | Severity | Issue | Fix | Where |
+|---|----------|-------|-----|-------|
+| DX1 | HIGH | SVG export labeled "矢量" but is raster-in-SVG | Changed label to "SVG (嵌入栅格)" | Task 6 export dialog |
+| DX2 | HIGH | Compare mode silent no-op with <2 periods | Early return + QMessageBox + uncheck button | Task 6 `_toggle_compare` |
+| DX3 | MEDIUM | Zero toolbar button tooltips | Added tooltips to 加载, 时期, 对比, 导出 | Task 6 toolbar |
+| DX4 | MEDIUM | Empty data message unhelpful | Added GeoJSON/CSV schema guidance to message | Task 6 `_load_file` |
+| DX5 | MEDIUM | No visual feedback during file load | Added WaitCursor/ArrowCursor around load | Task 6 `_load_file` |
+| DX6 | LOW | CSV errors surface raw tracebacks | Keep catch-all but cursor reset ensures UI responsive | Task 6 `_load_file` |
+| DX7 | LOW | Compare reject test missing | Added `test_page_compare_mode_rejects_single_period` | Task 7 tests |
