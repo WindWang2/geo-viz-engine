@@ -21,9 +21,9 @@ ECHARTS_HTML_TEMPLATE = """<!DOCTYPE html>
   body {{ margin: 0; padding: 0; background: #f7fafc; overflow: hidden; font-family: sans-serif; }}
   #map {{ position: absolute; top: 40px; bottom: 0; width: 100%; }}
   #loading {{ position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #334155; font-size: 16px; display: none; }}
-  #map-title {{ position: absolute; top: 8px; left: 50%; transform: translateX(-50%); font-size: 16px; font-weight: bold; color: #1a202c; z-index: 10; white-space: nowrap; }}
-  #legend {{ position: absolute; bottom: 12px; right: 12px; background: rgba(255,255,255,0.95); border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; font-size: 11px; z-index: 10; max-height: 80vh; overflow-y: auto; }}
-  #legend h4 {{ margin: 0 0 6px 0; font-size: 12px; color: #334155; }}
+  #map-title {{ position: absolute; top: 8px; left: 50%; transform: translateX(-50%); font-size: 16px; font-weight: bold; color: #1a202c; z-index: 10; white-space: nowrap; background: rgba(255,255,255,0.85); padding: 4px 12px; border-radius: 4px; }}
+  #legend {{ position: absolute; bottom: 12px; right: 12px; background: rgba(255,255,255,0.95); border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; font-size: 12px; z-index: 10; max-height: 80vh; overflow-y: auto; }}
+  #legend h4 {{ margin: 0 0 6px 0; font-size: 13px; color: #334155; }}
   .legend-item {{ display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }}
   .legend-swatch {{ width: 18px; height: 12px; border: 1px solid #aaa; flex-shrink: 0; }}
   .legend-line {{ width: 18px; height: 0; flex-shrink: 0; }}

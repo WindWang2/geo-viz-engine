@@ -61,7 +61,7 @@ class PaleoMapPage(QWidget):
 
         load_btn = QPushButton("加载")
         load_btn.setToolTip("加载 GeoJSON 或 CSV 文件 (支持拖拽)")
-        load_btn.setStyleSheet("QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:4px;padding:6px 12px;}QPushButton:hover{background:#e2e8f0;}")
+        load_btn.setStyleSheet("QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:4px;padding:6px 12px;}QPushButton:hover{background:#e2e8f0;}QPushButton:pressed{background:#cbd5e1;}")
         load_btn.clicked.connect(self._on_load_clicked)
 
         self._period_combo = QComboBox()
@@ -72,12 +72,12 @@ class PaleoMapPage(QWidget):
         self._compare_btn = QPushButton("对比")
         self._compare_btn.setToolTip("并排对比两个时期（需至少2个时期数据）")
         self._compare_btn.setCheckable(True)
-        self._compare_btn.setStyleSheet("QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:4px;padding:6px 12px;}QPushButton:checked{background:#dbeafe;color:#1d4ed8;}")
+        self._compare_btn.setStyleSheet("QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:4px;padding:6px 12px;}QPushButton:hover{background:#e2e8f0;}QPushButton:checked{background:#dbeafe;color:#1d4ed8;}QPushButton:pressed{background:#cbd5e1;}")
         self._compare_btn.clicked.connect(self._toggle_compare)
 
         export_btn = QPushButton("导出")
         export_btn.setToolTip("导出为 SVG / PDF / PNG")
-        export_btn.setStyleSheet("QPushButton{background:#2563eb;color:#fff;border:none;border-radius:4px;padding:6px 14px;font-weight:600;}QPushButton:hover{background:#1d4ed8;}")
+        export_btn.setStyleSheet("QPushButton{background:#2563eb;color:#fff;border:none;border-radius:4px;padding:6px 14px;font-weight:600;}QPushButton:hover{background:#1d4ed8;}QPushButton:pressed{background:#1e40af;}")
         export_btn.clicked.connect(self._on_export_clicked)
 
         tb_layout.addWidget(load_btn)
