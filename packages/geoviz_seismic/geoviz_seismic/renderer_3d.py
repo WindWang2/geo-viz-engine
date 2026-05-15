@@ -12,7 +12,10 @@ from PySide6.QtGui import QVector3D
 
 # Internal imports
 from .colormap import ColormapManager
-from .gpu_ops import is_gpu_available, to_gpu, slice_volume_gpu, apply_colormap_gpu
+from .gpu_ops import (
+    is_gpu_available, to_gpu, to_cpu, slice_volume_gpu, apply_colormap_gpu,
+    sample_arbitrary_slice_gpu, sample_polyline_slice
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,7 @@ class Renderer3D(QWidget):
     """
 
     slice_changed = Signal(str, int)  # (slice_type, position)
+    arbitrary_slice_changed = Signal(object)  # polyline slice data (np.ndarray)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,6 +47,7 @@ class Renderer3D(QWidget):
         self._xl_pos = 0
         self._t_pos = 0
         self._use_volume = False
+        self._arb_polyline: list[tuple[float, float]] | None = None  # index-space waypoints
 
         self._init_pyqtgraph(layout)
         self._plotter = True  # Keeps state parity with external API expectations
@@ -82,6 +87,7 @@ class Renderer3D(QWidget):
         self._img_il = None
         self._img_xl = None
         self._img_t = None
+        self._img_arb = None
         self._horizon_visual = None
         self._bbox_visual = None
 
@@ -282,7 +288,7 @@ class Renderer3D(QWidget):
 
     def _clear_visuals(self):
         for v in (self._volume_visual, self._img_il, self._img_xl,
-                  self._img_t, self._horizon_visual, self._bbox_visual):
+                  self._img_t, self._img_arb, self._horizon_visual, self._bbox_visual):
             if v is not None:
                 try:
                     self._view.removeItem(v)
@@ -296,7 +302,7 @@ class Renderer3D(QWidget):
                 pass
         self._axis_labels = []
         # Clear line items from borders
-        for attr in ('_line_il', '_line_xl', '_line_t'):
+        for attr in ('_line_il', '_line_xl', '_line_t', '_line_arb'):
             v = getattr(self, attr, None)
             if v is not None:
                 try:
@@ -308,8 +314,18 @@ class Renderer3D(QWidget):
         self._img_il = None
         self._img_xl = None
         self._img_t = None
+        self._img_arb = None
         self._horizon_visual = None
         self._bbox_visual = None
+        
+        # Clear polyline curtain items & data
+        for item in getattr(self, '_arb_curtain_items', []):
+            try:
+                self._view.removeItem(item)
+            except Exception:
+                pass
+        self._arb_curtain_items = []
+        self._arb_polyline = None
 
     # ------------------------------------------------------------------
     # Internal Graph Building
@@ -348,29 +364,54 @@ class Renderer3D(QWidget):
         self._view.addItem(self._bbox_visual)
 
     def _create_axis_labels(self, ni, nx, nt, sp):
-        """Create labeled coordinate axes with tick marks along bounding box edges."""
+        """Create visible 3D coordinate axes with colored lines, arrows, and tick labels."""
         si, sx, st = sp
         max_dim = max(ni * si, nx * sx, nt * st)
-        font_size = max(10, int(max_dim / 25))
+        pad = max_dim * 0.08  # Extension beyond bounding box
         
         self._axis_labels = []
         
-        # Axis label text items at end of each axis
+        # ---- Solid colored axis LINES (RGB convention) ----
+        # Inline axis (X) — Red
+        il_line = gl.GLLinePlotItem(
+            pos=np.array([[0, 0, 0], [ni * si + pad, 0, 0]], dtype=np.float32),
+            color=(1.0, 0.3, 0.3, 1.0), width=3.0, antialias=True
+        )
+        self._view.addItem(il_line)
+        self._axis_labels.append(il_line)
+        
+        # Crossline axis (Y) — Green
+        xl_line = gl.GLLinePlotItem(
+            pos=np.array([[0, 0, 0], [0, nx * sx + pad, 0]], dtype=np.float32),
+            color=(0.3, 0.85, 0.3, 1.0), width=3.0, antialias=True
+        )
+        self._view.addItem(xl_line)
+        self._axis_labels.append(xl_line)
+        
+        # Time axis (Z) — Blue
+        t_line = gl.GLLinePlotItem(
+            pos=np.array([[0, 0, 0], [0, 0, nt * st + pad]], dtype=np.float32),
+            color=(0.3, 0.5, 1.0, 1.0), width=3.0, antialias=True
+        )
+        self._view.addItem(t_line)
+        self._axis_labels.append(t_line)
+        
+        # ---- Axis endpoint text labels ----
         try:
             il_label = gl.GLTextItem(
-                pos=np.array([ni * si * 1.05, 0, 0]),
+                pos=np.array([ni * si + pad * 1.2, 0, 0]),
                 text=f'Inline (0-{ni-1})',
-                color=(255, 80, 80, 255)
+                color=(255, 100, 100, 255)
             )
             xl_label = gl.GLTextItem(
-                pos=np.array([0, nx * sx * 1.05, 0]),
+                pos=np.array([0, nx * sx + pad * 1.2, 0]),
                 text=f'Xline (0-{nx-1})',
-                color=(80, 200, 80, 255)
+                color=(100, 220, 100, 255)
             )
             t_label = gl.GLTextItem(
-                pos=np.array([0, 0, nt * st * 1.05]),
+                pos=np.array([0, 0, nt * st + pad * 1.2]),
                 text=f'Time (0-{nt-1})',
-                color=(80, 130, 255, 255)
+                color=(100, 150, 255, 255)
             )
             for lbl in (il_label, xl_label, t_label):
                 self._view.addItem(lbl)
@@ -378,37 +419,35 @@ class Renderer3D(QWidget):
         except Exception:
             pass
         
-        # Tick marks along each axis (5 ticks per axis)
+        # ---- Tick marks along each axis (5 ticks) ----
+        tick_offset = max_dim * 0.03
         n_ticks = 5
         for i in range(n_ticks + 1):
             frac = i / n_ticks
             try:
-                # Inline axis ticks (along X)
-                pos_il = np.array([frac * ni * si, -max_dim * 0.02, 0])
+                pos_il = np.array([frac * ni * si, -tick_offset, 0])
                 tick_il = gl.GLTextItem(
                     pos=pos_il,
                     text=str(int(frac * ni)),
-                    color=(200, 200, 200, 200)
+                    color=(220, 180, 180, 220)
                 )
                 self._view.addItem(tick_il)
                 self._axis_labels.append(tick_il)
                 
-                # Crossline axis ticks (along Y)
-                pos_xl = np.array([-max_dim * 0.02, frac * nx * sx, 0])
+                pos_xl = np.array([-tick_offset, frac * nx * sx, 0])
                 tick_xl = gl.GLTextItem(
                     pos=pos_xl,
                     text=str(int(frac * nx)),
-                    color=(200, 200, 200, 200)
+                    color=(180, 220, 180, 220)
                 )
                 self._view.addItem(tick_xl)
                 self._axis_labels.append(tick_xl)
                 
-                # Time axis ticks (along Z)
-                pos_t = np.array([-max_dim * 0.02, -max_dim * 0.02, frac * nt * st])
+                pos_t = np.array([-tick_offset, -tick_offset, frac * nt * st])
                 tick_t = gl.GLTextItem(
                     pos=pos_t,
                     text=str(int(frac * nt)),
-                    color=(200, 200, 200, 200)
+                    color=(180, 190, 220, 220)
                 )
                 self._view.addItem(tick_t)
                 self._axis_labels.append(tick_t)
@@ -477,23 +516,136 @@ class Renderer3D(QWidget):
         self._line_t = gl.GLLinePlotItem(pos=t_pts, color=(0, 0, 1, 1), width=2, antialias=True)
         self._line_t.translate(0, 0, self._t_pos * st)
         self._view.addItem(self._line_t)
+        
+        # 4. Polyline-driven arbitrary curtain (if set)
+        self._render_polyline_curtain(ni, nx, nt, si, sx, st, lut)
 
     def _update_slice_planes(self):
         # Clear existing plane visuals from item graph
-        for v in (getattr(self, "_img_il", None), getattr(self, "_img_xl", None), getattr(self, "_img_t", None),
-                  getattr(self, "_line_il", None), getattr(self, "_line_xl", None), getattr(self, "_line_t", None)):
+        items_to_clean = (
+            getattr(self, "_img_il", None), getattr(self, "_img_xl", None), getattr(self, "_img_t", None), getattr(self, "_img_arb", None),
+            getattr(self, "_line_il", None), getattr(self, "_line_xl", None), getattr(self, "_line_t", None), getattr(self, "_line_arb", None)
+        )
+        for v in items_to_clean:
             if v is not None:
                 try:
                     self._view.removeItem(v)
                 except Exception:
                     pass
         
-        self._img_il = self._img_xl = self._img_t = None
-        self._line_il = self._line_xl = self._line_t = None
+        self._img_il = self._img_xl = self._img_t = self._img_arb = None
+        self._line_il = self._line_xl = self._line_t = self._line_arb = None
+        
+        # Clean up polyline curtain items
+        for item in getattr(self, '_arb_curtain_items', []):
+            try:
+                self._view.removeItem(item)
+            except Exception:
+                pass
+        self._arb_curtain_items = []
         
         # Recreate instantly (leveraging GPU accelerated slicing cached results)
         self._create_slice_planes()
         self._view.update()
+
+    def set_arbitrary_polyline(self, points: list[tuple[float, float]]):
+        """Set the arbitrary slice polyline path (index-space coordinates).
+        
+        Args:
+            points: List of (inline_idx, xline_idx) waypoints.
+        """
+        self._arb_polyline = points if len(points) >= 2 else None
+        if self._loaded:
+            self._update_slice_planes()
+    
+    def _render_polyline_curtain(self, ni, nx, nt, si, sx, st, lut):
+        """Render the polyline-based arbitrary vertical curtain in 3D."""
+        if self._arb_polyline is None or len(self._arb_polyline) < 2:
+            return
+        
+        try:
+            vol = self._volume_data_gpu if self._volume_data_gpu is not None else self._volume_data_cpu
+            arb_data, cum_dist = sample_polyline_slice(vol, self._arb_polyline)
+            
+            if arb_data.shape[1] < 2:
+                return
+            
+            # Render each segment of the curtain as a separate image plane
+            # For simplicity, render the whole curtain as segments between consecutive waypoints
+            points = self._arb_polyline
+            
+            # Draw the polyline path on the floor (time=t_pos*st) as a magenta line
+            path_pts = []
+            for il_idx, xl_idx in points:
+                path_pts.append([il_idx * si, xl_idx * sx, self._t_pos * st])
+            path_arr = np.array(path_pts, dtype=np.float32)
+            
+            self._line_arb = gl.GLLinePlotItem(
+                pos=path_arr,
+                color=(1.0, 0.0, 0.85, 1.0),
+                width=4.0,
+                antialias=True
+            )
+            self._view.addItem(self._line_arb)
+            
+            # Draw vertical curtain walls between each consecutive pair of waypoints
+            img_arb_rgb = apply_colormap_gpu(arb_data, lut)
+            
+            # We render the whole curtain as individual segment planes
+            # Track horizontal position in the sampled data
+            self._arb_curtain_items = []
+            
+            seg_start = 0
+            for seg_idx in range(len(points) - 1):
+                i0, x0 = points[seg_idx]
+                i1, x1 = points[seg_idx + 1]
+                seg_len = float(np.hypot(i1 - i0, x1 - x0))
+                if seg_len < 0.01:
+                    continue
+                
+                n_pts = max(2, int(seg_len))
+                seg_end = min(seg_start + n_pts, arb_data.shape[1])
+                
+                if seg_end <= seg_start:
+                    continue
+                
+                seg_data = img_arb_rgb[:, seg_start:seg_end]
+                n_cols = seg_end - seg_start
+                
+                # Transpose for GLImageItem: (n_cols, nt, 4)
+                seg_img = np.ascontiguousarray(seg_data.transpose(1, 0, 2))
+                
+                wx0, wy0 = float(i0 * si), float(x0 * sx)
+                wx1, wy1 = float(i1 * si), float(x1 * sx)
+                d_spatial = float(np.hypot(wx1 - wx0, wy1 - wy0))
+                alpha_deg = float(np.degrees(np.arctan2(wy1 - wy0, wx1 - wx0)))
+                
+                item = gl.GLImageItem(seg_img)
+                item.scale(d_spatial / max(n_cols, 1), st, 1.0)
+                item.rotate(90, 1, 0, 0)
+                item.rotate(alpha_deg, 0, 0, 1)
+                item.translate(wx0, wy0, 0)
+                self._view.addItem(item)
+                self._arb_curtain_items.append(item)
+                
+                # Vertical borders for this segment
+                border = np.array([
+                    [wx0, wy0, 0], [wx1, wy1, 0],
+                    [wx1, wy1, nt * st], [wx0, wy0, nt * st],
+                    [wx0, wy0, 0]
+                ], dtype=np.float32)
+                border_item = gl.GLLinePlotItem(
+                    pos=border, color=(1.0, 0.0, 0.85, 0.6), width=2.0, antialias=True
+                )
+                self._view.addItem(border_item)
+                self._arb_curtain_items.append(border_item)
+                
+                seg_start = seg_end
+            
+            # Emit the full curtain data for 2D panel
+            self.arbitrary_slice_changed.emit(arb_data)
+        except Exception as e:
+            logger.error(f"Failed to render polyline curtain: {e}")
 
     def _on_slider(self, slice_type: str, value: int):
         if slice_type == "inline":
@@ -502,7 +654,7 @@ class Renderer3D(QWidget):
         elif slice_type == "crossline":
             self._xl_slider._val_label.setText(str(value))
             self._xl_pos = value
-        else:
+        elif slice_type == "time":
             self._t_slider._val_label.setText(str(value))
             self._t_pos = value
             

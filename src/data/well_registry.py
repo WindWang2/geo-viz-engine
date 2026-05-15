@@ -10,8 +10,8 @@ def _build_well_registry():
     registry = {}
     
     # Defaults/Hardcoded preferences
-    registry["HZ25-10-1"] = (load_well_log_from_excel, _DATA_DIR / "HZ25-10-1-laolong.xls")
-    registry["老龙1"] = (load_well_log_from_excel, _DATA_DIR / "老龙1井-野外剖面数据整理 .xls")
+    registry["HZ25-10-1"] = (load_well_log_from_excel, _DATA_DIR / "HZ25-10-1-laolong.xlsx")
+    registry["老龙1"] = (load_well_log_from_excel, _DATA_DIR / "老龙1井-野外剖面数据整理 .xlsx")
     
     coords_file = _DATA_DIR / "well_coordinates.json"
     if coords_file.exists():

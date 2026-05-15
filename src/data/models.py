@@ -13,7 +13,7 @@ class CurveData(BaseModel):
     name: str
     unit: str = ""
     depth: list[float]
-    values: list[float]
+    values: list[Optional[float]]
     display_range: tuple[float, float] = (0.0, 100.0)
     color: str = "#63b3ed"
     line_style: LineStyle = LineStyle.SOLID

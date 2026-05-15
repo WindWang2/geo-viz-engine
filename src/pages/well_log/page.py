@@ -129,11 +129,15 @@ class PredictionWorker(QObject):
                 print(f"Failed to clear sheet using openpyxl: {e}")
 
             try:
-                with pd.ExcelWriter(self.xls_path, engine="openpyxl", mode="a") as writer:
+                # Ensure only .xlsx files are appended using openpyxl, fail safely if not
+                if not str(self.xls_path).lower().endswith(".xlsx"):
+                    raise ValueError("仅支持向 .xlsx 格式的 Excel 追加 AI 预测结果。请先转换为 .xlsx 格式！")
+                
+                with pd.ExcelWriter(self.xls_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
                     df_ai.to_excel(writer, sheet_name="AI预测结果", index=False)
             except Exception as e:
                 print(f"Failed to append sheet: {e}")
-                df_ai.to_excel(self.xls_path, sheet_name="AI预测结果", index=False)
+                raise RuntimeError(f"写入 Excel 失败（可能文件已被其他程序打开或格式不受支持）: {e}")
 
             self.progress.emit(100, "完成")
             self.finished.emit(records)
@@ -488,6 +492,38 @@ class WellLogPage(QWidget):
             elif msg_box.clickedButton() == btn_repredict:
                 self._remove_ai_tracks()
             else:
+                return
+
+        # Auto-convert legacy .xls files to modern .xlsx before prediction to ensure safe appending
+        if str(self._current_xls_path).lower().endswith(".xls"):
+            try:
+                import pandas as pd
+                from pathlib import Path
+                src_path = Path(self._current_xls_path)
+                dst_path = src_path.with_suffix(".xlsx")
+                
+                print(f"[AI Prediction] Auto-converting legacy .xls to modern .xlsx: {src_path} -> {dst_path}")
+                
+                with pd.ExcelWriter(dst_path, engine="openpyxl") as writer:
+                    excel_file = pd.ExcelFile(src_path, engine="calamine")
+                    for sheet in excel_file.sheet_names:
+                        pd.read_excel(excel_file, sheet_name=sheet).to_excel(writer, sheet_name=sheet, index=False)
+                
+                # Point runtime state to the newly generated .xlsx path
+                self._current_xls_path = str(dst_path)
+                
+                # Update well registry in memory so subsequent references use the .xlsx version
+                import src.data.well_registry
+                entry = src.data.well_registry._WELL_REGISTRY.get(self._current_well)
+                if entry:
+                    loader_fn, _ = entry
+                    src.data.well_registry._WELL_REGISTRY[self._current_well] = (loader_fn, dst_path)
+                
+                print("[AI Prediction] Conversion successful. Switched to .xlsx mode.")
+            except Exception as conv_err:
+                QMessageBox.warning(self, "文件转换失败", 
+                    f"无法将旧版 .xls 格式转换为 .xlsx 以供 AI 预测追加结果，"
+                    f"请手动将您的文件另存为 .xlsx 格式后再试。\n错误: {conv_err}")
                 return
 
         self._run_ai_prediction()

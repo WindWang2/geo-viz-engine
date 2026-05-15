@@ -4,7 +4,7 @@ import logging
 import numpy as np
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QPushButton, QComboBox, QLabel, QFileDialog, QToolBar,
 )
 from PySide6.QtGui import QPainter, QLinearGradient, QColor
@@ -57,7 +57,7 @@ class _SyntheticWorker(QThread):
 
 class _SegyLoadWorker(QThread):
     """Background thread for SEGY file loading."""
-    done = Signal(object, object)  # (volume ndarray, slice ndarray)
+    done = Signal(object)  # tuple: (meta, vol, raw, path)
     error = Signal(str)
 
     def __init__(self, path: str, parent=None):
@@ -69,12 +69,17 @@ class _SegyLoadWorker(QThread):
             loader = SeismicLoader(self._path)
             meta = loader.inspect()
             vol = loader.get_volume_downsampled(factor=(4, 4, 2))
-            mid_il = (meta.iline_start
-                      + meta.n_inlines // 2 * meta.iline_step)
-            raw = loader.read_inline(mid_il)
+            mid_il = meta.iline_start + (meta.n_inlines // 2) * meta.iline_step
+            mid_xl = meta.xline_start + (meta.n_crosslines // 2) * meta.xline_step
+            mid_t = meta.n_samples // 2  # index
+            
+            raw_il = loader.read_inline(mid_il)
+            raw_xl = loader.read_crossline(mid_xl)
+            raw_t = loader.read_timeslice(mid_t)
+            
             # Close file handle on worker thread; main thread re-opens lazily
             loader.close()
-            self.done.emit((meta, vol, raw, self._path))
+            self.done.emit((meta, vol, raw_il, raw_xl, raw_t, self._path))
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -139,7 +144,7 @@ class SeismicView(QWidget):
 
         # Store raw slice data for export
         self._slice_data: dict[str, np.ndarray | None] = {
-            "inline": None, "crossline": None, "time": None
+            "inline": None, "crossline": None, "time": None, "arbitrary": None
         }
 
         layout = QVBoxLayout(self)
@@ -152,7 +157,8 @@ class SeismicView(QWidget):
         self._profile_il = ProfileWidget()
         self._profile_xl = ProfileWidget()
         self._profile_t = ProfileWidget()
-        # Keep backward compat reference
+        self._profile_arb = ProfileWidget()
+        
         self._profile_widget = self._profile_il
 
         toolbar = self._build_toolbar()
@@ -164,25 +170,29 @@ class SeismicView(QWidget):
         # Top: 3D renderer
         main_splitter.addWidget(self._renderer_3d)
 
-        # Bottom: 3 profile panels side by side
+        # Bottom: 2x2 grid layout of profiles
         profiles_container = QWidget()
-        profiles_layout = QHBoxLayout(profiles_container)
+        profiles_layout = QGridLayout(profiles_container)
         profiles_layout.setContentsMargins(0, 0, 0, 0)
-        profiles_layout.setSpacing(2)
+        profiles_layout.setSpacing(4)
 
-        for label, color, profile, key in [
-            ("Inline 剖面", "#e53e3e", self._profile_il, "inline"),
-            ("Crossline 剖面", "#38a169", self._profile_xl, "crossline"),
-            ("Time 剖面", "#3182ce", self._profile_t, "time"),
-        ]:
+        profile_panels = [
+            ("Inline 剖面", "#e53e3e", self._profile_il, "inline", 0, 0),
+            ("Crossline 剖面", "#38a169", self._profile_xl, "crossline", 0, 1),
+            ("Time 剖面", "#3182ce", self._profile_t, "time", 1, 0),
+            ("任意剖面", "#805ad5", self._profile_arb, "arbitrary", 1, 1),
+        ]
+
+        for label, color, profile, key, row, col in profile_panels:
             panel = QWidget()
+            panel.setStyleSheet("background: #ffffff; border-radius: 4px;")
             panel_layout = QVBoxLayout(panel)
             panel_layout.setContentsMargins(2, 0, 2, 0)
             panel_layout.setSpacing(2)
 
             # Header bar with label + export button
             header = QWidget()
-            header.setStyleSheet(f"background: #f0f4f8; border-bottom: 2px solid {color};")
+            header.setStyleSheet(f"background: #f7fafc; border-bottom: 2px solid {color};")
             header_layout = QHBoxLayout(header)
             header_layout.setContentsMargins(6, 2, 6, 2)
             lbl = QLabel(label)
@@ -201,10 +211,26 @@ class SeismicView(QWidget):
 
             panel_layout.addWidget(header)
             panel_layout.addWidget(profile, 1)
-            profiles_layout.addWidget(panel, 1)
+            profiles_layout.addWidget(panel, row, col)
 
         main_splitter.addWidget(profiles_container)
-        main_splitter.setSizes([450, 250])
+        main_splitter.setSizes([350, 350])
+        
+        # Make splitter handle visible and draggable
+        main_splitter.setHandleWidth(8)
+        main_splitter.setStyleSheet(
+            "QSplitter::handle:vertical { "
+            "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+            "    stop:0 #e2e8f0, stop:0.5 #a0aec0, stop:1 #e2e8f0); "
+            "  border: 1px solid #cbd5e0; "
+            "  border-radius: 3px; "
+            "  margin: 0 40px; "
+            "}"
+        )
+        main_splitter.setCollapsible(0, False)
+        main_splitter.setCollapsible(1, False)
+        self._renderer_3d.setMinimumHeight(200)
+        profiles_container.setMinimumHeight(150)
 
         # Horizontal layout for splitter + colorbar
         h_layout = QHBoxLayout()
@@ -222,6 +248,11 @@ class SeismicView(QWidget):
         self._slice_timer.timeout.connect(self._apply_pending_slice)
 
         self._renderer_3d.slice_changed.connect(self._on_slice_changed)
+        self._renderer_3d.arbitrary_slice_changed.connect(self._on_arbitrary_changed)
+
+        # Enable polyline drawing on Time panel and wire signal
+        self._profile_t._vd.enable_polyline_drawing(True)
+        self._profile_t._vd.polyline_changed.connect(self._on_polyline_drawn)
 
         # Auto-load: SEGY file if path given, else synthetic demo (async)
         if path is not None:
@@ -244,9 +275,24 @@ class SeismicView(QWidget):
         """Current profile display mode (``"vd"`` or ``"wiggle"``)."""
         return self._profile_widget.mode()
 
+    @staticmethod
+    def _compute_balanced_spacing(shape: tuple[int, ...], target: float = 200.0) -> tuple[float, float, float]:
+        """Compute spacing that normalizes each axis to approximately *target* visual units."""
+        ni, nx, nt = shape
+        return (
+            target / max(ni, 1),
+            target / max(nx, 1),
+            target / max(nt, 1),
+        )
+
     def load_demo(self, data: np.ndarray):
         """Load a synthetic or pre-computed 3-D volume for quick demo."""
         self._ds_factor = (1, 1, 1)
+        
+        # Clear existing polyline state
+        self._profile_t.clear_polyline()
+        self._slice_data.pop("arbitrary", None)
+        
         self._meta = SeismicVolumeMeta(
             filename="demo",
             n_inlines=data.shape[0],
@@ -259,7 +305,8 @@ class SeismicView(QWidget):
             xline_step=1,
             dt_ms=4.0,
         )
-        self._renderer_3d.load_volume(data)
+        spacing = self._compute_balanced_spacing(data.shape)
+        self._renderer_3d.load_volume(data, spacing=spacing)
         self._colorbar.set_range(float(np.nanmin(data)), float(np.nanmax(data)))
 
         # Populate all 3 profile panels
@@ -287,11 +334,19 @@ class SeismicView(QWidget):
         vol = self._loader.get_volume_downsampled(factor=self._ds_factor)
         self._log.info("Volume downsampled: shape=%s", vol.shape)
         self._renderer_3d.load_volume(vol)
-        mid_il = (self._meta.iline_start
-                  + self._meta.n_inlines // 2 * self._meta.iline_step)
-        raw = self._loader.read_inline(mid_il)
-        self._update_profile_panel("inline", mid_il, raw.T)
-        self._slice_label.setText(f"Inline {mid_il}")
+        mid_il = self._meta.iline_start + (self._meta.n_inlines // 2) * self._meta.iline_step
+        mid_xl = self._meta.xline_start + (self._meta.n_crosslines // 2) * self._meta.xline_step
+        mid_t = self._meta.n_samples // 2
+        
+        raw_il = self._loader.read_inline(mid_il)
+        raw_xl = self._loader.read_crossline(mid_xl)
+        raw_t = self._loader.read_timeslice(mid_t)
+        
+        self._update_profile_panel("inline", mid_il, raw_il.T)
+        self._update_profile_panel("crossline", mid_xl, raw_xl.T)
+        self._update_profile_panel("time", mid_t, raw_t.T)
+        
+        self._slice_label.setText(f"Loaded: IL:{mid_il} XL:{mid_xl} T:{mid_t}")
 
     def load_segy_async(self, path: str):
         """Load a SEGY file in a background thread."""
@@ -308,7 +363,7 @@ class SeismicView(QWidget):
 
     def set_display_mode(self, mode: str):
         """Switch the profile display mode (``"vd"`` or ``"wiggle"``)."""
-        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+        for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
             pw.set_display_mode(mode)
 
     # ------------------------------------------------------------------
@@ -322,19 +377,31 @@ class SeismicView(QWidget):
 
     @Slot(object)
     def _on_segy_ready(self, result: tuple):
-        meta, vol, raw, path = result
+        meta, vol, raw_il, raw_xl, raw_t, path = result
         self._loader = SeismicLoader(path)
         self._meta = meta
         self._ds_factor = (1, 1, 1)
+        
+        # Clear existing polyline state
+        self._profile_t.clear_polyline()
+        self._slice_data.pop("arbitrary", None)
+        
         self._log.info("SEGY loaded async: (%dx%dx%d), vol shape=%s",
                        meta.n_inlines, meta.n_crosslines, meta.n_samples,
                        vol.shape)
-        self._renderer_3d.load_volume(vol)
+        spacing = self._compute_balanced_spacing(vol.shape)
+        self._renderer_3d.load_volume(vol, spacing=spacing)
         self._colorbar.set_range(float(np.nanmin(vol)), float(np.nanmax(vol)))
-        mid_il = (meta.iline_start
-                  + meta.n_inlines // 2 * meta.iline_step)
-        self._update_profile_panel("inline", mid_il, raw.T)
-        self._slice_label.setText(f"Inline {mid_il}")
+        
+        mid_il = meta.iline_start + (meta.n_inlines // 2) * meta.iline_step
+        mid_xl = meta.xline_start + (meta.n_crosslines // 2) * meta.xline_step
+        mid_t = meta.n_samples // 2  # Sample index for time
+        
+        self._update_profile_panel("inline", mid_il, raw_il.T)
+        self._update_profile_panel("crossline", mid_xl, raw_xl.T)
+        self._update_profile_panel("time", mid_t, raw_t.T)
+        
+        self._slice_label.setText(f"Loaded: IL:{mid_il} XL:{mid_xl} T:{mid_t}")
         self._profile_il.set_overlay_text(None)
 
     @Slot(str)
@@ -378,7 +445,7 @@ class SeismicView(QWidget):
         self._cmap_combo = QComboBox()
         self._cmap_combo.addItems(["seismic", "gray", "jet"])
         self._cmap_combo.currentTextChanged.connect(
-            lambda name: [pw.set_colormap(name) for pw in (self._profile_il, self._profile_xl, self._profile_t)]
+            lambda name: [pw.set_colormap(name) for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb)]
         )
         self._cmap_combo.currentTextChanged.connect(
             self._colorbar.set_colormap
@@ -448,6 +515,46 @@ class SeismicView(QWidget):
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
+
+    @Slot(object)
+    def _on_arbitrary_changed(self, data: np.ndarray):
+        """Receive polyline-driven arbitrary slice data from Renderer3D."""
+        if data is None:
+            return
+        
+        self._slice_data["arbitrary"] = data.copy()
+        
+        m = self._meta
+        info = SliceInfo(
+            slice_type="arbitrary",
+            position=0,
+            axis_h_label="Distance",
+            axis_v_label="Time (ms)" if m else "Sample",
+            axis_h_values=np.arange(data.shape[1]).tolist(),
+            axis_v_values=(np.arange(data.shape[0]) * (m.dt_ms if m else 1.0)).tolist()
+        )
+        
+        self._profile_arb.update_profile(data, slice_info=info)
+
+    @Slot(list)
+    def _on_polyline_drawn(self, frac_points: list):
+        """Convert fractional Time-slice coordinates to index-space and forward to 3D."""
+        vol = self._renderer_3d._volume_data_cpu
+        if vol is None or len(frac_points) < 2:
+            return
+        
+        ni, nx, nt = vol.shape
+        
+        # frac_points are (col_frac, row_frac) on the Time slice
+        # Time slice data shape is (n_xlines, n_inlines) after .T
+        # col_frac maps to inline, row_frac maps to crossline
+        index_points = []
+        for col_frac, row_frac in frac_points:
+            il_idx = col_frac * (ni - 1)
+            xl_idx = row_frac * (nx - 1)
+            index_points.append((il_idx, xl_idx))
+        
+        self._renderer_3d.set_arbitrary_polyline(index_points)
 
     @Slot(str, int)
     def _on_slice_changed(self, slice_type: str, position: int):
@@ -596,7 +703,7 @@ class SeismicView(QWidget):
 
     def _on_mode_changed(self, index: int):
         mode = "vd" if index == 0 else "wiggle"
-        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+        for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
             pw.set_display_mode(mode)
 
     def _on_slice_type_changed(self, index: int):

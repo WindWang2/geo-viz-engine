@@ -47,7 +47,7 @@ class SliceInfo(BaseModel):
         axis_v_values: Tick values for the vertical axis.
     """
 
-    slice_type: Literal["inline", "crossline", "time"]
+    slice_type: Literal["inline", "crossline", "time", "arbitrary"]
     position: int
     axis_h_label: str
     axis_v_label: str

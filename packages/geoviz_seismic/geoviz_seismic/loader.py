@@ -38,8 +38,14 @@ class SeismicLoader:
         if self._meta is not None:
             return self._meta
         f = self._open()
-        ilines = np.asarray(f.ilines, dtype=np.int32)
-        xlines = np.asarray(f.xlines, dtype=np.int32)
+        if f.ilines is None or f.xlines is None:
+            # Fallback for unstructured mode: mock a single inline containing all traces as crosslines
+            n_traces = f.tracecount
+            ilines = np.array([1], dtype=np.int32)
+            xlines = np.arange(1, n_traces + 1, dtype=np.int32)
+        else:
+            ilines = np.asarray(f.ilines, dtype=np.int32)
+            xlines = np.asarray(f.xlines, dtype=np.int32)
         samples = np.asarray(f.samples, dtype=np.float64)
         try:
             dt_us = int(f.bin[segyio.BinField.Interval])
@@ -158,9 +164,84 @@ class SeismicLoader:
             self._f = None
 
     def _open(self) -> segyio.SegyFile:
-        if self._f is None:
+        if self._f is not None:
+            return self._f
+        
+        # 1) Try standard geometry (iline=189, xline=193)
+        try:
             self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=False)
-        return self._f
+            # Quick sanity check: if ilines/xlines are valid, we're done
+            if len(self._f.ilines) > 1 and len(self._f.xlines) > 1:
+                return self._f
+            self._f.close()
+            self._f = None
+        except Exception:
+            pass
+        
+        # 2) Auto-detect non-standard iline/xline header byte locations
+        logger.info("Standard SEGY geometry failed for %s — scanning for alternative header fields...", self._path)
+        self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=True)
+        n_traces = self._f.tracecount
+        
+        # Candidate header fields commonly used for IL/XL in non-standard files
+        candidates = [
+            (segyio.TraceField.CDP, "CDP"),
+            (segyio.TraceField.FieldRecord, "FieldRecord"),
+            (segyio.TraceField.TRACE_SEQUENCE_LINE, "TraceSeqLine"),
+            (segyio.TraceField.EnergySourcePoint, "EnergySourcePt"),
+            (segyio.TraceField.INLINE_3D, "Inline3D"),
+            (segyio.TraceField.CROSSLINE_3D, "Crossline3D"),
+        ]
+        
+        # Collect unique values for each candidate
+        field_info = {}
+        for field, name in candidates:
+            vals = set()
+            for i in range(n_traces):
+                vals.add(self._f.header[i][field])
+            if len(vals) > 1:
+                field_info[field] = (name, sorted(vals))
+        
+        # Find two fields whose product of unique counts equals n_traces
+        found_il, found_xl = None, None
+        fields = list(field_info.keys())
+        for i in range(len(fields)):
+            for j in range(i + 1, len(fields)):
+                n_a = len(field_info[fields[i]][1])
+                n_b = len(field_info[fields[j]][1])
+                if n_a * n_b == n_traces:
+                    # Determine which changes faster (that's the "fast" axis)
+                    v0 = self._f.header[0][fields[i]]
+                    v1 = self._f.header[1][fields[i]]
+                    if v0 != v1:
+                        # fields[i] changes every trace → it's the fast axis (iline in segyio terms)
+                        found_il, found_xl = fields[i], fields[j]
+                    else:
+                        found_il, found_xl = fields[j], fields[i]
+                    break
+            if found_il is not None:
+                break
+        
+        self._f.close()
+        self._f = None
+        
+        if found_il is not None:
+            il_name = field_info[found_il][0]
+            xl_name = field_info[found_xl][0]
+            logger.info("Detected geometry: iline=byte %d (%s), xline=byte %d (%s)",
+                        int(found_il), il_name, int(found_xl), xl_name)
+            self._f = segyio.open(
+                self._path, "r", strict=False, ignore_geometry=False,
+                iline=int(found_il), xline=int(found_xl),
+            )
+            return self._f
+        else:
+            # Last resort: assume square grid and open unstructured
+            import math
+            sqrt_n = math.isqrt(n_traces)
+            logger.warning("Could not auto-detect geometry. Falling back to unstructured mode (%d traces).", n_traces)
+            self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=True)
+            return self._f
 
     def __del__(self):
         self.close()

@@ -108,6 +108,10 @@ class ProfileWidget(QWidget):
             self._overlay.raise_()
             self._overlay.show()
 
+    def clear_polyline(self) -> None:
+        """Delegate polyline clearing down to underlying renderer."""
+        self._vd.clear_polyline()
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         if self._overlay.isVisible():
