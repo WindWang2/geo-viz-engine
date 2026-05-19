@@ -30,6 +30,30 @@ __MAPLIBRE_JS__
   const center_lat = __CENTER_LAT__;
   const center_lng = __CENTER_LNG__;
 
+  // Generate Graticule Grid Lines (经纬网) offline in browser
+  const graticules = [];
+  // Longitude grid lines every 2 degrees (from 104 to 126 E)
+  for (let lng = 104; lng <= 126; lng += 2) {
+    graticules.push({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [[lng, 15], [lng, 42]]
+      }
+    });
+  }
+  // Latitude grid lines every 2 degrees (from 14 to 41 N)
+  for (let lat = 14; lat <= 41; lat += 2) {
+    graticules.push({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [[100, lat], [130, lat]]
+      }
+    });
+  }
+  const gridGeojson = { type: 'FeatureCollection', features: graticules };
+
   function notifyWellClicked(name) {
     // Encode well name as query param to avoid host-encoding issues with CJK
     window.location.href = 'well://click?name=' + encodeURIComponent(name);
@@ -45,7 +69,7 @@ __MAPLIBRE_JS__
           "id": "background",
           "type": "background",
           "paint": {
-            "background-color": "#bae6fd" // Sleek, modern ocean blue
+            "background-color": "#cbebfb" // Professional hydrographic/ocean blue
           }
         }
       ]
@@ -55,6 +79,23 @@ __MAPLIBRE_JS__
   });
 
   map.on('load', () => {
+    // 0. Add Coordinate Grid Lines (经纬网)
+    map.addSource('grid', {
+      type: 'geojson',
+      data: gridGeojson
+    });
+    map.addLayer({
+      id: 'grid-lines',
+      type: 'line',
+      source: 'grid',
+      paint: {
+        'line-color': '#0284c7', // Slate/ocean blue grid lines
+        'line-opacity': 0.12,
+        'line-width': 0.8,
+        'line-dasharray': [4, 4] // Beautiful dashed line style
+      }
+    });
+
     // 1. Add global world landmass
     map.addSource('world', {
       type: 'geojson',
@@ -65,7 +106,7 @@ __MAPLIBRE_JS__
       type: 'fill',
       source: 'world',
       paint: {
-        'fill-color': '#f8fafc', // Beautiful ivory/light gray landmass
+        'fill-color': '#f3f1ec', // Warm sandy topographic land fill
         'fill-opacity': 1.0
       }
     });
@@ -89,16 +130,52 @@ __MAPLIBRE_JS__
       type: 'fill',
       source: 'china',
       paint: {
-        'fill-color': '#f8fafc', // Beautiful ivory landmass
+        'fill-color': '#faf9f5', // Slightly highlighted topographic relief land color for China
         'fill-opacity': 1.0
       }
     });
+
+    // 2a. Add parallel Bathymetric Contours (等深线) wrapping around coastlines
+    map.addLayer({
+      id: 'china-bathymetry-1',
+      type: 'line',
+      source: 'china',
+      paint: {
+        'line-color': '#0284c7',
+        'line-opacity': 0.15,
+        'line-width': 1.0,
+        'line-offset': 6 // Shift 6px outwards into water
+      }
+    });
+    map.addLayer({
+      id: 'china-bathymetry-2',
+      type: 'line',
+      source: 'china',
+      paint: {
+        'line-color': '#0284c7',
+        'line-opacity': 0.10,
+        'line-width': 1.0,
+        'line-offset': 16 // Shift 16px outwards
+      }
+    });
+    map.addLayer({
+      id: 'china-bathymetry-3',
+      type: 'line',
+      source: 'china',
+      paint: {
+        'line-color': '#0284c7',
+        'line-opacity': 0.06,
+        'line-width': 1.0,
+        'line-offset': 28 // Shift 28px outwards
+      }
+    });
+
     map.addLayer({
       id: 'china-borders',
       type: 'line',
       source: 'china',
       paint: {
-        'line-color': '#cbd5e1', // Clean provincial slate-gray lines
+        'line-color': '#94a3b8', // Distinct province boundaries
         'line-width': 1.0
       }
     });
