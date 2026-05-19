@@ -135,41 +135,6 @@ __MAPLIBRE_JS__
       }
     });
 
-    // 2a. Add parallel Bathymetric Contours (等深线) wrapping around coastlines
-    map.addLayer({
-      id: 'china-bathymetry-1',
-      type: 'line',
-      source: 'china',
-      paint: {
-        'line-color': '#0284c7',
-        'line-opacity': 0.15,
-        'line-width': 1.0,
-        'line-offset': 6 // Shift 6px outwards into water
-      }
-    });
-    map.addLayer({
-      id: 'china-bathymetry-2',
-      type: 'line',
-      source: 'china',
-      paint: {
-        'line-color': '#0284c7',
-        'line-opacity': 0.10,
-        'line-width': 1.0,
-        'line-offset': 16 // Shift 16px outwards
-      }
-    });
-    map.addLayer({
-      id: 'china-bathymetry-3',
-      type: 'line',
-      source: 'china',
-      paint: {
-        'line-color': '#0284c7',
-        'line-opacity': 0.06,
-        'line-width': 1.0,
-        'line-offset': 28 // Shift 28px outwards
-      }
-    });
-
     map.addLayer({
       id: 'china-borders',
       type: 'line',
