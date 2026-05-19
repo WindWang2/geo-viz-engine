@@ -76,51 +76,60 @@ MAPLIBRE_HTML = """<!DOCTYPE html>
       }}
     }});
 
-    // Add wells
-    map.addSource('wells', {{
-      type: 'geojson',
-      data: wells
-    }});
-    map.addLayer({{
-      id: 'well-stars',
-      type: 'circle',
-      source: 'wells',
-      paint: {{
-        'circle-radius': 8,
-        'circle-color': ['get', 'color'],
-        'circle-stroke-width': 1.5,
-        'circle-stroke-color': '#fff'
-      }}
-    }});
-    map.addLayer({{
-      id: 'well-labels',
-      type: 'symbol',
-      source: 'wells',
-      layout: {{
-        'text-field': ['get', 'name'],
-        'text-size': 12,
-        'text-offset': [0, 1.5],
-        'text-anchor': 'top',
-        'text-allow-overlap': false
-      }},
-      paint: {{
-        'text-color': ['case', ['get', 'has_data'], '#0f172a', '#475569'],
-        'text-halo-color': '#ffffff',
-        'text-halo-width': 1.5
-      }}
-    }});
+    // Add wells as highly customizable, offline-friendly HTML Markers
+    wells.features.forEach(feature => {
+      const coords = feature.geometry.coordinates;
+      const name = feature.properties.name;
+      const hasData = feature.properties.has_data;
+      const color = feature.properties.color;
 
-    map.on('click', 'well-stars', (e) => {{
-      notifyWellClicked(e.features[0].properties.name);
-    }});
-    map.on('click', 'well-labels', (e) => {{
-      notifyWellClicked(e.features[0].properties.name);
-    }});
+      const el = document.createElement('div');
+      el.className = 'well-marker';
+      el.style.display = 'flex';
+      el.style.flexDirection = 'column';
+      el.style.alignItems = 'center';
+      el.style.cursor = 'pointer';
 
-    map.on('mouseenter', 'well-stars', () => {{ map.getCanvas().style.cursor = 'pointer'; }});
-    map.on('mouseleave', 'well-stars', () => {{ map.getCanvas().style.cursor = ''; }});
-    map.on('mouseenter', 'well-labels', () => {{ map.getCanvas().style.cursor = 'pointer'; }});
-    map.on('mouseleave', 'well-labels', () => {{ map.getCanvas().style.cursor = ''; }});
+      // 12px Circle/dot
+      const dot = document.createElement('div');
+      dot.style.width = '14px';
+      dot.style.height = '14px';
+      dot.style.borderRadius = '50%';
+      dot.style.backgroundColor = color;
+      dot.style.border = '2px solid #ffffff';
+      dot.style.boxShadow = '0 2px 4px rgba(0,0,0,0.15)';
+      dot.style.transition = 'transform 0.2s ease';
+      el.appendChild(dot);
+
+      // Label text
+      const label = document.createElement('div');
+      label.innerText = name;
+      label.style.marginTop = '4px';
+      label.style.fontSize = '12px';
+      label.style.fontWeight = 'bold';
+      label.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+      label.style.color = hasData ? '#0f172a' : '#64748b';
+      label.style.textShadow = '1.5px 1.5px 0px #ffffff, -1.5px -1.5px 0px #ffffff, 1.5px -1.5px 0px #ffffff, -1.5px 1.5px 0px #ffffff'; // Crisp white halo
+      label.style.whiteSpace = 'nowrap';
+      el.appendChild(label);
+
+      // Micro-animations on hover
+      el.addEventListener('mouseenter', () => {
+        dot.style.transform = 'scale(1.2)';
+      });
+      el.addEventListener('mouseleave', () => {
+        dot.style.transform = 'scale(1.0)';
+      });
+
+      // Click callback
+      el.addEventListener('click', () => {
+        notifyWellClicked(name);
+      });
+
+      new maplibregl.Marker({ element: el })
+        .setLngLat(coords)
+        .addTo(map);
+    });
   }});
 </script>
 </body>
