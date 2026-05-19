@@ -19,7 +19,13 @@ def build_default_payload(data: WellLogData, offset: float = 0.0) -> dict:
 
     # 2. Add all curves as individual tracks by default
     for curve in data.curves:
-        curve_points = [[d + offset, (v if v == v else None)] for d, v in zip(curve.depth, curve.values)]
+        # Downsample float precision to drastically reduce JSON payload size
+        curve_points = []
+        for d, v in zip(curve.depth, curve.values):
+            d_rounded = round(d + offset, 2)
+            v_rounded = round(v, 4) if v == v and v is not None else None
+            curve_points.append([d_rounded, v_rounded])
+            
         tracks.append({
             "type": "CurveTrack",
             "name": curve.name,

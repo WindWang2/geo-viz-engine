@@ -397,7 +397,7 @@ export class WellLogChart {
     _ensureInit() {
         const dom = document.getElementById(this.containerId);
         if (!dom || this.chart) return dom;
-        this.chart = echarts.init(dom, null, { renderer: 'svg' });
+        this.chart = echarts.init(dom, null, { renderer: 'canvas' });
         // Debounced resize handler to prevent infinite re-render loops
         let resizeTimer = null;
         window.addEventListener('resize', () => {
@@ -602,23 +602,35 @@ export class WellLogChart {
 
                 const curveValues = new Map();
 
-                // Lookup all curve values by manual linear interpolation
+                // Lookup all curve values by Binary Search interpolation
                 trackData.forEach(t => {
                     if (t.type === 'CurveTrack') {
                         (t.series || []).forEach(s => {
                             const pts = s.data || [];
                             let val = null;
-                            for (let j = 0; j < pts.length - 1; j++) {
-                                // pts[j] is [depth, value] in track data?
-                                // WAIT! s.data from Python is [[depth, value]]
-                                // Let's check s.data structure...
-                                const d0 = pts[j][0], d1 = pts[j + 1][0];
-                                const v0 = pts[j][1], v1 = pts[j + 1][1];
-                                if (v0 === null || v1 === null) continue;
-                                if (depth >= Math.min(d0, d1) && depth <= Math.max(d0, d1)) {
-                                    const ratio = (d1 - d0) !== 0 ? (depth - d0) / (d1 - d0) : 0;
-                                    val = v0 + ratio * (v1 - v0);
-                                    break;
+                            if (pts.length > 1) {
+                                // Binary search
+                                let left = 0;
+                                let right = pts.length - 1;
+                                let idx = -1;
+                                while (left <= right) {
+                                    let mid = Math.floor((left + right) / 2);
+                                    if (pts[mid][0] === depth) {
+                                        idx = mid; break;
+                                    } else if (pts[mid][0] < depth) {
+                                        left = mid + 1;
+                                    } else {
+                                        right = mid - 1;
+                                    }
+                                }
+                                let j = idx !== -1 ? idx : (right >= 0 ? right : 0);
+                                if (j >= 0 && j < pts.length - 1) {
+                                    const d0 = pts[j][0], d1 = pts[j+1][0];
+                                    const v0 = pts[j][1], v1 = pts[j+1][1];
+                                    if (v0 !== null && v1 !== null && depth >= Math.min(d0, d1) && depth <= Math.max(d0, d1)) {
+                                        const ratio = (d1 - d0) !== 0 ? (depth - d0) / (d1 - d0) : 0;
+                                        val = v0 + ratio * (v1 - v0);
+                                    }
                                 }
                             }
                             if (val !== null) curveValues.set(s.name, val);
@@ -707,7 +719,17 @@ export class WellLogChart {
 
     exportToSvg() {
         if (!this.chart) return '';
-        const dataUrl = this.chart.getDataURL({ type: 'svg' });
+        
+        // Spin up a temporary SVG chart to preserve vector export fidelity
+        const tempDom = document.createElement('div');
+        tempDom.style.width = this.chart.getWidth() + 'px';
+        tempDom.style.height = this.chart.getHeight() + 'px';
+        const tempChart = echarts.init(tempDom, null, { renderer: 'svg' });
+        tempChart.setOption(this.chart.getOption());
+        
+        const dataUrl = tempChart.getDataURL({ type: 'svg' });
+        tempChart.dispose();
+        
         if (!dataUrl) return '';
         let svgText = dataUrl.includes('base64,') ? atob(dataUrl.split('base64,')[1]) : decodeURIComponent(dataUrl.split(',')[1]);
         if (svgText.includes('<svg')) {
