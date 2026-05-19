@@ -92,9 +92,6 @@ class CrossWellPage(QWidget):
         
         # ECharts has a 100ms resize debounce. Wait for it to finish, then refresh coords.
         QTimer.singleShot(150, self._refresh_overlay_coords)
-        
-        # ECharts has a 100ms resize debounce. Wait for it to finish, then refresh coords.
-        QTimer.singleShot(150, self._refresh_overlay_coords)
 
     def _auto_link(self):
         self.links = []
@@ -466,7 +463,7 @@ class CrossWellPage(QWidget):
         for engine in self.engines:
             # Disconnect previous if any (though unlikely here)
             try: engine.bridge.svg_received.disconnect()
-            except: pass
+            except (TypeError, RuntimeError): pass
             
             engine.bridge.svg_received.connect(lambda s, e=engine: handle_svg(s, e))
             engine.export_svg()

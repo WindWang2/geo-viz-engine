@@ -1,45 +1,14 @@
 from pydantic import BaseModel
 from typing import Optional
 from enum import Enum
-
-
-class LineStyle(str, Enum):
-    SOLID = "solid"
-    DASHED = "dashed"
-    DOTTED = "dotted"
-
-
-class CurveData(BaseModel):
-    name: str
-    unit: str = ""
-    depth: list[float]
-    values: list[Optional[float]]
-    display_range: tuple[float, float] = (0.0, 100.0)
-    color: str = "#63b3ed"
-    line_style: LineStyle = LineStyle.SOLID
-
-
-class IntervalItem(BaseModel):
-    top: float
-    bottom: float
-    name: str
-
-
-class FaciesData(BaseModel):
-    phase: list[IntervalItem] = []
-    sub_phase: list[IntervalItem] = []
-    micro_phase: list[IntervalItem] = []
-
-class WellIntervals(BaseModel):
-    series: list[IntervalItem] = []
-    system: list[IntervalItem] = []
-    formation: list[IntervalItem] = []
-    member: list[IntervalItem] = []
-    lithology: list[IntervalItem] = []
-    lithology_desc: list[IntervalItem] = []
-    systems_tract: list[IntervalItem] = []
-    sequence: list[IntervalItem] = []
-    facies: FaciesData = FaciesData()
+from geoviz_well_log.models import (
+    LineStyle,
+    CurveData,
+    IntervalItem,
+    FaciesData,
+    WellIntervals,
+    WellLogData,
+)
 
 
 class CorrelationLink(BaseModel):
@@ -67,17 +36,14 @@ class FaciesInterval(BaseModel):
     micro_facies: str = ""
 
 
-class WellLogData(BaseModel):
-    well_name: str
-    top_depth: float
-    bottom_depth: float
-    datum_elevation: float = 0.0
-    curves: list[CurveData] = []
+# Extend the WellLogData definition from geoviz_well_log to include app-specific fields
+class AppWellLogData(WellLogData):
     lithology: list[LithologyInterval] = []
     facies: list[FaciesInterval] = []
-    intervals: Optional[WellIntervals] = None
-    custom_tracks: list[dict] = []
 
+
+# Override WellLogData with the extended one so existing code doesn't break
+WellLogData = AppWellLogData
 
 
 class WellCoordinates(BaseModel):
