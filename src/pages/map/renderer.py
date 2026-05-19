@@ -12,8 +12,8 @@ MAPLIBRE_HTML = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="{maplibre_js}"></script>
+<link href="{maplibre_css}" rel="stylesheet" />
 <style>
   body {{ margin: 0; padding: 0; }}
   #map {{ position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }}
@@ -181,11 +181,17 @@ class MapRenderer(QWebEngineView):
         except Exception:
             guangdong_geojson = '{"type": "FeatureCollection", "features": []}'
 
+        # Load local MapLibre assets for fully offline rendering
+        assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
+        maplibre_js = QUrl.fromLocalFile(os.path.join(assets_dir, "maplibre-gl.js")).toString()
+        maplibre_css = QUrl.fromLocalFile(os.path.join(assets_dir, "maplibre-gl.css")).toString()
+
         geojson = build_geojson(wells, data_wells)
         center_lat = sum(w.latitude for w in wells) / len(wells) if wells else 38
         center_lng = sum(w.longitude for w in wells) / len(wells) if wells else 117
         html = MAPLIBRE_HTML.format(
             wells_json=geojson, guangdong_json=guangdong_geojson,
+            maplibre_js=maplibre_js, maplibre_css=maplibre_css,
             center_lat=center_lat, center_lng=center_lng,
         )
 
