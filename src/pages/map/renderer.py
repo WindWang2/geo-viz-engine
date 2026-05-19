@@ -157,6 +157,67 @@ __MAPLIBRE_JS__
         .setLngLat(coords)
         .addTo(map);
     });
+
+    // 3. Add key Chinese geographical reference labels for orientation
+    const referenceLabels = [
+      { name: "北京 (Beijing)", coords: [116.4074, 39.9042], type: "capital" },
+      { name: "上海 (Shanghai)", coords: [121.4737, 31.2304], type: "city" },
+      { name: "广州 (Guangzhou)", coords: [113.2644, 23.1292], type: "city" },
+      { name: "深圳 (Shenzhen)", coords: [114.0579, 22.5431], type: "city" },
+      { name: "香港 (Hong Kong)", coords: [114.1694, 22.3193], type: "city" },
+      { name: "澳门 (Macau)", coords: [113.5439, 22.1987], type: "city" },
+      { name: "惠州 (Huizhou)", coords: [114.4158, 23.1109], type: "city" },
+      { name: "珠海 (Zhuhai)", coords: [113.5767, 22.2707], type: "city" },
+      { name: "汕头 (Shantou)", coords: [116.7084, 23.3718], type: "city" },
+      { name: "湛江 (Zhanjiang)", coords: [110.3649, 21.2749], type: "city" },
+      { name: "海口 (Haikou)", coords: [110.3308, 20.0221], type: "city" },
+      { name: "福州 (Fuzhou)", coords: [119.3063, 26.0753], type: "city" },
+      { name: "台北 (Taipei)", coords: [121.5654, 25.0330], type: "city" },
+      { name: "南宁 (Nanning)", coords: [108.3200, 22.8240], type: "city" },
+      { name: "南海 (South China Sea)", coords: [115.5, 20.2], type: "sea" }
+    ];
+
+    referenceLabels.forEach(label => {
+      const el = document.createElement('div');
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.pointerEvents = 'none';
+
+      if (label.type === "sea") {
+        const text = document.createElement('div');
+        text.innerText = label.name;
+        text.style.fontSize = '13px';
+        text.style.fontWeight = 'bold';
+        text.style.fontStyle = 'italic';
+        text.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+        text.style.color = '#0284c7';
+        text.style.textShadow = '1.5px 1.5px 0px #ffffff, -1.5px -1.5px 0px #ffffff';
+        el.appendChild(text);
+      } else {
+        const dot = document.createElement('div');
+        dot.style.width = '6px';
+        dot.style.height = '6px';
+        dot.style.borderRadius = '50%';
+        dot.style.backgroundColor = label.type === "capital" ? '#ef4444' : '#94a3b8';
+        dot.style.marginRight = '5px';
+        dot.style.border = '1px solid #ffffff';
+        dot.style.boxShadow = '0 1px 2px rgba(0,0,0,0.15)';
+        el.appendChild(dot);
+
+        const text = document.createElement('div');
+        text.innerText = label.name;
+        text.style.fontSize = '11px';
+        text.style.fontWeight = label.type === "capital" ? 'bold' : 'normal';
+        text.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+        text.style.color = '#475569';
+        text.style.textShadow = '1.5px 1.5px 0px #ffffff, -1.5px -1.5px 0px #ffffff';
+        el.appendChild(text);
+      }
+
+      new maplibregl.Marker({ element: el })
+        .setLngLat(label.coords)
+        .addTo(map);
+    });
   });
 </script>
 </body>
