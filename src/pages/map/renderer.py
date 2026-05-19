@@ -23,6 +23,7 @@ MAPLIBRE_HTML = """<!DOCTYPE html>
 <div id="map"></div>
 <script>
   const wells = {wells_json};
+  const guangdong = {guangdong_json};
   const center_lat = {center_lat};
   const center_lng = {center_lng};
 
@@ -33,12 +34,49 @@ MAPLIBRE_HTML = """<!DOCTYPE html>
 
   const map = new maplibregl.Map({{
     container: 'map',
-    style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    style: {{
+      "version": 8,
+      "sources": {{}},
+      "layers": [
+        {{
+          "id": "background",
+          "type": "background",
+          "paint": {{
+            "background-color": "#bae6fd" // Sleek, modern ocean blue
+          }}
+        }}
+      ]
+    }},
     center: [center_lng, center_lat],
-    zoom: 7
+    zoom: 7.5
   }});
 
   map.on('load', () => {{
+    // Add local detailed landmass (Guangdong)
+    map.addSource('guangdong', {{
+      type: 'geojson',
+      data: guangdong
+    }});
+    map.addLayer({{
+      id: 'guangdong-fill',
+      type: 'fill',
+      source: 'guangdong',
+      paint: {{
+        'fill-color': '#f8fafc', // Beautiful ivory/light gray landmass
+        'fill-opacity': 1.0
+      }}
+    }});
+    map.addLayer({{
+      id: 'guangdong-borders',
+      type: 'line',
+      source: 'guangdong',
+      paint: {{
+        'line-color': '#cbd5e1', // Soft gray boundaries
+        'line-width': 1.0
+      }}
+    }});
+
+    // Add wells
     map.addSource('wells', {{
       type: 'geojson',
       data: wells
@@ -66,9 +104,9 @@ MAPLIBRE_HTML = """<!DOCTYPE html>
         'text-allow-overlap': false
       }},
       paint: {{
-        'text-color': ['case', ['get', 'has_data'], '#e2e8f0', '#6b7280'],
-        'text-halo-color': '#1a202c',
-        'text-halo-width': 1
+        'text-color': ['case', ['get', 'has_data'], '#0f172a', '#475569'],
+        'text-halo-color': '#ffffff',
+        'text-halo-width': 1.5
       }}
     }});
 
@@ -134,11 +172,21 @@ class MapRenderer(QWebEngineView):
         super().__init__()
         self.setPage(_MapPage(well_click_callback, self))
 
+        # Load local Guangdong Province GeoJSON for fully offline rendering
+        data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../data"))
+        guangdong_path = os.path.join(data_dir, "guangdong.json")
+        try:
+            with open(guangdong_path, "r", encoding="utf-8") as f:
+                guangdong_geojson = f.read()
+        except Exception:
+            guangdong_geojson = '{"type": "FeatureCollection", "features": []}'
+
         geojson = build_geojson(wells, data_wells)
         center_lat = sum(w.latitude for w in wells) / len(wells) if wells else 38
         center_lng = sum(w.longitude for w in wells) / len(wells) if wells else 117
         html = MAPLIBRE_HTML.format(
-            wells_json=geojson, center_lat=center_lat, center_lng=center_lng,
+            wells_json=geojson, guangdong_json=guangdong_geojson,
+            center_lat=center_lat, center_lng=center_lng,
         )
 
         # Write HTML to a temp file and load via file:// so that custom-scheme
