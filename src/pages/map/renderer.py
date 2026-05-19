@@ -26,7 +26,7 @@ __MAPLIBRE_JS__
 <script>
   const wells = __WELLS_JSON__;
   const world = __WORLD_JSON__;
-  const guangdong = __GUANGDONG_JSON__;
+  const china = __CHINA_PROVINCES_JSON__;
   const center_lat = __CENTER_LAT__;
   const center_lng = __CENTER_LNG__;
 
@@ -79,27 +79,27 @@ __MAPLIBRE_JS__
       }
     });
 
-    // 2. Add local detailed landmass (Guangdong) for regional focus
-    map.addSource('guangdong', {
+    // 2. Add detailed China Provinces boundaries (fully offline)
+    map.addSource('china', {
       type: 'geojson',
-      data: guangdong
+      data: china
     });
     map.addLayer({
-      id: 'guangdong-fill',
+      id: 'china-fill',
       type: 'fill',
-      source: 'guangdong',
+      source: 'china',
       paint: {
-        'fill-color': '#f1f5f9', // Slightly darker warm gray for regional emphasis
-        'fill-opacity': 0.6
+        'fill-color': '#f8fafc', // Beautiful ivory landmass
+        'fill-opacity': 1.0
       }
     });
     map.addLayer({
-      id: 'guangdong-borders',
+      id: 'china-borders',
       type: 'line',
-      source: 'guangdong',
+      source: 'china',
       paint: {
-        'line-color': '#94a3b8', // Gray boundaries
-        'line-width': 1.2
+        'line-color': '#cbd5e1', // Clean provincial slate-gray lines
+        'line-width': 1.0
       }
     });
 
@@ -271,18 +271,18 @@ class MapRenderer(QWebEngineView):
 
         # Resolve paths
         data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../data"))
-        guangdong_path = os.path.join(data_dir, "guangdong.json")
+        china_path = os.path.join(data_dir, "china_provinces.json")
         world_path = os.path.join(data_dir, "world.json")
         assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
         maplibre_js_path = os.path.join(assets_dir, "maplibre-gl.js")
         maplibre_css_path = os.path.join(assets_dir, "maplibre-gl.css")
 
-        # Load local Guangdong GeoJSON
+        # Load local China Provinces GeoJSON
         try:
-            with open(guangdong_path, "r", encoding="utf-8") as f:
-                guangdong_geojson = f.read()
+            with open(china_path, "r", encoding="utf-8") as f:
+                china_geojson = f.read()
         except Exception:
-            guangdong_geojson = '{"type": "FeatureCollection", "features": []}'
+            china_geojson = '{"type": "FeatureCollection", "features": []}'
 
         # Load local World Countries GeoJSON
         try:
@@ -314,19 +314,9 @@ class MapRenderer(QWebEngineView):
         html = html.replace("__MAPLIBRE_CSS__", maplibre_css)
         html = html.replace("__WELLS_JSON__", geojson)
         html = html.replace("__WORLD_JSON__", world_geojson)
-        html = html.replace("__GUANGDONG_JSON__", guangdong_geojson)
+        html = html.replace("__CHINA_PROVINCES_JSON__", china_geojson)
         html = html.replace("__CENTER_LAT__", str(center_lat))
         html = html.replace("__CENTER_LNG__", str(center_lng))
-
-        # Write HTML to a temp file and load via file:// so that custom-scheme
-        # navigation (well://) is not blocked by Chromium's data: URL security policy.
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False, encoding="utf-8"
-        )
-        tmp.write(html)
-        tmp.close()
-        self._tmp_html = tmp.name
-        self.load(QUrl.fromLocalFile(tmp.name))
 
         # Write HTML to a temp file and load via file:// so that custom-scheme
         # navigation (well://) is not blocked by Chromium's data: URL security policy.
