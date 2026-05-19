@@ -105,8 +105,9 @@ __MAPLIBRE_JS__
       id: 'world-fill',
       type: 'fill',
       source: 'world',
+      filter: ['all', ['!=', ['get', 'ISO_A3'], 'CHN'], ['!=', ['get', 'ISO_A3'], 'TWN']],
       paint: {
-        'fill-color': '#f3f1ec', // Warm sandy topographic land fill
+        'fill-color': '#f3f1ec', // Seamless warm sandy topographic land fill
         'fill-opacity': 1.0
       }
     });
@@ -114,6 +115,7 @@ __MAPLIBRE_JS__
       id: 'world-borders',
       type: 'line',
       source: 'world',
+      filter: ['all', ['!=', ['get', 'ISO_A3'], 'CHN'], ['!=', ['get', 'ISO_A3'], 'TWN']],
       paint: {
         'line-color': '#cbd5e1', // Soft gray boundaries
         'line-width': 0.8
@@ -130,7 +132,7 @@ __MAPLIBRE_JS__
       type: 'fill',
       source: 'china',
       paint: {
-        'fill-color': '#faf9f5', // Slightly highlighted topographic relief land color for China
+        'fill-color': '#f3f1ec', // EXACTLY the same color to ensure 100% uniformity!
         'fill-opacity': 1.0
       }
     });
@@ -140,8 +142,8 @@ __MAPLIBRE_JS__
       type: 'line',
       source: 'china',
       paint: {
-        'line-color': '#94a3b8', // Distinct province boundaries
-        'line-width': 1.0
+        'line-color': '#cbd5e1', // Clean provincial borders matching global borders
+        'line-width': 0.8
       }
     });
 
