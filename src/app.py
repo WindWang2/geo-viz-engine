@@ -10,16 +10,22 @@ from PySide6.QtWidgets import (
 )
 
 from src.data.cache import DataCache
+from src.utils.paths import get_resources_dir
+
+
+def _get_icon_path(name: str) -> str:
+    """Resolve icon path that works in both dev and frozen (PyInstaller) modes."""
+    return str(get_resources_dir() / "icons" / name)
 
 
 PAGES = [
-    ("map", "src/resources/icons/map.svg", "地图总览"),
-    ("paleo_map", "src/resources/icons/map.svg", "古地理图"),
-    ("well_log", "src/resources/icons/well_log.svg", "井剖面"),
-    ("cross_well", "src/resources/icons/cross_well.svg", "连井对比"),
-    ("seismic", "src/resources/icons/seismic.svg", "地震3D"),
-    ("data", "src/resources/icons/data.svg", "数据管理"),
-    ("tools", "src/resources/icons/tools.svg", "工具箱"),
+    ("map",       _get_icon_path("map.svg"),       "地图总览"),
+    ("paleo_map", _get_icon_path("map.svg"),       "古地理图"),
+    ("well_log",  _get_icon_path("well_log.svg"),  "井剖面"),
+    ("cross_well",_get_icon_path("cross_well.svg"),"连井对比"),
+    ("seismic",   _get_icon_path("seismic.svg"),   "地震3D"),
+    ("data",      _get_icon_path("data.svg"),       "数据管理"),
+    ("tools",     _get_icon_path("tools.svg"),      "工具箱"),
 ]
 
 
@@ -80,7 +86,7 @@ class MainWindow(QWidget):
         self.sidebar_buttons: list[SidebarButton] = []
         for i, (key, icon, tooltip) in enumerate(PAGES):
             btn = SidebarButton(icon, tooltip, key)
-            btn.clicked.connect(lambda checked, idx=i: self._switch_page(idx))
+            btn.clicked.connect(lambda _checked=False, idx=i: self._switch_page(idx))
             self.sidebar_buttons.append(btn)
             sidebar_layout.addWidget(btn)
 

@@ -74,7 +74,8 @@ class CrossWellPage(QWidget):
         self.location_map = LocationMapWidget(self)
         self.location_map.hide()
         
-        data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+        from src.utils.paths import get_data_dir
+        data_dir = get_data_dir()
         self._all_coordinates = load_well_coordinates(data_dir / "well_coordinates.json")
 
     def _show_well_menu(self):

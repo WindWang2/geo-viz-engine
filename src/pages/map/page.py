@@ -6,7 +6,9 @@ from src.data.cache import DataCache
 from src.data.well_registry import available_wells
 from src.pages.map.renderer import MapRenderer
 
-DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
+from src.utils.paths import get_data_dir
+
+DATA_DIR = get_data_dir()
 WELL_COORDS_FILE = DATA_DIR / "well_coordinates.json"
 
 

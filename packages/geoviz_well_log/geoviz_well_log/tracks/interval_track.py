@@ -95,8 +95,10 @@ class _IntervalContent(DepthMappedContent):
             # Text — skip if font would be too small
             font_size = self._adaptive_font_size(h)
             if h > 10 and iv.name and font_size >= 8:
-                font = QFont("Noto Sans CJK SC", font_size)
-                font.setStyleStrategy(QFont.StyleStrategy.NoFontMerging)
+                font = QFont()
+                font.setFamilies(["Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", "Arial"])
+                font.setPointSize(font_size)
+                font.setStyleStrategy(QFont.StyleStrategy.PreferMatch)
                 
                 from PySide6.QtGui import QFontMetrics
                 fm = QFontMetrics(font)
@@ -186,8 +188,10 @@ class IntervalTrack(TrackWidget):
             h = rect.height()
             font_size = self._content._adaptive_font_size(h)
             if h > 10 and iv.name and font_size >= 8:
-                font = QFont("Noto Sans CJK SC", font_size)
-                font.setStyleStrategy(QFont.StyleStrategy.NoFontMerging)
+                font = QFont()
+                font.setFamilies(["Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", "Arial"])
+                font.setPointSize(font_size)
+                font.setStyleStrategy(QFont.StyleStrategy.PreferMatch)
                 
                 from PySide6.QtGui import QFontMetrics
                 fm = QFontMetrics(font)

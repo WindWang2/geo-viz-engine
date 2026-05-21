@@ -68,8 +68,10 @@ class DepthTrack(TrackWidget):
             return
 
         # Draw depth ticks and labels
-        font = QFont("Noto Sans CJK SC", 8)
-        font.setStyleStrategy(QFont.StyleStrategy.NoFontMerging)
+        font = QFont()
+        font.setFamilies(["Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", "Arial"])
+        font.setPointSize(8)
+        font.setStyleStrategy(QFont.StyleStrategy.PreferMatch)
         painter.setFont(font)
         painter.setPen(QPen(QColor("#2d3748"), 1))
 
