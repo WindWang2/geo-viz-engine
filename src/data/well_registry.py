@@ -2,8 +2,9 @@ import json
 from pathlib import Path
 
 from src.data.loaders import load_well_log_from_excel
+from src.utils.paths import get_data_dir
 
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_DATA_DIR = get_data_dir()
 
 
 def _build_well_registry():

@@ -6,7 +6,7 @@ from geoviz_well_log.config import (
     TextTrackConfig, PatternMapping,
 )
 
-_PATTERNS_DIR = str(Path(__file__).parent.parent.parent.parent / "patterns")
+_PATTERNS_DIR = str(Path(__file__).resolve().parent.parent / "assets" / "patterns")
 
 LITHOLOGY_MAPPING = PatternMapping(
     patterns={

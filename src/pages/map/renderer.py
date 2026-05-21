@@ -314,10 +314,16 @@ class MapRenderer(QWebEngineView):
         self.setPage(_MapPage(well_click_callback, self))
 
         # Resolve paths
-        data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../data"))
+        from src.utils.paths import get_data_dir
+        data_dir = str(get_data_dir())
         china_path = os.path.join(data_dir, "china_provinces.json")
         world_path = os.path.join(data_dir, "world.json")
         assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
+        # In a frozen PyInstaller build, __file__ may be inside the .pkg archive.
+        # Fall back to sys._MEIPASS which is the actual extraction directory.
+        if not os.path.isdir(assets_dir) and hasattr(sys, "_MEIPASS"):
+            import sys as _sys
+            assets_dir = os.path.join(_sys._MEIPASS, "src", "pages", "map", "assets")
         maplibre_js_path = os.path.join(assets_dir, "maplibre-gl.js")
         maplibre_css_path = os.path.join(assets_dir, "maplibre-gl.css")
 

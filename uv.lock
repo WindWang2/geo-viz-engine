@@ -112,6 +112,28 @@ wheels = [
 ]
 
 [[package]]
+name = "cuda-pathfinder"
+version = "1.5.4"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/d0/c177e29701cf1d3008d7d2b16b5fc626592ce13bd535f8795c5f57187e0e/cuda_pathfinder-1.5.4-py3-none-any.whl", hash = "sha256:9563d3175ce1828531acf4b94e1c1c7d67208c347ca002493e2654878b26f4b7", size = 51657, upload-time = "2026-04-27T22:42:07.712Z" },
+]
+
+[[package]]
+name = "cupy-cuda13x"
+version = "14.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cuda-pathfinder", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "numpy", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7d/9b/7983b4e24749937dd4ab34565561a8c015e88df4ff9fd4678337b710b3ee/cupy_cuda13x-14.0.1-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:763f33f5641a28db5ac91788301271930e910813f1b1279119b504babeb1b863", size = 73616635, upload-time = "2026-02-20T10:24:14.115Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/d4/42f79f6baea881c604982df18d158456e40071925bfdd53c1b6eb82f6e75/cupy_cuda13x-14.0.1-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:a06cdc0d6a0054663fca4770e32df6a39cbeb7396a08b23f97965e5e1c0edb7d", size = 69793920, upload-time = "2026-02-20T10:24:20.287Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/0c/83c6be011fa00a270c0d08985844fd992d59c34a6bb91755dad4f31942e8/cupy_cuda13x-14.0.1-cp312-cp312-win_amd64.whl", hash = "sha256:e91052340bab0860bdf1fd4e5a4fc85846800df6cc9a1de02a5afa1dd8655550", size = 35353554, upload-time = "2026-02-20T10:24:24.337Z" },
+]
+
+[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -195,7 +217,7 @@ wheels = [
 
 [[package]]
 name = "geo-viz-engine"
-version = "0.6.0.0"
+version = "0.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "geoviz-seismic", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -205,6 +227,7 @@ dependencies = [
     { name = "openpyxl", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pandas", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pydantic", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "pyopengl", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pyqtgraph", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pyside6", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "python-calamine", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -220,9 +243,13 @@ dev = [
     { name = "pytest", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pytest-qt", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+gpu = [
+    { name = "cupy-cuda13x", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "cupy-cuda13x", marker = "extra == 'gpu'" },
     { name = "geoviz-seismic", editable = "packages/geoviz_seismic" },
     { name = "geoviz-well-log", editable = "packages/geoviz_well_log" },
     { name = "lasio", specifier = ">=0.14" },
@@ -231,6 +258,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6.0" },
+    { name = "pyopengl", specifier = ">=3.1.0" },
     { name = "pyqtgraph", specifier = ">=0.13" },
     { name = "pyside6", specifier = ">=6.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -241,15 +269,17 @@ requires-dist = [
     { name = "shapely", specifier = ">=2.0" },
     { name = "xlrd", specifier = ">=2.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "gpu"]
 
 [[package]]
 name = "geoviz-seismic"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "packages/geoviz_seismic" }
 dependencies = [
     { name = "numpy", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pydantic", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "pyopengl", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "pyqtgraph", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pyside6", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pyvista", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "scipy", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -258,14 +288,20 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+gpu = [
+    { name = "cupy-cuda13x", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
+]
 wiggle = [
     { name = "vispy", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "cupy-cuda13x", marker = "extra == 'gpu'" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pydantic", specifier = ">=2.0" },
+    { name = "pyopengl", specifier = ">=3.1.0" },
+    { name = "pyqtgraph", specifier = ">=0.13" },
     { name = "pyside6", specifier = ">=6.6" },
     { name = "pyvista", specifier = ">=0.43" },
     { name = "scipy", specifier = ">=1.12" },
@@ -273,7 +309,7 @@ requires-dist = [
     { name = "vispy", specifier = ">=0.16.1" },
     { name = "vispy", marker = "extra == 'wiggle'", specifier = ">=0.14" },
 ]
-provides-extras = ["wiggle"]
+provides-extras = ["wiggle", "gpu"]
 
 [[package]]
 name = "geoviz-well-log"
@@ -630,6 +666,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c7/fe/9278c29394bf69169febc21f96b4252c3ee7c8ec22c2fc545004bed47e71/pyinstaller_hooks_contrib-2026.4.tar.gz", hash = "sha256:766c281acb1ecc32e21c8c667056d7ebf5da0aabd5e30c219f9c2a283620eeaa", size = 173050, upload-time = "2026-03-31T14:10:51.188Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/f4/035fb8c06deff827f540a9a4ed9122c54e5376fca3e42eddf0c263730775/pyinstaller_hooks_contrib-2026.4-py3-none-any.whl", hash = "sha256:1de1a5e49a878122010b88c7e295502bc69776c157c4a4dc78741a4e6178b00f", size = 455496, upload-time = "2026-03-31T14:10:49.867Z" },
+]
+
+[[package]]
+name = "pyopengl"
+version = "3.1.10"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/16/912b7225d56284859cd9a672827f18be43f8012f8b7b932bc4bd959a298e/pyopengl-3.1.10.tar.gz", hash = "sha256:c4a02d6866b54eb119c8e9b3fb04fa835a95ab802dd96607ab4cdb0012df8335", size = 1915580, upload-time = "2025-08-18T02:33:01.76Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/e4/1ba6f44e491c4eece978685230dde56b14d51a0365bc1b774ddaa94d14cd/pyopengl-3.1.10-py3-none-any.whl", hash = "sha256:794a943daced39300879e4e47bd94525280685f42dbb5a998d336cfff151d74f", size = 3194996, upload-time = "2025-08-18T02:32:59.902Z" },
 ]
 
 [[package]]

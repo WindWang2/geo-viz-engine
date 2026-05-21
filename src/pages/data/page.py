@@ -48,7 +48,8 @@ class DataPage(QWidget):
             pass  # Will be implemented with actual loaders
 
     def _load_well_table(self):
-        well_coords_file = Path(__file__).parent.parent.parent.parent / "data" / "well_coordinates.json"
+        from src.utils.paths import get_data_dir
+        well_coords_file = get_data_dir() / "well_coordinates.json"
         wells = self.cache.get_well_coordinates(well_coords_file)
         self.table.setRowCount(len(wells))
         for i, w in enumerate(wells):

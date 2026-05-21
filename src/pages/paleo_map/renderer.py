@@ -335,7 +335,8 @@ class PaleoMapRenderer(QWebEngineView):
 
     def _get_svg_base64_dict(self):
         svg_dict = {}
-        patterns_dir = Path(__file__).parent.parent.parent / "patterns"
+        from src.utils.paths import get_patterns_dir
+        patterns_dir = get_patterns_dir()
         for facies_keyword, pattern_name in PATTERN_MAP.items():
             svg_filename = pattern_name.replace("-", "_") + ".svg"
             svg_path = patterns_dir / svg_filename
@@ -347,7 +348,8 @@ class PaleoMapRenderer(QWebEngineView):
 
     def _get_wells_json(self):
         try:
-            wells_path = Path(__file__).parent.parent.parent.parent / "data" / "well_coordinates.json"
+            from src.utils.paths import get_data_dir
+            wells_path = get_data_dir() / "well_coordinates.json"
             if not wells_path.exists():
                 return "[]"
             with open(wells_path, encoding="utf-8") as f:
@@ -368,7 +370,8 @@ class PaleoMapRenderer(QWebEngineView):
         from src.utils.constants import FACIES_COLORS
         facies_colors_json = json.dumps(FACIES_COLORS).replace("</script>", r"<\/script>")
 
-        echarts_js = Path(__file__).parent.parent.parent / "resources" / "js" / "echarts.min.js"
+        from src.utils.paths import get_resources_dir
+        echarts_js = get_resources_dir() / "js" / "echarts.min.js"
         echarts_url = QUrl.fromLocalFile(str(echarts_js)).toString()
 
         geojson_url = ""

@@ -69,7 +69,12 @@ class ChartEngine(QWidget):
         dist_path = os.path.abspath(os.path.join(base_dir, "web_dist", "index.html"))
         
         if os.path.exists(dist_path):
-            self.view.load(f"file://{dist_path}")
+            # Enable local file access for ES module <script type="module"> loading
+            self.view.page().settings().setAttribute(
+                self.view.page().settings().WebAttribute.LocalContentCanAccessFileUrls, True
+            )
+            from PySide6.QtCore import QUrl
+            self.view.load(QUrl.fromLocalFile(dist_path))
         else:
             print(f"Warning: ECharts dist not found at {dist_path}")
 

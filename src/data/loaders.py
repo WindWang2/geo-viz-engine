@@ -13,7 +13,7 @@ _SENTINEL_VALUES = {-9999, -999.25, -9999.0}
 
 def load_well_coordinates(path: Path) -> list[WellCoordinates]:
     if not path.exists(): return []
-    with open(path) as f: raw = json.load(f)
+    with open(path, encoding="utf-8") as f: raw = json.load(f)
     items = raw.get("wells", []) if isinstance(raw, dict) else raw
     return [WellCoordinates(**{**w, "name": w.get("well_name", w.get("name"))}) for w in items]
 

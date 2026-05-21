@@ -49,8 +49,10 @@ class _TextContent(DepthMappedContent):
             # Word-wrapped text — skip if font would be too small
             font_size = self._adaptive_font_size(h)
             if iv.name and h > 8 and font_size >= 8:
-                font = QFont("Noto Sans CJK SC", font_size)
-                font.setStyleStrategy(QFont.StyleStrategy.NoFontMerging)
+                font = QFont()
+                font.setFamilies(["Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", "Arial"])
+                font.setPointSize(font_size)
+                font.setStyleStrategy(QFont.StyleStrategy.PreferMatch)
                 
                 from PySide6.QtGui import QFontMetrics
                 fm = QFontMetrics(font)
@@ -124,8 +126,10 @@ class TextTrack(TrackWidget):
             # Word-wrapped text
             font_size = self._content._adaptive_font_size(h)
             if iv.name and h > 8 and font_size >= 8:
-                font = QFont("Noto Sans CJK SC", font_size)
-                font.setStyleStrategy(QFont.StyleStrategy.NoFontMerging)
+                font = QFont()
+                font.setFamilies(["Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", "Arial"])
+                font.setPointSize(font_size)
+                font.setStyleStrategy(QFont.StyleStrategy.PreferMatch)
                 
                 from PySide6.QtGui import QFontMetrics
                 fm = QFontMetrics(font)
