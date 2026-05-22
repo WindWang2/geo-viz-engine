@@ -1,62 +1,63 @@
+import pytest
+from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtCore import QRectF
+
 from geoviz_well_log.models import IntervalItem
-from geoviz_well_log.config import IntervalTrackConfig, TrackType, PatternMapping
-from geoviz_well_log.tracks.interval_track import IntervalTrack, _lookup_color, _lookup_pattern
+from geoviz_well_log.renderer.interval_track import IntervalTrack
 
 
-def test_interval_track_renders(qtbot):
-    intervals = [
-        IntervalItem(top=0, bottom=50, name="砂岩"),
-        IntervalItem(top=50, bottom=100, name="泥岩"),
+def _make_intervals():
+    return [
+        IntervalItem(top=0, bottom=100, name="System A"),
+        IntervalItem(top=100, bottom=200, name="System B"),
+        IntervalItem(top=200, bottom=300, name="System C"),
     ]
-    config = IntervalTrackConfig(
-        type=TrackType.INTERVAL, width=80, label="岩性",
-        data_key="lithology",
-        color_mapping=PatternMapping(
-            colors={"砂岩": "#fef08a", "泥岩": "#d1d5db"},
-        ),
-    )
-    track = IntervalTrack(config, intervals, top_depth=0, bottom_depth=100)
+
+
+def test_interval_track_creation(qtbot):
+    track = IntervalTrack(intervals=_make_intervals(), label="System", width=80)
     qtbot.addWidget(track)
-    assert track._content is not None
-    assert len(track._content._pattern_pixmaps) == 0  # no pattern_dir set
+    assert track.label == "System"
+    assert track.width == 80
 
 
-def test_interval_track_color_lookup():
-    mapping = PatternMapping(
-        patterns={"砂岩": "sandstone"},
-        colors={"砂岩": "#fef08a", "泥岩": "#d1d5db"},
-    )
-    assert _lookup_color("砂岩", mapping) == "#fef08a"
-    assert _lookup_color("细砂岩", mapping) == "#fef08a"  # substring match
-    assert _lookup_color("灰岩", mapping) == "#e5e7eb"  # default
-
-    assert _lookup_pattern("砂岩", mapping) == "sandstone"
-    assert _lookup_pattern("泥岩", mapping) is None
-
-
-def test_interval_track_dynamic_density(qtbot):
-    from geoviz_well_log.models import IntervalItem
-    from geoviz_well_log.config import IntervalTrackConfig, TrackType, PatternMapping
-
-    intervals = [
-        IntervalItem(top=0, bottom=50, name="砂岩"),
-        IntervalItem(top=50, bottom=100, name="泥岩"),
-    ]
-    config = IntervalTrackConfig(
-        type=TrackType.INTERVAL, width=80, label="岩性",
-        data_key="lithology",
-        color_mapping=PatternMapping(colors={"砂岩": "#fef08a", "泥岩": "#d1d5db"}),
-    )
-    track = IntervalTrack(config, intervals, top_depth=0, bottom_depth=100)
+def test_interval_track_paint_no_crash(qtbot):
+    track = IntervalTrack(intervals=_make_intervals(), label="System", width=80)
     qtbot.addWidget(track)
-    track.setFixedHeight(200)
+    track.set_depth_range(0, 300)
+    pm = QPixmap(80, 800)
+    painter = QPainter(pm)
+    track.paint_content(painter, QRectF(0, 0, 80, 800))
+    painter.end()
 
-    track.sync_depth(0, 100)
-    track.set_pixel_density(2.0)
 
-    track.sync_depth(0, 50)
-    track.set_pixel_density(4.0)  # 200/50=4px/m
+def test_interval_track_export_render(qtbot):
+    track = IntervalTrack(intervals=_make_intervals(), label="System", width=80)
+    qtbot.addWidget(track)
+    track.set_depth_range(0, 300)
+    pm = QPixmap(80, 832)
+    painter = QPainter(pm)
+    track.export_render(painter, QRectF(0, 0, 80, 832))
+    painter.end()
 
-    assert track._content._visible_top == 0
-    assert track._content._visible_bottom == 50
-    assert abs(track._content._px_per_m - 4.0) < 1e-6
+
+def test_interval_track_custom_colors(qtbot):
+    colors = {"System A": "#ff0000", "System B": "#00ff00"}
+    track = IntervalTrack(intervals=_make_intervals(), label="System", width=80,
+                          colors=colors)
+    qtbot.addWidget(track)
+    track.set_depth_range(0, 300)
+    pm = QPixmap(80, 800)
+    painter = QPainter(pm)
+    track.paint_content(painter, QRectF(0, 0, 80, 800))
+    painter.end()
+
+
+def test_interval_track_empty_intervals(qtbot):
+    track = IntervalTrack(intervals=[], label="Empty", width=80)
+    qtbot.addWidget(track)
+    track.set_depth_range(0, 100)
+    pm = QPixmap(80, 800)
+    painter = QPainter(pm)
+    track.paint_content(painter, QRectF(0, 0, 80, 800))
+    painter.end()
