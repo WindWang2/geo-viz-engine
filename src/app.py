@@ -97,16 +97,10 @@ class MainWindow(QWidget):
         # Page stack
         self.stack = QStackedWidget()
 
-        # Lazy-import pages to avoid heavy imports at startup.
-        # IMPORTANT: SeismicPage (VTK) must be created BEFORE QWebEngineView
-        # pages so VTK grabs the GPU context first.  Chromium can then fall
-        # back to software compositing via --disable-gpu-compositing.
-        from src.pages.well_log import WellLogPage
-        self.well_log_page = WellLogPage()
-
-        from src.pages.cross_well import CrossWellPage
-        self.cross_well_page = CrossWellPage()
-
+        # Lazy-import pages.
+        # IMPORTANT: SeismicPage (pyqtgraph QOpenGLWidget) must be created
+        # BEFORE any QWebEngineView pages so pyqtgraph grabs the GPU context
+        # first.  Chromium can then fall back to software compositing.
         try:
             from src.pages.seismic import SeismicPage
             self.seismic_page = SeismicPage()
@@ -134,6 +128,12 @@ class MainWindow(QWidget):
             paleo_map_widget = QLabel(f"古地理图 (unavailable: {e})")
             paleo_map_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
             paleo_map_widget.setStyleSheet("font-size: 24px; color: #a0aec0;")
+
+        from src.pages.well_log import WellLogPage
+        self.well_log_page = WellLogPage()
+
+        from src.pages.cross_well import CrossWellPage
+        self.cross_well_page = CrossWellPage()
 
         from src.pages.data import DataPage
         self.data_page = DataPage(self.cache)
