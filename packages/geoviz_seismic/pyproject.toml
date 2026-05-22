@@ -16,7 +16,6 @@ classifiers = [
 ]
 dependencies = [
     "PySide6>=6.6",
-    "pyvista>=0.43",
     "segyio>=1.9",
     "numpy>=1.26",
     "scipy>=1.12",
