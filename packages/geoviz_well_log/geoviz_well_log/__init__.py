@@ -26,6 +26,12 @@ from .payload_builder import (
 from .track_manager import TrackManager
 from .pattern_map import PATTERN_MAP
 
+# New QPainter renderer
+from .renderer import BaseTrack, DepthTrack, CurveTrack, WellLogCanvas, LayoutCoordinator
+from .export_qpainter import export_svg as qpainter_export_svg
+from .export_qpainter import export_pdf as qpainter_export_pdf
+from .export_qpainter import export_png as qpainter_export_png
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -62,4 +68,7 @@ __all__ = [
     "LEGACY_DEFAULT_ACTIVE",
     "TrackManager",
     "PATTERN_MAP",
+    # QPainter renderer
+    "BaseTrack", "DepthTrack", "CurveTrack", "WellLogCanvas", "LayoutCoordinator",
+    "qpainter_export_svg", "qpainter_export_pdf", "qpainter_export_png",
 ]
