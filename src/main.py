@@ -9,19 +9,19 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # ---------------------------------------------------------------------------
 if getattr(sys, 'frozen', False) and sys.platform == 'win32' and hasattr(os, 'add_dll_directory'):
     from pathlib import Path
-    
+
     base_dirs = []
     if hasattr(sys, '_MEIPASS'):
         base_dirs.append(Path(sys._MEIPASS))
     else:
         print("DEBUG: sys._MEIPASS is NOT set!", file=sys.stderr)
-    
+
     exe_dir = Path(sys.executable).parent
     base_dirs.append(exe_dir)
     base_dirs.append(exe_dir / "_internal")
-    
+
     print(f"DEBUG: base_dirs to search: {base_dirs}", file=sys.stderr)
-    
+
     for base_dir in base_dirs:
         if base_dir.exists():
             try:
@@ -46,47 +46,58 @@ if getattr(sys, 'frozen', False) and sys.platform == 'win32' and hasattr(os, 'ad
 
 
 # ---------------------------------------------------------------------------
+# Windows: Chromium GPU compositing flags (MUST be before any Qt import)
+# ---------------------------------------------------------------------------
+# On Windows, QWebEngineView (Chromium) and pyqtgraph.opengl (QOpenGLWidget)
+# compete for the GPU context.  Setting --disable-gpu-compositing forces
+# Chromium to use software compositing, avoiding the conflict while keeping
+# WebGL functional for map rendering.
+# ---------------------------------------------------------------------------
+if sys.platform == "win32":
+    _flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+    if "--disable-gpu-compositing" not in _flags:
+        _flags += " --disable-gpu-compositing"
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _flags.strip()
+
+    # Lightweight GPU diagnostics (stderr only)
+    try:
+        import subprocess
+        gpu_info = subprocess.run(
+            ["wmic", "path", "win32_VideoController", "get", "name"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        print(f"[GeoViz] GPU: {gpu_info}", file=sys.stderr)
+        print(f"[GeoViz] Chromium flags: {os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '(none)')}", file=sys.stderr)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Critical: OpenGL + QWebEngineView coexistence on Windows
 # ---------------------------------------------------------------------------
-# Problem: pyqtgraph.opengl (GLViewWidget) requires an OpenGL context, while
-#   QWebEngineView (Chromium) uses Qt Quick internally (QQuickWidget).  On
-#   Windows, three things must be configured BEFORE QApplication is created:
-#
-#   1. AA_ShareOpenGLContexts — allows OpenGL contexts to be shared between
-#      QOpenGLWidget (pyqtgraph) and QQuickWidget (Chromium).  Without this,
-#      QWebEngineView gets a fatal "Failed to create shared context" error.
-#
-#   2. QQuickWindow.setGraphicsApi(OpenGL) — forces Qt Quick's RHI backend to
-#      OpenGL (instead of Direct3D/Vulkan default on Windows).  Without this,
-#      the RHI mismatch causes "OpenGL is not compatible with this QQuickWidget".
-#
-#   3. CompatibilityProfile instead of CoreProfile — CoreProfile strips legacy
-#      GL functions that Chromium's GLES emulation layer depends on, causing
-#      "Failed to create GLES3 context".  CompatibilityProfile includes all
-#      OpenGL 3.3 features PLUS legacy functions, satisfying both pyqtgraph
-#      and Chromium.
+# 1. AA_ShareOpenGLContexts — allows OpenGL contexts to be shared between
+#    QOpenGLWidget (pyqtgraph) and Chromium's GPU process.
+# 2. QQuickWindow.setGraphicsApi(OpenGL) — forces Qt Quick RHI to OpenGL
+#    (instead of Direct3D/Vulkan default on Windows).
+# 3. CompatibilityProfile — includes legacy GL functions that Chromium's
+#    GLES emulation layer depends on.
 # ---------------------------------------------------------------------------
-
 from PySide6.QtCore import Qt
-
-# Step 1: Enable OpenGL context sharing (MUST be before QApplication)
-Qt.AA_ShareOpenGLContexts  # verify attribute exists
 from PySide6.QtWidgets import QApplication
+
 QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
-# Step 2: Force Qt Quick RHI to use OpenGL backend (MUST be before QApplication)
 try:
     from PySide6.QtQuick import QQuickWindow, QSGRendererInterface
     QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.OpenGL)
 except ImportError:
-    pass  # QtQuick not available — QWebEngineView may still work without this
+    pass
 
 from PySide6.QtGui import QFont, QSurfaceFormat
 from src.app import MainWindow
 
 
 def main():
-    # Step 3: Set CompatibilityProfile as global default surface format
     fmt = QSurfaceFormat()
     fmt.setVersion(3, 3)
     fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile)
