@@ -43,8 +43,6 @@ def build():
         # Hidden imports
         "--hidden-import", "PySide6.QtWebEngineWidgets",
         "--hidden-import", "PySide6.QtWebChannel",
-        "--hidden-import", "pyvistaqt",
-        "--hidden-import", "vtkmodules",
         "--hidden-import", "shiboken6",
         "--hidden-import", "pydantic",
         
