@@ -58,6 +58,11 @@ class BaseTrack(QWidget):
         self._depth_bottom = bottom
         self.update()
 
+    def _depth_to_y(self, depth: float, rect: QRectF) -> float:
+        if self.depth_span <= 0:
+            return rect.top()
+        return rect.top() + (depth - self.depth_top) / self.depth_span * rect.height()
+
     def paint_content(self, painter: QPainter, rect: QRectF):
         """Render track content. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement paint_content")

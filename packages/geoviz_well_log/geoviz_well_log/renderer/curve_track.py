@@ -22,17 +22,17 @@ class CurveTrack(BaseTrack):
                          width=width, header_height=header_height, parent=parent)
         self._curves = curves
         self._log_scale = log_scale
-        # Pre-sort depths for binary search
+        # Store sorted copies — never mutate the original Pydantic models
+        self._sorted_depths: dict[str, list[float]] = {}
+        self._sorted_values: dict[str, list[float]] = {}
         for c in self._curves:
             if c.depth != sorted(c.depth):
                 pairs = sorted(zip(c.depth, c.values))
-                c.depth = [p[0] for p in pairs]
-                c.values = [p[1] for p in pairs]
-
-    def _depth_to_y(self, depth: float, rect: QRectF) -> float:
-        if self.depth_span <= 0:
-            return rect.top()
-        return rect.top() + (depth - self.depth_top) / self.depth_span * rect.height()
+                self._sorted_depths[c.name] = [p[0] for p in pairs]
+                self._sorted_values[c.name] = [p[1] for p in pairs]
+            else:
+                self._sorted_depths[c.name] = list(c.depth)
+                self._sorted_values[c.name] = list(c.values)
 
     def _value_to_x(self, value: float, display_range: tuple[float, float],
                     rect: QRectF) -> float:
@@ -42,18 +42,23 @@ class CurveTrack(BaseTrack):
                 value = lo
             lo = max(lo, 1e-10)
             hi = max(hi, 1e-10)
-            t = (log10(value) - log10(lo)) / (log10(hi) - log10(lo))
+            if lo == hi:
+                t = 0.5
+            else:
+                t = (log10(value) - log10(lo)) / (log10(hi) - log10(lo))
         else:
             t = (value - lo) / (hi - lo) if hi != lo else 0.5
         return rect.left() + t * rect.width()
 
     def _visible_data(self, curve: CurveData) -> tuple[list[float], list[float]]:
+        depths = self._sorted_depths.get(curve.name, curve.depth)
+        values = self._sorted_values.get(curve.name, curve.values)
         margin = (self.depth_bottom - self.depth_top) * 0.01
         top = self.depth_top - margin
         bottom = self.depth_bottom + margin
-        start = bisect.bisect_left(curve.depth, top)
-        end = bisect.bisect_right(curve.depth, bottom)
-        return curve.depth[start:end], curve.values[start:end]
+        start = bisect.bisect_left(depths, top)
+        end = bisect.bisect_right(depths, bottom)
+        return depths[start:end], values[start:end]
 
     def _downsample(self, depths: list[float], values: list[float],
                     pixel_height: int) -> tuple[list[float], list[float]]:
@@ -67,10 +72,17 @@ class CurveTrack(BaseTrack):
             chunk = arr_v[i:i + step]
             max_idx = i + int(np.argmax(chunk))
             min_idx = i + int(np.argmin(chunk))
-            result_d.append(depths[max_idx])
-            result_v.append(values[max_idx])
-            result_d.append(depths[min_idx])
-            result_v.append(values[min_idx])
+            # Emit in depth order to avoid zigzag artifacts
+            if max_idx <= min_idx:
+                result_d.append(depths[max_idx])
+                result_v.append(values[max_idx])
+                result_d.append(depths[min_idx])
+                result_v.append(values[min_idx])
+            else:
+                result_d.append(depths[min_idx])
+                result_v.append(values[min_idx])
+                result_d.append(depths[max_idx])
+                result_v.append(values[max_idx])
         return result_d, result_v
 
     def _make_pen(self, curve: CurveData) -> QPen:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import floor
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPen, QFont, QColor
 from PySide6.QtWidgets import QWidget
@@ -32,17 +34,17 @@ class DepthTrack(BaseTrack):
                 return float(c)
         return float(candidates[-1])
 
-    def _depth_to_y(self, depth: float, rect: QRectF) -> float:
-        if self.depth_span <= 0:
-            return rect.top()
-        return rect.top() + (depth - self.depth_top) / self.depth_span * rect.height()
-
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setClipRect(rect)
 
         self._tick_interval = self._compute_tick_interval(rect.height())
+
+        # Safety guard against zero interval (infinite loop)
+        interval = self._tick_interval
+        if interval <= 0:
+            interval = 10.0
 
         pen = QPen(QColor("#333333"), 1)
         painter.setPen(pen)
@@ -51,7 +53,8 @@ class DepthTrack(BaseTrack):
         font.setPointSize(7)
         painter.setFont(font)
 
-        start = int(self.depth_top / self._tick_interval) * self._tick_interval
+        # Use floor for correct alignment with negative depths
+        start = floor(self.depth_top / interval) * interval
         depth = float(start)
         while depth <= self.depth_bottom:
             y = self._depth_to_y(depth, rect)
@@ -60,7 +63,7 @@ class DepthTrack(BaseTrack):
                 text_rect = QRectF(rect.left(), y - 8, rect.width() - 12, 16)
                 painter.drawText(text_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                                  f"{depth:.0f}")
-            depth += self._tick_interval
+            depth += interval
 
         # Border
         painter.setPen(QPen(QColor("#999999"), 1))

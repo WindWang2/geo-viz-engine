@@ -23,11 +23,6 @@ class IntervalTrack(BaseTrack):
         self._intervals = intervals
         self._colors = colors or {}
 
-    def _depth_to_y(self, depth: float, rect: QRectF) -> float:
-        if self.depth_span <= 0:
-            return rect.top()
-        return rect.top() + (depth - self.depth_top) / self.depth_span * rect.height()
-
     def _get_color(self, index: int, name: str) -> QColor:
         if name in self._colors:
             return QColor(self._colors[name])

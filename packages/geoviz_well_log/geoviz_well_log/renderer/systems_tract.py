@@ -34,11 +34,6 @@ class SystemsTractTrack(BaseTrack):
                          parent=parent)
         self._intervals = intervals
 
-    def _depth_to_y(self, depth: float, rect: QRectF) -> float:
-        if self.depth_span <= 0:
-            return rect.top()
-        return rect.top() + (depth - self.depth_top) / self.depth_span * rect.height()
-
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()
         painter.setClipRect(rect)

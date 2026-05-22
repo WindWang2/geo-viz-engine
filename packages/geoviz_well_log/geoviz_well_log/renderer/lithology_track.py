@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QBrush
-from PySide6.QtWidgets import QWidget
 
 from ..models import LithologyInterval
 from ..pattern_map import FACIES_COLORS
 from .pattern_engine import PatternEngine
 from .track_base import BaseTrack
+
+_shared_pattern_engine = PatternEngine()
 
 
 class LithologyTrack(BaseTrack):
@@ -15,17 +16,13 @@ class LithologyTrack(BaseTrack):
 
     def __init__(self, intervals: list[LithologyInterval], label: str = "Lithology",
                  width: int = 80, show_description: bool = True,
+                 pattern_engine: PatternEngine | None = None,
                  header_height: int = 32, parent=None):
         super().__init__(label=label, width=width, header_height=header_height,
                          parent=parent)
         self._intervals = intervals
         self._show_description = show_description
-        self._pattern_engine = PatternEngine()
-
-    def _depth_to_y(self, depth: float, rect: QRectF) -> float:
-        if self.depth_span <= 0:
-            return rect.top()
-        return rect.top() + (depth - self.depth_top) / self.depth_span * rect.height()
+        self._pattern_engine = pattern_engine or _shared_pattern_engine
 
     def _fallback_color(self, lithology: str) -> QColor:
         hex_color = FACIES_COLORS.get(lithology, "#e0e0e0")
