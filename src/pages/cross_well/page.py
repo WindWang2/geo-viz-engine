@@ -6,11 +6,12 @@ from PySide6.QtCore import Qt, QObject, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QDialog, QListWidget, QListWidgetItem, QAbstractItemView,
+    QFileDialog, QMessageBox,
 )
 
 from geoviz_well_log import CrossWellWidget, build_qpainter_tracks
 from geoviz_well_log.renderer.canvas import WellLogCanvas
-from src.data.well_registry import get_well_data
+from src.data.well_registry import list_wells, get_well_data
 
 
 class _WellSelectDialog(QDialog):
@@ -91,6 +92,176 @@ class _WellLoadWorker(QObject):
         self.finished.emit(self.result)
 
 
-class CrossWellPage(CrossWellWidget):
-    """Cross-well comparison page for the main application."""
-    pass
+class CrossWellPage(QWidget):
+    """Cross-well comparison page with toolbar and multi-well display."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._worker = None
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # --- Toolbar ---
+        self._toolbar = QWidget()
+        self._toolbar.setStyleSheet(
+            "background: #f7fafc; border-bottom: 1px solid #e2e8f0;"
+        )
+        tb = QHBoxLayout(self._toolbar)
+        tb.setContentsMargins(12, 6, 12, 6)
+
+        title = QLabel("连井对比")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1a202c;")
+        tb.addWidget(title)
+        tb.addSpacing(12)
+
+        self._add_btn = QPushButton("添加井")
+        self._add_btn.setFixedHeight(28)
+        self._add_btn.setStyleSheet("""
+            QPushButton {
+                background: #edf2f7; color: #1e293b;
+                border: 1px solid #cbd5e1; border-radius: 4px;
+                padding: 0 12px; font-size: 13px;
+            }
+            QPushButton:hover { background: #e2e8f0; }
+        """)
+        self._add_btn.clicked.connect(self._on_add_wells)
+        tb.addWidget(self._add_btn)
+
+        self._auto_link_btn = QPushButton("自动连井")
+        self._auto_link_btn.setFixedHeight(28)
+        self._auto_link_btn.setStyleSheet(self._btn_style())
+        self._auto_link_btn.clicked.connect(self._on_auto_link)
+        tb.addWidget(self._auto_link_btn)
+
+        self._manual_link_btn = QPushButton("手动连井")
+        self._manual_link_btn.setFixedHeight(28)
+        self._manual_link_btn.setCheckable(True)
+        self._manual_link_btn.setStyleSheet(self._btn_style())
+        self._manual_link_btn.clicked.connect(self._on_toggle_manual_link)
+        tb.addWidget(self._manual_link_btn)
+
+        self._clear_btn = QPushButton("清除")
+        self._clear_btn.setFixedHeight(28)
+        self._clear_btn.setStyleSheet("""
+            QPushButton {
+                background: #fed7d7; color: #9b2c2c;
+                border: 1px solid #feb2b2; border-radius: 4px;
+                padding: 0 12px; font-size: 13px;
+            }
+            QPushButton:hover { background: #fc8181; color: white; }
+        """)
+        self._clear_btn.clicked.connect(self._on_clear)
+        tb.addWidget(self._clear_btn)
+
+        tb.addStretch()
+
+        self._export_btn = QPushButton("导出")
+        self._export_btn.setFixedHeight(28)
+        self._export_btn.setStyleSheet("""
+            QPushButton {
+                background: #3182ce; color: white;
+                border: none; border-radius: 4px;
+                padding: 0 12px; font-size: 13px;
+            }
+            QPushButton:hover { background: #2b6cb0; }
+            QPushButton:pressed { background: #2c5282; }
+        """)
+        self._export_btn.clicked.connect(self._on_export)
+        tb.addWidget(self._export_btn)
+
+        outer.addWidget(self._toolbar)
+
+        # --- CrossWellWidget (inherited from library) ---
+        self._cross_well = CrossWellWidget()
+        outer.addWidget(self._cross_well, 1)
+
+        # --- Empty state placeholder ---
+        self._placeholder = QLabel("点击\"添加井\"开始对比")
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._placeholder.setStyleSheet("font-size: 16px; color: #a0aec0;")
+        self._cross_well._container_layout.addWidget(self._placeholder)
+
+    @property
+    def canvas_count(self) -> int:
+        return self._cross_well.canvas_count
+
+    @staticmethod
+    def _btn_style() -> str:
+        return """
+            QPushButton {
+                background: #edf2f7; color: #1e293b;
+                border: 1px solid #cbd5e1; border-radius: 4px;
+                padding: 0 12px; font-size: 13px;
+            }
+            QPushButton:hover { background: #e2e8f0; }
+        """
+
+    # --- Actions ---
+
+    def _on_add_wells(self):
+        available = list_wells()
+        if not available:
+            QMessageBox.information(self, "添加井", "没有可用的井数据。")
+            return
+        dialog = _WellSelectDialog(available, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = dialog.get_selected()
+        if not selected:
+            return
+        self._load_wells(selected)
+
+    def _load_wells(self, well_names: list[str]):
+        """Load wells synchronously and populate the cross-well view."""
+        self._placeholder.setVisible(False)
+        self._add_btn.setEnabled(False)
+
+        self._worker = _WellLoadWorker(well_names)
+        self._worker.run()
+        self._on_load_finished(self._worker.result)
+
+    def _on_load_finished(self, canvases: list):
+        self._add_btn.setEnabled(True)
+        for canvas in canvases:
+            well_name = canvas.tracks[0].label if canvas.tracks else "unknown"
+            self._cross_well.add_canvas(canvas, well_name)
+
+    def _on_auto_link(self):
+        self._cross_well.auto_link()
+
+    def _on_toggle_manual_link(self):
+        self._cross_well.toggle_manual_link()
+        if self._cross_well._manual_link_active:
+            self._manual_link_btn.setStyleSheet(
+                self._btn_style() + "QPushButton { background: #fef3c7; border-color: #f59e0b; }"
+            )
+        else:
+            self._manual_link_btn.setStyleSheet(self._btn_style())
+
+    def _on_clear(self):
+        self._cross_well.clear_all()
+        self._placeholder.setVisible(True)
+        self._manual_link_btn.setChecked(False)
+        self._manual_link_btn.setStyleSheet(self._btn_style())
+
+    def _on_export(self):
+        if self._cross_well.canvas_count == 0:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出连井对比图", "cross_well",
+            "SVG 矢量 (*.svg);;PDF 矢量 (*.pdf);;PNG 位图 (*.png)",
+        )
+        if not path:
+            return
+        lower = path.lower()
+        if lower.endswith(".pdf"):
+            fmt = "pdf"
+        elif lower.endswith(".png"):
+            fmt = "png"
+        else:
+            if not lower.endswith(".svg"):
+                path += ".svg"
+            fmt = "svg"
+        self._cross_well.export_composite(path, fmt=fmt)

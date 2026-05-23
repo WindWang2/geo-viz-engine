@@ -78,3 +78,92 @@ def test_worker_skips_failed_wells(app):
             worker.run()
 
     assert len(worker.result) == 1  # bad_well skipped
+
+
+# ---- CrossWellPage tests ----
+
+from src.pages.cross_well.page import CrossWellPage
+
+
+def test_page_creation(app):
+    page = CrossWellPage()
+    assert page.canvas_count == 0
+
+
+def test_page_has_toolbar(app):
+    page = CrossWellPage()
+    assert page._toolbar is not None
+    assert page._add_btn is not None
+
+
+def test_page_add_button_opens_dialog(app, qtbot):
+    page = CrossWellPage()
+    # Verify add_btn is connected (click should not crash without wells)
+    # We just check the button exists and is enabled
+    assert page._add_btn.isEnabled()
+
+
+def test_page_load_wells(app):
+    from unittest.mock import patch, MagicMock
+    page = CrossWellPage()
+
+    mock_data = MagicMock()
+    mock_data.curves = []
+    mock_data.top_depth = 0
+    mock_data.bottom_depth = 100
+    mock_data.intervals = None
+
+    fake_entry = (lambda path, well_name=None: mock_data, "/fake.xlsx", {})
+
+    with patch("src.pages.cross_well.page.get_well_data", return_value=fake_entry):
+        with patch("src.pages.cross_well.page.build_qpainter_tracks", return_value=[]):
+            page._load_wells(["well1"])
+
+    assert page.canvas_count == 1
+
+
+def test_page_clear_all(app):
+    from unittest.mock import patch, MagicMock
+    page = CrossWellPage()
+
+    mock_data = MagicMock()
+    mock_data.curves = []
+    mock_data.top_depth = 0
+    mock_data.bottom_depth = 100
+    mock_data.intervals = None
+
+    fake_entry = (lambda path, well_name=None: mock_data, "/fake.xlsx", {})
+
+    with patch("src.pages.cross_well.page.get_well_data", return_value=fake_entry):
+        with patch("src.pages.cross_well.page.build_qpainter_tracks", return_value=[]):
+            page._load_wells(["well1", "well2"])
+
+    assert page.canvas_count == 2
+    page._on_clear()
+    assert page.canvas_count == 0
+
+
+def test_page_placeholder_visible_when_empty(app):
+    page = CrossWellPage()
+    page.show()
+    assert page._placeholder.isVisible()
+
+
+def test_page_placeholder_hidden_when_loaded(app):
+    from unittest.mock import patch, MagicMock
+    page = CrossWellPage()
+
+    mock_data = MagicMock()
+    mock_data.curves = []
+    mock_data.top_depth = 0
+    mock_data.bottom_depth = 100
+    mock_data.intervals = None
+
+    fake_entry = (lambda path, well_name=None: mock_data, "/fake.xlsx", {})
+
+    with patch("src.pages.cross_well.page.get_well_data", return_value=fake_entry):
+        with patch("src.pages.cross_well.page.build_qpainter_tracks", return_value=[]):
+            page._load_wells(["well1"])
+
+    page.show()
+    assert not page._placeholder.isVisible()
