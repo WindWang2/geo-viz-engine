@@ -2,8 +2,8 @@
 
 ![PySide6](https://img.shields.io/badge/PySide6-6.6+-41CD52?logo=qt)
 ![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python)
-![ECharts](https://img.shields.io/badge/ECharts-5.x-AA344D)
-![PyVista](https://img.shields.io/badge/PyVista-0.43+-5896FF)
+![QPainter](https://img.shields.io/badge/QPainter-Well_Log-41CD52)
+![PyVista](https://img.shields.io/badge/pyqtgraph-OpenGL-5896FF)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 面向地质工程师和科研人员的**跨平台桌面应用**，提供测井数据可视化、井位地图、地震体三维显示等功能。
