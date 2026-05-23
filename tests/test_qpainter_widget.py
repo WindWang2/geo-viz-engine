@@ -58,3 +58,11 @@ def test_reset_view(qtbot):
     t = widget.canvas.tracks[0]
     assert t.depth_top == 0.0
     assert t.depth_bottom == 100.0
+
+
+def test_set_tracks_empty(qtbot):
+    widget = QPainterWidget()
+    qtbot.addWidget(widget)
+    widget.set_tracks([])
+    assert len(widget.canvas.tracks) == 0
+    widget.reset_view()

@@ -19,6 +19,10 @@ class CrosshairOverlay:
         self._canvas = canvas
         self._cursor_y: float | None = None
 
+    @property
+    def visible(self) -> bool:
+        return self._cursor_y is not None
+
     def set_cursor_y(self, y: float | None):
         """Set cursor y-position (pixels) or None to hide."""
         self._cursor_y = y

@@ -52,6 +52,10 @@ class QPainterWidget(QScrollArea):
         h = max(self.height(), 600)
         self._canvas.setFixedSize(w, h)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_canvas_size()
+
     def eventFilter(self, obj, event):
         if obj is self._canvas:
             if isinstance(event, QMouseEvent) and event.type() == event.Type.MouseMove:
@@ -62,7 +66,7 @@ class QPainterWidget(QScrollArea):
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        if self._crosshair._cursor_y is not None and self._canvas.tracks:
+        if self._crosshair.visible and self._canvas.tracks:
             painter = QPainter(self.viewport())
             self._crosshair.paint_overlay(painter, QRectF(self.viewport().rect()))
             painter.end()
