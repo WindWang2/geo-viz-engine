@@ -302,7 +302,7 @@ class WellLogPage(QWidget):
         self._qpainter_widget: QPainterWidget | None = None
 
     def load_well(self, well_name: str) -> bool:
-        if well_name == self._current_well and self._chart_widget:
+        if well_name == self._current_well and (self._chart_widget or self._qpainter_widget):
             return True
 
         entry = get_well_data(well_name)
@@ -523,12 +523,15 @@ class WellLogPage(QWidget):
             if not path:
                 return
             canvas = self._qpainter_widget.canvas
-            if path.endswith(".svg"):
-                qpainter_export_svg(canvas, path)
-            elif path.endswith(".pdf"):
+            lower = path.lower()
+            if lower.endswith(".pdf"):
                 qpainter_export_pdf(canvas, path)
-            elif path.endswith(".png"):
+            elif lower.endswith(".png"):
                 qpainter_export_png(canvas, path)
+            else:
+                if not lower.endswith(".svg"):
+                    path += ".svg"
+                qpainter_export_svg(canvas, path)
         elif self._chart_widget:
             export_dialog(
                 self._chart_widget, parent=self,
