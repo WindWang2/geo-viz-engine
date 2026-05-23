@@ -4,6 +4,18 @@ from PySide6.QtCore import QRectF, Qt, QSizeF, Signal
 from PySide6.QtGui import QPainter, QFont, QColor
 from PySide6.QtWidgets import QWidget
 
+# ECharts-matching visual constants (Tailwind slate palette)
+ECHARTS_BORDER = "#94a3b8"
+ECHARTS_GRID = "#cbd5e1"
+ECHARTS_HEADER_BG = "#e2e8f0"
+ECHARTS_SUB_HEADER_BG = "#f8fafc"
+ECHARTS_TEXT = "#0f172a"
+ECHARTS_HEADER_TOP = 10
+ECHARTS_GROUP_HEADER_HEIGHT = 32
+ECHARTS_TRACK_HEADER_HEIGHT = 56
+ECHARTS_BODY_TOP_GAP = 8
+ECHARTS_FONT_FAMILY = "Inter, 'Microsoft YaHei', sans-serif"
+
 
 class BaseTrack(QWidget):
     """Abstract base for all well log tracks.
@@ -17,7 +29,7 @@ class BaseTrack(QWidget):
 
     depth_range_changed = Signal(float, float)
 
-    def __init__(self, label: str = "", width: int = 100, header_height: int = 32, parent=None):
+    def __init__(self, label: str = "", width: int = 100, header_height: int = 56, parent=None):
         if type(self) is BaseTrack:
             raise TypeError("BaseTrack is abstract and cannot be instantiated directly")
         super().__init__(parent)
@@ -70,9 +82,10 @@ class BaseTrack(QWidget):
     def paint_header(self, painter: QPainter, rect: QRectF):
         """Render track header (label)."""
         painter.save()
-        painter.setPen(Qt.GlobalColor.black)
+        painter.setPen(QColor(ECHARTS_TEXT))
         font = QFont()
-        font.setPointSize(8)
+        font.setPixelSize(14)
+        font.setBold(True)
         painter.setFont(font)
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._label)
         painter.restore()
@@ -86,10 +99,12 @@ class BaseTrack(QWidget):
         )
         painter.save()
         # Header background
-        painter.fillRect(header_rect, QColor("#f0f0f0"))
+        painter.fillRect(header_rect, QColor(ECHARTS_HEADER_BG))
+        painter.setPen(QColor(ECHARTS_BORDER))
         painter.drawRect(header_rect)
         self.paint_header(painter, header_rect)
         # Content
         self.paint_content(painter, content_rect)
+        painter.setPen(QColor(ECHARTS_BORDER))
         painter.drawRect(content_rect)
         painter.restore()
