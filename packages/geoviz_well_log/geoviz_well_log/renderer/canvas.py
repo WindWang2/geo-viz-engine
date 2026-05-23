@@ -1,11 +1,29 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QRectF, Signal
-from PySide6.QtGui import QPainter, QColor, QPen, QFont
+from PySide6.QtCore import Qt, QRectF, Signal, QObject, QEvent
+from PySide6.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent
 from PySide6.QtWidgets import QWidget
 
 from .track_base import BaseTrack, ECHARTS_HEADER_BG, ECHARTS_BORDER, ECHARTS_TEXT, ECHARTS_GROUP_HEADER_HEIGHT
 from .coordinator import LayoutCoordinator
+
+
+class _TrackMouseFilter(QObject):
+    """Event filter installed on each track widget to capture mouse events."""
+
+    def __init__(self, canvas: "WellLogCanvas"):
+        super().__init__(canvas)
+        self._canvas = canvas
+
+    def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
+        if isinstance(event, QMouseEvent):
+            if event.type() == QEvent.Type.MouseMove:
+                # Convert track-local pos to canvas coords via mapTo
+                canvas_pos = obj.mapTo(self._canvas, event.position().toPoint())
+                self._canvas.mouse_moved.emit(float(canvas_pos.y()))
+            elif event.type() == QEvent.Type.Leave:
+                self._canvas.mouse_moved.emit(-1.0)
+        return False  # don't consume — let tracks still receive events
 
 
 class WellLogCanvas(QWidget):
@@ -18,10 +36,12 @@ class WellLogCanvas(QWidget):
     depth_range_changed = Signal(float, float)
     interval_clicked = Signal(str, float, float)
     cursor_moved = Signal(float)
+    mouse_moved = Signal(float)  # y position in canvas coordinates, -1 = left
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._coordinator = LayoutCoordinator()
+        self._track_filter = _TrackMouseFilter(self)
         self.setMinimumSize(200, 400)
 
     @property
@@ -32,12 +52,21 @@ class WellLogCanvas(QWidget):
     def total_width(self) -> int:
         return self._coordinator.total_width
 
+    @property
+    def depth_span(self) -> float:
+        if not self.tracks:
+            return 100.0
+        return self.tracks[0].depth_span
+
     def add_track(self, track: BaseTrack):
         self._coordinator.add_track(track)
         track.setParent(self)
+        track.setMouseTracking(True)
+        track.installEventFilter(self._track_filter)
         self.setMinimumWidth(self.total_width)
 
     def remove_track(self, track: BaseTrack):
+        track.removeEventFilter(self._track_filter)
         self._coordinator.remove_track(track)
         self.setMinimumWidth(self.total_width)
 
@@ -48,9 +77,9 @@ class WellLogCanvas(QWidget):
 
     def set_tracks(self, tracks: list[BaseTrack]):
         for t in self._coordinator.tracks[:]:
-            self._coordinator.remove_track(t)
+            self.remove_track(t)
         for t in tracks:
-            self._coordinator.add_track(t)
+            self.add_track(t)
         self.setMinimumWidth(self.total_width)
 
     def paint_all(self, painter: QPainter):
@@ -111,3 +140,11 @@ class WellLogCanvas(QWidget):
         painter.fillRect(self.rect(), QColor("#ffffff"))
         self.paint_all(painter)
         painter.end()
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        self.mouse_moved.emit(event.position().y())
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self.mouse_moved.emit(-1.0)
+        super().leaveEvent(event)

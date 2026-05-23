@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QRectF, QObject, QEvent
-from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics, QBrush, QMouseEvent
+from PySide6.QtCore import Qt, QRectF
+from PySide6.QtGui import QPainter, QWheelEvent
 from PySide6.QtWidgets import QWidget, QScrollArea, QApplication
 
 from geoviz_well_log import WellLogCanvas, ZoomPanHandler, CrosshairOverlay
@@ -77,6 +77,8 @@ class QPainterWidget(QScrollArea):
         self._update_canvas_size()
 
     def _on_mouse_moved(self, canvas_y: float):
+        if not self._canvas.tracks:
+            return
         if canvas_y < 0:
             self._crosshair.set_cursor_y(None)
         else:
@@ -85,7 +87,6 @@ class QPainterWidget(QScrollArea):
 
     def wheelEvent(self, event):
         """Forward wheel events to canvas so ZoomPanHandler handles zoom."""
-        from PySide6.QtGui import QWheelEvent
         canvas_pos = self._canvas.mapFrom(self.viewport(), event.position().toPoint())
         canvas_global = event.globalPosition().toPoint() - event.position().toPoint() + canvas_pos
         new_event = QWheelEvent(
