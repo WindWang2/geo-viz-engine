@@ -60,15 +60,23 @@ class WellLogCanvas(QWidget):
 
         w = self.width()
         h = self.height()
+        natural_width = self.total_width
+        scale = w / natural_width if natural_width > 0 else 1.0
+
+        # Compute scaled x offsets and widths
+        scaled: list[tuple[float, float]] = []
+        x_off = 0.0
+        for track in self.tracks:
+            sw = track.width * scale
+            scaled.append((x_off, sw))
+            x_off += sw
 
         # Collect groups: group_name -> [(x_offset, width), ...]
         groups: dict[str, list[tuple[float, float]]] = {}
-        x_off = 0.0
-        for track in self.tracks:
+        for i, track in enumerate(self.tracks):
             gn = track.group_name
             if gn:
-                groups.setdefault(gn, []).append((x_off, track.width))
-            x_off += track.width
+                groups.setdefault(gn, []).append(scaled[i])
 
         # Draw group headers
         group_font = QFont()
@@ -83,10 +91,8 @@ class WellLogCanvas(QWidget):
             x_start = spans[0][0]
             x_end = spans[-1][0] + spans[-1][1]
             gw = x_end - x_start
-            # Group header rect at the very top
             group_rect = QRectF(x_start, 0, gw, ECHARTS_GROUP_HEADER_HEIGHT)
             painter.fillRect(group_rect, QColor(ECHARTS_HEADER_BG))
-            old_pen = painter.pen()
             painter.setPen(QPen(QColor(ECHARTS_BORDER), 1))
             painter.drawRect(group_rect)
             painter.setPen(QPen(QColor(ECHARTS_TEXT)))
@@ -95,11 +101,10 @@ class WellLogCanvas(QWidget):
 
         # Render individual tracks with uniform header height
         max_header = max((t.header_height for t in self.tracks), default=0)
-        x_offset = 0.0
-        for track in self.tracks:
-            full_rect = QRectF(x_offset, 0, track.width, h)
+        for i, track in enumerate(self.tracks):
+            x_off, sw = scaled[i]
+            full_rect = QRectF(x_off, 0, sw, h)
             track.export_render(painter, full_rect, canvas_header_height=max_header)
-            x_offset += track.width
 
     def paintEvent(self, event):
         painter = QPainter(self)

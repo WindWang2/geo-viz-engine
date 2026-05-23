@@ -48,7 +48,9 @@ class QPainterWidget(QScrollArea):
         self._canvas.set_depth_range(self._full_top, self._full_bottom)
 
     def _update_canvas_size(self):
-        w = self._canvas.total_width
+        viewport_w = self.viewport().width()
+        total_w = self._canvas.total_width
+        w = max(total_w, viewport_w)
         h = max(self.height(), 600)
         self._canvas.setFixedSize(w, h)
 
