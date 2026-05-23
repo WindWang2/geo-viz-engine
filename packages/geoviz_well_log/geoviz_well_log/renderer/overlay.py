@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import bisect
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics
+from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics, QBrush
 
 from typing import TYPE_CHECKING
 
@@ -10,10 +11,7 @@ if TYPE_CHECKING:
 
 
 class CrosshairOverlay:
-    """Crosshair depth cursor overlay for WellLogCanvas.
-
-    Not a QWidget -- renders via paint_overlay() called from canvas paintEvent.
-    """
+    """Crosshair depth cursor overlay with semi-transparent info panel."""
 
     def __init__(self, canvas: WellLogCanvas):
         self._canvas = canvas
@@ -24,20 +22,67 @@ class CrosshairOverlay:
         return self._cursor_y is not None
 
     def set_cursor_y(self, y: float | None):
-        """Set cursor y-position (pixels) or None to hide."""
         self._cursor_y = y
 
     def depth_at_y(self, y: float) -> float:
-        """Convert pixel y-coordinate to depth value."""
         track = self._canvas.tracks[0] if self._canvas.tracks else None
         if track is None or self._canvas.height() <= 0:
             return 0.0
-        ratio = y / self._canvas.height()
+        header_h = max((t.header_height for t in self._canvas.tracks), default=56)
+        content_h = self._canvas.height() - header_h
+        if content_h <= 0:
+            return 0.0
+        cy = y - header_h
+        ratio = cy / content_h
         depth = track.depth_top + ratio * track.depth_span
         return max(track.depth_top, min(depth, track.depth_bottom))
 
+    def _collect_values(self, depth: float) -> list[tuple[str, str]]:
+        """Collect (label, value) pairs from all tracks at given depth."""
+        rows: list[tuple[str, str]] = []
+        for track in self._canvas.tracks:
+            name = track.label
+            from .curve_track import CurveTrack
+            if isinstance(track, CurveTrack):
+                for curve in track._curves:
+                    depths = track._sorted_depths.get(curve.name, curve.depth)
+                    values = track._sorted_values.get(curve.name, curve.values)
+                    idx = bisect.bisect_left(depths, depth)
+                    best = idx
+                    if idx > 0 and (idx >= len(depths) or
+                                    abs(depths[idx - 1] - depth) < abs(depths[idx] - depth)):
+                        best = idx - 1
+                    if 0 <= best < len(values):
+                        rows.append((curve.name, f"{values[best]:.2f}"))
+            else:
+                from .interval_track import IntervalTrack
+                from .lithology_track import LithologyTrack
+                from .facies_track import FaciesTrack
+                from .systems_tract import SystemsTractTrack
+                if isinstance(track, LithologyTrack):
+                    for iv in track._intervals:
+                        if iv.top <= depth <= iv.bottom:
+                            rows.append((name, iv.lithology))
+                            break
+                elif isinstance(track, FaciesTrack):
+                    for attr in ("phase", "sub_phase", "micro_phase"):
+                        for iv in getattr(track._facies_data, attr, []):
+                            if iv.top <= depth <= iv.bottom:
+                                rows.append((name, iv.name))
+                                break
+                elif isinstance(track, SystemsTractTrack):
+                    for iv in track._intervals:
+                        if iv.top <= depth <= iv.bottom:
+                            rows.append((name, iv.name))
+                            break
+                elif isinstance(track, IntervalTrack):
+                    for iv in track._intervals:
+                        if iv.top <= depth <= iv.bottom:
+                            rows.append((name, iv.name))
+                            break
+        return rows
+
     def paint_overlay(self, painter: QPainter, rect: QRectF):
-        """Draw crosshair line and depth tooltip."""
         if self._cursor_y is None:
             return
         if self._cursor_y < rect.top() or self._cursor_y > rect.bottom():
@@ -46,33 +91,58 @@ class CrosshairOverlay:
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # Dashed horizontal line
+        # Dashed horizontal line across full width
         pen = QPen(QColor("#ef4444"), 1, Qt.PenStyle.DashLine)
         painter.setPen(pen)
         painter.drawLine(int(rect.left()), int(self._cursor_y),
                          int(rect.right()), int(self._cursor_y))
 
-        # Depth tooltip
+        # Semi-transparent info panel
         depth = self.depth_at_y(self._cursor_y)
+        rows = self._collect_values(depth)
+
         font = QFont()
-        font.setPointSize(7)
+        font.setPixelSize(12)
         painter.setFont(font)
-
-        label = f"{depth:.1f} m"
         fm = QFontMetrics(font)
-        text_width = fm.horizontalAdvance(label) + 8
-        text_height = fm.height() + 4
 
-        tooltip_x = rect.right() - text_width - 4
-        tooltip_y = self._cursor_y - text_height - 2
-        if tooltip_y < rect.top():
-            tooltip_y = self._cursor_y + 4
+        # Build panel lines
+        lines = [f"深度: {depth:.1f} m"]
+        for label, value in rows:
+            lines.append(f"{label}: {value}")
 
-        tooltip_rect = QRectF(tooltip_x, tooltip_y, text_width, text_height)
-        painter.fillRect(tooltip_rect, QColor("#fef2f2"))
-        painter.setPen(QPen(QColor("#ef4444"), 0.5))
-        painter.drawRect(tooltip_rect)
-        painter.setPen(QColor("#dc2626"))
-        painter.drawText(tooltip_rect, Qt.AlignmentFlag.AlignCenter, label)
+        line_h = fm.height() + 2
+        max_w = max(fm.horizontalAdvance(l) for l in lines) + 16
+        panel_h = len(lines) * line_h + 8
+        panel_w = max_w
+
+        # Position: right side, offset from cursor
+        px = rect.right() - panel_w - 8
+        py = self._cursor_y - panel_h - 4
+        if py < rect.top():
+            py = self._cursor_y + 4
+
+        panel_rect = QRectF(px, py, panel_w, panel_h)
+
+        # Semi-transparent background
+        painter.fillRect(panel_rect, QColor(255, 255, 255, 210))
+        painter.setPen(QPen(QColor("#94a3b8"), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(panel_rect, 4, 4)
+
+        # Text
+        painter.setPen(QColor("#0f172a"))
+        painter.setFont(font)
+        ty = py + 4
+        for i, line in enumerate(lines):
+            text_rect = QRectF(px + 8, ty + i * line_h, panel_w - 16, line_h)
+            if i == 0:
+                bold_font = QFont(font)
+                bold_font.setBold(True)
+                painter.setFont(bold_font)
+                painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, line)
+                painter.setFont(font)
+            else:
+                painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, line)
 
         painter.restore()

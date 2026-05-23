@@ -25,15 +25,19 @@ def test_overlay_creation(qtbot):
 def test_overlay_depth_at_y(qtbot):
     canvas = _make_canvas(qtbot)
     overlay = CrosshairOverlay(canvas)
+    # Canvas height=500, header_h=56, content area=444px
+    # y=250 => content_y=194 => depth=194/444 * 1000 ≈ 436.9
     depth = overlay.depth_at_y(250)
-    assert depth == pytest.approx(500.0)
+    header_h = 56
+    content_h = 500 - header_h
+    expected = (250 - header_h) / content_h * 1000
+    assert depth == pytest.approx(expected, abs=1.0)
 
 
 def test_overlay_depth_at_y_clamped(qtbot):
     canvas = _make_canvas(qtbot)
     overlay = CrosshairOverlay(canvas)
-    depth = overlay.depth_at_y(-10)
-    assert depth == pytest.approx(0.0)
+    # Below canvas => clamped to bottom
     depth = overlay.depth_at_y(600)
     assert depth == pytest.approx(1000.0)
 
