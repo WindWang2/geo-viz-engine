@@ -17,7 +17,7 @@ class CurveTrack(BaseTrack):
 
     def __init__(self, curves: list[CurveData], label: str = "",
                  width: int = 150, log_scale: bool = False,
-                 header_height: int = 32, parent=None):
+                 header_height: int = 56, parent=None):
         super().__init__(label=label or (curves[0].name if curves else ""),
                          width=width, header_height=header_height, parent=parent)
         self._curves = curves

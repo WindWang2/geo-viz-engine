@@ -10,6 +10,9 @@ from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
 
 _shared_pattern_engine = PatternEngine()
 
+# Sort keys by length descending for fuzzy matching
+_SORTED_COLOR_KEYS = sorted(FACIES_COLORS.keys(), key=len, reverse=True)
+
 
 class LithologyTrack(BaseTrack):
     """Lithology column with SVG pattern fills."""
@@ -17,7 +20,7 @@ class LithologyTrack(BaseTrack):
     def __init__(self, intervals: list[LithologyInterval], label: str = "Lithology",
                  width: int = 80, show_description: bool = True,
                  pattern_engine: PatternEngine | None = None,
-                 header_height: int = 32, parent=None):
+                 header_height: int = 56, parent=None):
         super().__init__(label=label, width=width, header_height=header_height,
                          parent=parent)
         self._intervals = intervals
@@ -25,8 +28,13 @@ class LithologyTrack(BaseTrack):
         self._pattern_engine = pattern_engine or _shared_pattern_engine
 
     def _fallback_color(self, lithology: str) -> QColor:
-        hex_color = FACIES_COLORS.get(lithology, "#e0e0e0")
-        return QColor(hex_color)
+        hex_color = FACIES_COLORS.get(lithology)
+        if hex_color is None:
+            for key in _SORTED_COLOR_KEYS:
+                if key in lithology:
+                    hex_color = FACIES_COLORS[key]
+                    break
+        return QColor(hex_color or "#e0e0e0")
 
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()

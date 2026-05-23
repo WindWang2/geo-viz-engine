@@ -8,6 +8,9 @@ from PySide6.QtCore import QSize, Qt
 
 from ..pattern_map import PATTERN_MAP, FACIES_COLORS
 
+# Sort keys by length descending so "粉砂岩" matches before "砂岩"
+_SORTED_PATTERN_KEYS = sorted(PATTERN_MAP.keys(), key=len, reverse=True)
+
 
 class PatternEngine:
     """Cache that converts SVG pattern files to tiled QBrush objects."""
@@ -37,15 +40,34 @@ class PatternEngine:
         painter.end()
         return QBrush(pm)
 
+    def _fuzzy_lookup(self, lithology_name: str) -> str | None:
+        """Find pattern_id by exact match, then by substring match.
+
+        E.g. "浅灰色粉砂岩" contains "粉砂岩" -> returns "siltstone".
+        Longer keys are tried first to avoid "砂岩" matching before "粉砂岩".
+        """
+        # Exact match
+        pid = PATTERN_MAP.get(lithology_name)
+        if pid is not None:
+            return pid
+
+        # Substring match: find the longest PATTERN_MAP key contained in the name
+        for key in _SORTED_PATTERN_KEYS:
+            if key in lithology_name:
+                return PATTERN_MAP[key]
+
+        return None
+
     def get_brush(self, lithology_name: str) -> QBrush | None:
         """Return a tiled QBrush for the given lithology name.
 
-        Returns None if the name has no PATTERN_MAP entry or the SVG file is missing.
+        Supports fuzzy matching: "浅灰色粉砂岩" matches "粉砂岩".
+        Returns None if no pattern found.
         """
         if lithology_name in self._brush_cache:
             return self._brush_cache[lithology_name]
 
-        pattern_id = PATTERN_MAP.get(lithology_name)
+        pattern_id = self._fuzzy_lookup(lithology_name)
         if pattern_id is None:
             return None
 

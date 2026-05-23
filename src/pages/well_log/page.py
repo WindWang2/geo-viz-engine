@@ -516,7 +516,7 @@ class WellLogPage(QWidget):
 
     def _on_merge_curves(self):
         selected_items = self._track_list_widget.selectedItems()
-        if len(selected_items) != 2:
+        if len(selected_items) < 2 or len(selected_items) > 3:
             return
 
         if self._qpainter_widget:
@@ -534,18 +534,16 @@ class WellLogPage(QWidget):
             elif it.text() in pool and pool[it.text()]["type"] == "CurveTrack":
                 valid.append(it.text())
 
-        if len(valid) != 2:
+        if len(valid) < 2:
             return
 
-        c1, c2 = valid
-        row1 = self._track_list_widget.row(selected_items[0])
-        row2 = self._track_list_widget.row(selected_items[1])
-        insert_idx = min(row1, row2)
+        merged_label = " + ".join(valid)
+        rows = sorted([self._track_list_widget.row(it) for it in selected_items], reverse=True)
+        for r in rows:
+            self._track_list_widget.takeItem(r)
+        insert_idx = rows[-1]
 
-        self._track_list_widget.takeItem(max(row1, row2))
-        self._track_list_widget.takeItem(min(row1, row2))
-
-        item = QListWidgetItem(f"{c1} + {c2}")
+        item = QListWidgetItem(merged_label)
         item.setIcon(QIcon("src/resources/icons/curve.svg"))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(Qt.CheckState.Checked)
@@ -580,51 +578,50 @@ class WellLogPage(QWidget):
         self._update_chart()
 
     def _qpainter_merge_curves(self, selected_items):
-        """Merge two curve tracks in QPainter mode."""
+        """Merge 2-3 curve tracks in QPainter mode."""
         from geoviz_well_log.renderer.curve_track import CurveTrack
 
         label_map = {t.label: t for t in self._all_qpainter_tracks}
 
         labels = []
+        tracks = []
         for it in selected_items:
             text = it.text()
             track = label_map.get(text)
             if track and isinstance(track, CurveTrack):
                 labels.append(text)
+                tracks.append(track)
             else:
                 return
 
-        if len(labels) != 2:
+        if len(labels) < 2:
             return
 
-        t1 = label_map[labels[0]]
-        t2 = label_map[labels[1]]
-
-        # Combine curves from both tracks
-        combined_curves = list(t1._curves) + list(t2._curves)
-        merged_label = f"{labels[0]} + {labels[1]}"
+        # Combine curves from all selected tracks
+        combined_curves = []
+        for t in tracks:
+            combined_curves.extend(t._curves)
+        merged_label = " + ".join(labels)
         merged = CurveTrack(curves=combined_curves, label=merged_label, width=140)
 
         # Replace in all_qpainter_tracks
-        idx1 = self._all_qpainter_tracks.index(t1)
-        idx2 = self._all_qpainter_tracks.index(t2)
-        self._all_qpainter_tracks.remove(t1)
-        self._all_qpainter_tracks.remove(t2)
-        insert_idx = min(idx1, idx2)
+        indices = [self._all_qpainter_tracks.index(t) for t in tracks]
+        for t in tracks:
+            self._all_qpainter_tracks.remove(t)
+        insert_idx = min(indices)
         self._all_qpainter_tracks.insert(insert_idx, merged)
-        merged.set_depth_range(t1.depth_top, t1.depth_bottom)
+        merged.set_depth_range(tracks[0].depth_top, tracks[0].depth_bottom)
 
         # Update list widget
-        row1 = self._track_list_widget.row(selected_items[0])
-        row2 = self._track_list_widget.row(selected_items[1])
-        self._track_list_widget.takeItem(max(row1, row2))
-        self._track_list_widget.takeItem(min(row1, row2))
+        rows = sorted([self._track_list_widget.row(it) for it in selected_items], reverse=True)
+        for r in rows:
+            self._track_list_widget.takeItem(r)
 
         item = QListWidgetItem(merged_label)
         item.setIcon(QIcon("src/resources/icons/curve.svg"))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(Qt.CheckState.Checked)
-        self._track_list_widget.insertItem(min(row1, row2), item)
+        self._track_list_widget.insertItem(rows[-1], item)
         self._update_chart()
 
     def _qpainter_split_curve(self, list_item, text: str):
@@ -638,8 +635,6 @@ class WellLogPage(QWidget):
             return
 
         curves = list(track._curves)
-        if len(curves) != 2:
-            return
 
         # Create individual tracks
         new_tracks = []
