@@ -67,8 +67,8 @@ class CrossWellPage(QWidget):
         layout.addWidget(self.scroll)
         
         # Connection Overlay
-        self.overlay = ConnectionOverlay(self.container, [])
-        self.overlay.hide() 
+        self.overlay = ConnectionOverlay(self.container)
+        self.overlay.hide()
 
         self.engines = []
         self._well_data_cache = {}
@@ -260,7 +260,7 @@ class CrossWellPage(QWidget):
         # Insert before the last stretch
         self.well_layout.insertWidget(self.well_layout.count() - 1, engine)
         self.engines.append(engine)
-        self.overlay._engines = self.engines
+        self.overlay.set_canvases(self.engines)
         self.sync_manager.register_engine(engine)
 
         payload = self._build_engine_payload(data, 0.0)
@@ -565,8 +565,7 @@ class CrossWellPage(QWidget):
         self.links = []
         self.overlay.set_links([])
         self.sync_manager = SyncManager()
-        self.overlay._engines = []
-        self.overlay._depth_cache.clear()
+        self.overlay.set_canvases([])
         self._well_data_cache = {}
         self._update_flatten_combo()
         self.location_map.hide()

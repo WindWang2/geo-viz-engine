@@ -1,78 +1,114 @@
+from __future__ import annotations
+
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QPainter, QColor, QPen, QPolygonF
 from PySide6.QtWidgets import QWidget
-from PySide6.QtGui import QPainter, QPolygonF, QColor, QPen
-from PySide6.QtCore import QPointF, Qt
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .renderer.canvas import WellLogCanvas
+
 
 class ConnectionOverlay(QWidget):
-    def __init__(self, parent, engines):
+    """Transparent overlay drawing correlation polygons between WellLogCanvas widgets."""
+
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._engines = engines
-        self._links = [] # List of CorrelationLink objects
-        self._depth_cache = {} # Map (engine, depth) -> y_pixel
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._canvases: list[WellLogCanvas] = []
+        self._links: list = []
 
-    def set_links(self, links):
-        self._links = links
+    def set_canvases(self, canvases: list[WellLogCanvas]):
+        self._canvases = list(canvases)
         self.update()
+
+    def set_links(self, links: list):
+        self._links = list(links)
+        self.update()
+
+    # --- Backward-compatible stubs for ECharts-based CrossWellPage ---
+    # These are no-ops; the new QPainter pipeline computes positions directly.
 
     def update_depth_cache(self, engine, depth, y_pixel):
-        self._depth_cache[(engine, depth)] = y_pixel
-        self.update()
+        """No-op stub — legacy ECharts depth cache is unused by QPainter canvases."""
+        pass
+
+    @property
+    def _depth_cache(self):
+        return {}
+
+    def depth_to_y(self, canvas: WellLogCanvas, depth: float) -> float:
+        """Convert a depth value to Y pixel position within the canvas."""
+        if not canvas.tracks:
+            return 0.0
+        header_h = max((t.header_height for t in canvas.tracks), default=56)
+        content_h = canvas.height() - header_h
+        if content_h <= 0:
+            return 0.0
+        track = canvas.tracks[0]
+        span = track.depth_span
+        if span <= 0:
+            return header_h
+        ratio = (depth - track.depth_top) / span
+        return header_h + ratio * content_h
+
+    def _canvas_left(self, canvas: WellLogCanvas) -> float:
+        return canvas.mapTo(self, canvas.rect().topLeft()).x()
+
+    def _canvas_right(self, canvas: WellLogCanvas) -> float:
+        return canvas.mapTo(self, canvas.rect().topRight()).x()
 
     def paintEvent(self, event):
-        if not self._links or len(self._engines) < 2:
+        self.paint_event(QPainter(self), QRectF(self.rect()))
+
+    def paint_event(self, painter: QPainter, rect: QRectF):
+        if not self._links or not self._canvases:
             return
+        canvas_map = {c: c for c in self._canvases}
+        name_map = {}
+        for c in self._canvases:
+            if c.tracks:
+                name_map[c.tracks[0].label] = c
 
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        drawn_count = 0
         for link in self._links:
+            source = canvas_map.get(link.source_well) or name_map.get(link.source_well)
+            target = canvas_map.get(link.target_well) or name_map.get(link.target_well)
+            if source is None or target is None:
+                continue
+
+            src_left = self._canvas_left(source)
+            src_right = self._canvas_right(source)
+            tgt_left = self._canvas_left(target)
+            tgt_right = self._canvas_right(target)
+
             try:
-                src_engine = next((e for e in self._engines if getattr(e, '_well_name', '') == link.source_well), None)
-                tgt_engine = next((e for e in self._engines if getattr(e, '_well_name', '') == link.target_well), None)
-                
-                if not src_engine or not tgt_engine:
-                    continue
+                src_parts = link.source_interval_id.split("_")
+                src_top = float(src_parts[0])
+                src_bot = float(src_parts[1])
+                tgt_parts = link.target_interval_id.split("_")
+                tgt_top = float(tgt_parts[0])
+                tgt_bot = float(tgt_parts[1])
+            except (ValueError, IndexError):
+                continue
 
-                parts_s = link.source_interval_id.split('_')
-                parts_t = link.target_interval_id.split('_')
-                if len(parts_s) < 2 or len(parts_t) < 2: continue
-                
-                s_top, s_bot = parts_s[0], parts_s[1]
-                t_top, t_bot = parts_t[0], parts_t[1]
+            sy1 = self.depth_to_y(source, src_top)
+            sy2 = self.depth_to_y(source, src_bot)
+            ty1 = self.depth_to_y(target, tgt_top)
+            ty2 = self.depth_to_y(target, tgt_bot)
 
-                # Get coordinates relative to the overlay parent (the container)
-                src_rect = src_engine.geometry()
-                tgt_rect = tgt_engine.geometry()
-                
-                y_s_top = self._depth_cache.get((src_engine, s_top))
-                y_s_bot = self._depth_cache.get((src_engine, s_bot))
-                y_t_top = self._depth_cache.get((tgt_engine, t_top))
-                y_t_bot = self._depth_cache.get((tgt_engine, t_bot))
+            polygon = QPolygonF([
+                (src_right, sy1),
+                (tgt_left, ty1),
+                (tgt_left, ty2),
+                (src_right, sy2),
+            ])
 
-                if None in (y_s_top, y_s_bot, y_t_top, y_t_bot):
-                    continue
-
-                # Polygon points
-                # Source well right edge to Target well left edge
-                x_s = src_rect.right()
-                x_t = tgt_rect.left()
-                
-                poly = QPolygonF([
-                    QPointF(x_s, src_rect.y() + y_s_top),
-                    QPointF(x_t, tgt_rect.y() + y_t_top),
-                    QPointF(x_t, tgt_rect.y() + y_t_bot),
-                    QPointF(x_s, src_rect.y() + y_s_bot)
-                ])
-
-                color = QColor(link.color)
-                color.setAlpha(120) 
-                painter.setBrush(color)
-                painter.setPen(QPen(QColor(link.color).darker(110), 1, Qt.PenStyle.SolidLine))
-                painter.drawPolygon(poly)
-                drawn_count += 1
-
-            except Exception as e:
-                print(f"[Overlay] Draw error: {e}")
-        
-        # print(f"[Overlay] Painted {drawn_count} correlation polygons out of {len(self._links)} links")
+            color = QColor(link.color)
+            color.setAlpha(120)
+            painter.setPen(QPen(color.darker(120), 1))
+            painter.setBrush(color)
+            painter.drawPolygon(polygon)
