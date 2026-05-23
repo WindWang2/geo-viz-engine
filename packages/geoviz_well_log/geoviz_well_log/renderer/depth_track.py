@@ -11,8 +11,8 @@ class DepthTrack(BaseTrack):
     """Depth ruler track with adaptive tick spacing."""
 
     def __init__(self, top_depth: float = 0.0, bottom_depth: float = 100.0,
-                 width: int = 60, header_height: int = 56, parent=None):
-        super().__init__(label="Depth", width=width, header_height=header_height, parent=parent)
+                 width: int = 60, header_height: int = 56, label: str = "Depth", parent=None):
+        super().__init__(label=label, width=width, header_height=header_height, parent=parent)
         self._tick_interval = 10.0
         self.set_depth_range(top_depth, bottom_depth)
 

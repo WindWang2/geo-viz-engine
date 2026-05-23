@@ -300,6 +300,7 @@ class WellLogPage(QWidget):
         self._track_mgr: TrackManager | None = None
         self._cached_metadata = {}
         self._qpainter_widget: QPainterWidget | None = None
+        self._all_qpainter_tracks: list = []
 
     def load_well(self, well_name: str) -> bool:
         if well_name == self._current_well and (self._chart_widget or self._qpainter_widget):
@@ -366,8 +367,30 @@ class WellLogPage(QWidget):
             self._switch_to_qpainter()
         else:
             self._update_chart()
+            self._merge_btn.setEnabled(True)
+            self._split_btn.setEnabled(True)
 
         return True
+
+    def _populate_qpainter_list_widget(self):
+        """Populate track list from QPainter track labels."""
+        from geoviz_well_log.renderer.curve_track import CurveTrack
+        from geoviz_well_log.renderer.depth_track import DepthTrack
+        from geoviz_well_log.renderer.lithology_track import LithologyTrack
+
+        self._track_list_widget.blockSignals(True)
+        self._track_list_widget.clear()
+
+        for track in self._all_qpainter_tracks:
+            label = track.label
+            item = QListWidgetItem(label)
+            if isinstance(track, CurveTrack):
+                item.setIcon(QIcon("src/resources/icons/curve.svg"))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            self._track_list_widget.addItem(item)
+
+        self._track_list_widget.blockSignals(False)
 
     def _populate_list_widget_converted(self, custom_tracks):
         self._track_list_widget.blockSignals(True)
@@ -422,10 +445,13 @@ class WellLogPage(QWidget):
             self._chart_widget = None
 
         self._qpainter_widget = QPainterWidget(self)
-        tracks = build_qpainter_tracks(self._current_data)
-        self._qpainter_widget.set_tracks(tracks)
+        self._all_qpainter_tracks = build_qpainter_tracks(self._current_data)
+        self._qpainter_widget.set_tracks(self._all_qpainter_tracks)
         self._stack.addWidget(self._qpainter_widget)
         self._stack.setCurrentWidget(self._qpainter_widget)
+
+        # Populate track list from QPainter tracks
+        self._populate_qpainter_list_widget()
 
         self._merge_btn.setEnabled(False)
         self._split_btn.setEnabled(False)
@@ -442,12 +468,22 @@ class WellLogPage(QWidget):
         self._chart_widget.bridge.svg_received.connect(self._save_svg_to_disk)
         self._stack.addWidget(self._chart_widget)
         self._stack.setCurrentWidget(self._chart_widget)
+
+        # Re-populate list widget for ECharts
+        if self._track_mgr:
+            pool = self._track_mgr.pool
+            display_items = build_legacy_display_items(pool)
+            self._populate_list_widget_legacy(display_items)
+
         self._update_chart()
 
         self._merge_btn.setEnabled(True)
         self._split_btn.setEnabled(True)
 
     def _update_chart(self, *_):
+        if self._qpainter_widget:
+            self._update_qpainter_tracks()
+            return
         if not self._track_mgr or not self._chart_widget:
             return
         display_items = []
@@ -456,6 +492,27 @@ class WellLogPage(QWidget):
             display_items.append((item.text(), item.checkState() == Qt.CheckState.Checked))
         payload = self._track_mgr.build_payload(self._cached_metadata, display_items)
         self._chart_widget.render_data(payload)
+
+    def _update_qpainter_tracks(self):
+        """Filter and reorder QPainter tracks based on track list widget."""
+        if not self._qpainter_widget or not self._all_qpainter_tracks:
+            return
+
+        # Build label -> track mapping
+        label_map = {t.label: t for t in self._all_qpainter_tracks}
+
+        # Read list widget state: checked items in display order
+        visible_tracks = []
+        for i in range(self._track_list_widget.count()):
+            item = self._track_list_widget.item(i)
+            if item.checkState() != Qt.CheckState.Checked:
+                continue
+            label = item.text()
+            if label in label_map:
+                visible_tracks.append(label_map[label])
+
+        if visible_tracks:
+            self._qpainter_widget.set_tracks(visible_tracks)
 
     def _on_merge_curves(self):
         selected_items = self._track_list_widget.selectedItems()

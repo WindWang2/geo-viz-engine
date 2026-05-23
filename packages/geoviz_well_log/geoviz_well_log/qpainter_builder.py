@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .models import FaciesData, IntervalItem, WellLogData, CurveData, LineStyle
+from .models import FaciesData, IntervalItem, LithologyInterval, WellLogData, CurveData, LineStyle
 from .renderer import (
     BaseTrack,
     CurveTrack,
@@ -27,6 +27,21 @@ _MERGE_GROUPS = [
 
 _LOG_SCALE_CURVES = {"RT", "RXO"}
 
+# Map track labels to ECharts-style display names
+_LABEL_TO_DISPLAY = {
+    "深度": "深度 (m)",
+    "AC/GR": "AC/GR",
+    "RT/RXO": "RT/RXO",
+    "系": "系",
+    "统": "统",
+    "组": "组",
+    "岩性": "岩性",
+    "岩性描述": "岩性描述",
+    "沉积相": "沉积相",
+    "体系域": "体系域",
+    "层序": "层序",
+}
+
 
 def _apply_curve_meta(curve: CurveData) -> CurveData:
     meta = CURVE_META.get(curve.name, {})
@@ -42,6 +57,14 @@ def _apply_curve_meta(curve: CurveData) -> CurveData:
     )
 
 
+def _intervals_to_lithology(items: list[IntervalItem]) -> list[LithologyInterval]:
+    """Convert IntervalItem list to LithologyInterval for SVG pattern fills."""
+    return [
+        LithologyInterval(top=i.top, bottom=i.bottom, lithology=i.name, description=i.name)
+        for i in items
+    ]
+
+
 def build_qpainter_tracks(data: WellLogData) -> list[BaseTrack]:
     """Convert WellLogData into QPainter track objects for WellLogCanvas.
 
@@ -52,7 +75,7 @@ def build_qpainter_tracks(data: WellLogData) -> list[BaseTrack]:
     tracks: list[BaseTrack] = []
 
     # 1. Depth track (always)
-    tracks.append(DepthTrack(top_depth=data.top_depth, bottom_depth=data.bottom_depth, width=60))
+    tracks.append(DepthTrack(top_depth=data.top_depth, bottom_depth=data.bottom_depth, width=60, label="深度"))
 
     # 2. Curve tracks — merge according to _MERGE_GROUPS
     curve_map = {c.name: c for c in data.curves}
@@ -91,16 +114,21 @@ def build_qpainter_tracks(data: WellLogData) -> list[BaseTrack]:
                     intervals=items, label=label, width=width, group_name=group
                 ))
 
-    # 4. Lithology
+    # 4. Lithology — try LithologyInterval list first, then intervals.lithology
+    litho_intervals: list[LithologyInterval] = []
     if data.lithology:
-        tracks.append(LithologyTrack(intervals=data.lithology, width=80))
+        litho_intervals = data.lithology
+    elif data.intervals and data.intervals.lithology:
+        litho_intervals = _intervals_to_lithology(data.intervals.lithology)
+    if litho_intervals:
+        tracks.append(LithologyTrack(intervals=litho_intervals, label="岩性", width=80))
 
     # 5. Facies with group_name
     if data.intervals and data.intervals.facies:
         f = data.intervals.facies
         has_data = any([f.phase, f.sub_phase, f.micro_phase])
         if has_data:
-            tracks.append(FaciesTrack(facies_data=f, width=80, nested=True, group_name="沉积相"))
+            tracks.append(FaciesTrack(facies_data=f, width=80, nested=True, group_name="沉积相", label="沉积相"))
 
     # 6. Systems tract
     if data.intervals and data.intervals.systems_tract:
