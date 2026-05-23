@@ -69,20 +69,13 @@ class LithologyTrack(BaseTrack):
             painter.setPen(QPen(QColor(ECHARTS_BORDER), 0.5))
             painter.drawRect(interval_rect)
 
-            # Description text (vertical, along right edge)
-            if self._show_description and interval.description and interval_rect.height() > 16:
+            # Lithology name (horizontal, centered)
+            if interval_rect.height() > 16:
                 painter.setFont(desc_font)
                 painter.setPen(QPen(QColor(ECHARTS_TEXT), 1))
-                painter.save()
-                tx = interval_rect.right() - 4
-                ty = interval_rect.center().y()
-                painter.translate(tx, ty)
-                painter.rotate(-90)
-                text_w = interval_rect.height() - 4
-                text_h = 10
-                painter.drawText(QRectF(-text_w / 2, -text_h / 2, text_w, text_h),
-                                 Qt.AlignmentFlag.AlignCenter, interval.description)
-                painter.restore()
+                text_rect = QRectF(interval_rect.left() + 2, interval_rect.top() + 1,
+                                   interval_rect.width() - 4, interval_rect.height() - 2)
+                painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, interval.lithology)
 
         painter.setClipping(False)
         painter.setPen(QPen(QColor(ECHARTS_BORDER), 1))
