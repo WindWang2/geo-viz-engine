@@ -60,3 +60,31 @@ def test_overlay_paint_hidden(qtbot):
     painter = QPainter(pm)
     overlay.paint_overlay(painter, QRectF(0, 0, 210, 500))
     painter.end()
+
+
+def test_overlay_interpolation(qtbot):
+    """Curve values should be linearly interpolated between depth points."""
+    from geoviz_well_log.renderer.curve_track import CurveTrack
+    from geoviz_well_log.models import CurveData
+
+    canvas = WellLogCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(210, 500)
+
+    # Create a curve with known values
+    curve = CurveData(
+        name="GR",
+        depth=[0.0, 100.0],
+        values=[10.0, 20.0],
+    )
+    track = CurveTrack(curves=[curve])
+    track.set_depth_range(0, 100)
+    canvas.add_track(track)
+    canvas.set_depth_range(0, 100)
+
+    overlay = CrosshairOverlay(canvas)
+    # depth=50 should interpolate to 15.0 (midpoint)
+    rows = overlay._collect_values(50.0)
+    gr_rows = [(n, v) for n, v in rows if n == "GR"]
+    assert len(gr_rows) == 1
+    assert float(gr_rows[0][1]) == pytest.approx(15.0, abs=0.1)

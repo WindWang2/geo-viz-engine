@@ -47,13 +47,25 @@ class CrosshairOverlay:
                 for curve in track._curves:
                     depths = track._sorted_depths.get(curve.name, curve.depth)
                     values = track._sorted_values.get(curve.name, curve.values)
+                    if len(depths) < 2:
+                        continue
                     idx = bisect.bisect_left(depths, depth)
-                    best = idx
-                    if idx > 0 and (idx >= len(depths) or
-                                    abs(depths[idx - 1] - depth) < abs(depths[idx] - depth)):
-                        best = idx - 1
-                    if 0 <= best < len(values):
-                        rows.append((curve.name, f"{values[best]:.2f}"))
+                    # Clamp to valid range
+                    idx = max(0, min(idx, len(depths) - 1))
+                    # Find bracketing indices for interpolation
+                    if idx > 0 and depth < depths[idx]:
+                        i0, i1 = idx - 1, idx
+                    elif idx < len(depths) - 1 and depth > depths[idx]:
+                        i0, i1 = idx, idx + 1
+                    else:
+                        i0, i1 = idx, idx
+                    d0, d1 = depths[i0], depths[i1]
+                    v0, v1 = values[i0], values[i1]
+                    if d1 - d0 > 0:
+                        interp = v0 + (depth - d0) / (d1 - d0) * (v1 - v0)
+                    else:
+                        interp = v0
+                    rows.append((curve.name, f"{interp:.2f}"))
             else:
                 from .interval_track import IntervalTrack
                 from .lithology_track import LithologyTrack
@@ -82,10 +94,12 @@ class CrosshairOverlay:
                             break
         return rows
 
-    def paint_overlay(self, painter: QPainter, rect: QRectF):
+    def paint_overlay(self, painter: QPainter, rect: QRectF, scroll_offset: float = 0.0):
         if self._cursor_y is None:
             return
-        if self._cursor_y < rect.top() or self._cursor_y > rect.bottom():
+        # cursor_y is canvas-relative; convert to viewport-relative for rendering
+        cursor_viewport_y = self._cursor_y - scroll_offset
+        if cursor_viewport_y < rect.top() or cursor_viewport_y > rect.bottom():
             return
 
         painter.save()
@@ -94,8 +108,8 @@ class CrosshairOverlay:
         # Dashed horizontal line across full width
         pen = QPen(QColor("#ef4444"), 1, Qt.PenStyle.DashLine)
         painter.setPen(pen)
-        painter.drawLine(int(rect.left()), int(self._cursor_y),
-                         int(rect.right()), int(self._cursor_y))
+        painter.drawLine(int(rect.left()), int(cursor_viewport_y),
+                         int(rect.right()), int(cursor_viewport_y))
 
         # Semi-transparent info panel
         depth = self.depth_at_y(self._cursor_y)
@@ -118,9 +132,9 @@ class CrosshairOverlay:
 
         # Position: right side, offset from cursor
         px = rect.right() - panel_w - 8
-        py = self._cursor_y - panel_h - 4
+        py = cursor_viewport_y - panel_h - 4
         if py < rect.top():
-            py = self._cursor_y + 4
+            py = cursor_viewport_y + 4
 
         panel_rect = QRectF(px, py, panel_w, panel_h)
 
