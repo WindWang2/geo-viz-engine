@@ -45,6 +45,7 @@ from .renderer import (
     PatternEngine,
     ZoomPanHandler,
     CrosshairOverlay,
+    DepthRuler,
 )
 
 # Track builder
@@ -81,6 +82,7 @@ __all__ = [
     "PatternEngine",
     "ZoomPanHandler",
     "CrosshairOverlay",
+    "DepthRuler",
     # Builder
     "build_qpainter_tracks",
     # Export

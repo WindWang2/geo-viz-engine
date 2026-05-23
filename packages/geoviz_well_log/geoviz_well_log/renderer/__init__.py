@@ -10,10 +10,11 @@ from .canvas import WellLogCanvas
 from .pattern_engine import PatternEngine
 from .interaction import ZoomPanHandler
 from .overlay import CrosshairOverlay
+from .depth_ruler import DepthRuler
 
 __all__ = [
     "BaseTrack", "DepthTrack", "CurveTrack",
     "IntervalTrack", "LithologyTrack", "FaciesTrack", "SystemsTractTrack",
     "WellLogCanvas", "LayoutCoordinator", "PatternEngine",
-    "ZoomPanHandler", "CrosshairOverlay",
+    "ZoomPanHandler", "CrosshairOverlay", "DepthRuler",
 ]
