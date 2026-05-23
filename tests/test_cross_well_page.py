@@ -191,3 +191,39 @@ def test_context_menu_shows_track_list(app):
 
     # Verify canvas has tracks
     assert len(page._cross_well._canvases[0].tracks) == 1
+
+
+# ---- Edge case / guard tests ----
+
+
+def test_page_export_no_wells(app):
+    page = CrossWellPage()
+    # Should not crash or open dialog
+    page._on_export()
+
+
+def test_page_auto_link_no_wells(app):
+    page = CrossWellPage()
+    # Should not crash
+    page._on_auto_link()
+
+
+def test_page_manual_link_no_wells(app):
+    page = CrossWellPage()
+    # Should not crash with zero canvases
+    page._on_toggle_manual_link()
+    # Toggle activates manual link mode (False -> True)
+    assert page._cross_well._manual_link_active
+    # Second toggle deactivates it (True -> False)
+    page._on_toggle_manual_link()
+    assert not page._cross_well._manual_link_active
+
+
+def test_page_add_disabled_during_load(app):
+    page = CrossWellPage()
+    # Simulate loading state
+    page._add_btn.setEnabled(False)
+    assert not page._add_btn.isEnabled()
+    # Re-enable
+    page._on_load_finished([])
+    assert page._add_btn.isEnabled()
