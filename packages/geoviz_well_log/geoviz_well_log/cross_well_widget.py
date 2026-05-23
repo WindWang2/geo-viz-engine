@@ -7,8 +7,11 @@ from PySide6.QtWidgets import (
 
 from .renderer.canvas import WellLogCanvas
 from .renderer.depth_ruler import DepthRuler
+from .renderer.interval_track import IntervalTrack
+from .models import IntervalItem
 from .connection_overlay import ConnectionOverlay
 from .painter_sync_manager import QPainterSyncManager
+from src.data.models import CorrelationLink
 
 
 class CrossWellWidget(QWidget):
@@ -19,6 +22,8 @@ class CrossWellWidget(QWidget):
         self._canvases: list[WellLogCanvas] = []
         self._well_names: list[str] = []
         self._sync_manager = QPainterSyncManager(self)
+        self._manual_link_active = False
+        self._manual_link_picks: list[tuple[str, IntervalItem]] = []
 
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -88,3 +93,60 @@ class CrossWellWidget(QWidget):
         vp = self._scroll.viewport().rect()
         ruler_w = self._depth_ruler.width()
         self._depth_ruler.setGeometry(vp.width() - ruler_w, 0, ruler_w, vp.height())
+
+    # --- Auto-link and manual link ---
+
+    def auto_link(self):
+        """Auto-correlate intervals between adjacent wells by name matching."""
+        links = []
+        for i in range(len(self._canvases) - 1):
+            c1 = self._canvases[i]
+            c2 = self._canvases[i + 1]
+            name1 = self._well_names[i]
+            name2 = self._well_names[i + 1]
+            ivs1 = self._collect_intervals(c1)
+            ivs2 = self._collect_intervals(c2)
+            names1 = {iv.name: iv for iv in ivs1}
+            names2 = {iv.name: iv for iv in ivs2}
+            common = set(names1.keys()) & set(names2.keys())
+            for iv_name in common:
+                iv1 = names1[iv_name]
+                iv2 = names2[iv_name]
+                link = CorrelationLink(
+                    source_well=name1, target_well=name2,
+                    source_interval_id=f"{iv1.top}_{iv1.bottom}_{iv1.name}",
+                    target_interval_id=f"{iv2.top}_{iv2.bottom}_{iv2.name}",
+                    color="#f59e0b",
+                )
+                links.append(link)
+        self._overlay.set_links(links)
+
+    def _collect_intervals(self, canvas: WellLogCanvas) -> list[IntervalItem]:
+        """Collect all IntervalItem objects from a canvas's tracks."""
+        intervals = []
+        for track in canvas.tracks:
+            if isinstance(track, IntervalTrack):
+                intervals.extend(track._intervals)
+        return intervals
+
+    def toggle_manual_link(self):
+        """Toggle manual linking mode."""
+        self._manual_link_active = not self._manual_link_active
+        self._manual_link_picks.clear()
+
+    def _finish_manual_link(self):
+        """Complete a manual link from collected picks."""
+        if len(self._manual_link_picks) < 2:
+            return
+        w1, iv1 = self._manual_link_picks[0]
+        w2, iv2 = self._manual_link_picks[1]
+        link = CorrelationLink(
+            source_well=w1, target_well=w2,
+            source_interval_id=f"{iv1.top}_{iv1.bottom}_{iv1.name}",
+            target_interval_id=f"{iv2.top}_{iv2.bottom}_{iv2.name}",
+            color="#ef4444", is_manual=True,
+        )
+        links = self._overlay._links + [link]
+        self._overlay.set_links(links)
+        self._manual_link_active = False
+        self._manual_link_picks.clear()
