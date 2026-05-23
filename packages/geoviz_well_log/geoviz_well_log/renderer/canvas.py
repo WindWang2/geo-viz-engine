@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QRectF, Signal, QObject, QEvent
 from PySide6.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QApplication
 
 from .track_base import BaseTrack, ECHARTS_HEADER_BG, ECHARTS_BORDER, ECHARTS_TEXT, ECHARTS_GROUP_HEADER_HEIGHT
 from .coordinator import LayoutCoordinator
@@ -23,6 +23,20 @@ class _TrackMouseFilter(QObject):
                 self._canvas.mouse_moved.emit(float(canvas_pos.y()))
             elif event.type() == QEvent.Type.Leave:
                 self._canvas.mouse_moved.emit(-1.0)
+            # Forward mouse press/release/move to canvas for ZoomPanHandler
+            if event.type() in (QEvent.Type.MouseButtonPress,
+                                QEvent.Type.MouseButtonRelease,
+                                QEvent.Type.MouseMove):
+                canvas_pos = obj.mapTo(self._canvas, event.position().toPoint())
+                new_event = QMouseEvent(
+                    event.type(),
+                    canvas_pos,
+                    event.globalPosition(),
+                    event.button(),
+                    event.buttons(),
+                    event.modifiers(),
+                )
+                QApplication.sendEvent(self._canvas, new_event)
         return False  # don't consume — let tracks still receive events
 
 
