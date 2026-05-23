@@ -127,3 +127,73 @@ def test_crosshair_syncs_across_canvases(app):
     # Each canvas should have its own crosshair overlay
     assert c1.crosshair is not None
     assert c2.crosshair is not None
+
+
+# --- Task 6: Composite vector export ---
+
+import tempfile
+import os
+
+
+def test_export_composite_svg_no_crash(app):
+    widget = CrossWellWidget()
+    c1 = _make_well_canvas("well1", [IntervalItem(top=0, bottom=100, name="A")])
+    c2 = _make_well_canvas("well2", [IntervalItem(top=0, bottom=100, name="A")])
+    widget.add_canvas(c1, "well1")
+    widget.add_canvas(c2, "well2")
+    widget.auto_link()
+    with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
+        path = f.name
+    try:
+        widget.export_composite(path, fmt="svg")
+        assert os.path.exists(path)
+        assert os.path.getsize(path) > 0
+    finally:
+        os.unlink(path)
+
+
+def test_export_composite_pdf_no_crash(app):
+    widget = CrossWellWidget()
+    c1 = _make_well_canvas("well1", [IntervalItem(top=0, bottom=100, name="A")])
+    c2 = _make_well_canvas("well2", [IntervalItem(top=0, bottom=100, name="A")])
+    widget.add_canvas(c1, "well1")
+    widget.add_canvas(c2, "well2")
+    widget.auto_link()
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        path = f.name
+    try:
+        widget.export_composite(path, fmt="pdf")
+        assert os.path.exists(path)
+        assert os.path.getsize(path) > 0
+    finally:
+        os.unlink(path)
+
+
+def test_export_composite_png_no_crash(app):
+    widget = CrossWellWidget()
+    c1 = _make_well_canvas("well1", [IntervalItem(top=0, bottom=100, name="A")])
+    c2 = _make_well_canvas("well2", [IntervalItem(top=0, bottom=100, name="A")])
+    widget.add_canvas(c1, "well1")
+    widget.add_canvas(c2, "well2")
+    widget.auto_link()
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        path = f.name
+    try:
+        widget.export_composite(path, fmt="png")
+        assert os.path.exists(path)
+        assert os.path.getsize(path) > 0
+    finally:
+        os.unlink(path)
+
+
+def test_export_composite_empty_no_crash(app):
+    """Export with no canvases should not crash."""
+    widget = CrossWellWidget()
+    with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
+        path = f.name
+    try:
+        widget.export_composite(path, fmt="svg")
+        # File may or may not exist — no crash is the key assertion
+    finally:
+        if os.path.exists(path):
+            os.unlink(path)

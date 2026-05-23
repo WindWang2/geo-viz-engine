@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRectF, QSizeF, QSize, QPointF
+from PySide6.QtGui import QPainter, QColor, QPen, QPolygonF, QImage, QPageSize
+from PySide6.QtSvg import QSvgGenerator
+from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
 )
@@ -158,3 +161,120 @@ class CrossWellWidget(QWidget):
         self._overlay.set_links(links)
         self._manual_link_active = False
         self._manual_link_picks.clear()
+
+    # --- Composite vector export ---
+
+    def export_composite(self, path: str, fmt: str = "svg"):
+        """Export all canvases + correlation polygons as a single file.
+
+        Args:
+            path: Output file path.
+            fmt: One of "svg", "pdf", "png".
+        """
+        if not self._canvases:
+            return
+
+        spacing = 150
+        total_w = sum(c.width() for c in self._canvases) + \
+                  spacing * (len(self._canvases) - 1)
+        total_h = max(c.height() for c in self._canvases)
+
+        if fmt == "svg":
+            self._export_svg(path, total_w, total_h)
+        elif fmt == "pdf":
+            self._export_pdf(path, total_w, total_h)
+        elif fmt == "png":
+            self._export_png(path, total_w, total_h)
+
+    def _export_svg(self, path: str, w: int, h: int):
+        gen = QSvgGenerator()
+        gen.setFileName(path)
+        gen.setSize(QSize(w, h))
+        gen.setViewBox(QRectF(0, 0, w, h))
+        painter = QPainter(gen)
+        self._paint_composite(painter, w, h)
+        painter.end()
+
+    def _export_pdf(self, path: str, w: int, h: int):
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setOutputFileName(path)
+        mm_w = w * 25.4 / 96
+        mm_h = h * 25.4 / 96
+        printer.setPageSize(QPageSize(QSizeF(mm_w, mm_h), QPageSize.Unit.Millimeter))
+        painter = QPainter(printer)
+        self._paint_composite(painter, w, h)
+        painter.end()
+
+    def _export_png(self, path: str, w: int, h: int):
+        img = QImage(w, h, QImage.Format.Format_ARGB32)
+        img.fill(0xFFFFFFFF)
+        painter = QPainter(img)
+        self._paint_composite(painter, w, h)
+        painter.end()
+        img.save(path)
+
+    def _paint_composite(self, painter: QPainter, total_w: int, total_h: int):
+        """Paint all canvases at computed x-offsets, then overlay correlation polygons."""
+        spacing = 150
+        x_off = 0
+        canvas_x_offsets: dict[int, float] = {}
+        canvas_right_edges: dict[int, float] = {}
+        canvas_widths: dict[int, float] = {}
+
+        for canvas in self._canvases:
+            painter.save()
+            painter.translate(x_off, 0)
+            canvas.paint_all(painter)
+            painter.restore()
+            canvas_x_offsets[id(canvas)] = x_off
+            canvas_widths[id(canvas)] = canvas.width()
+            canvas_right_edges[id(canvas)] = x_off + canvas.width()
+            x_off += canvas.width() + spacing
+
+        # Paint correlation polygons
+        if self._overlay._links:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+            # Build well-name -> canvas map using first track label
+            name_to_canvas: dict[str, WellLogCanvas] = {}
+            for c in self._canvases:
+                if c.tracks:
+                    name_to_canvas[c.tracks[0].label] = c
+
+            for link in self._overlay._links:
+                source = name_to_canvas.get(link.source_well)
+                target = name_to_canvas.get(link.target_well)
+                if source is None or target is None:
+                    continue
+
+                try:
+                    src_parts = link.source_interval_id.split("_")
+                    src_top = float(src_parts[0])
+                    src_bot = float(src_parts[1])
+                    tgt_parts = link.target_interval_id.split("_")
+                    tgt_top = float(tgt_parts[0])
+                    tgt_bot = float(tgt_parts[1])
+                except (ValueError, IndexError):
+                    continue
+
+                sy1 = self._overlay.depth_to_y(source, src_top)
+                sy2 = self._overlay.depth_to_y(source, src_bot)
+                ty1 = self._overlay.depth_to_y(target, tgt_top)
+                ty2 = self._overlay.depth_to_y(target, tgt_bot)
+
+                src_right = canvas_right_edges[id(source)]
+                tgt_left = canvas_x_offsets[id(target)]
+
+                polygon = QPolygonF([
+                    QPointF(src_right, sy1),
+                    QPointF(tgt_left, ty1),
+                    QPointF(tgt_left, ty2),
+                    QPointF(src_right, sy2),
+                ])
+
+                color = QColor(link.color)
+                color.setAlpha(120)
+                painter.setPen(QPen(color.darker(120), 1))
+                painter.setBrush(color)
+                painter.drawPolygon(polygon)
