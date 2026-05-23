@@ -7,5 +7,6 @@ from .facies_track import FaciesTrack
 from .systems_tract import SystemsTractTrack
 from .coordinator import LayoutCoordinator
 from .canvas import WellLogCanvas
+from .interaction import ZoomPanHandler
 
-__all__ = ["BaseTrack", "DepthTrack", "CurveTrack", "IntervalTrack", "LithologyTrack", "FaciesTrack", "SystemsTractTrack", "LayoutCoordinator", "WellLogCanvas"]
+__all__ = ["BaseTrack", "DepthTrack", "CurveTrack", "IntervalTrack", "LithologyTrack", "FaciesTrack", "SystemsTractTrack", "LayoutCoordinator", "WellLogCanvas", "ZoomPanHandler"]
