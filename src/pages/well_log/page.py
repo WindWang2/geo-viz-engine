@@ -3,19 +3,14 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QStackedWidget, QGroupBox, QListWidget, QAbstractItemView, QListWidgetItem,
-    QMessageBox, QProgressDialog, QComboBox
+    QMessageBox, QProgressDialog, QComboBox, QFileDialog
 )
 from src.data.well_registry import get_well_data, list_wells
-from geoviz_well_log import (
-    ChartEngine, TrackManager, PATTERN_MAP,
-    build_tracks_from_data, build_ai_prediction_tracks,
-    build_legacy_display_items, LEGACY_DEFAULT_ACTIVE,
-    build_qpainter_tracks,
-)
-from geoviz_well_log.export import export_dialog
+from geoviz_well_log import build_qpainter_tracks
 from geoviz_well_log.export_qpainter import export_svg as qpainter_export_svg
 from geoviz_well_log.export_qpainter import export_pdf as qpainter_export_pdf
 from geoviz_well_log.export_qpainter import export_png as qpainter_export_png
+from geoviz_well_log.renderer.curve_track import CurveTrack
 from src.pages.well_log.qpainter_widget import QPainterWidget
 
 
@@ -134,10 +129,9 @@ class PredictionWorker(QObject):
                 print(f"Failed to clear sheet using openpyxl: {e}")
 
             try:
-                # Ensure only .xlsx files are appended using openpyxl, fail safely if not
                 if not str(self.xls_path).lower().endswith(".xlsx"):
                     raise ValueError("仅支持向 .xlsx 格式的 Excel 追加 AI 预测结果。请先转换为 .xlsx 格式！")
-                
+
                 with pd.ExcelWriter(self.xls_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
                     df_ai.to_excel(writer, sheet_name="AI预测结果", index=False)
             except Exception as e:
@@ -202,24 +196,6 @@ class WellLogPage(QWidget):
         self._export_btn.clicked.connect(self._on_export)
         toolbar_layout.addWidget(self._export_btn)
 
-        toolbar_layout.addSpacing(12)
-
-        self._renderer_combo = QComboBox()
-        self._renderer_combo.setFixedHeight(28)
-        self._renderer_combo.addItem("ECharts")
-        self._renderer_combo.addItem("QPainter")
-        self._renderer_combo.setStyleSheet("""
-            QComboBox {
-                border: 1px solid #cbd5e1; border-radius: 4px;
-                padding: 0 8px; font-size: 13px; background: white;
-                min-width: 100px;
-            }
-            QComboBox:hover { border-color: #3182ce; }
-            QComboBox::drop-down { border: none; width: 20px; }
-        """)
-        self._renderer_combo.currentTextChanged.connect(self._on_renderer_changed)
-        toolbar_layout.addWidget(self._renderer_combo)
-
         self._toolbar.setVisible(True)
         outer.addWidget(self._toolbar)
 
@@ -251,8 +227,8 @@ class WellLogPage(QWidget):
             QListWidget::item:hover { background: #e2e8f0; }
             QListWidget::item:selected { background: #cbd5e1; color: #000; }
         """)
-        self._track_list_widget.model().rowsMoved.connect(self._update_chart)
-        self._track_list_widget.itemChanged.connect(self._update_chart)
+        self._track_list_widget.model().rowsMoved.connect(self._update_tracks)
+        self._track_list_widget.itemChanged.connect(self._update_tracks)
         panel_layout.addWidget(self._track_list_widget)
 
         btn_layout = QHBoxLayout()
@@ -293,17 +269,14 @@ class WellLogPage(QWidget):
         self._content_layout.addWidget(self._control_panel)
 
         # State
-        self._chart_widget: ChartEngine | None = None
+        self._qpainter_widget: QPainterWidget | None = None
+        self._all_tracks: list = []
         self._current_well: str | None = None
         self._current_xls_path = None
         self._current_data = None
-        self._track_mgr: TrackManager | None = None
-        self._cached_metadata = {}
-        self._qpainter_widget: QPainterWidget | None = None
-        self._all_qpainter_tracks: list = []
 
     def load_well(self, well_name: str) -> bool:
-        if well_name == self._current_well and (self._chart_widget or self._qpainter_widget):
+        if well_name == self._current_well and self._qpainter_widget:
             return True
 
         entry = get_well_data(well_name)
@@ -312,10 +285,6 @@ class WellLogPage(QWidget):
 
         loader_fn, xls_path, config = entry
 
-        if self._chart_widget:
-            self._stack.removeWidget(self._chart_widget)
-            self._chart_widget.deleteLater()
-            self._chart_widget = None
         if self._qpainter_widget:
             self._stack.removeWidget(self._qpainter_widget)
             self._qpainter_widget.deleteLater()
@@ -328,19 +297,9 @@ class WellLogPage(QWidget):
             print(f"[WellLog] Failed to load {well_name}: {e}")
             return False
 
-        self._chart_widget = ChartEngine(self)
-        self._chart_widget.bridge.svg_received.connect(self._save_svg_to_disk)
-        self._stack.addWidget(self._chart_widget)
-        self._stack.setCurrentWidget(self._chart_widget)
         self._current_well = well_name
         self._current_xls_path = xls_path
         self._current_data = data
-
-        self._cached_metadata = {
-            "wellName": data.well_name,
-            "topDepth": data.top_depth,
-            "bottomDepth": data.bottom_depth,
-        }
 
         # Sync combo box
         idx = self._well_combo.findText(well_name)
@@ -349,74 +308,28 @@ class WellLogPage(QWidget):
             self._well_combo.setCurrentIndex(idx)
             self._well_combo.blockSignals(False)
 
-        # Build tracks using the package
-        if hasattr(data, "custom_tracks") and data.custom_tracks:
-            track_pool = {t["name"]: t for t in data.custom_tracks}
-            self._track_mgr = TrackManager(track_pool)
-            self._populate_list_widget_converted(data.custom_tracks)
-        else:
-            track_pool = build_tracks_from_data(data)
-            self._track_mgr = TrackManager(track_pool)
-            display_items = build_legacy_display_items(track_pool)
-            self._populate_list_widget_legacy(display_items)
+        # Build QPainter tracks
+        self._all_tracks = build_qpainter_tracks(data)
+
+        self._qpainter_widget = QPainterWidget(self)
+        self._qpainter_widget.set_tracks(self._all_tracks)
+        self._stack.addWidget(self._qpainter_widget)
+        self._stack.setCurrentWidget(self._qpainter_widget)
+
+        # Populate track list
+        self._populate_track_list()
 
         self._well_name_label.setText(well_name + " 综合测井解释图")
         self._control_panel.setVisible(True)
 
-        if self._renderer_combo.currentText() == "QPainter":
-            self._switch_to_qpainter()
-        else:
-            self._update_chart()
-            self._merge_btn.setEnabled(True)
-            self._split_btn.setEnabled(True)
-
         return True
 
-    def _populate_qpainter_list_widget(self):
-        """Populate track list from QPainter track labels."""
-        from geoviz_well_log.renderer.curve_track import CurveTrack
-        from geoviz_well_log.renderer.depth_track import DepthTrack
-        from geoviz_well_log.renderer.lithology_track import LithologyTrack
-
+    def _populate_track_list(self):
         self._track_list_widget.blockSignals(True)
         self._track_list_widget.clear()
-
-        for track in self._all_qpainter_tracks:
-            label = track.label
-            item = QListWidgetItem(label)
+        for track in self._all_tracks:
+            item = QListWidgetItem(track.label)
             if isinstance(track, CurveTrack):
-                item.setIcon(QIcon("src/resources/icons/curve.svg"))
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked)
-            self._track_list_widget.addItem(item)
-
-        self._track_list_widget.blockSignals(False)
-
-    def _populate_list_widget_converted(self, custom_tracks):
-        self._track_list_widget.blockSignals(True)
-        self._track_list_widget.clear()
-        for t in custom_tracks:
-            item = QListWidgetItem(t["name"])
-            if t.get("type") == "CurveTrack":
-                item.setIcon(QIcon("src/resources/icons/curve.svg"))
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            name = t["name"]
-            is_active = any(
-                name == ref or (ref in name and ref not in ("AC", "GR", "RT", "RXO"))
-                for ref in LEGACY_DEFAULT_ACTIVE
-            )
-            item.setCheckState(Qt.CheckState.Checked if is_active else Qt.CheckState.Unchecked)
-            self._track_list_widget.addItem(item)
-        self._track_list_widget.blockSignals(False)
-
-    def _populate_list_widget_legacy(self, display_items):
-        self._track_list_widget.blockSignals(True)
-        self._track_list_widget.clear()
-        pool = self._track_mgr.pool
-        for item_text in display_items:
-            item = QListWidgetItem(item_text)
-            if (item_text.startswith("曲线: ") or "+" in item_text
-                    or (item_text in pool and pool[item_text]["type"] == "CurveTrack")):
                 item.setIcon(QIcon("src/resources/icons/curve.svg"))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked)
@@ -428,80 +341,12 @@ class WellLogPage(QWidget):
             return
         self.load_well(text)
 
-    def _on_renderer_changed(self, text: str):
-        if not self._current_data:
-            return
-        if text == "QPainter":
-            self._switch_to_qpainter()
-        else:
-            self._switch_to_echarts()
-
-    def _switch_to_qpainter(self):
-        if self._qpainter_widget:
-            return
-        if self._chart_widget:
-            self._stack.removeWidget(self._chart_widget)
-            self._chart_widget.deleteLater()
-            self._chart_widget = None
-
-        self._qpainter_widget = QPainterWidget(self)
-        self._all_qpainter_tracks = build_qpainter_tracks(self._current_data)
-        self._qpainter_widget.set_tracks(self._all_qpainter_tracks)
-        self._stack.addWidget(self._qpainter_widget)
-        self._stack.setCurrentWidget(self._qpainter_widget)
-
-        # Populate track list from QPainter tracks
-        self._populate_qpainter_list_widget()
-
-        self._merge_btn.setEnabled(True)
-        self._split_btn.setEnabled(True)
-
-    def _switch_to_echarts(self):
-        if self._chart_widget:
-            return
-        if self._qpainter_widget:
-            self._stack.removeWidget(self._qpainter_widget)
-            self._qpainter_widget.deleteLater()
-            self._qpainter_widget = None
-
-        self._chart_widget = ChartEngine(self)
-        self._chart_widget.bridge.svg_received.connect(self._save_svg_to_disk)
-        self._stack.addWidget(self._chart_widget)
-        self._stack.setCurrentWidget(self._chart_widget)
-
-        # Re-populate list widget for ECharts
-        if self._track_mgr:
-            pool = self._track_mgr.pool
-            display_items = build_legacy_display_items(pool)
-            self._populate_list_widget_legacy(display_items)
-
-        self._update_chart()
-
-        self._merge_btn.setEnabled(True)
-        self._split_btn.setEnabled(True)
-
-    def _update_chart(self, *_):
-        if self._qpainter_widget:
-            self._update_qpainter_tracks()
-            return
-        if not self._track_mgr or not self._chart_widget:
-            return
-        display_items = []
-        for i in range(self._track_list_widget.count()):
-            item = self._track_list_widget.item(i)
-            display_items.append((item.text(), item.checkState() == Qt.CheckState.Checked))
-        payload = self._track_mgr.build_payload(self._cached_metadata, display_items)
-        self._chart_widget.render_data(payload)
-
-    def _update_qpainter_tracks(self):
-        """Filter and reorder QPainter tracks based on track list widget."""
-        if not self._qpainter_widget or not self._all_qpainter_tracks:
+    def _update_tracks(self, *_):
+        if not self._qpainter_widget or not self._all_tracks:
             return
 
-        # Build label -> track mapping
-        label_map = {t.label: t for t in self._all_qpainter_tracks}
+        label_map = {t.label: t for t in self._all_tracks}
 
-        # Read list widget state: checked items in display order
         visible_tracks = []
         for i in range(self._track_list_widget.count()):
             item = self._track_list_widget.item(i)
@@ -519,69 +364,7 @@ class WellLogPage(QWidget):
         if len(selected_items) < 2 or len(selected_items) > 3:
             return
 
-        if self._qpainter_widget:
-            self._qpainter_merge_curves(selected_items)
-            return
-
-        pool = self._track_mgr.pool
-        valid = []
-        for it in selected_items:
-            clean = it.text().replace("曲线: ", "").strip()
-            if clean in pool and pool[clean]["type"] == "CurveTrack":
-                valid.append(clean)
-            elif "+" in clean:
-                valid.append(clean)
-            elif it.text() in pool and pool[it.text()]["type"] == "CurveTrack":
-                valid.append(it.text())
-
-        if len(valid) < 2:
-            return
-
-        merged_label = " + ".join(valid)
-        rows = sorted([self._track_list_widget.row(it) for it in selected_items], reverse=True)
-        for r in rows:
-            self._track_list_widget.takeItem(r)
-        insert_idx = rows[-1]
-
-        item = QListWidgetItem(merged_label)
-        item.setIcon(QIcon("src/resources/icons/curve.svg"))
-        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-        item.setCheckState(Qt.CheckState.Checked)
-        self._track_list_widget.insertItem(insert_idx, item)
-        self._update_chart()
-
-    def _on_split_curve(self):
-        selected_items = self._track_list_widget.selectedItems()
-        if len(selected_items) != 1:
-            return
-
-        text = selected_items[0].text()
-
-        if self._qpainter_widget:
-            self._qpainter_split_curve(selected_items[0], text)
-            return
-
-        clean = text.replace("曲线: ", "").strip()
-        if "+" not in clean:
-            return
-
-        c1, c2 = [c.strip() for c in clean.split("+")]
-        row = self._track_list_widget.row(selected_items[0])
-        self._track_list_widget.takeItem(row)
-
-        for i, name in enumerate([c1, c2]):
-            item = QListWidgetItem(name)
-            item.setIcon(QIcon("src/resources/icons/curve.svg"))
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked)
-            self._track_list_widget.insertItem(row + i, item)
-        self._update_chart()
-
-    def _qpainter_merge_curves(self, selected_items):
-        """Merge 2-3 curve tracks in QPainter mode."""
-        from geoviz_well_log.renderer.curve_track import CurveTrack
-
-        label_map = {t.label: t for t in self._all_qpainter_tracks}
+        label_map = {t.label: t for t in self._all_tracks}
 
         labels = []
         tracks = []
@@ -597,22 +380,18 @@ class WellLogPage(QWidget):
         if len(labels) < 2:
             return
 
-        # Combine curves from all selected tracks
         combined_curves = []
         for t in tracks:
             combined_curves.extend(t._curves)
         merged_label = " + ".join(labels)
         merged = CurveTrack(curves=combined_curves, label=merged_label, width=140)
 
-        # Replace in all_qpainter_tracks
-        indices = [self._all_qpainter_tracks.index(t) for t in tracks]
+        indices = [self._all_tracks.index(t) for t in tracks]
         for t in tracks:
-            self._all_qpainter_tracks.remove(t)
-        insert_idx = min(indices)
-        self._all_qpainter_tracks.insert(insert_idx, merged)
+            self._all_tracks.remove(t)
+        self._all_tracks.insert(min(indices), merged)
         merged.set_depth_range(tracks[0].depth_top, tracks[0].depth_bottom)
 
-        # Update list widget
         rows = sorted([self._track_list_widget.row(it) for it in selected_items], reverse=True)
         for r in rows:
             self._track_list_widget.takeItem(r)
@@ -622,38 +401,34 @@ class WellLogPage(QWidget):
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(Qt.CheckState.Checked)
         self._track_list_widget.insertItem(rows[-1], item)
-        self._update_chart()
+        self._update_tracks()
 
-    def _qpainter_split_curve(self, list_item, text: str):
-        """Split a merged curve track in QPainter mode."""
-        from geoviz_well_log.renderer.curve_track import CurveTrack
+    def _on_split_curve(self):
+        selected_items = self._track_list_widget.selectedItems()
+        if len(selected_items) != 1:
+            return
 
-        label_map = {t.label: t for t in self._all_qpainter_tracks}
+        text = selected_items[0].text()
+        label_map = {t.label: t for t in self._all_tracks}
         track = label_map.get(text)
 
         if not track or not isinstance(track, CurveTrack) or len(track._curves) < 2:
             return
 
-        curves = list(track._curves)
-
-        # Create individual tracks
         new_tracks = []
         new_labels = []
-        for c in curves:
-            label = c.name
-            ct = CurveTrack(curves=[c], label=label, width=140)
+        for c in track._curves:
+            ct = CurveTrack(curves=[c], label=c.name, width=140)
             ct.set_depth_range(track.depth_top, track.depth_bottom)
             new_tracks.append(ct)
-            new_labels.append(label)
+            new_labels.append(c.name)
 
-        # Replace in all_qpainter_tracks
-        idx = self._all_qpainter_tracks.index(track)
-        self._all_qpainter_tracks.remove(track)
+        idx = self._all_tracks.index(track)
+        self._all_tracks.remove(track)
         for i, nt in enumerate(new_tracks):
-            self._all_qpainter_tracks.insert(idx + i, nt)
+            self._all_tracks.insert(idx + i, nt)
 
-        # Update list widget
-        row = self._track_list_widget.row(list_item)
+        row = self._track_list_widget.row(selected_items[0])
         self._track_list_widget.takeItem(row)
 
         for i, label in enumerate(new_labels):
@@ -662,46 +437,28 @@ class WellLogPage(QWidget):
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked)
             self._track_list_widget.insertItem(row + i, item)
-        self._update_chart()
+        self._update_tracks()
 
     def _on_export(self):
-        if self._qpainter_widget:
-            from PySide6.QtWidgets import QFileDialog
-            path, _ = QFileDialog.getSaveFileName(
-                self, "导出测井图",
-                f"{self._current_well}_well_log",
-                "SVG 矢量 (*.svg);;PDF 矢量 (*.pdf);;PNG 位图 (*.png)",
-            )
-            if not path:
-                return
-            canvas = self._qpainter_widget.canvas
-            lower = path.lower()
-            if lower.endswith(".pdf"):
-                qpainter_export_pdf(canvas, path)
-            elif lower.endswith(".png"):
-                qpainter_export_png(canvas, path)
-            else:
-                if not lower.endswith(".svg"):
-                    path += ".svg"
-                qpainter_export_svg(canvas, path)
-        elif self._chart_widget:
-            export_dialog(
-                self._chart_widget, parent=self,
-                default_name=f"{self._current_well}_well_log",
-            )
-
-    def _save_svg_to_disk(self, svg_str):
-        export_path = getattr(self._chart_widget, "_export_path", None)
-        if not export_path:
-            from PySide6.QtWidgets import QFileDialog
-            export_path, _ = QFileDialog.getSaveFileName(
-                self, "导出测井图", f"{self._current_well}_well_log.svg", "SVG 矢量 (*.svg)"
-            )
-        if export_path:
-            with open(export_path, "w", encoding="utf-8") as f:
-                f.write(svg_str)
-            if hasattr(self._chart_widget, "_export_path"):
-                self._chart_widget._export_path = None
+        if not self._qpainter_widget:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出测井图",
+            f"{self._current_well}_well_log",
+            "SVG 矢量 (*.svg);;PDF 矢量 (*.pdf);;PNG 位图 (*.png)",
+        )
+        if not path:
+            return
+        canvas = self._qpainter_widget.canvas
+        lower = path.lower()
+        if lower.endswith(".pdf"):
+            qpainter_export_pdf(canvas, path)
+        elif lower.endswith(".png"):
+            qpainter_export_png(canvas, path)
+        else:
+            if not lower.endswith(".svg"):
+                path += ".svg"
+            qpainter_export_svg(canvas, path)
 
     def _on_predict_facies(self):
         if not self._current_well or not self._current_xls_path:
@@ -738,34 +495,31 @@ class WellLogPage(QWidget):
             else:
                 return
 
-        # Auto-convert legacy .xls files to modern .xlsx before prediction to ensure safe appending
         if str(self._current_xls_path).lower().endswith(".xls"):
             try:
                 import pandas as pd
                 from pathlib import Path
                 src_path = Path(self._current_xls_path)
                 dst_path = src_path.with_suffix(".xlsx")
-                
+
                 print(f"[AI Prediction] Auto-converting legacy .xls to modern .xlsx: {src_path} -> {dst_path}")
-                
+
                 with pd.ExcelWriter(dst_path, engine="openpyxl") as writer:
                     excel_file = pd.ExcelFile(src_path, engine="calamine")
                     for sheet in excel_file.sheet_names:
                         pd.read_excel(excel_file, sheet_name=sheet).to_excel(writer, sheet_name=sheet, index=False)
-                
-                # Point runtime state to the newly generated .xlsx path
+
                 self._current_xls_path = str(dst_path)
-                
-                # Update well registry in memory so subsequent references use the .xlsx version
+
                 import src.data.well_registry
                 entry = src.data.well_registry._WELL_REGISTRY.get(self._current_well)
                 if entry:
                     loader_fn, _ = entry
                     src.data.well_registry._WELL_REGISTRY[self._current_well] = (loader_fn, dst_path)
-                
+
                 print("[AI Prediction] Conversion successful. Switched to .xlsx mode.")
             except Exception as conv_err:
-                QMessageBox.warning(self, "文件转换失败", 
+                QMessageBox.warning(self, "文件转换失败",
                     f"无法将旧版 .xls 格式转换为 .xlsx 以供 AI 预测追加结果，"
                     f"请手动将您的文件另存为 .xlsx 格式后再试。\n错误: {conv_err}")
                 return
@@ -773,30 +527,55 @@ class WellLogPage(QWidget):
         self._run_ai_prediction()
 
     def _apply_ai_prediction(self, records):
-        if not records or not self._track_mgr:
+        if not records:
             return
-        added = build_ai_prediction_tracks(records, self._track_mgr.pool)
-        # Add to list widget if not already present
-        existing = {
+        from geoviz_well_log.models import IntervalItem
+        from geoviz_well_log.renderer.interval_track import IntervalTrack
+
+        # Build AI prediction tracks as IntervalTracks
+        facies_items = []
+        confidence_items = []
+        for r in records:
+            depth = r["深度"]
+            facies_items.append(IntervalItem(top=depth - 0.5, bottom=depth + 0.5, name=r["预测相"]))
+            conf = r.get("置信度", 0)
+            label = f"{conf:.0%}" if isinstance(conf, (int, float)) else str(conf)
+            confidence_items.append(IntervalItem(top=depth - 0.5, bottom=depth + 0.5, name=label))
+
+        existing_labels = {
             self._track_list_widget.item(i).text()
             for i in range(self._track_list_widget.count())
         }
-        for name in added:
-            if name not in existing:
-                item = QListWidgetItem(name)
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(Qt.CheckState.Checked)
-                self._track_list_widget.addItem(item)
-        self._update_chart()
+
+        new_tracks = []
+        if "AI预测相" not in existing_labels:
+            t = IntervalTrack(intervals=facies_items, label="AI预测相", width=80)
+            if self._current_data:
+                t.set_depth_range(self._current_data.top_depth, self._current_data.bottom_depth)
+            self._all_tracks.append(t)
+            new_tracks.append("AI预测相")
+
+        if "AI预测置信度" not in existing_labels:
+            t = IntervalTrack(intervals=confidence_items, label="AI预测置信度", width=80)
+            if self._current_data:
+                t.set_depth_range(self._current_data.top_depth, self._current_data.bottom_depth)
+            self._all_tracks.append(t)
+            new_tracks.append("AI预测置信度")
+
+        for name in new_tracks:
+            item = QListWidgetItem(name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            self._track_list_widget.addItem(item)
+        self._update_tracks()
 
     def _remove_ai_tracks(self):
-        if self._track_mgr:
-            self._track_mgr.remove_tracks(["AI预测相", "AI预测置信度"])
         for idx in range(self._track_list_widget.count() - 1, -1, -1):
             item = self._track_list_widget.item(idx)
             if item.text() in ("AI预测相", "AI预测置信度"):
                 self._track_list_widget.takeItem(idx)
-        self._update_chart()
+        self._all_tracks = [t for t in self._all_tracks if t.label not in ("AI预测相", "AI预测置信度")]
+        self._update_tracks()
 
     def _run_ai_prediction(self):
         self._progress_dialog = QProgressDialog("正在准备预测数据...", "取消", 0, 100, self)
