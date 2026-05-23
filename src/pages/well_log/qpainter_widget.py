@@ -92,7 +92,7 @@ class QPainterWidget(QScrollArea):
             self._crosshair.set_cursor_y(canvas_y)
             depth = self._crosshair.depth_at_y(canvas_y)
             self._depth_ruler.set_cursor_depth(depth)
-        self._overlay.update()
+        self.update()
 
     def wheelEvent(self, event):
         """Forward wheel events to canvas so ZoomPanHandler handles zoom."""
