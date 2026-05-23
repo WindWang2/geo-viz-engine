@@ -7,7 +7,13 @@ from .facies_track import FaciesTrack
 from .systems_tract import SystemsTractTrack
 from .coordinator import LayoutCoordinator
 from .canvas import WellLogCanvas
+from .pattern_engine import PatternEngine
 from .interaction import ZoomPanHandler
 from .overlay import CrosshairOverlay
 
-__all__ = ["BaseTrack", "DepthTrack", "CurveTrack", "IntervalTrack", "LithologyTrack", "FaciesTrack", "SystemsTractTrack", "LayoutCoordinator", "WellLogCanvas", "ZoomPanHandler", "CrosshairOverlay"]
+__all__ = [
+    "BaseTrack", "DepthTrack", "CurveTrack",
+    "IntervalTrack", "LithologyTrack", "FaciesTrack", "SystemsTractTrack",
+    "WellLogCanvas", "LayoutCoordinator", "PatternEngine",
+    "ZoomPanHandler", "CrosshairOverlay",
+]

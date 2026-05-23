@@ -27,7 +27,11 @@ from .track_manager import TrackManager
 from .pattern_map import PATTERN_MAP
 
 # New QPainter renderer
-from .renderer import BaseTrack, DepthTrack, CurveTrack, WellLogCanvas, LayoutCoordinator
+from .renderer import (
+    BaseTrack, DepthTrack, CurveTrack, WellLogCanvas, LayoutCoordinator,
+    IntervalTrack, LithologyTrack, FaciesTrack, SystemsTractTrack,
+    PatternEngine, ZoomPanHandler, CrosshairOverlay,
+)
 from .export_qpainter import export_svg as qpainter_export_svg
 from .export_qpainter import export_pdf as qpainter_export_pdf
 from .export_qpainter import export_png as qpainter_export_png
@@ -70,5 +74,7 @@ __all__ = [
     "PATTERN_MAP",
     # QPainter renderer
     "BaseTrack", "DepthTrack", "CurveTrack", "WellLogCanvas", "LayoutCoordinator",
+    "IntervalTrack", "LithologyTrack", "FaciesTrack", "SystemsTractTrack",
+    "PatternEngine", "ZoomPanHandler", "CrosshairOverlay",
     "qpainter_export_svg", "qpainter_export_pdf", "qpainter_export_png",
 ]
