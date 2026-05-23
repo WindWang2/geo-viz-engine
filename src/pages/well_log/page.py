@@ -10,8 +10,13 @@ from geoviz_well_log import (
     ChartEngine, TrackManager, PATTERN_MAP,
     build_tracks_from_data, build_ai_prediction_tracks,
     build_legacy_display_items, LEGACY_DEFAULT_ACTIVE,
+    build_qpainter_tracks,
 )
 from geoviz_well_log.export import export_dialog
+from geoviz_well_log.export_qpainter import export_svg as qpainter_export_svg
+from geoviz_well_log.export_qpainter import export_pdf as qpainter_export_pdf
+from geoviz_well_log.export_qpainter import export_png as qpainter_export_png
+from src.pages.well_log.qpainter_widget import QPainterWidget
 
 
 class PredictionWorker(QObject):
@@ -197,6 +202,24 @@ class WellLogPage(QWidget):
         self._export_btn.clicked.connect(self._on_export)
         toolbar_layout.addWidget(self._export_btn)
 
+        toolbar_layout.addSpacing(12)
+
+        self._renderer_combo = QComboBox()
+        self._renderer_combo.setFixedHeight(28)
+        self._renderer_combo.addItem("ECharts")
+        self._renderer_combo.addItem("QPainter")
+        self._renderer_combo.setStyleSheet("""
+            QComboBox {
+                border: 1px solid #cbd5e1; border-radius: 4px;
+                padding: 0 8px; font-size: 13px; background: white;
+                min-width: 100px;
+            }
+            QComboBox:hover { border-color: #3182ce; }
+            QComboBox::drop-down { border: none; width: 20px; }
+        """)
+        self._renderer_combo.currentTextChanged.connect(self._on_renderer_changed)
+        toolbar_layout.addWidget(self._renderer_combo)
+
         self._toolbar.setVisible(True)
         outer.addWidget(self._toolbar)
 
@@ -276,6 +299,7 @@ class WellLogPage(QWidget):
         self._current_data = None
         self._track_mgr: TrackManager | None = None
         self._cached_metadata = {}
+        self._qpainter_widget: QPainterWidget | None = None
 
     def load_well(self, well_name: str) -> bool:
         if well_name == self._current_well and self._chart_widget:
@@ -291,6 +315,10 @@ class WellLogPage(QWidget):
             self._stack.removeWidget(self._chart_widget)
             self._chart_widget.deleteLater()
             self._chart_widget = None
+        if self._qpainter_widget:
+            self._stack.removeWidget(self._qpainter_widget)
+            self._qpainter_widget.deleteLater()
+            self._qpainter_widget = None
 
         try:
             data = loader_fn(xls_path, well_name=well_name)
@@ -334,6 +362,10 @@ class WellLogPage(QWidget):
         self._well_name_label.setText(well_name + " 综合测井解释图")
         self._control_panel.setVisible(True)
         self._update_chart()
+
+        if self._renderer_combo.currentText() == "QPainter":
+            self._switch_to_qpainter()
+
         return True
 
     def _populate_list_widget_converted(self, custom_tracks):
@@ -371,6 +403,48 @@ class WellLogPage(QWidget):
         if not text or text == "选择测井...":
             return
         self.load_well(text)
+
+    def _on_renderer_changed(self, text: str):
+        if not self._current_data:
+            return
+        if text == "QPainter":
+            self._switch_to_qpainter()
+        else:
+            self._switch_to_echarts()
+
+    def _switch_to_qpainter(self):
+        if self._qpainter_widget:
+            return
+        if self._chart_widget:
+            self._stack.removeWidget(self._chart_widget)
+            self._chart_widget.deleteLater()
+            self._chart_widget = None
+
+        self._qpainter_widget = QPainterWidget(self)
+        tracks = build_qpainter_tracks(self._current_data)
+        self._qpainter_widget.set_tracks(tracks)
+        self._stack.addWidget(self._qpainter_widget)
+        self._stack.setCurrentWidget(self._qpainter_widget)
+
+        self._merge_btn.setEnabled(False)
+        self._split_btn.setEnabled(False)
+
+    def _switch_to_echarts(self):
+        if self._chart_widget:
+            return
+        if self._qpainter_widget:
+            self._stack.removeWidget(self._qpainter_widget)
+            self._qpainter_widget.deleteLater()
+            self._qpainter_widget = None
+
+        self._chart_widget = ChartEngine(self)
+        self._chart_widget.bridge.svg_received.connect(self._save_svg_to_disk)
+        self._stack.addWidget(self._chart_widget)
+        self._stack.setCurrentWidget(self._chart_widget)
+        self._update_chart()
+
+        self._merge_btn.setEnabled(True)
+        self._split_btn.setEnabled(True)
 
     def _update_chart(self, *_):
         if not self._track_mgr or not self._chart_widget:
@@ -439,12 +513,27 @@ class WellLogPage(QWidget):
         self._update_chart()
 
     def _on_export(self):
-        if not self._chart_widget:
-            return
-        export_dialog(
-            self._chart_widget, parent=self,
-            default_name=f"{self._current_well}_well_log",
-        )
+        if self._qpainter_widget:
+            from PySide6.QtWidgets import QFileDialog
+            path, _ = QFileDialog.getSaveFileName(
+                self, "导出测井图",
+                f"{self._current_well}_well_log",
+                "SVG 矢量 (*.svg);;PDF 矢量 (*.pdf);;PNG 位图 (*.png)",
+            )
+            if not path:
+                return
+            canvas = self._qpainter_widget.canvas
+            if path.endswith(".svg"):
+                qpainter_export_svg(canvas, path)
+            elif path.endswith(".pdf"):
+                qpainter_export_pdf(canvas, path)
+            elif path.endswith(".png"):
+                qpainter_export_png(canvas, path)
+        elif self._chart_widget:
+            export_dialog(
+                self._chart_widget, parent=self,
+                default_name=f"{self._current_well}_well_log",
+            )
 
     def _save_svg_to_disk(self, svg_str):
         export_path = getattr(self._chart_widget, "_export_path", None)
