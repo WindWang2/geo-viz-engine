@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import math
-from PySide6.QtCore import Qt, QRectF, Signal
+from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import QWidget
 
 
 class DepthRuler(QWidget):
-    """Depth ruler widget showing depth labels and cursor position on the right edge."""
+    """Depth ruler widget showing depth labels and cursor depth indicator."""
 
     _NICE_NUMBERS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
     _TARGET_PIXEL_SPACING = 60
