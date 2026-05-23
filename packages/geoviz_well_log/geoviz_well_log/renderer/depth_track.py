@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from math import floor
-
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QPainter, QPen, QFont, QColor
+from PySide6.QtCore import QRectF, Qt, QPointF
+from PySide6.QtGui import QPainter, QPen, QColor
 from PySide6.QtWidgets import QWidget
 
-from .track_base import BaseTrack
+from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
 
 
 class DepthTrack(BaseTrack):
@@ -49,26 +47,27 @@ class DepthTrack(BaseTrack):
         if interval <= 0:
             interval = 10.0
 
-        pen = QPen(QColor("#333333"), 1)
-        painter.setPen(pen)
-
-        font = QFont()
-        font.setPointSize(7)
+        # Draw depth labels centered in track
+        font = painter.font()
+        font.setPixelSize(11)
+        font.setBold(True)
         painter.setFont(font)
+        painter.setPen(QColor(ECHARTS_TEXT))
 
-        # Use floor for correct alignment with negative depths
-        start = floor(self.depth_top / interval) * interval
-        depth = float(start)
+        start = (self.depth_top // interval) * interval
+        if start < self.depth_top:
+            start += interval
+        depth = start
         while depth <= self.depth_bottom:
             y = self._depth_to_y(depth, rect)
             if rect.top() <= y <= rect.bottom():
-                painter.drawLine(int(rect.right()) - 10, int(y), int(rect.right()), int(y))
-                text_rect = QRectF(rect.left(), y - 8, rect.width() - 12, 16)
-                painter.drawText(text_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                                 f"{depth:.0f}")
+                # Centered label
+                text_rect = QRectF(rect.left(), y - 8, rect.width(), 16)
+                painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, f"{depth:.0f}")
             depth += interval
 
-        # Border
-        painter.setPen(QPen(QColor("#999999"), 1))
-        painter.drawLine(int(rect.right()), int(rect.top()), int(rect.right()), int(rect.bottom()))
+        # Right edge border only
+        pen = QPen(QColor(ECHARTS_BORDER), 1)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(rect.right(), rect.top()), QPointF(rect.right(), rect.bottom()))
         painter.restore()
