@@ -265,3 +265,38 @@ class CrossWellPage(QWidget):
                 path += ".svg"
             fmt = "svg"
         self._cross_well.export_composite(path, fmt=fmt)
+
+    def contextMenuEvent(self, event):
+        """Right-click context menu for per-well track visibility."""
+        from PySide6.QtWidgets import QMenu
+
+        # Find which canvas was right-clicked
+        pos = event.pos()
+        target_canvas = None
+        for canvas in self._cross_well._canvases:
+            # Map canvas position to page coordinates
+            canvas_pos = canvas.mapTo(self, canvas.rect().topLeft())
+            canvas_rect = canvas.rect().translated(canvas_pos)
+            if canvas_rect.contains(pos):
+                target_canvas = canvas
+                break
+
+        if target_canvas is None:
+            return
+
+        menu = QMenu(self)
+        well_name = target_canvas.tracks[0].label if target_canvas.tracks else "unknown"
+        menu.addAction(f"── {well_name} ──").setEnabled(False)
+
+        for i, track in enumerate(target_canvas.tracks):
+            action = menu.addAction(track.label)
+            action.setCheckable(True)
+            action.setChecked(getattr(track, "_visible", True))
+            # Use lambda with default arg to capture i
+            action.toggled.connect(
+                lambda checked, idx=i: self._cross_well.set_track_visible(
+                    target_canvas, idx, checked
+                )
+            )
+
+        menu.exec(event.globalPos())

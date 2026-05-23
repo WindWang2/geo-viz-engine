@@ -167,3 +167,27 @@ def test_page_placeholder_hidden_when_loaded(app):
 
     page.show()
     assert not page._placeholder.isVisible()
+
+
+def test_context_menu_shows_track_list(app):
+    from unittest.mock import patch, MagicMock
+    from geoviz_well_log.renderer.depth_track import DepthTrack
+    page = CrossWellPage()
+
+    mock_data = MagicMock()
+    mock_data.curves = []
+    mock_data.top_depth = 0
+    mock_data.bottom_depth = 100
+    mock_data.intervals = None
+
+    def fake_build(data):
+        return [DepthTrack(top_depth=0, bottom_depth=100, width=60, label="深度")]
+
+    fake_entry = (lambda path, well_name=None: mock_data, "/fake.xlsx", {})
+
+    with patch("src.pages.cross_well.page.get_well_data", return_value=fake_entry):
+        with patch("src.pages.cross_well.page.build_qpainter_tracks", side_effect=fake_build):
+            page._load_wells(["well1"])
+
+    # Verify canvas has tracks
+    assert len(page._cross_well._canvases[0].tracks) == 1
