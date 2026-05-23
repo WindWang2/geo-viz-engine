@@ -66,7 +66,6 @@ class ConnectionOverlay(QWidget):
     def paint_event(self, painter: QPainter, rect: QRectF):
         if not self._links or not self._canvases:
             return
-        canvas_map = {c: c for c in self._canvases}
         name_map = {}
         for c in self._canvases:
             if c.tracks:
@@ -75,15 +74,13 @@ class ConnectionOverlay(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         for link in self._links:
-            source = canvas_map.get(link.source_well) or name_map.get(link.source_well)
-            target = canvas_map.get(link.target_well) or name_map.get(link.target_well)
+            source = name_map.get(link.source_well)
+            target = name_map.get(link.target_well)
             if source is None or target is None:
                 continue
 
-            src_left = self._canvas_left(source)
             src_right = self._canvas_right(source)
             tgt_left = self._canvas_left(target)
-            tgt_right = self._canvas_right(target)
 
             try:
                 src_parts = link.source_interval_id.split("_")
