@@ -34,6 +34,7 @@ class WellLogCanvas(QWidget):
 
     def add_track(self, track: BaseTrack):
         self._coordinator.add_track(track)
+        track.setParent(self)
         self.setMinimumWidth(self.total_width)
 
     def remove_track(self, track: BaseTrack):
@@ -43,6 +44,7 @@ class WellLogCanvas(QWidget):
     def set_depth_range(self, top: float, bottom: float):
         self._coordinator.set_depth_range(top, bottom)
         self.depth_range_changed.emit(top, bottom)
+        self.update()
 
     def set_tracks(self, tracks: list[BaseTrack]):
         for t in self._coordinator.tracks[:]:

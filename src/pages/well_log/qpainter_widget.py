@@ -60,8 +60,10 @@ class QPainterWidget(QScrollArea):
         if obj is self._canvas:
             if isinstance(event, QMouseEvent) and event.type() == event.Type.MouseMove:
                 self._crosshair.set_cursor_y(event.position().y())
+                self.viewport().update()
             elif isinstance(event, QMouseEvent) and event.type() == event.Type.Leave:
                 self._crosshair.set_cursor_y(None)
+                self.viewport().update()
         return super().eventFilter(obj, event)
 
     def paintEvent(self, event):

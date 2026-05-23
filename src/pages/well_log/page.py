@@ -361,10 +361,11 @@ class WellLogPage(QWidget):
 
         self._well_name_label.setText(well_name + " 综合测井解释图")
         self._control_panel.setVisible(True)
-        self._update_chart()
 
         if self._renderer_combo.currentText() == "QPainter":
             self._switch_to_qpainter()
+        else:
+            self._update_chart()
 
         return True
 
