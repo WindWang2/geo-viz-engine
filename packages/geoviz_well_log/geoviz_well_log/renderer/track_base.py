@@ -123,12 +123,18 @@ class BaseTrack(QWidget):
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._label)
         painter.restore()
 
-    def export_render(self, painter: QPainter, full_rect: QRectF):
-        """Export: header + content together."""
-        header_rect = QRectF(full_rect.topLeft(), QSizeF(full_rect.width(), self._header_height))
+    def export_render(self, painter: QPainter, full_rect: QRectF,
+                      canvas_header_height: int | None = None):
+        """Export: header + content together.
+
+        canvas_header_height overrides per-track header height so all tracks
+        share the same header band height on the canvas.
+        """
+        hh = canvas_header_height if canvas_header_height is not None else self._header_height
+        header_rect = QRectF(full_rect.topLeft(), QSizeF(full_rect.width(), hh))
         content_rect = QRectF(
-            full_rect.left(), full_rect.top() + self._header_height,
-            full_rect.width(), full_rect.height() - self._header_height,
+            full_rect.left(), full_rect.top() + hh,
+            full_rect.width(), full_rect.height() - hh,
         )
         painter.save()
         # Header background

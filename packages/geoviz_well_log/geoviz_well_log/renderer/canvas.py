@@ -93,11 +93,12 @@ class WellLogCanvas(QWidget):
             painter.setFont(group_font)
             painter.drawText(group_rect, Qt.AlignmentFlag.AlignCenter, group_name)
 
-        # Render individual tracks
+        # Render individual tracks with uniform header height
+        max_header = max((t.header_height for t in self.tracks), default=0)
         x_offset = 0.0
         for track in self.tracks:
             full_rect = QRectF(x_offset, 0, track.width, h)
-            track.export_render(painter, full_rect)
+            track.export_render(painter, full_rect, canvas_header_height=max_header)
             x_offset += track.width
 
     def paintEvent(self, event):
