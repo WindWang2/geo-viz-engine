@@ -6,7 +6,7 @@ from PySide6.QtGui import QPainter
 from ..models import IntervalItem, FaciesData
 from ..pattern_map import FACIES_COLORS
 from .interval_track import IntervalTrack
-from .track_base import BaseTrack
+from .track_base import BaseTrack, ECHARTS_BORDER
 
 
 class FaciesTrack(BaseTrack):

@@ -4,7 +4,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QBrush
 
 from ..models import IntervalItem
-from .track_base import BaseTrack
+from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
 
 _PASTEL_PALETTE = [
     "#d4e6f1", "#d5f5e3", "#fdebd0", "#e8daef",
@@ -36,7 +36,8 @@ class IntervalTrack(BaseTrack):
         self.paint_grid(painter, rect)
 
         font = QFont()
-        font.setPointSize(7)
+        font.setBold(True)
+        # will be set per-text-orientation below
         painter.setFont(font)
 
         for i, interval in enumerate(self._intervals):
@@ -57,15 +58,17 @@ class IntervalTrack(BaseTrack):
             painter.fillRect(interval_rect, QBrush(color))
 
             # Border
-            painter.setPen(QPen(QColor("#666666"), 0.5))
+            painter.setPen(QPen(QColor(ECHARTS_BORDER), 0.5))
             painter.drawRect(interval_rect)
 
             # Label
-            painter.setPen(QPen(QColor("#333333"), 1))
+            painter.setPen(QPen(QColor(ECHARTS_TEXT), 1))
             text_rect = QRectF(interval_rect.left() + 2, interval_rect.top() + 1,
                                interval_rect.width() - 4, interval_rect.height() - 2)
             if interval_rect.height() > 14:
                 if rect.width() < 50:
+                    font.setPixelSize(11)
+                    painter.setFont(font)
                     painter.save()
                     painter.translate(text_rect.center())
                     painter.rotate(-90)
@@ -74,10 +77,12 @@ class IntervalTrack(BaseTrack):
                     painter.drawText(rotated, Qt.AlignmentFlag.AlignCenter, interval.name)
                     painter.restore()
                 else:
+                    font.setPixelSize(10)
+                    painter.setFont(font)
                     painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, interval.name)
 
         painter.setClipping(False)
-        painter.setPen(QPen(QColor("#999999"), 1))
+        painter.setPen(QPen(QColor(ECHARTS_BORDER), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(rect)
         painter.restore()

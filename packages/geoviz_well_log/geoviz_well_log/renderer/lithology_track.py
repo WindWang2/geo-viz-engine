@@ -6,7 +6,7 @@ from PySide6.QtGui import QPainter, QPen, QColor, QFont, QBrush
 from ..models import LithologyInterval
 from ..pattern_map import FACIES_COLORS
 from .pattern_engine import PatternEngine
-from .track_base import BaseTrack
+from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
 
 _shared_pattern_engine = PatternEngine()
 
@@ -36,7 +36,7 @@ class LithologyTrack(BaseTrack):
         self.paint_grid(painter, rect)
 
         desc_font = QFont()
-        desc_font.setPointSize(6)
+        desc_font.setPixelSize(10)
 
         for interval in self._intervals:
             y_top = self._depth_to_y(interval.top, rect)
@@ -58,13 +58,13 @@ class LithologyTrack(BaseTrack):
                 painter.fillRect(interval_rect, QBrush(self._fallback_color(interval.lithology)))
 
             # Border
-            painter.setPen(QPen(QColor("#666666"), 0.5))
+            painter.setPen(QPen(QColor(ECHARTS_BORDER), 0.5))
             painter.drawRect(interval_rect)
 
             # Description text (vertical, along right edge)
             if self._show_description and interval.description and interval_rect.height() > 16:
                 painter.setFont(desc_font)
-                painter.setPen(QPen(QColor("#555555"), 1))
+                painter.setPen(QPen(QColor(ECHARTS_TEXT), 1))
                 painter.save()
                 tx = interval_rect.right() - 4
                 ty = interval_rect.center().y()
@@ -77,7 +77,7 @@ class LithologyTrack(BaseTrack):
                 painter.restore()
 
         painter.setClipping(False)
-        painter.setPen(QPen(QColor("#999999"), 1))
+        painter.setPen(QPen(QColor(ECHARTS_BORDER), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(rect)
         painter.restore()
