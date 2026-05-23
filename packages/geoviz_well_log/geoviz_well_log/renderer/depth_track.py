@@ -39,6 +39,9 @@ class DepthTrack(BaseTrack):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setClipRect(rect)
 
+        # Horizontal grid lines (ECharts splitLine parity)
+        self.paint_grid(painter, rect)
+
         self._tick_interval = self._compute_tick_interval(rect.height())
 
         # Safety guard against zero interval (infinite loop)

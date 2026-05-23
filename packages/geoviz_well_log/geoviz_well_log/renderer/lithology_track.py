@@ -32,6 +32,9 @@ class LithologyTrack(BaseTrack):
         painter.save()
         painter.setClipRect(rect)
 
+        # Horizontal grid lines (ECharts splitLine parity)
+        self.paint_grid(painter, rect)
+
         desc_font = QFont()
         desc_font.setPointSize(6)
 

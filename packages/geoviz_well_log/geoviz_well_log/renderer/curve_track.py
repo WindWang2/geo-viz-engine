@@ -100,9 +100,8 @@ class CurveTrack(BaseTrack):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setClipRect(rect)
 
-        # Light grid
-        painter.setPen(QPen(QColor("#e5e7eb"), 0.5, Qt.PenStyle.DotLine))
-        painter.drawLine(int(rect.left()), int(rect.top()), int(rect.left()), int(rect.bottom()))
+        # Horizontal grid lines (ECharts splitLine parity)
+        self.paint_grid(painter, rect)
 
         pixel_height = max(1, int(rect.height()))
 

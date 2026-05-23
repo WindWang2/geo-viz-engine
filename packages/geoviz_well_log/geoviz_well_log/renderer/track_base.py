@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt, QSizeF, Signal
-from PySide6.QtGui import QPainter, QFont, QColor
+from PySide6.QtCore import QRectF, Qt, QSizeF, Signal, QPointF
+from PySide6.QtGui import QPainter, QFont, QColor, QPen
 from PySide6.QtWidgets import QWidget
 
 # ECharts-matching visual constants (Tailwind slate palette)
@@ -74,6 +74,33 @@ class BaseTrack(QWidget):
         if self.depth_span <= 0:
             return rect.top()
         return rect.top() + (depth - self.depth_top) / self.depth_span * rect.height()
+
+    def paint_grid(self, painter: QPainter, rect: QRectF):
+        """Draw horizontal grid lines matching ECharts yAxis splitLine."""
+        pen = QPen(QColor(ECHARTS_GRID), 1, Qt.PenStyle.SolidLine)
+        painter.setPen(pen)
+        span = self.depth_span
+        if span <= 0:
+            return
+        interval = self._compute_grid_interval(rect.height(), span)
+        start = (self.depth_top // interval) * interval
+        if start < self.depth_top:
+            start += interval
+        depth = start
+        while depth <= self.depth_bottom:
+            y = self._depth_to_y(depth, rect)
+            if rect.top() <= y <= rect.bottom():
+                painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
+            depth += interval
+
+    def _compute_grid_interval(self, rect_height: float, span: float) -> float:
+        """Pick interval so that grid lines are >=20px apart."""
+        candidates = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
+        for c in candidates:
+            px_per_tick = rect_height / (span / c)
+            if px_per_tick >= 20:
+                return c
+        return candidates[-1]
 
     def paint_content(self, painter: QPainter, rect: QRectF):
         """Render track content. Must be implemented by subclasses."""

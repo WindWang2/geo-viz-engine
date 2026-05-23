@@ -27,6 +27,9 @@ class FaciesTrack(BaseTrack):
         inner.paint_content(painter, rect)
 
     def paint_content(self, painter: QPainter, rect: QRectF):
+        # Horizontal grid lines (ECharts splitLine parity)
+        self.paint_grid(painter, rect)
+
         if self._nested:
             col_width = rect.width() / 3
             phase_rect = QRectF(rect.left(), rect.top(), col_width, rect.height())

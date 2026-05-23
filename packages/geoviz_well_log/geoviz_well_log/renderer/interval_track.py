@@ -32,6 +32,9 @@ class IntervalTrack(BaseTrack):
         painter.save()
         painter.setClipRect(rect)
 
+        # Horizontal grid lines (ECharts splitLine parity)
+        self.paint_grid(painter, rect)
+
         font = QFont()
         font.setPointSize(7)
         painter.setFont(font)
