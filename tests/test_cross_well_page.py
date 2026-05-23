@@ -31,3 +31,50 @@ def test_dialog_sorted_wells(app):
     dialog = _WellSelectDialog(["well3", "well1", "well2"])
     items = [dialog._list.item(i).text() for i in range(dialog._list.count())]
     assert items == ["well1", "well2", "well3"]
+
+
+from PySide6.QtCore import Qt, QThread
+from src.pages.cross_well.page import _WellLoadWorker
+from geoviz_well_log.renderer.canvas import WellLogCanvas
+
+
+def test_worker_emits_finished_with_canvases(app, qtbot):
+    """Worker should emit finished signal with a list of WellLogCanvas."""
+    from unittest.mock import patch, MagicMock
+
+    # Mock get_well_data to return a controlled loader
+    mock_data = MagicMock()
+    mock_data.curves = []
+    mock_data.top_depth = 0
+    mock_data.bottom_depth = 100
+    mock_data.intervals = None
+
+    def fake_loader(path, well_name=None):
+        return mock_data
+
+    fake_entry = (fake_loader, "/fake/path.xlsx", {})
+
+    worker = _WellLoadWorker(["well1"])
+    with patch("src.pages.cross_well.page.get_well_data", return_value=fake_entry):
+        with patch("src.pages.cross_well.page.build_qpainter_tracks", return_value=[]):
+            # Direct call (not threaded) for testing
+            worker.run()
+
+    assert len(worker.result) == 1
+    assert isinstance(worker.result[0], WellLogCanvas)
+
+
+def test_worker_skips_failed_wells(app):
+    from unittest.mock import patch, MagicMock
+
+    def fake_get_well(name):
+        if name == "bad_well":
+            return None
+        return (lambda path, well_name=None: MagicMock(curves=[], top_depth=0, bottom_depth=100, intervals=None), "/fake.xlsx", {})
+
+    worker = _WellLoadWorker(["well1", "bad_well"])
+    with patch("src.pages.cross_well.page.get_well_data", side_effect=fake_get_well):
+        with patch("src.pages.cross_well.page.build_qpainter_tracks", return_value=[]):
+            worker.run()
+
+    assert len(worker.result) == 1  # bad_well skipped

@@ -2,13 +2,15 @@
 """Thin wrapper around the QPainter cross-well widget."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QObject, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QDialog, QListWidget, QListWidgetItem, QAbstractItemView,
 )
 
-from geoviz_well_log import CrossWellWidget
+from geoviz_well_log import CrossWellWidget, build_qpainter_tracks
+from geoviz_well_log.renderer.canvas import WellLogCanvas
+from src.data.well_registry import get_well_data
 
 
 class _WellSelectDialog(QDialog):
@@ -53,6 +55,40 @@ class _WellSelectDialog(QDialog):
             if item.checkState() == Qt.CheckState.Checked:
                 selected.append(item.text())
         return selected
+
+
+class _WellLoadWorker(QObject):
+    """Background worker that loads multiple wells and builds canvases."""
+
+    progress = Signal(int, str)  # index, well_name
+    finished = Signal(list)  # list[WellLogCanvas]
+    error = Signal(str)
+
+    def __init__(self, well_names: list[str], parent=None):
+        super().__init__(parent)
+        self._well_names = well_names
+        self.result: list[WellLogCanvas] = []
+
+    def run(self):
+        self.result = []
+        for i, name in enumerate(self._well_names):
+            try:
+                entry = get_well_data(name)
+                if entry is None:
+                    print(f"[CrossWell] Skipping {name}: not found in registry")
+                    continue
+                loader_fn, xls_path, config = entry
+                data = loader_fn(xls_path, well_name=name)
+                tracks = build_qpainter_tracks(data)
+                canvas = WellLogCanvas()
+                canvas.set_tracks(tracks)
+                canvas.resize(200, 600)
+                self.result.append(canvas)
+                self.progress.emit(i, name)
+            except Exception as e:
+                print(f"[CrossWell] Failed to load {name}: {e}")
+                continue
+        self.finished.emit(self.result)
 
 
 class CrossWellPage(CrossWellWidget):
