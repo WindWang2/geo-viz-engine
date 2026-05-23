@@ -212,3 +212,18 @@ def test_well_reorder_changes_order(app):
     widget.add_canvas(c3, "well3")
     widget.move_well(0, 2)  # Move well1 to position 2
     assert widget._well_names == ["well2", "well3", "well1"]
+
+
+# --- Task 8: Per-well track control ---
+
+
+def test_per_well_track_toggle(app):
+    widget = CrossWellWidget()
+    iv = [IntervalItem(top=0, bottom=100, name="A")]
+    c1 = _make_well_canvas("well1", iv)
+    initial_track_count = len(c1.tracks)
+    widget.add_canvas(c1, "well1")
+    # Hide the interval track (index 1 = IntervalTrack)
+    widget.set_track_visible(c1, 1, False)
+    assert len(c1.tracks) < initial_track_count or \
+           any(not t.visible for t in c1.tracks if hasattr(t, 'visible'))

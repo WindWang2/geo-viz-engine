@@ -112,25 +112,31 @@ class WellLogCanvas(QWidget):
         if not self.tracks:
             return
 
+        # Filter to visible tracks only
+        visible_tracks = [(i, t) for i, t in enumerate(self.tracks)
+                          if getattr(t, '_visible', True)]
+        if not visible_tracks:
+            return
+
         w = self.width()
         h = self.height()
         natural_width = self.total_width
         scale = w / natural_width if natural_width > 0 else 1.0
 
-        # Compute scaled x offsets and widths
+        # Compute scaled x offsets and widths for visible tracks
         scaled: list[tuple[float, float]] = []
         x_off = 0.0
-        for track in self.tracks:
+        for _, track in visible_tracks:
             sw = track.width * scale
             scaled.append((x_off, sw))
             x_off += sw
 
         # Collect groups: group_name -> [(x_offset, width), ...]
         groups: dict[str, list[tuple[float, float]]] = {}
-        for i, track in enumerate(self.tracks):
+        for (_, track), s in zip(visible_tracks, scaled):
             gn = track.group_name
             if gn:
-                groups.setdefault(gn, []).append(scaled[i])
+                groups.setdefault(gn, []).append(s)
 
         # Draw group headers
         group_font = QFont()
@@ -154,9 +160,8 @@ class WellLogCanvas(QWidget):
             painter.drawText(group_rect, Qt.AlignmentFlag.AlignCenter, group_name)
 
         # Render individual tracks with uniform header height
-        max_header = max((t.header_height for t in self.tracks), default=0)
-        for i, track in enumerate(self.tracks):
-            x_off, sw = scaled[i]
+        max_header = max((t.header_height for _, t in visible_tracks), default=0)
+        for (_, track), (x_off, sw) in zip(visible_tracks, scaled):
             full_rect = QRectF(x_off, 0, sw, h)
             track.export_render(painter, full_rect, canvas_header_height=max_header)
 

@@ -112,6 +112,12 @@ class CrossWellWidget(QWidget):
             self.remove_canvas(canvas)
         self._overlay.set_links([])
 
+    def set_track_visible(self, canvas: WellLogCanvas, track_index: int, visible: bool):
+        """Show or hide a specific track on a canvas."""
+        if 0 <= track_index < len(canvas.tracks):
+            canvas.tracks[track_index]._visible = visible
+            canvas.update()
+
     def _update_overlay_geometry(self):
         """Update overlay geometry to cover the container."""
         if self._overlay:

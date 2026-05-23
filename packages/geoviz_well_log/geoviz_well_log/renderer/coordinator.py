@@ -24,7 +24,7 @@ class LayoutCoordinator:
 
     @property
     def total_width(self) -> int:
-        return sum(t.width for t in self._tracks)
+        return sum(t.width for t in self._tracks if getattr(t, '_visible', True))
 
     def set_depth_range(self, top: float, bottom: float):
         for track in self._tracks:

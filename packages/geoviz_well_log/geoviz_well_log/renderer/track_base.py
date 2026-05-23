@@ -40,6 +40,7 @@ class BaseTrack(QWidget):
         self._group_name = group_name
         self._depth_top = 0.0
         self._depth_bottom = 100.0
+        self._visible = True
         self.setMinimumWidth(width)
         self.setMaximumWidth(width)
 
@@ -70,6 +71,14 @@ class BaseTrack(QWidget):
     @property
     def depth_span(self) -> float:
         return self._depth_bottom - self._depth_top
+
+    @property
+    def visible(self) -> bool:
+        return self._visible
+
+    @visible.setter
+    def visible(self, value: bool):
+        self._visible = value
 
     def set_depth_range(self, top: float, bottom: float):
         self._depth_top = top
