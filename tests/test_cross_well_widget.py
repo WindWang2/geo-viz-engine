@@ -197,3 +197,18 @@ def test_export_composite_empty_no_crash(app):
     finally:
         if os.path.exists(path):
             os.unlink(path)
+
+
+# --- Task 7: Well reordering ---
+
+
+def test_well_reorder_changes_order(app):
+    widget = CrossWellWidget()
+    c1 = _make_well_canvas("well1", [])
+    c2 = _make_well_canvas("well2", [])
+    c3 = _make_well_canvas("well3", [])
+    widget.add_canvas(c1, "well1")
+    widget.add_canvas(c2, "well2")
+    widget.add_canvas(c3, "well3")
+    widget.move_well(0, 2)  # Move well1 to position 2
+    assert widget._well_names == ["well2", "well3", "well1"]

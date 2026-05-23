@@ -86,6 +86,26 @@ class CrossWellWidget(QWidget):
             self._well_names.pop(idx)
             self._update_overlay_geometry()
 
+    def move_well(self, from_idx: int, to_idx: int):
+        """Move a well canvas from one position to another."""
+        if from_idx == to_idx:
+            return
+        canvas = self._canvases[from_idx]
+        name = self._well_names[from_idx]
+        # Remove from lists and layout
+        self._sync_manager.remove_canvas(canvas)
+        self._container_layout.removeWidget(canvas)
+        self._canvases.pop(from_idx)
+        self._well_names.pop(from_idx)
+        # Insert at new position (clamped, before stretch)
+        insert_idx = min(to_idx, len(self._canvases))
+        self._canvases.insert(insert_idx, canvas)
+        self._well_names.insert(insert_idx, name)
+        # Re-add to layout at the correct position
+        self._container_layout.insertWidget(insert_idx, canvas)
+        self._sync_manager.add_canvas(canvas)
+        self._update_overlay_geometry()
+
     def clear_all(self):
         """Remove all wells and clear state."""
         for canvas in self._canvases[:]:
