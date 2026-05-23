@@ -4,14 +4,14 @@ from PySide6.QtCore import QRectF, Qt, QPointF
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QPolygonF, QBrush
 
 from ..models import IntervalItem
-from .track_base import BaseTrack
+from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
 
 _TRACT_COLORS: dict[str, str] = {
-    "TST": "#4472C4",
-    "HST": "#ED7D31",
+    "TST": "#93c5fd",
+    "HST": "#fde047",
     "LST": "#70AD47",
-    "海侵体系域": "#4472C4",
-    "高位体系域": "#ED7D31",
+    "海侵体系域": "#93c5fd",
+    "高位体系域": "#fde047",
     "低位体系域": "#70AD47",
 }
 
@@ -60,7 +60,7 @@ class SystemsTractTrack(BaseTrack):
             shape = _TRACT_SHAPES.get(interval.name, "rectangle")
 
             painter.setBrush(QBrush(color))
-            painter.setPen(QPen(QColor("#666666"), 0.5))
+            painter.setPen(QPen(QColor(ECHARTS_BORDER), 0.5))
 
             if shape == "triangle_up":
                 polygon = QPolygonF([
@@ -80,7 +80,7 @@ class SystemsTractTrack(BaseTrack):
                 painter.drawRect(interval_rect)
 
             # Label
-            painter.setPen(QPen(QColor("#333333"), 1))
+            painter.setPen(QPen(QColor(ECHARTS_TEXT), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             text_rect = QRectF(interval_rect.left() + 2, interval_rect.top() + 1,
                                interval_rect.width() - 4, interval_rect.height() - 2)
@@ -94,7 +94,7 @@ class SystemsTractTrack(BaseTrack):
                 painter.restore()
 
         painter.setClipping(False)
-        painter.setPen(QPen(QColor("#999999"), 1))
+        painter.setPen(QPen(QColor(ECHARTS_BORDER), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(rect)
         painter.restore()
