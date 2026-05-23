@@ -14,9 +14,9 @@ class FaciesTrack(BaseTrack):
 
     def __init__(self, facies_data: FaciesData, label: str = "Facies",
                  width: int = 80, nested: bool = False,
-                 header_height: int = 32, parent=None):
+                 header_height: int = 32, group_name: str = "", parent=None):
         super().__init__(label=label, width=width, header_height=header_height,
-                         parent=parent)
+                         group_name=group_name, parent=parent)
         self._facies_data = facies_data
         self._nested = nested
 

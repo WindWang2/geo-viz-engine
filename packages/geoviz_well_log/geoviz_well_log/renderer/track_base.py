@@ -29,13 +29,15 @@ class BaseTrack(QWidget):
 
     depth_range_changed = Signal(float, float)
 
-    def __init__(self, label: str = "", width: int = 100, header_height: int = 56, parent=None):
+    def __init__(self, label: str = "", width: int = 100, header_height: int = 56,
+                 group_name: str = "", parent=None):
         if type(self) is BaseTrack:
             raise TypeError("BaseTrack is abstract and cannot be instantiated directly")
         super().__init__(parent)
         self._label = label
         self._width = width
         self._header_height = header_height
+        self._group_name = group_name
         self._depth_top = 0.0
         self._depth_bottom = 100.0
         self.setMinimumWidth(width)
@@ -52,6 +54,10 @@ class BaseTrack(QWidget):
     @property
     def header_height(self) -> int:
         return self._header_height
+
+    @property
+    def group_name(self) -> str:
+        return self._group_name
 
     @property
     def depth_top(self) -> float:

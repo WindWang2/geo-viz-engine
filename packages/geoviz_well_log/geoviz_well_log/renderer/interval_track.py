@@ -17,9 +17,9 @@ class IntervalTrack(BaseTrack):
 
     def __init__(self, intervals: list[IntervalItem], label: str = "",
                  width: int = 80, colors: dict[str, str] | None = None,
-                 header_height: int = 32, parent=None):
+                 header_height: int = 32, group_name: str = "", parent=None):
         super().__init__(label=label, width=width, header_height=header_height,
-                         parent=parent)
+                         group_name=group_name, parent=parent)
         self._intervals = intervals
         self._colors = colors or {}
 

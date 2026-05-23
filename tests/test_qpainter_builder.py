@@ -90,7 +90,8 @@ def test_build_tracks_curves_count(qtbot):
     for t in tracks:
         qtbot.addWidget(t)
     curve_tracks = [t for t in tracks if isinstance(t, CurveTrack)]
-    assert len(curve_tracks) == 3
+    # AC+GR merged into 1 track, RT standalone (no RXO in data) = 2 tracks
+    assert len(curve_tracks) == 2
 
 
 def test_build_tracks_rt_is_log_scale(qtbot):

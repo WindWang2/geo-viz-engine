@@ -28,7 +28,7 @@ def test_concrete_track_paint_content_called(qtbot):
     qtbot.addWidget(track)
     assert track.label == "GR"
     assert track.width == 100
-    assert track.header_height == 32
+    assert track.header_height == 56
 
     # Simulate paint
     pm = QPixmap(100, 200)
