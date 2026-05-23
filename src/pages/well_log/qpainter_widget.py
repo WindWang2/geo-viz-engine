@@ -1,13 +1,23 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QPainter, QMouseEvent
-from PySide6.QtWidgets import QScrollArea
+from PySide6.QtCore import Qt, QRectF, QObject, QEvent
+from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics, QBrush, QMouseEvent
+from PySide6.QtWidgets import QWidget, QScrollArea, QApplication
 
-from geoviz_well_log import (
-    WellLogCanvas, ZoomPanHandler, CrosshairOverlay,
-)
+from geoviz_well_log import WellLogCanvas, ZoomPanHandler, CrosshairOverlay
 from geoviz_well_log.renderer.track_base import BaseTrack
+
+
+class _CrosshairOverlayWidget(QWidget):
+    """Transparent widget sitting on top of viewport that paints the crosshair overlay."""
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    def paintEvent(self, event):
+        pass  # painted externally by QPainterWidget
 
 
 class QPainterWidget(QScrollArea):
@@ -27,7 +37,10 @@ class QPainterWidget(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._canvas.setMouseTracking(True)
-        self._canvas.installEventFilter(self)
+        self._canvas.mouse_moved.connect(self._on_mouse_moved)
+
+        # Transparent overlay on top of viewport for crosshair painting
+        self._overlay = _CrosshairOverlayWidget(self.viewport())
 
     @property
     def canvas(self) -> WellLogCanvas:
@@ -39,6 +52,7 @@ class QPainterWidget(QScrollArea):
             self._full_top = tracks[0].depth_top
             self._full_bottom = tracks[0].depth_bottom
             self._zoom_handler.set_full_range(self._full_top, self._full_bottom)
+        self._sync_overlay_geometry()
         self._update_canvas_size()
 
     def set_depth_range(self, top: float, bottom: float):
@@ -47,30 +61,48 @@ class QPainterWidget(QScrollArea):
     def reset_view(self):
         self._canvas.set_depth_range(self._full_top, self._full_bottom)
 
+    def _sync_overlay_geometry(self):
+        """Keep overlay widget covering the full viewport."""
+        if hasattr(self, "_overlay"):
+            self._overlay.setGeometry(self.viewport().rect())
+
     def _update_canvas_size(self):
         viewport_w = self.viewport().width()
         total_w = self._canvas.total_width
-        w = max(total_w, viewport_w)
-        h = max(self.height(), 600)
-        self._canvas.setFixedSize(w, h)
+        self._canvas.setMinimumWidth(max(total_w, viewport_w))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._sync_overlay_geometry()
         self._update_canvas_size()
 
-    def eventFilter(self, obj, event):
-        if obj is self._canvas:
-            if isinstance(event, QMouseEvent) and event.type() == event.Type.MouseMove:
-                self._crosshair.set_cursor_y(event.position().y())
-                self.viewport().update()
-            elif isinstance(event, QMouseEvent) and event.type() == event.Type.Leave:
-                self._crosshair.set_cursor_y(None)
-                self.viewport().update()
-        return super().eventFilter(obj, event)
+    def _on_mouse_moved(self, canvas_y: float):
+        if canvas_y < 0:
+            self._crosshair.set_cursor_y(None)
+        else:
+            self._crosshair.set_cursor_y(canvas_y)
+        self._overlay.update()
+
+    def wheelEvent(self, event):
+        """Forward wheel events to canvas so ZoomPanHandler handles zoom."""
+        from PySide6.QtGui import QWheelEvent
+        canvas_pos = self._canvas.mapFrom(self.viewport(), event.position().toPoint())
+        canvas_global = event.globalPosition().toPoint() - event.position().toPoint() + canvas_pos
+        new_event = QWheelEvent(
+            canvas_pos,
+            canvas_global,
+            event.pixelDelta(),
+            event.angleDelta(),
+            event.buttons(),
+            event.modifiers(),
+            event.phase(),
+            event.inverted(),
+        )
+        QApplication.sendEvent(self._canvas, new_event)
 
     def paintEvent(self, event):
         super().paintEvent(event)
         if self._crosshair.visible and self._canvas.tracks:
-            painter = QPainter(self.viewport())
-            self._crosshair.paint_overlay(painter, QRectF(self.viewport().rect()))
+            painter = QPainter(self._overlay)
+            self._crosshair.paint_overlay(painter, QRectF(self._overlay.rect()))
             painter.end()
