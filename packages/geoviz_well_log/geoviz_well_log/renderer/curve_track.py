@@ -9,7 +9,7 @@ from PySide6.QtGui import QPainter, QPen, QPainterPath, QColor, QFont
 from PySide6.QtWidgets import QWidget
 
 from ..models import CurveData, LineStyle
-from .track_base import BaseTrack
+from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
 
 
 class CurveTrack(BaseTrack):
@@ -95,6 +95,43 @@ class CurveTrack(BaseTrack):
             pen.setStyle(Qt.PenStyle.SolidLine)
         return pen
 
+    def paint_header(self, painter: QPainter, rect: QRectF):
+        """Draw header with track name and curve legends matching ECharts."""
+        # Track name at top
+        font = painter.font()
+        font.setPixelSize(15)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor(ECHARTS_TEXT))
+
+        name_rect = QRectF(rect.left() + 4, rect.top() + 2, rect.width() - 8, 20)
+        painter.drawText(name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, self._label)
+
+        # Curve legend rows
+        font.setPixelSize(10)
+        font.setBold(False)
+        painter.setFont(font)
+
+        y_offset = rect.top() + 24
+        for curve in self._curves:
+            if y_offset + 14 > rect.bottom():
+                break
+            color = QColor(curve.color)
+
+            # Color swatch
+            swatch_rect = QRectF(rect.left() + 4, y_offset + 2, 8, 4)
+            painter.fillRect(swatch_rect, color)
+
+            # Legend text: style indicator + name + range
+            style = "- -" if curve.line_style == LineStyle.DASHED else "---"
+            range_str = f"{curve.display_range[0]} - {curve.display_range[1]}"
+            text = f"{style} {curve.name} ({range_str})"
+
+            painter.setPen(color)
+            text_rect = QRectF(rect.left() + 16, y_offset, rect.width() - 20, 14)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+            y_offset += 16
+
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -131,16 +168,16 @@ class CurveTrack(BaseTrack):
             c = self._curves[0]
             lo, hi = c.display_range
             font = QFont()
-            font.setPointSize(6)
+            font.setPixelSize(10)
             painter.setFont(font)
-            painter.setPen(QColor("#999999"))
+            painter.setPen(QColor("#64748b"))
             painter.drawText(QRectF(rect.left(), rect.top() + 2, rect.width(), 12),
                              Qt.AlignmentFlag.AlignLeft, f"{lo}")
             painter.drawText(QRectF(rect.left(), rect.bottom() - 14, rect.width(), 12),
                              Qt.AlignmentFlag.AlignLeft, f"{hi}")
 
         # Border
-        painter.setPen(QPen(QColor("#999999"), 1))
+        painter.setPen(QPen(QColor(ECHARTS_BORDER), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setClipping(False)
         painter.drawRect(rect)
