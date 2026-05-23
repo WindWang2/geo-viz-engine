@@ -11,7 +11,7 @@ from .renderer.interval_track import IntervalTrack
 from .models import IntervalItem
 from .connection_overlay import ConnectionOverlay
 from .painter_sync_manager import QPainterSyncManager
-from src.data.models import CorrelationLink
+from .models import CorrelationLink
 
 
 class CrossWellWidget(QWidget):
@@ -62,6 +62,14 @@ class CrossWellWidget(QWidget):
         self._container_layout.insertWidget(idx, canvas)
         self._sync_manager.add_canvas(canvas)
         canvas.setMouseTracking(True)
+        # Set up crosshair overlay per canvas
+        from .renderer.overlay import CrosshairOverlay
+        overlay = CrosshairOverlay(canvas)
+        canvas.crosshair = overlay
+        # Update depth ruler from first canvas's tracks
+        if canvas.tracks:
+            t = canvas.tracks[0]
+            self._depth_ruler.set_depth_range(t.depth_top, t.depth_bottom)
         self._update_overlay_geometry()
 
     def remove_canvas(self, canvas: WellLogCanvas):

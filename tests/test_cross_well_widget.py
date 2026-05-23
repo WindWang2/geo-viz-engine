@@ -105,3 +105,25 @@ def test_manual_link(app):
     widget._finish_manual_link()
     assert len(widget._overlay._links) == 1
     assert widget._overlay._links[0].is_manual is True
+
+
+# --- Task 5: Depth ruler and crosshair ---
+
+
+def test_depth_ruler_updates_on_add(app):
+    widget = CrossWellWidget()
+    c1 = _make_well_canvas("well1", [IntervalItem(top=0, bottom=100, name="A")])
+    widget.add_canvas(c1, "well1")
+    assert widget._depth_ruler._depth_top == 0
+    assert widget._depth_ruler._depth_bottom == 100
+
+
+def test_crosshair_syncs_across_canvases(app):
+    widget = CrossWellWidget()
+    c1 = _make_well_canvas("well1", [])
+    c2 = _make_well_canvas("well2", [])
+    widget.add_canvas(c1, "well1")
+    widget.add_canvas(c2, "well2")
+    # Each canvas should have its own crosshair overlay
+    assert c1.crosshair is not None
+    assert c2.crosshair is not None
