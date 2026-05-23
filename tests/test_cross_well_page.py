@@ -227,3 +227,51 @@ def test_page_add_disabled_during_load(app):
     # Re-enable
     page._on_load_finished([])
     assert page._add_btn.isEnabled()
+
+
+# ---- Integration / smoke test ----
+
+
+def test_full_workflow(app):
+    """End-to-end: open dialog -> load wells -> auto-link -> export."""
+    from unittest.mock import patch, MagicMock
+    from geoviz_well_log.renderer.depth_track import DepthTrack
+    from geoviz_well_log.renderer.interval_track import IntervalTrack
+    from geoviz_well_log.models import IntervalItem
+
+    page = CrossWellPage()
+
+    def fake_build(data):
+        # Return tracks with intervals so auto-link has something to match
+        return [
+            DepthTrack(top_depth=0, bottom_depth=100, width=60, label="深度"),
+            IntervalTrack(
+                intervals=[IntervalItem(top=10, bottom=50, name="FormationA")],
+                label="组", width=50,
+            ),
+        ]
+
+    mock_data = MagicMock()
+    mock_data.curves = []
+    mock_data.top_depth = 0
+    mock_data.bottom_depth = 100
+    mock_data.intervals = None
+
+    fake_entry = (lambda path, well_name=None: mock_data, "/fake.xlsx", {})
+
+    with patch("src.pages.cross_well.page.get_well_data", return_value=fake_entry):
+        with patch("src.pages.cross_well.page.build_qpainter_tracks", side_effect=fake_build):
+            page._load_wells(["well1", "well2"])
+
+    # Should have 2 canvases
+    assert page.canvas_count == 2
+
+    # Auto-link should create a correlation
+    page._on_auto_link()
+    assert len(page._cross_well._overlay.links) == 1
+
+    # Clear should reset everything
+    page._on_clear()
+    assert page.canvas_count == 0
+    page.show()
+    assert page._placeholder.isVisible()
