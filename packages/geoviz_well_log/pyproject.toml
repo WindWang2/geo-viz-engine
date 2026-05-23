@@ -1,14 +1,18 @@
 [project]
 name = "geoviz-well-log"
-version = "0.1.0"
-description = "Modular well log visualization package"
+version = "1.0.0"
+description = "QPainter-based well log visualization package for PySide6"
+readme = "README.md"
+license = "MIT"
 authors = [{ name = "Kevin", email = "kevin@example.com" }]
 requires-python = ">=3.10"
 dependencies = [
     "PySide6",
-    "pyqtgraph",
-    "pydantic"
+    "pydantic",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-qt", "numpy"]
 
 [build-system]
 requires = ["hatchling"]
@@ -23,5 +27,4 @@ include = [
 ]
 
 [tool.hatch.build.targets.wheel.shared-data]
-"geoviz_well_log/web_dist" = "geoviz_well_log/web_dist"
 "geoviz_well_log/assets" = "geoviz_well_log/assets"

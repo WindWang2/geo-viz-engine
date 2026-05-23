@@ -1,6 +1,9 @@
 from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QScrollArea, 
                              QPushButton, QMenu, QComboBox, QFileDialog, QMessageBox)
-from geoviz_well_log import ChartEngine, SyncManager, ConnectionOverlay, LocationMapWidget
+from geoviz_well_log.chart_engine import ChartEngine
+from geoviz_well_log.sync_manager import SyncManager
+from geoviz_well_log.connection_overlay import ConnectionOverlay
+from geoviz_well_log.location_map import LocationMapWidget
 from src.data.well_registry import get_well_data, list_wells
 import json
 from pathlib import Path
