@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QWidget, QApplication
 
 from .track_base import BaseTrack, ECHARTS_HEADER_BG, ECHARTS_BORDER, ECHARTS_TEXT, ECHARTS_GROUP_HEADER_HEIGHT
 from .coordinator import LayoutCoordinator
+from .overlay import CrosshairOverlay
 
 
 class _TrackMouseFilter(QObject):
@@ -18,7 +19,6 @@ class _TrackMouseFilter(QObject):
     def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
         if isinstance(event, QMouseEvent):
             if event.type() == QEvent.Type.MouseMove:
-                # Convert track-local pos to canvas coords via mapTo
                 canvas_pos = obj.mapTo(self._canvas, event.position().toPoint())
                 self._canvas.mouse_moved.emit(float(canvas_pos.y()))
             elif event.type() == QEvent.Type.Leave:
@@ -56,7 +56,17 @@ class WellLogCanvas(QWidget):
         super().__init__(parent)
         self._coordinator = LayoutCoordinator()
         self._track_filter = _TrackMouseFilter(self)
+        self._crosshair: CrosshairOverlay | None = None
+        self._depth_span: float = 100.0
         self.setMinimumSize(200, 400)
+
+    @property
+    def crosshair(self) -> CrosshairOverlay | None:
+        return self._crosshair
+
+    @crosshair.setter
+    def crosshair(self, overlay: CrosshairOverlay):
+        self._crosshair = overlay
 
     @property
     def tracks(self) -> list[BaseTrack]:
@@ -69,7 +79,7 @@ class WellLogCanvas(QWidget):
     @property
     def depth_span(self) -> float:
         if not self.tracks:
-            return 100.0
+            return self._depth_span
         return self.tracks[0].depth_span
 
     def add_track(self, track: BaseTrack):
@@ -85,6 +95,7 @@ class WellLogCanvas(QWidget):
         self.setMinimumWidth(self.total_width)
 
     def set_depth_range(self, top: float, bottom: float):
+        self._depth_span = bottom - top
         self._coordinator.set_depth_range(top, bottom)
         self.depth_range_changed.emit(top, bottom)
         self.update()
@@ -153,6 +164,8 @@ class WellLogCanvas(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#ffffff"))
         self.paint_all(painter)
+        if self._crosshair and self._crosshair.visible and self.tracks:
+            self._crosshair.paint_overlay(painter, QRectF(self.rect()))
         painter.end()
 
     def mouseMoveEvent(self, event: QMouseEvent):
