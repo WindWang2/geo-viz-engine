@@ -11,10 +11,9 @@ from PySide6.QtWidgets import (
 from .renderer.canvas import WellLogCanvas
 from .renderer.depth_ruler import DepthRuler
 from .renderer.interval_track import IntervalTrack
-from .models import IntervalItem
+from .models import IntervalItem, CorrelationLink
 from .connection_overlay import ConnectionOverlay
 from .painter_sync_manager import QPainterSyncManager
-from .models import CorrelationLink
 
 
 class CrossWellWidget(QWidget):
@@ -183,7 +182,7 @@ class CrossWellWidget(QWidget):
             target_interval_id=f"{iv2.top}_{iv2.bottom}_{iv2.name}",
             color="#ef4444", is_manual=True,
         )
-        links = self._overlay._links + [link]
+        links = self._overlay.links + [link]
         self._overlay.set_links(links)
         self._manual_link_active = False
         self._manual_link_picks.clear()
@@ -246,7 +245,6 @@ class CrossWellWidget(QWidget):
         x_off = 0
         canvas_x_offsets: dict[int, float] = {}
         canvas_right_edges: dict[int, float] = {}
-        canvas_widths: dict[int, float] = {}
 
         for canvas in self._canvases:
             painter.save()
@@ -254,12 +252,12 @@ class CrossWellWidget(QWidget):
             canvas.paint_all(painter)
             painter.restore()
             canvas_x_offsets[id(canvas)] = x_off
-            canvas_widths[id(canvas)] = canvas.width()
             canvas_right_edges[id(canvas)] = x_off + canvas.width()
             x_off += canvas.width() + spacing
 
         # Paint correlation polygons
-        if self._overlay._links:
+        links = self._overlay.links
+        if links:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
             # Build well-name -> canvas map using first track label
@@ -268,7 +266,7 @@ class CrossWellWidget(QWidget):
                 if c.tracks:
                     name_to_canvas[c.tracks[0].label] = c
 
-            for link in self._overlay._links:
+            for link in links:
                 source = name_to_canvas.get(link.source_well)
                 target = name_to_canvas.get(link.target_well)
                 if source is None or target is None:

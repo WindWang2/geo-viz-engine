@@ -28,6 +28,15 @@ class ConnectionOverlay(QWidget):
         self._links = list(links)
         self.update()
 
+    def add_link(self, link):
+        """Append a single link and repaint."""
+        self._links.append(link)
+        self.update()
+
+    @property
+    def links(self) -> list:
+        return list(self._links)
+
     # --- Backward-compatible stubs for ECharts-based CrossWellPage ---
     # These are no-ops; the new QPainter pipeline computes positions directly.
 
