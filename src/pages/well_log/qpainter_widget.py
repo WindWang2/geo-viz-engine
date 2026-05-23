@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QPainter, QWheelEvent
 from PySide6.QtWidgets import QWidget, QScrollArea, QApplication
 
-from geoviz_well_log import WellLogCanvas, ZoomPanHandler, CrosshairOverlay
+from geoviz_well_log import WellLogCanvas, ZoomPanHandler, CrosshairOverlay, DepthRuler
 from geoviz_well_log.renderer.track_base import BaseTrack
 
 
@@ -42,6 +42,9 @@ class QPainterWidget(QScrollArea):
         # Transparent overlay on top of viewport for crosshair painting
         self._overlay = _CrosshairOverlayWidget(self.viewport())
 
+        # Depth ruler on right edge
+        self._depth_ruler = DepthRuler(self.viewport())
+
     @property
     def canvas(self) -> WellLogCanvas:
         return self._canvas
@@ -52,6 +55,7 @@ class QPainterWidget(QScrollArea):
             self._full_top = tracks[0].depth_top
             self._full_bottom = tracks[0].depth_bottom
             self._zoom_handler.set_full_range(self._full_top, self._full_bottom)
+        self._depth_ruler.set_depth_range(self._full_top, self._full_bottom)
         self._sync_overlay_geometry()
         self._update_canvas_size()
 
@@ -62,9 +66,11 @@ class QPainterWidget(QScrollArea):
         self._canvas.set_depth_range(self._full_top, self._full_bottom)
 
     def _sync_overlay_geometry(self):
-        """Keep overlay widget covering the full viewport."""
-        if hasattr(self, "_overlay"):
-            self._overlay.setGeometry(self.viewport().rect())
+        if hasattr(self, "_overlay") and hasattr(self, "_depth_ruler"):
+            vp = self.viewport().rect()
+            ruler_w = self._depth_ruler.width()
+            self._overlay.setGeometry(vp.adjusted(0, 0, -ruler_w, 0))
+            self._depth_ruler.setGeometry(vp.width() - ruler_w, 0, ruler_w, vp.height())
 
     def _update_canvas_size(self):
         viewport_w = self.viewport().width()
@@ -81,8 +87,11 @@ class QPainterWidget(QScrollArea):
             return
         if canvas_y < 0:
             self._crosshair.set_cursor_y(None)
+            self._depth_ruler.set_cursor_depth(None)
         else:
             self._crosshair.set_cursor_y(canvas_y)
+            depth = self._crosshair.depth_at_y(canvas_y)
+            self._depth_ruler.set_cursor_depth(depth)
         self._overlay.update()
 
     def wheelEvent(self, event):
