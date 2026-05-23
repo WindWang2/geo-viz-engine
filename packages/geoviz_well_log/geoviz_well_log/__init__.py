@@ -26,6 +26,7 @@ from .models import (
     WellIntervals,
     FaciesData,
     LineStyle,
+    CorrelationLink,
 )
 
 # Pattern mapping
@@ -54,6 +55,10 @@ from .qpainter_builder import build_qpainter_tracks
 # Vector export
 from .export_qpainter import export_svg, export_pdf, export_png
 
+# Cross-well widgets
+from .cross_well_widget import CrossWellWidget
+from .painter_sync_manager import QPainterSyncManager
+
 __version__ = "1.0.0"
 
 __all__ = [
@@ -66,6 +71,7 @@ __all__ = [
     "WellIntervals",
     "FaciesData",
     "LineStyle",
+    "CorrelationLink",
     # Patterns
     "PATTERN_MAP",
     "FACIES_COLORS",
@@ -89,4 +95,7 @@ __all__ = [
     "export_svg",
     "export_pdf",
     "export_png",
+    # Cross-well
+    "CrossWellWidget",
+    "QPainterSyncManager",
 ]
