@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QImage, QPainter, QPixmap, QFont, QPen, QColor
 from PySide6.QtWidgets import QWidget
 
@@ -24,7 +24,19 @@ class ProfileVD(QWidget):
     """
 
     # Signal emitted when user draws a polyline on this profile
-    polyline_changed = Signal(list)  # list of (row_frac, col_frac) tuples
+    polyline_changed = Signal(list)  # list of (col_frac, row_frac) tuples
+
+    # Signal emitted on mouse move: (h_seismic_value, v_seismic_value)
+    cursor_moved = Signal(float, float)
+
+    # Signal emitted on mouse move: formatted readout string
+    amplitude_readout = Signal(str)
+
+    # Signal emitted when user picks a horizon point: (inline, xline, time_ms)
+    horizon_picked = Signal(float, float, float)
+
+    # Signal emitted when user adds an annotation: (h_value, v_value, text)
+    annotation_added = Signal(float, float, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -39,6 +51,31 @@ class ProfileVD(QWidget):
         self._drawing_enabled = False
         self._polyline_points: list[tuple[float, float]] = []  # (col_frac, row_frac)
         self._drawing_active = False
+
+        # Cross-hair state (received from other panels)
+        self._crosshair_h: float | None = None  # seismic coordinate
+        self._crosshair_v: float | None = None
+
+        # Horizon picking state
+        self._picking_enabled = False
+        self._picked_points: list[tuple[float, float]] = []  # (h_value, v_value) in seismic coords
+
+        # Annotation state
+        self._annotation_mode = False
+        self._annotations: list = []  # list of SeismicAnnotation
+        self._annotation_drag_idx: int | None = None
+
+        # Display gain
+        self._clip_pct = 99.0  # percentile clip (P1 to P_clip)
+
+        # Cursor signal throttle (~60 fps)
+        self._cursor_timer = QTimer(self)
+        self._cursor_timer.setInterval(16)
+        self._cursor_timer.setSingleShot(True)
+        self._cursor_timer.timeout.connect(self._emit_cursor)
+        self._pending_cursor: tuple[float, float, int, int] | None = None
+
+        self.setMouseTracking(True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -78,36 +115,130 @@ class ProfileVD(QWidget):
         self._drawing_active = False
         self.update()
 
+    def set_crosshair(self, h_value: float | None, v_value: float | None):
+        """Set cross-hair position from another panel's cursor (seismic coords)."""
+        self._crosshair_h = h_value
+        self._crosshair_v = v_value
+        self.update()
+
+    def enable_picking(self, enabled: bool):
+        """Enable/disable horizon picking mode."""
+        self._picking_enabled = enabled
+
+    def enable_annotation_mode(self, enabled: bool):
+        """Toggle annotation placement mode."""
+        self._annotation_mode = enabled
+
+    def add_annotation(self, annotation):
+        """Add an annotation object to this panel."""
+        self._annotations.append(annotation)
+        self.update()
+
+    def clear_annotations(self):
+        """Remove all annotations."""
+        self._annotations.clear()
+        self.update()
+
+    def annotations(self) -> list:
+        """Return a copy of current annotations."""
+        return list(self._annotations)
+
+    def add_picked_point(self, h_value: float, v_value: float):
+        """Add an externally-picked point to this panel's display."""
+        self._picked_points.append((h_value, v_value))
+        self.update()
+
+    def clear_picked_points(self):
+        """Remove all picked points."""
+        self._picked_points.clear()
+        self.update()
+
+    def set_clip_percentile(self, pct: float):
+        """Set clip percentile (1-99) and re-normalize."""
+        pct = max(1.0, min(99.0, pct))
+        if abs(pct - self._clip_pct) < 0.01:
+            return
+        self._clip_pct = pct
+        if self._has_data and self._data is not None:
+            self._renormalize()
+
+    def clip_percentile(self) -> float:
+        return self._clip_pct
+
     def render(
         self,
         data: np.ndarray,
         colormap: str | None = None,
         slice_info=None,
     ) -> None:
-        """Convert *data* to an RGBA image and schedule a repaint.
-
-        Parameters
-        ----------
-        data:
-            2-D ``float32`` array of shape ``(n_samples, n_traces)``.
-        colormap:
-            Name of a colormap registered in :class:`ColormapManager`.
-            When ``None`` the current colormap is used.
-        slice_info:
-            Optional :class:`SliceInfo` metadata stored for later queries.
-        """
+        """Convert *data* to an RGBA image and schedule a repaint."""
         self._data = data.astype(np.float32, copy=False)
         if colormap is not None:
             self._colormap_name = colormap
         self._slice_info = slice_info
         self._has_data = True
-        # Cache normalized data for fast colormap switches
+        self._renormalize()
+
+    def _renormalize(self):
+        """Compute normalized data using percentile clipping."""
         dmin, dmax = np.nanmin(self._data), np.nanmax(self._data)
         if dmax == dmin:
             self._normalized = np.zeros_like(self._data, dtype=np.float32)
         else:
-            self._normalized = (self._data - dmin) / (dmax - dmin)
+            pct = self._clip_pct
+            lo = np.nanpercentile(self._data, 100.0 - pct)
+            hi = np.nanpercentile(self._data, pct)
+            if hi <= lo:
+                hi = dmax
+                lo = dmin
+            self._normalized = np.clip((self._data - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
         self._build_image_from_normalized()
+
+    # ------------------------------------------------------------------
+    # Coordinate helpers
+    # ------------------------------------------------------------------
+
+    def _pixel_to_seismic(self, pos) -> tuple[float, float, int, int] | None:
+        """Convert pixel position to (h_value, v_value, col_idx, row_idx) or None."""
+        if not self._has_data or self._slice_info is None:
+            return None
+        img_rect = self._image_rect()
+        col_frac = (pos.x() - img_rect.left()) / max(img_rect.width(), 1)
+        row_frac = (pos.y() - img_rect.top()) / max(img_rect.height(), 1)
+        col_frac = max(0.0, min(1.0, col_frac))
+        row_frac = max(0.0, min(1.0, row_frac))
+
+        info = self._slice_info
+        n_cols = len(info.axis_h_values) if info.axis_h_values else 1
+        n_rows = len(info.axis_v_values) if info.axis_v_values else 1
+
+        col_idx = min(int(col_frac * (n_cols - 1)), n_cols - 1)
+        row_idx = min(int(row_frac * (n_rows - 1)), n_rows - 1)
+
+        h_val = info.axis_h_values[col_idx] if info.axis_h_values else col_frac
+        v_val = info.axis_v_values[row_idx] if info.axis_v_values else row_frac
+
+        return h_val, v_val, col_idx, row_idx
+
+    def _seismic_to_pixel(self, h_value: float, v_value: float) -> tuple[float, float] | None:
+        """Convert seismic coordinates to pixel position within image rect."""
+        info = self._slice_info
+        if info is None or not self._has_data:
+            return None
+        img_rect = self._image_rect()
+
+        h_vals = info.axis_h_values
+        v_vals = info.axis_v_values
+        if not h_vals or not v_vals:
+            return None
+
+        # Find fractional position via binary search on sorted values
+        h_idx = _find_nearest_index(h_vals, h_value)
+        v_idx = _find_nearest_index(v_vals, v_value)
+
+        px = img_rect.left() + (h_idx / max(len(h_vals) - 1, 1)) * img_rect.width()
+        py = img_rect.top() + (v_idx / max(len(v_vals) - 1, 1)) * img_rect.height()
+        return px, py
 
     # ------------------------------------------------------------------
     # Internals
@@ -155,9 +286,20 @@ class ProfileVD(QWidget):
         # 2. Draw coordinate axes
         self._draw_axes(painter, img_rect)
 
-        # 3. Draw polyline overlay if any
+        # 3. Draw cross-hair from linked panels
+        self._draw_crosshair(painter, img_rect)
+
+        # 4. Draw picked horizon points
+        if self._picked_points:
+            self._draw_picked_points(painter, img_rect)
+
+        # 5. Draw polyline overlay if any
         if self._polyline_points:
             self._draw_polyline(painter, img_rect)
+
+        # 6. Draw annotations
+        if self._annotations:
+            self._draw_annotations(painter, img_rect)
 
         painter.end()
 
@@ -180,9 +322,7 @@ class ProfileVD(QWidget):
             frac = i / n_ticks
             x = img_rect.left() + frac * img_rect.width()
             y_top = img_rect.bottom()
-            # Tick line
             painter.drawLine(int(x), int(y_top), int(x), int(y_top + tick_len))
-            # Tick label
             if info and info.axis_h_values:
                 idx = int(frac * (len(info.axis_h_values) - 1))
                 idx = min(idx, len(info.axis_h_values) - 1)
@@ -192,7 +332,6 @@ class ProfileVD(QWidget):
                 text = f"{frac:.1f}"
             painter.drawText(int(x - 18), int(y_top + tick_len + 12), text)
 
-        # Bottom axis label
         if info and info.axis_h_label:
             painter.setFont(label_font)
             painter.drawText(
@@ -217,7 +356,6 @@ class ProfileVD(QWidget):
                 text = f"{frac:.1f}"
             painter.drawText(int(x_left - 48), int(y + 4), text)
 
-        # Left axis label (rotated)
         if info and info.axis_v_label:
             painter.setFont(label_font)
             painter.save()
@@ -231,6 +369,36 @@ class ProfileVD(QWidget):
         border_pen.setWidthF(0.5)
         painter.setPen(border_pen)
         painter.drawRect(img_rect)
+
+    def _draw_crosshair(self, painter: QPainter, img_rect):
+        """Draw cross-hair lines from linked panels."""
+        if self._crosshair_h is None and self._crosshair_v is None:
+            return
+        pen = QPen(QColor(255, 255, 0, 180), 1, Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+
+        if self._crosshair_h is not None:
+            pt = self._seismic_to_pixel(self._crosshair_h, 0)
+            if pt:
+                x = pt[0]
+                if img_rect.left() <= x <= img_rect.right():
+                    painter.drawLine(int(x), int(img_rect.top()), int(x), int(img_rect.bottom()))
+
+        if self._crosshair_v is not None:
+            pt = self._seismic_to_pixel(0, self._crosshair_v)
+            if pt:
+                y = pt[1]
+                if img_rect.top() <= y <= img_rect.bottom():
+                    painter.drawLine(int(img_rect.left()), int(y), int(img_rect.right()), int(y))
+
+    def _draw_picked_points(self, painter: QPainter, img_rect):
+        """Draw horizon pick points as orange circles."""
+        painter.setPen(QPen(QColor(200, 100, 0), 1))
+        painter.setBrush(QColor(255, 165, 0))
+        for h_val, v_val in self._picked_points:
+            pt = self._seismic_to_pixel(h_val, v_val)
+            if pt:
+                painter.drawEllipse(int(pt[0]) - 4, int(pt[1]) - 4, 8, 8)
 
     def _draw_polyline(self, painter: QPainter, img_rect):
         """Draw the user's polyline path overlaid on the image."""
@@ -247,30 +415,157 @@ class ProfileVD(QWidget):
             py = img_rect.top() + row_frac * img_rect.height()
             pts_px.append((int(px), int(py)))
 
-        # Draw lines
         for i in range(len(pts_px) - 1):
             painter.drawLine(pts_px[i][0], pts_px[i][1], pts_px[i + 1][0], pts_px[i + 1][1])
 
-        # Draw nodes
         node_pen = QPen(QColor(255, 255, 0), 1)
         painter.setPen(node_pen)
         painter.setBrush(QColor(255, 0, 200))
         for px, py in pts_px:
             painter.drawEllipse(px - 4, py - 4, 8, 8)
 
+    def _draw_annotations(self, painter: QPainter, img_rect):
+        """Draw text annotations with background labels."""
+        from PySide6.QtGui import QFontMetrics
+
+        font = QFont("Sans", 10)
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+
+        for ann in self._annotations:
+            pt = self._seismic_to_pixel(ann.h_value, ann.v_value)
+            if pt is None:
+                continue
+            px, py = int(pt[0]), int(pt[1])
+
+            color = QColor(ann.color)
+            text_w = fm.horizontalAdvance(ann.text) + 8
+            text_h = fm.height() + 4
+
+            # Small marker dot at annotation point
+            painter.setPen(QPen(color, 1))
+            painter.setBrush(color)
+            painter.drawEllipse(px - 3, py - 3, 6, 6)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+
+            # Text positioned above-right of the point
+            tx = px + 6
+            ty = py - 8
+
+            # Background rectangle
+            bg_color = QColor(255, 255, 255, 210)
+            painter.fillRect(tx - 2, ty - text_h + 3, text_w, text_h, bg_color)
+            painter.setPen(QPen(color, 1))
+            painter.drawRect(tx - 2, ty - text_h + 3, text_w, text_h)
+
+            # Text
+            painter.setPen(color)
+            painter.drawText(tx + 2, ty, ann.text)
+
     # ------------------------------------------------------------------
-    # Mouse interaction for polyline drawing
+    # Mouse interaction
     # ------------------------------------------------------------------
 
+    def mouseMoveEvent(self, event):
+        if not self._has_data:
+            super().mouseMoveEvent(event)
+            return
+
+        result = self._pixel_to_seismic(event.position())
+        if result is None:
+            super().mouseMoveEvent(event)
+            return
+
+        h_val, v_val, col_idx, row_idx = result
+
+        # Throttle cursor signals to ~60 fps
+        self._pending_cursor = (h_val, v_val, col_idx, row_idx)
+        if not self._cursor_timer.isActive():
+            self._cursor_timer.start()
+
+    def _emit_cursor(self):
+        """Emit throttled cursor and readout signals."""
+        if self._pending_cursor is None:
+            return
+        h_val, v_val, col_idx, row_idx = self._pending_cursor
+        self._pending_cursor = None
+
+        self.cursor_moved.emit(h_val, v_val)
+
+        info = self._slice_info
+        if info and self._data is not None:
+            n_samples, n_traces = self._data.shape
+            if 0 <= row_idx < n_samples and 0 <= col_idx < n_traces:
+                amp = float(self._data[row_idx, col_idx])
+                h_label = info.axis_h_label or "H"
+                v_label = info.axis_v_label or "V"
+                self.amplitude_readout.emit(
+                    f"{h_label}={h_val:.0f}  {v_label}={v_val:.1f}  Amp={amp:.4f}"
+                )
+
     def mousePressEvent(self, event):
-        if not self._drawing_enabled or not self._has_data:
+        if not self._has_data:
             super().mousePressEvent(event)
             return
 
         img_rect = self._image_rect()
 
+        # Horizon picking mode (left click, no drawing active)
+        if self._picking_enabled and event.button() == Qt.MouseButton.LeftButton:
+            result = self._pixel_to_seismic(event.position())
+            if result:
+                h_val, v_val, _, _ = result
+                info = self._slice_info
+                if info:
+                    self._picked_points.append((h_val, v_val))
+                    self.horizon_picked.emit(h_val, v_val, 0)
+                    self.update()
+            return
+
+        # Annotation mode
+        if self._annotation_mode:
+            result = self._pixel_to_seismic(event.position())
+            if result is None:
+                super().mousePressEvent(event)
+                return
+            h_val, v_val, _, _ = result
+
+            if event.button() == Qt.MouseButton.LeftButton:
+                # Check if clicking near existing annotation (for drag)
+                near_idx = self._find_annotation_at(h_val, v_val)
+                if near_idx is not None:
+                    self._annotation_drag_idx = near_idx
+                else:
+                    from PySide6.QtWidgets import QInputDialog
+                    from .models import SeismicAnnotation
+                    text, ok = QInputDialog.getText(self, "标注", "输入标注文字:")
+                    if ok and text.strip():
+                        info = self._slice_info
+                        ann = SeismicAnnotation(
+                            text=text.strip(),
+                            h_value=h_val,
+                            v_value=v_val,
+                            slice_type=info.slice_type if info else "inline",
+                            slice_position=info.position if info else 0,
+                        )
+                        self._annotations.append(ann)
+                        self.annotation_added.emit(h_val, v_val, text.strip())
+                        self.update()
+                return
+
+            if event.button() == Qt.MouseButton.RightButton:
+                near_idx = self._find_annotation_at(h_val, v_val)
+                if near_idx is not None:
+                    self._annotations.pop(near_idx)
+                    self.update()
+                return
+
+        # Polyline drawing mode
+        if not self._drawing_enabled:
+            super().mousePressEvent(event)
+            return
+
         if event.button() == Qt.MouseButton.RightButton:
-            # Right click = finish drawing
             if len(self._polyline_points) >= 2:
                 self._drawing_active = False
                 self.polyline_changed.emit(list(self._polyline_points))
@@ -278,11 +573,8 @@ class ProfileVD(QWidget):
 
         if event.button() == Qt.MouseButton.LeftButton:
             pos = event.position()
-            # Convert pixel to fractional position within image rect
             col_frac = (pos.x() - img_rect.left()) / max(img_rect.width(), 1)
             row_frac = (pos.y() - img_rect.top()) / max(img_rect.height(), 1)
-
-            # Clamp to [0, 1]
             col_frac = max(0.0, min(1.0, col_frac))
             row_frac = max(0.0, min(1.0, row_frac))
 
@@ -293,3 +585,40 @@ class ProfileVD(QWidget):
             self._polyline_points.append((col_frac, row_frac))
             self.update()
 
+    def mouseReleaseEvent(self, event):
+        if self._annotation_drag_idx is not None:
+            self._annotation_drag_idx = None
+            return
+        super().mouseReleaseEvent(event)
+
+    def _find_annotation_at(self, h_val: float, v_val: float) -> int | None:
+        """Find index of annotation near given seismic coordinates, or None."""
+        info = self._slice_info
+        if info is None or not info.axis_h_values or not info.axis_v_values:
+            return None
+        h_range = max(info.axis_h_values) - min(info.axis_h_values)
+        v_range = max(info.axis_v_values) - min(info.axis_v_values)
+        threshold = 0.03
+        for i, ann in enumerate(self._annotations):
+            dh = abs(ann.h_value - h_val) / max(h_range, 1e-6)
+            dv = abs(ann.v_value - v_val) / max(v_range, 1e-6)
+            if dh < threshold and dv < threshold:
+                return i
+        return None
+
+
+def _find_nearest_index(sorted_values: list, target: float) -> int:
+    """Binary search for nearest index in a sorted list."""
+    lo, hi = 0, len(sorted_values) - 1
+    if hi <= 0:
+        return 0
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if sorted_values[mid] < target:
+            lo = mid + 1
+        else:
+            hi = mid
+    # Check if previous element is closer
+    if lo > 0 and abs(sorted_values[lo - 1] - target) < abs(sorted_values[lo] - target):
+        return lo - 1
+    return lo

@@ -89,6 +89,9 @@ class Renderer3D(QWidget):
         self._img_t = None
         self._img_arb = None
         self._horizon_visual = None
+        self._horizons: dict[str, object] = {}  # name -> GLMeshItem
+        self._picks_visual = None
+        self._annotation_items: list = []  # GLTextItem references
         self._bbox_visual = None
 
     @staticmethod
@@ -168,13 +171,12 @@ class Renderer3D(QWidget):
 
         self._mode = getattr(self, "_mode", "planes")
         self._volume_visual = None
-        
+        self._opacity_mode = getattr(self, "_opacity_mode", "sharp")
+
         # 1. 3D Volume Item (Hidden by default, shown when mode="volume")
         try:
             cmap_data = ColormapManager.get_colormap(self._cmap_name).copy()
-            # To avoid the "foggy" look and make it solid/substantial, use a harsh step-like alpha curve 
-            # where only the absolute zero crossing is transparent, and everything else is solid.
-            alpha_curve = np.clip(np.abs(np.linspace(-1, 1, 256)) * 400, 0, 255)
+            alpha_curve = self._build_alpha_curve(self._opacity_mode, len(cmap_data))
             cmap_data[:, 3] = alpha_curve.astype(np.uint8)
             vol_data = self._volume_data_gpu if self._volume_data_gpu is not None else data
             
@@ -230,22 +232,27 @@ class Renderer3D(QWidget):
         self._t_slider.valueChanged.connect(lambda v: self._on_slider("time", v))
 
     def add_horizon(self, horizon_data: np.ndarray, origin=(0, 0, 0),
-                    spacing=(1, 1)):
+                    spacing=(1, 1), name: str = "horizon", color=(1.0, 0.9, 0.2, 0.6)):
         """Renders horizon as a 3D mesh surface."""
         if horizon_data is None:
             return
+
+        # Remove previous single-horizon if it exists
         if self._horizon_visual is not None:
             self._view.removeItem(self._horizon_visual)
-            
+            self._horizon_visual = None
+
+        # Remove existing horizon with same name
+        if name in self._horizons:
+            self._view.removeItem(self._horizons[name])
+
         nI, nX = horizon_data.shape
         x = np.arange(nX, dtype=np.float32) * spacing[1] + origin[0]
         y = np.arange(nI, dtype=np.float32) * spacing[0] + origin[1]
         xx, yy = np.meshgrid(x, y)
-        
-        # Create mesh vertex grid
+
         verts = np.dstack([xx, yy, horizon_data.astype(np.float32)])
-        
-        # Generate faces
+
         faces = []
         for i in range(nI - 1):
             for j in range(nX - 1):
@@ -255,22 +262,27 @@ class Renderer3D(QWidget):
                 p3 = p2 + 1
                 faces.append([p0, p1, p2])
                 faces.append([p1, p3, p2])
-        
+
         faces = np.array(faces)
         verts_flat = verts.reshape(-1, 3)
-        
-        # Soft golden/yellow coloring
-        m_color = (1.0, 0.9, 0.2, 0.6)
-        
-        self._horizon_visual = gl.GLMeshItem(
+
+        mesh = gl.GLMeshItem(
             vertexes=verts_flat,
             faces=faces,
-            color=m_color,
+            color=color,
             shader='shaded',
             smooth=True,
             glOptions='additive'
         )
-        self._view.addItem(self._horizon_visual)
+        self._horizons[name] = mesh
+        self._view.addItem(mesh)
+
+    def remove_horizon(self, name: str):
+        if name in self._horizons:
+            self._view.removeItem(self._horizons.pop(name))
+
+    def horizons(self) -> list[str]:
+        return list(self._horizons.keys())
 
     def set_colormap(self, cmap_name: str):
         """Change the display colormap and trigger redraw."""
@@ -278,6 +290,51 @@ class Renderer3D(QWidget):
             return
         self._cmap_name = cmap_name
         self._update_slice_planes()
+        if self._mode == "volume":
+            self._rebuild_volume_visual()
+
+    @staticmethod
+    def _build_alpha_curve(mode: str, n: int = 256) -> np.ndarray:
+        """Build an alpha transfer function curve (0-255)."""
+        t = np.linspace(0, 1, n)
+        if mode == "linear":
+            alpha = t * 255
+        elif mode == "sigmoid":
+            alpha = 1 / (1 + np.exp(-10 * (t - 0.5))) * 255
+        elif mode == "threshold":
+            alpha = np.where(t > 0.15, 200, 0).astype(np.float64)
+        else:  # "sharp" (default) — original behavior
+            alpha = np.clip(np.abs(np.linspace(-1, 1, n)) * 400, 0, 255)
+        return np.clip(alpha, 0, 255).astype(np.uint8)
+
+    def set_opacity_mode(self, mode: str):
+        """Set the opacity transfer function and rebuild volume visual."""
+        self._opacity_mode = mode
+        if self._loaded and self._volume_visual is not None:
+            self._rebuild_volume_visual()
+
+    def _rebuild_volume_visual(self):
+        """Rebuild the GLVolumeItem with current opacity settings."""
+        if self._volume_visual is not None:
+            self._view.removeItem(self._volume_visual)
+            self._volume_visual = None
+
+        try:
+            cmap_data = ColormapManager.get_colormap(self._cmap_name).copy()
+            alpha_curve = self._build_alpha_curve(self._opacity_mode, len(cmap_data))
+            cmap_data[:, 3] = alpha_curve.astype(np.uint8)
+            vol_data = self._volume_data_gpu if self._volume_data_gpu is not None else self._volume_data_cpu
+            from .gpu_ops import apply_colormap_gpu
+            vol_rgba = apply_colormap_gpu(vol_data[::2, ::2, ::2], cmap_data)
+
+            si, sx, st = self._volume_spacing
+            self._volume_visual = gl.GLVolumeItem(vol_rgba, sliceDensity=3, smooth=True)
+            self._volume_visual.scale(si * 2, sx * 2, st * 2)
+            self._view.addItem(self._volume_visual)
+            if self._mode != "volume":
+                self._volume_visual.hide()
+        except Exception as e:
+            logger.warning(f"Rebuild volume visual failed: {e}")
 
     def clear(self):
         """Reset state and clean visual graph."""
@@ -288,12 +345,19 @@ class Renderer3D(QWidget):
 
     def _clear_visuals(self):
         for v in (self._volume_visual, self._img_il, self._img_xl,
-                  self._img_t, self._img_arb, self._horizon_visual, self._bbox_visual):
+                  self._img_t, self._img_arb, self._horizon_visual,
+                  self._picks_visual, self._bbox_visual):
             if v is not None:
                 try:
                     self._view.removeItem(v)
                 except Exception:
                     pass
+        for v in self._horizons.values():
+            try:
+                self._view.removeItem(v)
+            except Exception:
+                pass
+        self._horizons.clear()
         # Clear axis labels
         for v in getattr(self, '_axis_labels', []):
             try:
@@ -326,6 +390,14 @@ class Renderer3D(QWidget):
                 pass
         self._arb_curtain_items = []
         self._arb_polyline = None
+
+        # Clear annotation items
+        for item in self._annotation_items:
+            try:
+                self._view.removeItem(item)
+            except Exception:
+                pass
+        self._annotation_items = []
 
     # ------------------------------------------------------------------
     # Internal Graph Building
@@ -657,11 +729,72 @@ class Renderer3D(QWidget):
         elif slice_type == "time":
             self._t_slider._val_label.setText(str(value))
             self._t_pos = value
-            
+
         self._update_slice_planes()
-        
+
         if value >= 0:
             self.slice_changed.emit(slice_type, value)
+
+    def set_horizon_picks(self, points: list[tuple[float, float, float]]):
+        """Render manually picked horizon points as a 3D scatter plot.
+
+        Args:
+            points: List of (inline_num, xline_num, time_ms) tuples.
+        """
+        if self._picks_visual is not None:
+            self._view.removeItem(self._picks_visual)
+            self._picks_visual = None
+
+        if not points or not self._loaded:
+            return
+
+        ni, nx, nt = self._volume_data_cpu.shape
+        si, sx, st = self._volume_spacing
+
+        pos = np.array([
+            [il * si, xl * sx, t * st]
+            for il, xl, t in points
+        ], dtype=np.float32)
+
+        if len(pos) == 0:
+            return
+
+        color = np.full((len(pos), 4), [1.0, 0.65, 0.0, 1.0], dtype=np.float32)
+        self._picks_visual = gl.GLScatterPlotItem(
+            pos=pos, color=color, size=8, pxMode=True
+        )
+        self._view.addItem(self._picks_visual)
+
+    def set_annotations(self, annotations: list[tuple[float, float, float, str]]):
+        """Render text annotations in 3D space.
+
+        Args:
+            annotations: List of (il_val, xl_val, time_val, text) tuples.
+        """
+        for item in self._annotation_items:
+            try:
+                self._view.removeItem(item)
+            except Exception:
+                pass
+        self._annotation_items = []
+
+        if not annotations or not self._loaded:
+            return
+
+        si, sx, st = self._volume_spacing
+
+        for il_val, xl_val, t_val, text in annotations:
+            try:
+                pos = np.array([il_val * si, xl_val * sx, t_val * st])
+                item = gl.GLTextItem(
+                    pos=pos,
+                    text=text,
+                    color=(255, 255, 0, 255),
+                )
+                self._view.addItem(item)
+                self._annotation_items.append(item)
+            except Exception:
+                pass
 
     # Helper for existing API compatibility
     def grab(self):

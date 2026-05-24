@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QPushButton, QComboBox, QLabel, QFileDialog, QToolBar,
+    QDoubleSpinBox,
 )
 from PySide6.QtGui import QPainter, QLinearGradient, QColor
 
@@ -142,6 +143,9 @@ class SeismicView(QWidget):
         self._ds_factor: tuple[int, int, int] = (1, 1, 1)
         self._log = logging.getLogger(__name__)
 
+        # Horizon picking state
+        self._picked_points: list[tuple[float, float, float]] = []  # (il, xl, t)
+
         # Store raw slice data for export
         self._slice_data: dict[str, np.ndarray | None] = {
             "inline": None, "crossline": None, "time": None, "arbitrary": None
@@ -253,6 +257,23 @@ class SeismicView(QWidget):
         # Enable polyline drawing on Time panel and wire signal
         self._profile_t._vd.enable_polyline_drawing(True)
         self._profile_t._vd.polyline_changed.connect(self._on_polyline_drawn)
+
+        # Cross-hair cursor linking between IL/XL/T panels
+        self._profile_il._vd.cursor_moved.connect(self._on_il_cursor)
+        self._profile_xl._vd.cursor_moved.connect(self._on_xl_cursor)
+        self._profile_t._vd.cursor_moved.connect(self._on_t_cursor)
+
+        # Amplitude readout from all panels
+        for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
+            pw._vd.amplitude_readout.connect(self._on_amplitude_readout)
+
+        # Horizon picking signals
+        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+            pw._vd.horizon_picked.connect(self._on_horizon_picked)
+
+        # Annotation signals
+        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+            pw._vd.annotation_added.connect(self._on_annotation_added)
 
         # Auto-load: SEGY file if path given, else synthetic demo (async)
         if path is not None:
@@ -432,6 +453,13 @@ class SeismicView(QWidget):
         horizon_btn = QPushButton("层位")
         horizon_btn.clicked.connect(self._load_horizon)
 
+        horizon_list_btn = QPushButton("层位管理")
+        horizon_list_btn.setStyleSheet(
+            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
+            "border-radius: 4px; padding: 0 10px; font-size: 13px; }"
+        )
+        horizon_list_btn.clicked.connect(self._show_horizon_list)
+
         self._slice_type_combo = QComboBox()
         self._slice_type_combo.addItems(["Inline", "Crossline", "Time"])
         self._slice_type_combo.currentIndexChanged.connect(
@@ -455,21 +483,95 @@ class SeismicView(QWidget):
         self._3d_mode_combo.addItems(["正交切片", "三维体"])
         self._3d_mode_combo.currentIndexChanged.connect(self._on_3d_mode_changed)
 
+        self._opacity_combo = QComboBox()
+        self._opacity_combo.addItems(["透明度: 锐利", "透明度: 线性", "透明度: S曲线", "透明度: 阈值"])
+        self._opacity_combo.currentIndexChanged.connect(self._on_opacity_changed)
+
+        self._clip_spin = QDoubleSpinBox()
+        self._clip_spin.setRange(50.0, 99.9)
+        self._clip_spin.setValue(99.0)
+        self._clip_spin.setSuffix("%")
+        self._clip_spin.setSingleStep(1.0)
+        self._clip_spin.setDecimals(1)
+        self._clip_spin.setFixedWidth(80)
+        self._clip_spin.setStyleSheet(
+            "QDoubleSpinBox { border: 1px solid #cbd5e1; border-radius: 3px; "
+            "padding: 0 4px; font-size: 12px; }"
+        )
+        self._clip_spin.valueChanged.connect(self._on_clip_changed)
+
         self._slice_label = QLabel("未加载")
         self._slice_label.setStyleSheet("color: #888; padding: 0 8px;")
+
+        self._readout_label = QLabel("")
+        self._readout_label.setStyleSheet(
+            "color: #2d3748; font-size: 12px; font-family: monospace; padding: 0 8px;"
+        )
+        self._readout_label.setMinimumWidth(300)
+
+        self._pick_btn = QPushButton("拾取层位")
+        self._pick_btn.setCheckable(True)
+        self._pick_btn.setStyleSheet(
+            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
+            "border-radius: 4px; padding: 0 10px; font-size: 13px; } "
+            "QPushButton:checked { background: #fef3c7; border-color: #f59e0b; }"
+        )
+        self._pick_btn.toggled.connect(self._on_pick_toggled)
+
+        clear_pick_btn = QPushButton("清除拾取")
+        clear_pick_btn.setStyleSheet(
+            "QPushButton { background: #fed7d7; color: #9b2c2c; "
+            "border: 1px solid #feb2b2; border-radius: 4px; "
+            "padding: 0 10px; font-size: 13px; }"
+        )
+        clear_pick_btn.clicked.connect(self._on_clear_picks)
+
+        export_pick_btn = QPushButton("导出层位")
+        export_pick_btn.setStyleSheet(
+            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
+            "border-radius: 4px; padding: 0 10px; font-size: 13px; }"
+        )
+        export_pick_btn.clicked.connect(self._on_export_picks)
+
+        self._annotation_btn = QPushButton("标注")
+        self._annotation_btn.setCheckable(True)
+        self._annotation_btn.setStyleSheet(
+            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
+            "border-radius: 4px; padding: 0 10px; font-size: 13px; } "
+            "QPushButton:checked { background: #c6f6d5; border-color: #38a169; }"
+        )
+        self._annotation_btn.toggled.connect(self._on_annotation_toggled)
 
         bar.addWidget(load_btn)
         bar.addWidget(demo_btn)
         bar.addWidget(horizon_btn)
+        bar.addWidget(horizon_list_btn)
+        bar.addSeparator()
+        bar.addWidget(self._pick_btn)
+        bar.addWidget(clear_pick_btn)
+        bar.addWidget(export_pick_btn)
+        bar.addWidget(self._annotation_btn)
+        bar.addSeparator()
         bar.addWidget(QLabel(" 3D模式:"))
         bar.addWidget(self._3d_mode_combo)
+        bar.addWidget(self._opacity_combo)
         bar.addWidget(QLabel(" 剖面:"))
         bar.addWidget(self._slice_type_combo)
         bar.addWidget(QLabel(" 显示:"))
         bar.addWidget(self._mode_combo)
         bar.addWidget(QLabel(" 色标:"))
         bar.addWidget(self._cmap_combo)
+        self._attr_combo = QComboBox()
+        self._attr_combo.addItems(["振幅", "包络"])
+        self._attr_combo.currentIndexChanged.connect(self._on_attr_changed)
+
+        bar.addWidget(QLabel(" 裁剪:"))
+        bar.addWidget(self._clip_spin)
+        bar.addWidget(QLabel(" 属性:"))
+        bar.addWidget(self._attr_combo)
         bar.addWidget(self._slice_label)
+        bar.addSeparator()
+        bar.addWidget(self._readout_label)
         return bar
 
     def _build_slice_info(self, slice_type: str, position: int,
@@ -624,29 +726,49 @@ class SeismicView(QWidget):
         info = self._build_slice_info(slice_type, position, slice_2d.shape)
         self._slice_data[slice_type] = slice_2d.copy()
 
+        display = self._apply_attr(slice_2d)
+
         if slice_type == "inline":
-            self._profile_il.update_profile(slice_2d, slice_info=info)
+            self._profile_il.update_profile(display, slice_info=info)
         elif slice_type == "crossline":
-            self._profile_xl.update_profile(slice_2d, slice_info=info)
+            self._profile_xl.update_profile(display, slice_info=info)
         else:
-            self._profile_t.update_profile(slice_2d, slice_info=info)
+            self._profile_t.update_profile(display, slice_info=info)
 
         self._slice_label.setText(f"{slice_type.capitalize()} {position}")
 
+    def _apply_attr(self, data: np.ndarray) -> np.ndarray:
+        """Apply the current attribute mode to slice data."""
+        if self._attr_combo.currentIndex() == 1:
+            from .attributes import compute_envelope
+            return compute_envelope(data, axis=0)
+        return data
+
     def _export_slice(self, slice_type: str):
-        """Export the current slice data for the given type as CSV."""
+        """Export the current slice data or rendered image."""
         data = self._slice_data.get(slice_type)
         if data is None:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, f"导出 {slice_type.capitalize()} 剖面数据",
-            f"{slice_type}_slice.csv",
-            "CSV Files (*.csv);;NumPy Files (*.npy)"
+            self, f"导出 {slice_type.capitalize()} 剖面",
+            f"{slice_type}_slice",
+            "NumPy (*.npy);;CSV (*.csv);;PNG 图像 (*.png)"
         )
         if not path:
             return
         try:
-            if path.endswith(".npy"):
+            if path.endswith(".png"):
+                widget_map = {
+                    "inline": self._profile_il,
+                    "crossline": self._profile_xl,
+                    "time": self._profile_t,
+                    "arbitrary": self._profile_arb,
+                }
+                widget = widget_map.get(slice_type)
+                if widget:
+                    pixmap = widget.grab()
+                    pixmap.save(path, "PNG")
+            elif path.endswith(".npy"):
                 np.save(path, data)
             else:
                 np.savetxt(path, data, delimiter=",", fmt="%.6f")
@@ -680,6 +802,8 @@ class SeismicView(QWidget):
         )
         if not path:
             return
+        import os
+        name = os.path.basename(path).rsplit(".", 1)[0]
         axes = {
             "ilines": np.arange(
                 self._meta.iline_start,
@@ -699,7 +823,60 @@ class SeismicView(QWidget):
         parser = HorizonParser(path, unit="ms")
         grid = parser.parse(axes)
         filled = parser.fill_nearest(grid)
-        self._renderer_3d.add_horizon(filled)
+
+        # Cycle through colors for multiple horizons
+        colors = [
+            (1.0, 0.9, 0.2, 0.6),   # gold
+            (0.2, 0.9, 0.5, 0.6),    # green
+            (0.3, 0.6, 1.0, 0.6),    # blue
+            (0.9, 0.4, 0.4, 0.6),    # red
+            (0.8, 0.5, 1.0, 0.6),    # purple
+        ]
+        idx = len(self._horizon_grids) % len(colors)
+        self._horizon_grids[name] = filled
+        self._renderer_3d.add_horizon(filled, name=name, color=colors[idx])
+        self._readout_label.setText(f"已加载层位: {name} ({len(self._horizon_grids)} 个)")
+
+    def _remove_horizon(self, name: str):
+        self._horizon_grids.pop(name, None)
+        self._renderer_3d.remove_horizon(name)
+        self._readout_label.setText(f"已移除层位: {name}")
+
+    def _show_horizon_list(self):
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout
+        dialog = QDialog(self)
+        dialog.setWindowTitle("层位管理")
+        dialog.setMinimumSize(300, 300)
+        layout = QVBoxLayout(dialog)
+
+        list_widget = QListWidget()
+        for name in self._horizon_grids:
+            list_widget.addItem(name)
+        layout.addWidget(list_widget)
+
+        def remove_selected():
+            item = list_widget.currentItem()
+            if item:
+                name = item.text()
+                self._remove_horizon(name)
+                list_widget.takeItem(list_widget.row(item))
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        remove_btn = QPushButton("移除选中")
+        remove_btn.setStyleSheet(
+            "QPushButton { background: #fed7d7; color: #9b2c2c; "
+            "border: 1px solid #feb2b2; border-radius: 4px; "
+            "padding: 0 12px; font-size: 13px; }"
+        )
+        remove_btn.clicked.connect(remove_selected)
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(remove_btn)
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.exec()
 
     def _on_mode_changed(self, index: int):
         mode = "vd" if index == 0 else "wiggle"
@@ -708,3 +885,184 @@ class SeismicView(QWidget):
 
     def _on_slice_type_changed(self, index: int):
         pass  # Slice type is controlled by 3D plane widgets
+
+    def _on_clip_changed(self, value: float):
+        for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
+            pw._vd.set_clip_percentile(value)
+
+    def _on_opacity_changed(self, index: int):
+        modes = ["sharp", "linear", "sigmoid", "threshold"]
+        if 0 <= index < len(modes):
+            self._renderer_3d.set_opacity_mode(modes[index])
+
+    def _on_attr_changed(self, index: int):
+        self._apply_current_attr()
+
+    def _apply_current_attr(self):
+        """Re-render all cached slice data with the current attribute mode."""
+        from .attributes import compute_envelope
+
+        attr_mode = self._attr_combo.currentIndex()
+        for st in ("inline", "crossline", "time"):
+            raw = self._slice_data.get(st)
+            if raw is None:
+                continue
+            info = self._build_slice_info(st, 0, raw.shape)
+            # Recover position from info stored in the profile widget
+            pw_map = {
+                "inline": self._profile_il,
+                "crossline": self._profile_xl,
+                "time": self._profile_t,
+            }
+            pw = pw_map[st]
+            existing_info = pw._vd.slice_info() if pw._vd else None
+            if existing_info:
+                info = existing_info
+
+            display = raw
+            if attr_mode == 1:
+                display = compute_envelope(raw, axis=0)
+
+            pw.update_profile(display, slice_info=info)
+
+    # --- Cross-hair cursor linking ---
+
+    def _current_il_xl_t(self) -> tuple[int, int, int]:
+        """Get current slider positions as (il_index, xl_index, t_index)."""
+        r = self._renderer_3d
+        return r._il_pos, r._xl_pos, r._t_pos
+
+    def _on_il_cursor(self, xline_val: float, time_val: float):
+        """Cursor moved on Inline panel: show crosshairs on XL and T panels."""
+        _, il_pos, _ = self._current_il_xl_t()
+        m = self._meta
+        il_val = (m.iline_start + il_pos * m.iline_step) if m else il_pos
+        self._profile_xl._vd.set_crosshair(il_val, time_val)
+        self._profile_t._vd.set_crosshair(il_val, xline_val)
+
+    def _on_xl_cursor(self, iline_val: float, time_val: float):
+        """Cursor moved on Crossline panel: show crosshairs on IL and T panels."""
+        _, _, xl_pos = self._current_il_xl_t()
+        m = self._meta
+        xl_val = (m.xline_start + xl_pos * m.xline_step) if m else xl_pos
+        self._profile_il._vd.set_crosshair(xl_val, time_val)
+        self._profile_t._vd.set_crosshair(iline_val, xl_val)
+
+    def _on_t_cursor(self, iline_val: float, xline_val: float):
+        """Cursor moved on Time panel: show crosshairs on IL and XL panels."""
+        _, _, t_pos = self._current_il_xl_t()
+        m = self._meta
+        t_val = (m.t0_ms + t_pos * m.dt_ms) if m else t_pos
+        self._profile_il._vd.set_crosshair(xline_val, t_val)
+        self._profile_xl._vd.set_crosshair(iline_val, t_val)
+
+    # --- Amplitude readout ---
+
+    def _on_amplitude_readout(self, text: str):
+        self._readout_label.setText(text)
+
+    # --- Horizon picking ---
+
+    def _on_pick_toggled(self, checked: bool):
+        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+            pw._vd.enable_picking(checked)
+
+    def _on_horizon_picked(self, h_val: float, v_val: float, _extra: float):
+        """A horizon point was picked on one of the profile panels."""
+        sender = self.sender()
+        if sender is None:
+            return
+        info = sender.slice_info()
+        if info is None:
+            return
+
+        m = self._meta
+        st = info.slice_type
+        pos = info.position
+
+        il_val, xl_val, t_val = 0.0, 0.0, 0.0
+        if st == "inline":
+            il_val = float(m.iline_start + pos * m.iline_step) if m else float(pos)
+            xl_val, t_val = h_val, v_val
+        elif st == "crossline":
+            xl_val = float(m.xline_start + pos * m.xline_step) if m else float(pos)
+            il_val, t_val = h_val, v_val
+        else:  # time
+            t_val = float(m.t0_ms + pos * m.dt_ms) if m else float(pos)
+            il_val, xl_val = h_val, v_val
+
+        self._picked_points.append((il_val, xl_val, t_val))
+
+        # Show on all 2D panels
+        self._profile_il._vd.add_picked_point(xl_val, t_val)
+        self._profile_xl._vd.add_picked_point(il_val, t_val)
+        self._profile_t._vd.add_picked_point(il_val, xl_val)
+
+        # Show in 3D
+        self._renderer_3d.set_horizon_picks(self._picked_points)
+
+        n = len(self._picked_points)
+        self._readout_label.setText(f"已拾取 {n} 个点")
+
+    def _on_clear_picks(self):
+        self._picked_points.clear()
+        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+            pw._vd.clear_picked_points()
+        self._renderer_3d.set_horizon_picks([])
+        self._readout_label.setText("")
+
+    def _on_export_picks(self):
+        if not self._picked_points:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出层位拾取点", "horizon_picks.csv",
+            "CSV Files (*.csv)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w") as f:
+                f.write("inline,crossline,time_ms\n")
+                for il, xl, t in self._picked_points:
+                    f.write(f"{il:.1f},{xl:.1f},{t:.1f}\n")
+            self._log.info("Exported %d picks to %s", len(self._picked_points), path)
+        except Exception as exc:
+            self._log.error("Export picks failed: %s", exc)
+
+    # --- Annotation ---
+
+    def _on_annotation_toggled(self, checked: bool):
+        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+            pw._vd.enable_annotation_mode(checked)
+
+    def _on_annotation_added(self, h_val: float, v_val: float, text: str):
+        """An annotation was placed on a profile panel; sync to 3D."""
+        self._sync_annotations_to_3d()
+
+    def _sync_annotations_to_3d(self):
+        """Collect annotations from all profile panels and push to 3D renderer."""
+        all_3d: list[tuple[float, float, float, str]] = []
+
+        m = self._meta
+        if m is None:
+            self._renderer_3d.set_annotations(all_3d)
+            return
+
+        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+            for ann in pw._vd.annotations():
+                st = ann.slice_type
+                pos = ann.slice_position
+
+                if st == "inline":
+                    il = float(m.iline_start + pos * m.iline_step)
+                    xl, t = ann.h_value, ann.v_value
+                elif st == "crossline":
+                    xl = float(m.xline_start + pos * m.xline_step)
+                    il, t = ann.h_value, ann.v_value
+                else:
+                    t = float(m.t0_ms + pos * m.dt_ms)
+                    il, xl = ann.h_value, ann.v_value
+
+                all_3d.append((il, xl, t, ann.text))
+
+        self._renderer_3d.set_annotations(all_3d)

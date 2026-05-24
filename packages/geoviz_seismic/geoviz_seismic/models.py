@@ -69,3 +69,14 @@ class HorizonData(BaseModel):
     unit: Literal["ms", "m", "ft"]
     shape: tuple[int, int]
     filled: bool
+
+
+class SeismicAnnotation(BaseModel):
+    """A text annotation placed on a seismic profile panel."""
+
+    text: str
+    h_value: float
+    v_value: float
+    slice_type: str
+    slice_position: int
+    color: str = "#ffff00"
