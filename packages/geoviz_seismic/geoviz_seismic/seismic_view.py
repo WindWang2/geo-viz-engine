@@ -722,6 +722,18 @@ class SeismicView(QWidget):
         # Sync toolbar slider from 3D slider
         self._sync_toolbar_slider(slice_type, position)
 
+        # Sync slice type combo box index
+        combo_map = {
+            "inline": 0,
+            "crossline": 1,
+            "time": 2,
+        }
+        idx = combo_map.get(slice_type)
+        if idx is not None:
+            self._slice_type_combo.blockSignals(True)
+            self._slice_type_combo.setCurrentIndex(idx)
+            self._slice_type_combo.blockSignals(False)
+
     def _sync_toolbar_slider(self, slice_type: str, position: int):
         """Update the toolbar slider when position changes from 3D sliders."""
         slider_map = {
@@ -1016,8 +1028,34 @@ class SeismicView(QWidget):
         for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
             pw.set_display_mode(mode)
 
+    @Slot(int)
     def _on_slice_type_changed(self, index: int):
-        pass  # Slice type is controlled by 3D plane widgets
+        if self._meta is None:
+            return
+
+        slice_types = ["inline", "crossline", "time"]
+        if not (0 <= index < len(slice_types)):
+            return
+        slice_type = slice_types[index]
+
+        pos_map = {
+            "inline": self._renderer_3d._il_pos,
+            "crossline": self._renderer_3d._xl_pos,
+            "time": self._renderer_3d._t_pos,
+        }
+        position = pos_map.get(slice_type)
+        if position is None:
+            return
+
+        widget_map = {
+            "inline": self._profile_il,
+            "crossline": self._profile_xl,
+            "time": self._profile_t,
+        }
+        self._profile_widget = widget_map[slice_type]
+
+        # Trigger an immediate slice read / render
+        self._on_slice_changed(slice_type, position)
 
     def _on_clip_changed(self, value: float):
         for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
