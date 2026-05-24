@@ -59,6 +59,7 @@ def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogD
     
     excel_file = pd.ExcelFile(path, engine="calamine")
     sheet_names = excel_file.sheet_names
+    all_sheets = pd.read_excel(excel_file, sheet_name=None)  # dict[str, DataFrame]
 
     def read_interval_sheet(df):
         items = []
@@ -87,26 +88,34 @@ def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogD
     
     # 1. AC and GR
     if "AC、GR" in sheet_names:
-        df = pd.read_excel(excel_file, sheet_name="AC、GR")
-        curves.append(CurveData(name="AC", depth=df["深度"].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df["AC"].tolist()], color="#1d4ed8", display_range=(40, 100), line_style=LineStyle.SOLID))
-        curves.append(CurveData(name="GR", depth=df["深度"].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df["GR"].tolist()], color="#15803d", display_range=(0, 150)))
+        df = all_sheets.get("AC、GR")
+        ac_vals = df["AC"].replace(list(_SENTINEL_VALUES), float('nan')).astype(float).tolist()
+        gr_vals = df["GR"].replace(list(_SENTINEL_VALUES), float('nan')).astype(float).tolist()
+        curves.append(CurveData(name="AC", depth=df["深度"].tolist(), values=ac_vals, color="#1d4ed8", display_range=(40, 100), line_style=LineStyle.SOLID))
+        curves.append(CurveData(name="GR", depth=df["深度"].tolist(), values=gr_vals, color="#15803d", display_range=(0, 150)))
     else:
         if "GR" in sheet_names:
-            df = pd.read_excel(excel_file, sheet_name="GR")
-            curves.append(CurveData(name="GR", depth=df.iloc[:, 0].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df.iloc[:, 1].tolist()], color="#15803d", display_range=(0, 150)))
+            df = all_sheets.get("GR")
+            gr_vals = df.iloc[:, 1].replace(list(_SENTINEL_VALUES), float('nan')).astype(float).tolist()
+            curves.append(CurveData(name="GR", depth=df.iloc[:, 0].tolist(), values=gr_vals, color="#15803d", display_range=(0, 150)))
         if "其他曲线" in sheet_names:
-            df = pd.read_excel(excel_file, sheet_name="其他曲线")
-            curves.append(CurveData(name="AC", depth=df.iloc[:, 0].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df.iloc[:, 1].tolist()], color="#1d4ed8", display_range=(40, 100), line_style=LineStyle.SOLID))
+            df = all_sheets.get("其他曲线")
+            ac_vals = df.iloc[:, 1].replace(list(_SENTINEL_VALUES), float('nan')).astype(float).tolist()
+            curves.append(CurveData(name="AC", depth=df.iloc[:, 0].tolist(), values=ac_vals, color="#1d4ed8", display_range=(40, 100), line_style=LineStyle.SOLID))
 
     # 2. RT and RXO
     if "RT、RXO" in sheet_names:
-        df = pd.read_excel(excel_file, sheet_name="RT、RXO")
-        curves.append(CurveData(name="RT", depth=df["深度"].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df["RT"].tolist()], color="#b91c1c", display_range=(0.1, 1000), line_style=LineStyle.SOLID))
-        curves.append(CurveData(name="RXO", depth=df["深度"].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df["RXO"].tolist()], color="#ea580c", display_range=(0.1, 1000), line_style=LineStyle.DASHED))
+        df = all_sheets.get("RT、RXO")
+        rt_vals = df["RT"].replace(list(_SENTINEL_VALUES), float('nan')).astype(float).tolist()
+        rxo_vals = df["RXO"].replace(list(_SENTINEL_VALUES), float('nan')).astype(float).tolist()
+        curves.append(CurveData(name="RT", depth=df["深度"].tolist(), values=rt_vals, color="#b91c1c", display_range=(0.1, 1000), line_style=LineStyle.SOLID))
+        curves.append(CurveData(name="RXO", depth=df["深度"].tolist(), values=rxo_vals, color="#ea580c", display_range=(0.1, 1000), line_style=LineStyle.DASHED))
     elif "电阻率" in sheet_names:
-        df = pd.read_excel(excel_file, sheet_name="电阻率")
-        curves.append(CurveData(name="RT", depth=df.iloc[:, 0].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df.iloc[:, 1].tolist()], color="#b91c1c", display_range=(0.1, 1000), line_style=LineStyle.SOLID))
-        curves.append(CurveData(name="RXO", depth=df.iloc[:, 0].tolist(), values=[(float(v) if v not in _SENTINEL_VALUES else float('nan')) for v in df.iloc[:, 2].tolist()], color="#ea580c", display_range=(0.1, 1000), line_style=LineStyle.DASHED))
+        df = all_sheets.get("电阻率")
+        rt_vals = df.iloc[:, 1].replace(list(_SENTINEL_VALUES), float('nan')).astype(float).tolist()
+        rxo_vals = df.iloc[:, 2].replace(list(_SENTINEL_VALUES), float('nan')).astype(float).tolist()
+        curves.append(CurveData(name="RT", depth=df.iloc[:, 0].tolist(), values=rt_vals, color="#b91c1c", display_range=(0.1, 1000), line_style=LineStyle.SOLID))
+        curves.append(CurveData(name="RXO", depth=df.iloc[:, 0].tolist(), values=rxo_vals, color="#ea580c", display_range=(0.1, 1000), line_style=LineStyle.DASHED))
 
     # 3. Intervals
     series = []
@@ -114,7 +123,7 @@ def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogD
     formation = []
     
     if "地层系统" in sheet_names:
-        df = pd.read_excel(excel_file, sheet_name="地层系统")
+        df = all_sheets.get("地层系统")
         cols = [str(c).strip() for c in df.columns]
         if "井号" in cols or (not df.empty and len(df.columns) > 0 and any(isinstance(val, str) and "井号" in val for val in df.iloc[:, 0].dropna())):
             all_rows = [df.columns.tolist()] + df.values.tolist()
@@ -140,29 +149,29 @@ def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogD
 
     lithology = []
     if "岩性剖面" in sheet_names:
-        lithology = read_interval_sheet(pd.read_excel(excel_file, sheet_name="岩性剖面"))
+        lithology = read_interval_sheet(all_sheets.get("岩性剖面"))
 
     lithology_desc = []
     if "岩性描述" in sheet_names:
-        lithology_desc = read_interval_sheet(pd.read_excel(excel_file, sheet_name="岩性描述"))
+        lithology_desc = read_interval_sheet(all_sheets.get("岩性描述"))
 
     micro_phase = []
     if "微相" in sheet_names:
-        micro_phase = read_interval_sheet(pd.read_excel(excel_file, sheet_name="微相"))
+        micro_phase = read_interval_sheet(all_sheets.get("微相"))
 
     sub_phase = []
     if "亚相" in sheet_names:
-        sub_phase = read_interval_sheet(pd.read_excel(excel_file, sheet_name="亚相"))
+        sub_phase = read_interval_sheet(all_sheets.get("亚相"))
 
     phase = []
     if "相" in sheet_names:
-        phase = read_interval_sheet(pd.read_excel(excel_file, sheet_name="相"))
+        phase = read_interval_sheet(all_sheets.get("相"))
 
     systems_tract = []
     sequence = []
     
     if "层序" in sheet_names:
-        df = pd.read_excel(excel_file, sheet_name="层序")
+        df = all_sheets.get("层序")
         cols = [str(c).strip() for c in df.columns]
         if "井号" in cols or (not df.empty and len(df.columns) > 0 and any(isinstance(val, str) and "井号" in val for val in df.iloc[:, 0].dropna())):
             all_rows = [df.columns.tolist()] + df.values.tolist()
@@ -271,6 +280,7 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
 
     excel_file = pd.ExcelFile(path, engine="calamine")
     sheet_names = excel_file.sheet_names
+    all_sheets = pd.read_excel(excel_file, sheet_name=None)  # dict[str, DataFrame]
 
     curves = []
     series = []
@@ -296,8 +306,8 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
         is_curve_sheet = any(k in s for k in ("测井曲线", "离散曲线", "AC", "GR", "RT", "RXO", "POR", "电阻率", "其他曲线"))
         if is_curve_sheet:
             try:
-                df = pd.read_excel(excel_file, sheet_name=s)
-                if df.empty:
+                df = all_sheets.get(s)
+                if df is None or df.empty:
                     continue
                 cols = df.columns.tolist()
                 
@@ -335,15 +345,7 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
                     if c == depth_col or c_str in ("井号", "TVD", "TVDSS", "道名", "道"):
                         continue
                         
-                    vals = []
-                    for x in df[c].tolist():
-                        try:
-                            if pd.isna(x) or x in _SENTINEL_VALUES:
-                                vals.append(float('nan'))
-                            else:
-                                vals.append(float(x))
-                        except (ValueError, TypeError):
-                            vals.append(float('nan'))
+                    vals = df[c].replace(list(_SENTINEL_VALUES), float('nan')).astype(float).tolist()
                             
                     if not any(v == v for v in vals):
                         continue
@@ -470,8 +472,8 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
             continue
             
         try:
-            df = pd.read_excel(excel_file, sheet_name=s)
-            if df.empty:
+            df = all_sheets.get(s)
+            if df is None or df.empty:
                 continue
                 
             items_dict = read_child_sheet(df, s)

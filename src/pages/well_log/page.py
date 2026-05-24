@@ -3,8 +3,9 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QStackedWidget, QGroupBox, QListWidget, QAbstractItemView, QListWidgetItem,
-    QMessageBox, QProgressDialog, QComboBox, QFileDialog
+    QMessageBox, QComboBox, QFileDialog
 )
+from src.utils.floating_progress import FloatingProgressOverlay
 from src.data.well_registry import get_well_data, list_wells
 from geoviz_well_log import build_qpainter_tracks
 from geoviz_well_log.export_qpainter import export_svg as qpainter_export_svg
@@ -144,6 +145,28 @@ class PredictionWorker(QObject):
             self.error.emit(f"请求发生异常: {str(e)}")
 
 
+class _WellLogLoadWorker(QObject):
+    """Background worker that loads a single well's data."""
+    progress = Signal(int, str)
+    finished = Signal(object)  # WellLogData
+    error = Signal(str)
+
+    def __init__(self, loader_fn, xls_path, well_name, parent=None):
+        super().__init__(parent)
+        self._loader_fn = loader_fn
+        self._xls_path = xls_path
+        self._well_name = well_name
+
+    def run(self):
+        try:
+            self.progress.emit(10, "正在读取 Excel 数据...")
+            data = self._loader_fn(self._xls_path, well_name=self._well_name)
+            self.progress.emit(80, "正在构建轨道...")
+            self.finished.emit(data)
+        except Exception as e:
+            self.error.emit(f"加载失败: {e}")
+
+
 class WellLogPage(QWidget):
     def __init__(self):
         super().__init__()
@@ -198,6 +221,10 @@ class WellLogPage(QWidget):
 
         self._toolbar.setVisible(True)
         outer.addWidget(self._toolbar)
+
+        # Inline progress bar (between toolbar and content)
+        self._progress = FloatingProgressOverlay(self)
+        outer.addWidget(self._progress)
 
         # Main content area
         self._content_layout = QHBoxLayout()
@@ -274,6 +301,8 @@ class WellLogPage(QWidget):
         self._current_well: str | None = None
         self._current_xls_path = None
         self._current_data = None
+        self._load_thread = None
+        self._load_worker = None
 
     def load_well(self, well_name: str) -> bool:
         if well_name == self._current_well and self._qpainter_widget:
@@ -290,16 +319,45 @@ class WellLogPage(QWidget):
             self._qpainter_widget.deleteLater()
             self._qpainter_widget = None
 
-        try:
-            data = loader_fn(xls_path, well_name=well_name)
-            print(f"[WellLog] Data Loaded. Curves: {[c.name for c in data.curves]}")
-        except Exception as e:
-            print(f"[WellLog] Failed to load {well_name}: {e}")
-            return False
+        # Disable combo during loading
+        self._well_combo.setEnabled(False)
 
+        # Show floating progress overlay
+        self._progress.show_progress("正在加载井数据...")
+
+        # Start background loading
+        self._load_thread = QThread()
+        self._load_worker = _WellLogLoadWorker(loader_fn, xls_path, well_name)
+        self._load_worker.moveToThread(self._load_thread)
+
+        self._load_thread.started.connect(self._load_worker.run)
+        self._load_worker.progress.connect(self._on_load_progress)
+        self._load_worker.finished.connect(self._on_well_loaded)
+        self._load_worker.error.connect(self._on_load_error)
+        self._load_worker.finished.connect(self._load_thread.quit)
+        self._load_worker.error.connect(self._load_thread.quit)
+        self._load_worker.finished.connect(self._load_worker.deleteLater)
+        self._load_worker.error.connect(self._load_worker.deleteLater)
+        self._load_thread.finished.connect(self._load_thread.deleteLater)
+        self._load_thread.finished.connect(self._on_load_thread_finished)
+
+        self._load_thread.start()
+        return True
+
+    def _on_load_progress(self, val, msg):
+        self._progress.update_progress(val, msg)
+
+    def _on_well_loaded(self, data):
+        print(f"[WellLog] Data Loaded. Curves: {[c.name for c in data.curves]}")
+
+        well_name = data.well_name
         self._current_well = well_name
-        self._current_xls_path = xls_path
         self._current_data = data
+
+        # Find xls_path from registry
+        entry = get_well_data(well_name)
+        if entry:
+            self._current_xls_path = entry[1]
 
         # Sync combo box
         idx = self._well_combo.findText(well_name)
@@ -322,7 +380,15 @@ class WellLogPage(QWidget):
         self._well_name_label.setText(well_name + " 综合测井解释图")
         self._control_panel.setVisible(True)
 
-        return True
+    def _on_load_error(self, msg):
+        self._well_combo.setEnabled(True)
+        self._progress.hide_progress()
+        print(f"[WellLog] {msg}")
+        QMessageBox.warning(self, "加载失败", msg)
+
+    def _on_load_thread_finished(self):
+        self._well_combo.setEnabled(True)
+        self._progress.hide_progress()
 
     def _populate_track_list(self):
         self._track_list_widget.blockSignals(True)
@@ -578,9 +644,7 @@ class WellLogPage(QWidget):
         self._update_tracks()
 
     def _run_ai_prediction(self):
-        self._progress_dialog = QProgressDialog("正在准备预测数据...", "取消", 0, 100, self)
-        self._progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        self._progress_dialog.show()
+        self._progress.show_progress("正在准备预测数据...", maximum=100)
 
         self._thread = QThread()
         self._worker = PredictionWorker(self._current_well, self._current_xls_path, self._current_data)
@@ -599,31 +663,13 @@ class WellLogPage(QWidget):
         self._thread.start()
 
     def _on_prediction_progress(self, val, msg):
-        dialog = getattr(self, "_progress_dialog", None)
-        if dialog is not None:
-            try:
-                dialog.setValue(val)
-                dialog.setLabelText(msg)
-            except RuntimeError:
-                pass
+        self._progress.update_progress(val, msg)
 
     def _on_prediction_finished(self, records):
-        dialog = getattr(self, "_progress_dialog", None)
-        if dialog is not None:
-            try:
-                dialog.close()
-            except RuntimeError:
-                pass
-            self._progress_dialog = None
+        self._progress.hide_progress()
         self._apply_ai_prediction(records)
         QMessageBox.information(self, "AI 预测", "AI 预测完成！已成功渲染并写入 Excel。")
 
     def _on_prediction_error(self, err_msg):
-        dialog = getattr(self, "_progress_dialog", None)
-        if dialog is not None:
-            try:
-                dialog.close()
-            except RuntimeError:
-                pass
-            self._progress_dialog = None
+        self._progress.hide_progress()
         QMessageBox.critical(self, "AI 预测错误", err_msg)

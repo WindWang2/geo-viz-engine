@@ -1,3 +1,3 @@
-from src.pages.cross_well.page import CrossWellPage
+from src.pages.cross_well.scene_page import CrossWellScenePage as CrossWellPage
 
 __all__ = ["CrossWellPage"]

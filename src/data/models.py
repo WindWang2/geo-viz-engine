@@ -8,16 +8,8 @@ from geoviz_well_log.models import (
     FaciesData,
     WellIntervals,
     WellLogData,
+    CorrelationLink,
 )
-
-
-class CorrelationLink(BaseModel):
-    source_well: str
-    target_well: str
-    source_interval_id: str  # Format: "top_bottom_name"
-    target_interval_id: str
-    color: str
-    is_manual: bool = False
 
 
 # Legacy models — kept for backward compatibility with existing loaders/tests
