@@ -59,6 +59,9 @@ from .export_qpainter import export_svg, export_pdf, export_png
 from .cross_well_widget import CrossWellWidget
 from .painter_sync_manager import QPainterSyncManager
 
+# Cross-well scene (QGraphicsScene-based)
+from .scene import CrossWellScene, CrossWellView, WellItem, CorrelationBand, DepthRulerItem
+
 __version__ = "1.0.0"
 
 __all__ = [
@@ -98,4 +101,9 @@ __all__ = [
     # Cross-well
     "CrossWellWidget",
     "QPainterSyncManager",
+    "CrossWellScene",
+    "CrossWellView",
+    "WellItem",
+    "CorrelationBand",
+    "DepthRulerItem",
 ]

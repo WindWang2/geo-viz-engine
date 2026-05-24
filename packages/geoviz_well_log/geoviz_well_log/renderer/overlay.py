@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import bisect
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics, QBrush
+from PySide6.QtCore import QRectF, QPoint, Qt
+from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics, QBrush, QCursor
 
 from typing import TYPE_CHECKING
 
@@ -130,11 +130,17 @@ class CrosshairOverlay:
         panel_h = len(lines) * line_h + 8
         panel_w = max_w
 
-        # Position: right side, offset from cursor
-        px = rect.right() - panel_w - 8
-        py = cursor_viewport_y - panel_h - 4
+        # Position: follow mouse cursor
+        cursor_canvas = self._canvas.mapFromGlobal(QCursor.pos())
+        cursor_x = cursor_canvas.x() - scroll_offset if scroll_offset else cursor_canvas.x()
+        px = cursor_x + 16
+        py = cursor_viewport_y - panel_h - 8
+        # Keep panel within canvas bounds
+        if px + panel_w > rect.right():
+            px = cursor_x - panel_w - 8
         if py < rect.top():
-            py = cursor_viewport_y + 4
+            py = cursor_viewport_y + 8
+        px = max(rect.left(), min(px, rect.right() - panel_w))
 
         panel_rect = QRectF(px, py, panel_w, panel_h)
 

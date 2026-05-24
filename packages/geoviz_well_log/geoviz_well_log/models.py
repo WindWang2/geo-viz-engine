@@ -54,6 +54,15 @@ class FaciesInterval(BaseModel):
     sub_facies: str = ""
     micro_facies: str = ""
 
+class CorrelationLink(BaseModel):
+    source_well: str
+    target_well: str
+    source_interval_id: str
+    target_interval_id: str
+    color: str = "#f59e0b"
+    is_manual: bool = False
+
+
 class WellLogData(BaseModel):
     well_name: str
     top_depth: float

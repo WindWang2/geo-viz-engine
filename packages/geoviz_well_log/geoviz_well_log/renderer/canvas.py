@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QRectF, Signal, QObject, QEvent
 from PySide6.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent
-from PySide6.QtWidgets import QWidget, QApplication
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtWidgets import QApplication
 
 from .track_base import BaseTrack, ECHARTS_HEADER_BG, ECHARTS_BORDER, ECHARTS_TEXT, ECHARTS_GROUP_HEADER_HEIGHT
 from .coordinator import LayoutCoordinator
@@ -40,7 +41,7 @@ class _TrackMouseFilter(QObject):
         return False  # don't consume — let tracks still receive events
 
 
-class WellLogCanvas(QWidget):
+class WellLogCanvas(QOpenGLWidget):
     """Main canvas widget for well log visualization.
 
     Manages track layout, depth range, and provides unified paint_all()

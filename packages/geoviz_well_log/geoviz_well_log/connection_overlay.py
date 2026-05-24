@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, QPointF
 from PySide6.QtGui import QPainter, QColor, QPen, QPolygonF
 from PySide6.QtWidgets import QWidget
 
@@ -17,11 +17,13 @@ class ConnectionOverlay(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAutoFillBackground(False)
         self._canvases: list[WellLogCanvas] = []
         self._links: list = []
 
-    def set_canvases(self, canvases: list[WellLogCanvas]):
+    def set_canvases(self, canvases: list[WellLogCanvas], well_names: list[str] | None = None):
         self._canvases = list(canvases)
+        self._well_names = list(well_names) if well_names else []
         self.update()
 
     def set_links(self, links: list):
@@ -76,9 +78,9 @@ class ConnectionOverlay(QWidget):
         if not self._links or not self._canvases:
             return
         name_map = {}
-        for c in self._canvases:
-            if c.tracks:
-                name_map[c.tracks[0].label] = c
+        for i, c in enumerate(self._canvases):
+            if i < len(self._well_names):
+                name_map[self._well_names[i]] = c
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
@@ -107,10 +109,10 @@ class ConnectionOverlay(QWidget):
             ty2 = self.depth_to_y(target, tgt_bot)
 
             polygon = QPolygonF([
-                (src_right, sy1),
-                (tgt_left, ty1),
-                (tgt_left, ty2),
-                (src_right, sy2),
+                QPointF(src_right, sy1),
+                QPointF(tgt_left, ty1),
+                QPointF(tgt_left, ty2),
+                QPointF(src_right, sy2),
             ])
 
             color = QColor(link.color)
