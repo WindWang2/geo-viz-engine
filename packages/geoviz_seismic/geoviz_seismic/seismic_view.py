@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QPushButton, QComboBox, QLabel, QFileDialog, QToolBar,
-    QDoubleSpinBox,
+    QDoubleSpinBox, QSlider,
 )
 from PySide6.QtGui import QPainter, QLinearGradient, QColor
 
@@ -253,15 +253,20 @@ class SeismicView(QWidget):
 
         self._renderer_3d.slice_changed.connect(self._on_slice_changed)
         self._renderer_3d.arbitrary_slice_changed.connect(self._on_arbitrary_changed)
+        self._renderer_3d.jump_to_position.connect(self._on_jump)
 
         # Enable polyline drawing on Time panel and wire signal
         self._profile_t._vd.enable_polyline_drawing(True)
         self._profile_t._vd.polyline_changed.connect(self._on_polyline_drawn)
 
-        # Cross-hair cursor linking between IL/XL/T panels
-        self._profile_il._vd.cursor_moved.connect(self._on_il_cursor)
-        self._profile_xl._vd.cursor_moved.connect(self._on_xl_cursor)
-        self._profile_t._vd.cursor_moved.connect(self._on_t_cursor)
+        # Cross-hair cursor linking between IL/XL/T panels (via 3D-aware signal)
+        for pw in (self._profile_il, self._profile_xl, self._profile_t):
+            pw._vd.cursor_moved_3d.connect(self._on_cursor_3d)
+
+        # Shift+wheel slice browsing
+        self._profile_il._vd.slice_step_requested.connect(lambda d: self._on_slice_step("inline", d))
+        self._profile_xl._vd.slice_step_requested.connect(lambda d: self._on_slice_step("crossline", d))
+        self._profile_t._vd.slice_step_requested.connect(lambda d: self._on_slice_step("time", d))
 
         # Amplitude readout from all panels
         for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
@@ -340,6 +345,7 @@ class SeismicView(QWidget):
         self._update_profile_panel("time", mid_t, data[:, :, mid_t].T)
 
         self._slice_label.setText(f"IL:{mid_il} XL:{mid_xl} T:{mid_t}")
+        self._setup_toolbar_sliders()
         self._log.info("Demo loaded: shape=%s", data.shape)
 
     def load_segy(self, path: str):
@@ -368,6 +374,7 @@ class SeismicView(QWidget):
         self._update_profile_panel("time", mid_t, raw_t.T)
         
         self._slice_label.setText(f"Loaded: IL:{mid_il} XL:{mid_xl} T:{mid_t}")
+        self._setup_toolbar_sliders()
 
     def load_segy_async(self, path: str):
         """Load a SEGY file in a background thread."""
@@ -421,9 +428,10 @@ class SeismicView(QWidget):
         self._update_profile_panel("inline", mid_il, raw_il.T)
         self._update_profile_panel("crossline", mid_xl, raw_xl.T)
         self._update_profile_panel("time", mid_t, raw_t.T)
-        
+
         self._slice_label.setText(f"Loaded: IL:{mid_il} XL:{mid_xl} T:{mid_t}")
         self._profile_il.set_overlay_text(None)
+        self._setup_toolbar_sliders()
 
     @Slot(str)
     def _on_segy_error(self, msg: str):
@@ -500,6 +508,45 @@ class SeismicView(QWidget):
         )
         self._clip_spin.valueChanged.connect(self._on_clip_changed)
 
+        # Toolbar slice sliders
+        self._tb_il_slider = QSlider(Qt.Orientation.Horizontal)
+        self._tb_xl_slider = QSlider(Qt.Orientation.Horizontal)
+        self._tb_t_slider = QSlider(Qt.Orientation.Horizontal)
+        self._tb_il_label = QLabel("IL --")
+        self._tb_xl_label = QLabel("XL --")
+        self._tb_t_label = QLabel("T --")
+        for s in (self._tb_il_slider, self._tb_xl_slider, self._tb_t_slider):
+            s.setRange(0, 0)
+            s.setEnabled(False)
+            s.setFixedWidth(100)
+            s.setStyleSheet(
+                "QSlider::groove:horizontal{height:3px;background:#e2e8f0;border-radius:1px;}"
+                "QSlider::handle:horizontal{background:#4a5568;width:10px;height:10px;"
+                "margin:-4px 0;border-radius:5px;}"
+            )
+        self._tb_il_slider.setStyleSheet(
+            "QSlider::groove:horizontal{height:3px;background:#e2e8f0;border-radius:1px;}"
+            "QSlider::handle:horizontal{background:#e53e3e;width:10px;height:10px;"
+            "margin:-4px 0;border-radius:5px;}"
+        )
+        self._tb_xl_slider.setStyleSheet(
+            "QSlider::groove:horizontal{height:3px;background:#e2e8f0;border-radius:1px;}"
+            "QSlider::handle:horizontal{background:#38a169;width:10px;height:10px;"
+            "margin:-4px 0;border-radius:5px;}"
+        )
+        self._tb_t_slider.setStyleSheet(
+            "QSlider::groove:horizontal{height:3px;background:#e2e8f0;border-radius:1px;}"
+            "QSlider::handle:horizontal{background:#3182ce;width:10px;height:10px;"
+            "margin:-4px 0;border-radius:5px;}"
+        )
+        self._tb_il_label.setStyleSheet("color: #e53e3e; font-size: 11px; font-weight: bold;")
+        self._tb_xl_label.setStyleSheet("color: #38a169; font-size: 11px; font-weight: bold;")
+        self._tb_t_label.setStyleSheet("color: #3182ce; font-size: 11px; font-weight: bold;")
+
+        self._tb_il_slider.valueChanged.connect(lambda v: self._on_tb_slider_changed("inline", v))
+        self._tb_xl_slider.valueChanged.connect(lambda v: self._on_tb_slider_changed("crossline", v))
+        self._tb_t_slider.valueChanged.connect(lambda v: self._on_tb_slider_changed("time", v))
+
         self._slice_label = QLabel("未加载")
         self._slice_label.setStyleSheet("color: #888; padding: 0 8px;")
 
@@ -570,6 +617,16 @@ class SeismicView(QWidget):
         bar.addWidget(QLabel(" 属性:"))
         bar.addWidget(self._attr_combo)
         bar.addWidget(self._slice_label)
+        bar.addSeparator()
+        bar.addWidget(QLabel(" IL:"))
+        bar.addWidget(self._tb_il_label)
+        bar.addWidget(self._tb_il_slider)
+        bar.addWidget(QLabel(" XL:"))
+        bar.addWidget(self._tb_xl_label)
+        bar.addWidget(self._tb_xl_slider)
+        bar.addWidget(QLabel(" T:"))
+        bar.addWidget(self._tb_t_label)
+        bar.addWidget(self._tb_t_slider)
         bar.addSeparator()
         bar.addWidget(self._readout_label)
         return bar
@@ -662,6 +719,82 @@ class SeismicView(QWidget):
     def _on_slice_changed(self, slice_type: str, position: int):
         self._pending_slice = (slice_type, position)
         self._slice_timer.start()  # Resets timer on each drag move
+        # Sync toolbar slider from 3D slider
+        self._sync_toolbar_slider(slice_type, position)
+
+    def _sync_toolbar_slider(self, slice_type: str, position: int):
+        """Update the toolbar slider when position changes from 3D sliders."""
+        slider_map = {
+            "inline": self._tb_il_slider,
+            "crossline": self._tb_xl_slider,
+            "time": self._tb_t_slider,
+        }
+        slider = slider_map.get(slice_type)
+        if slider and slider.isEnabled():
+            slider.blockSignals(True)
+            slider.setValue(position)
+            slider.blockSignals(False)
+            self._update_tb_slider_label(slice_type, position)
+
+    def _on_tb_slider_changed(self, slice_type: str, value: int):
+        """Toolbar slider changed: update 3D slider and render."""
+        self._update_tb_slider_label(slice_type, value)
+        # Sync 3D slider
+        self._renderer_3d.set_position_external(slice_type, value)
+
+    def _update_tb_slider_label(self, slice_type: str, position: int):
+        """Update the toolbar slider value label with actual coordinate."""
+        m = self._meta
+        if m is None:
+            return
+        if slice_type == "inline":
+            coord = m.iline_start + position * m.iline_step
+            self._tb_il_label.setText(f"IL {coord}")
+        elif slice_type == "crossline":
+            coord = m.xline_start + position * m.xline_step
+            self._tb_xl_label.setText(f"XL {coord}")
+        else:
+            coord = m.t0_ms + position * m.dt_ms
+            self._tb_t_label.setText(f"T {coord:.0f}")
+
+    def _on_slice_step(self, slice_type: str, delta: int):
+        """Handle Shift+wheel slice browsing: increment/decrement slice position."""
+        if self._meta is None:
+            return
+        pos_map = {
+            "inline": self._renderer_3d._il_pos,
+            "crossline": self._renderer_3d._xl_pos,
+            "time": self._renderer_3d._t_pos,
+        }
+        vol = self._renderer_3d._volume_data_cpu
+        if vol is None:
+            return
+        max_map = {
+            "inline": vol.shape[0],
+            "crossline": vol.shape[1],
+            "time": vol.shape[2],
+        }
+        current = pos_map[slice_type]
+        new_pos = max(0, min(current + delta, max_map[slice_type] - 1))
+        if new_pos == current:
+            return
+        self._renderer_3d.set_position_external(slice_type, new_pos)
+
+    def _setup_toolbar_sliders(self):
+        """Enable and configure toolbar sliders after data is loaded."""
+        vol = self._renderer_3d._volume_data_cpu
+        if vol is None:
+            return
+        ni, nx, nt = vol.shape
+        for s, n in [(self._tb_il_slider, ni), (self._tb_xl_slider, nx), (self._tb_t_slider, nt)]:
+            s.setRange(0, n - 1)
+            s.setEnabled(True)
+        self._tb_il_slider.setValue(self._renderer_3d._il_pos)
+        self._tb_xl_slider.setValue(self._renderer_3d._xl_pos)
+        self._tb_t_slider.setValue(self._renderer_3d._t_pos)
+        self._update_tb_slider_label("inline", self._renderer_3d._il_pos)
+        self._update_tb_slider_label("crossline", self._renderer_3d._xl_pos)
+        self._update_tb_slider_label("time", self._renderer_3d._t_pos)
 
     @Slot()
     def _apply_pending_slice(self):
@@ -932,29 +1065,60 @@ class SeismicView(QWidget):
         r = self._renderer_3d
         return r._il_pos, r._xl_pos, r._t_pos
 
-    def _on_il_cursor(self, xline_val: float, time_val: float):
-        """Cursor moved on Inline panel: show crosshairs on XL and T panels."""
-        _, il_pos, _ = self._current_il_xl_t()
+    def _on_cursor_3d(self, h_val: float, v_val: float, slice_type: str):
+        """Unified cursor handler: convert (h, v, slice_type) to 3D coords and link panels."""
+        il_pos, xl_pos, t_pos = self._current_il_xl_t()
         m = self._meta
-        il_val = (m.iline_start + il_pos * m.iline_step) if m else il_pos
-        self._profile_xl._vd.set_crosshair(il_val, time_val)
-        self._profile_t._vd.set_crosshair(il_val, xline_val)
 
-    def _on_xl_cursor(self, iline_val: float, time_val: float):
-        """Cursor moved on Crossline panel: show crosshairs on IL and T panels."""
-        _, _, xl_pos = self._current_il_xl_t()
-        m = self._meta
-        xl_val = (m.xline_start + xl_pos * m.xline_step) if m else xl_pos
-        self._profile_il._vd.set_crosshair(xl_val, time_val)
-        self._profile_t._vd.set_crosshair(iline_val, xl_val)
+        # Convert slider positions to actual coordinate values
+        il_val = (m.iline_start + il_pos * m.iline_step) if m else float(il_pos)
+        xl_val = (m.xline_start + xl_pos * m.xline_step) if m else float(xl_pos)
+        t_val = (m.t0_ms + t_pos * m.dt_ms) if m else float(t_pos)
 
-    def _on_t_cursor(self, iline_val: float, xline_val: float):
-        """Cursor moved on Time panel: show crosshairs on IL and XL panels."""
-        _, _, t_pos = self._current_il_xl_t()
+        if slice_type == "inline":
+            # h=xline, v=time, current il position
+            self._set_crosshairs(il_val, h_val, v_val)
+        elif slice_type == "crossline":
+            # h=inline, v=time, current xl position
+            self._set_crosshairs(h_val, xl_val, v_val)
+        elif slice_type == "time":
+            # h=inline, v=xline, current t position
+            self._set_crosshairs(h_val, v_val, t_val)
+
+    def _set_crosshairs(self, il_val: float, xl_val: float, t_val: float):
+        """Set crosshair positions on all three orthogonal profile panels."""
+        # IL panel: h=xline, v=time
+        self._profile_xl._vd.set_crosshair(il_val, t_val)
+        self._profile_t._vd.set_crosshair(il_val, xl_val)
+        # XL panel: h=inline, v=time
+        self._profile_il._vd.set_crosshair(xl_val, t_val)
+        # T panel: h=inline, v=xline (already set above for IL→T and XL→T cases)
+        # Update 3D cursor sphere
+        self._renderer_3d.set_cursor_position(il_val, xl_val, t_val)
+
+    # --- 3D click-to-jump ---
+
+    def _on_jump(self, il_idx: float, xl_idx: float, t_idx: float):
+        """Handle 3D click-to-jump: navigate all panels to the clicked position."""
+        vol = self._renderer_3d._volume_data_cpu
+        if vol is None:
+            return
+        ni, nx, nt = vol.shape
+        il_pos = max(0, min(int(round(il_idx)), ni - 1))
+        xl_pos = max(0, min(int(round(xl_idx)), nx - 1))
+        t_pos = max(0, min(int(round(t_idx)), nt - 1))
+
+        # Update all three slices
+        self._renderer_3d.set_position_external("inline", il_pos)
+        self._renderer_3d.set_position_external("crossline", xl_pos)
+        self._renderer_3d.set_position_external("time", t_pos)
+
+        # Show crosshairs at the jump position
         m = self._meta
-        t_val = (m.t0_ms + t_pos * m.dt_ms) if m else t_pos
-        self._profile_il._vd.set_crosshair(xline_val, t_val)
-        self._profile_xl._vd.set_crosshair(iline_val, t_val)
+        il_val = (m.iline_start + il_pos * m.iline_step) if m else float(il_pos)
+        xl_val = (m.xline_start + xl_pos * m.xline_step) if m else float(xl_pos)
+        t_val = (m.t0_ms + t_pos * m.dt_ms) if m else float(t_pos)
+        self._set_crosshairs(il_val, xl_val, t_val)
 
     # --- Amplitude readout ---
 

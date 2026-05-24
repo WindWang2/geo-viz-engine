@@ -38,6 +38,15 @@ class ProfileVD(QWidget):
     # Signal emitted when user adds an annotation: (h_value, v_value, text)
     annotation_added = Signal(float, float, str)
 
+    # Signal emitted when zoom/pan changes the viewport
+    view_changed = Signal()
+
+    # Signal emitted on Shift+wheel: delta (+1 or -1) for slice browsing
+    slice_step_requested = Signal(int)
+
+    # Signal for 4-panel cursor linkage: (h_value, v_value, slice_type)
+    cursor_moved_3d = Signal(float, float, str)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._image: QPixmap | None = None
@@ -67,6 +76,13 @@ class ProfileVD(QWidget):
 
         # Display gain
         self._clip_pct = 99.0  # percentile clip (P1 to P_clip)
+
+        # Zoom/pan viewport state
+        self._zoom_scale: float = 1.0
+        self._view_h: tuple[float, float] = (0.0, 1.0)  # visible horizontal fraction
+        self._view_v: tuple[float, float] = (0.0, 1.0)  # visible vertical fraction
+        self._panning: bool = False
+        self._pan_last: tuple[float, float] | None = None
 
         # Cursor signal throttle (~60 fps)
         self._cursor_timer = QTimer(self)
@@ -177,6 +193,10 @@ class ProfileVD(QWidget):
             self._colormap_name = colormap
         self._slice_info = slice_info
         self._has_data = True
+        # Reset viewport on new data
+        self._zoom_scale = 1.0
+        self._view_h = (0.0, 1.0)
+        self._view_v = (0.0, 1.0)
         self._renormalize()
 
     def _renormalize(self):
@@ -203,20 +223,26 @@ class ProfileVD(QWidget):
         if not self._has_data or self._slice_info is None:
             return None
         img_rect = self._image_rect()
-        col_frac = (pos.x() - img_rect.left()) / max(img_rect.width(), 1)
-        row_frac = (pos.y() - img_rect.top()) / max(img_rect.height(), 1)
-        col_frac = max(0.0, min(1.0, col_frac))
-        row_frac = max(0.0, min(1.0, row_frac))
+        vp_frac_x = (pos.x() - img_rect.left()) / max(img_rect.width(), 1)
+        vp_frac_y = (pos.y() - img_rect.top()) / max(img_rect.height(), 1)
+        vp_frac_x = max(0.0, min(1.0, vp_frac_x))
+        vp_frac_y = max(0.0, min(1.0, vp_frac_y))
 
         info = self._slice_info
         n_cols = len(info.axis_h_values) if info.axis_h_values else 1
         n_rows = len(info.axis_v_values) if info.axis_v_values else 1
 
-        col_idx = min(int(col_frac * (n_cols - 1)), n_cols - 1)
-        row_idx = min(int(row_frac * (n_rows - 1)), n_rows - 1)
+        # Convert viewport fraction to global fraction
+        h_start, h_end = self._view_h
+        v_start, v_end = self._view_v
+        global_frac_x = h_start + vp_frac_x * (h_end - h_start)
+        global_frac_y = v_start + vp_frac_y * (v_end - v_start)
 
-        h_val = info.axis_h_values[col_idx] if info.axis_h_values else col_frac
-        v_val = info.axis_v_values[row_idx] if info.axis_v_values else row_frac
+        col_idx = max(0, min(int(global_frac_x * (n_cols - 1)), n_cols - 1))
+        row_idx = max(0, min(int(global_frac_y * (n_rows - 1)), n_rows - 1))
+
+        h_val = info.axis_h_values[col_idx] if info.axis_h_values else global_frac_x
+        v_val = info.axis_v_values[row_idx] if info.axis_v_values else global_frac_y
 
         return h_val, v_val, col_idx, row_idx
 
@@ -232,12 +258,26 @@ class ProfileVD(QWidget):
         if not h_vals or not v_vals:
             return None
 
-        # Find fractional position via binary search on sorted values
         h_idx = _find_nearest_index(h_vals, h_value)
         v_idx = _find_nearest_index(v_vals, v_value)
 
-        px = img_rect.left() + (h_idx / max(len(h_vals) - 1, 1)) * img_rect.width()
-        py = img_rect.top() + (v_idx / max(len(v_vals) - 1, 1)) * img_rect.height()
+        # Convert to global fraction, then to viewport fraction
+        global_frac_x = h_idx / max(len(h_vals) - 1, 1)
+        global_frac_y = v_idx / max(len(v_vals) - 1, 1)
+
+        h_start, h_end = self._view_h
+        v_start, v_end = self._view_v
+        h_span = h_end - h_start
+        v_span = v_end - v_start
+
+        if h_span <= 0 or v_span <= 0:
+            return None
+
+        vp_frac_x = (global_frac_x - h_start) / h_span
+        vp_frac_y = (global_frac_y - v_start) / v_span
+
+        px = img_rect.left() + vp_frac_x * img_rect.width()
+        py = img_rect.top() + vp_frac_y * img_rect.height()
         return px, py
 
     # ------------------------------------------------------------------
@@ -245,22 +285,51 @@ class ProfileVD(QWidget):
     # ------------------------------------------------------------------
 
     def _build_image_from_normalized(self) -> None:
-        """Map cached normalized data through the colour LUT into a QPixmap."""
+        """Map the visible portion of normalized data through the colour LUT."""
+        if self._normalized is None:
+            return
+
         lut = ColormapManager.get_colormap(self._colormap_name)
-        indices = (self._normalized * (len(lut) - 1)).astype(np.int32)
+
+        n_rows, n_cols = self._normalized.shape
+
+        # Determine visible data range from viewport
+        h_start, h_end = self._view_h
+        v_start, v_end = self._view_v
+
+        col_start = max(0, int(h_start * (n_cols - 1)))
+        col_end = min(n_cols, int(h_end * (n_cols - 1)) + 1)
+        row_start = max(0, int(v_start * (n_rows - 1)))
+        row_end = min(n_rows, int(v_end * (n_rows - 1)) + 1)
+
+        # Ensure at least 1 pixel
+        col_end = max(col_start + 1, col_end)
+        row_end = max(row_start + 1, row_end)
+
+        sub = self._normalized[row_start:row_end, col_start:col_end]
+
+        indices = (sub * (len(lut) - 1)).astype(np.int32)
         indices = np.clip(indices, 0, len(lut) - 1)
         rgba = lut[indices]
 
-        n_samples, n_traces, _ = rgba.shape
+        sub_samples, sub_traces, _ = rgba.shape
         img = QImage(
             rgba.tobytes(),
-            n_traces,
-            n_samples,
-            n_traces * 4,
+            sub_traces,
+            sub_samples,
+            sub_traces * 4,
             QImage.Format.Format_RGBA8888,
         )
         self._image = QPixmap.fromImage(img.copy())
         self.update()
+
+    def _reset_zoom(self) -> None:
+        """Reset viewport to show the full data extent."""
+        self._zoom_scale = 1.0
+        self._view_h = (0.0, 1.0)
+        self._view_v = (0.0, 1.0)
+        self._build_image_from_normalized()
+        self.view_changed.emit()
 
     # Keep old method name as alias for backward compat
     _build_image = _build_image_from_normalized
@@ -324,8 +393,9 @@ class ProfileVD(QWidget):
             y_top = img_rect.bottom()
             painter.drawLine(int(x), int(y_top), int(x), int(y_top + tick_len))
             if info and info.axis_h_values:
-                idx = int(frac * (len(info.axis_h_values) - 1))
-                idx = min(idx, len(info.axis_h_values) - 1)
+                h_s, h_e = self._view_h
+                idx = int((h_s + frac * (h_e - h_s)) * (len(info.axis_h_values) - 1))
+                idx = max(0, min(idx, len(info.axis_h_values) - 1))
                 val = info.axis_h_values[idx]
                 text = f"{val:.0f}" if abs(val) > 1 else f"{val:.2f}"
             else:
@@ -348,8 +418,9 @@ class ProfileVD(QWidget):
             x_left = img_rect.left()
             painter.drawLine(int(x_left - tick_len), int(y), int(x_left), int(y))
             if info and info.axis_v_values:
-                idx = int(frac * (len(info.axis_v_values) - 1))
-                idx = min(idx, len(info.axis_v_values) - 1)
+                v_s, v_e = self._view_v
+                idx = int((v_s + frac * (v_e - v_s)) * (len(info.axis_v_values) - 1))
+                idx = max(0, min(idx, len(info.axis_v_values) - 1))
                 val = info.axis_v_values[idx]
                 text = f"{val:.0f}" if abs(val) > 1 else f"{val:.2f}"
             else:
@@ -466,9 +537,136 @@ class ProfileVD(QWidget):
     # Mouse interaction
     # ------------------------------------------------------------------
 
+    def wheelEvent(self, event):
+        if not self._has_data:
+            super().wheelEvent(event)
+            return
+
+        # Shift+wheel: emit slice step for browsing
+        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            delta = event.angleDelta().y()
+            self.slice_step_requested.emit(1 if delta > 0 else -1)
+            return
+
+        img_rect = self._image_rect()
+        mx = event.position().x()
+        my = event.position().y()
+
+        if not (img_rect.left() <= mx <= img_rect.right() and
+                img_rect.top() <= my <= img_rect.bottom()):
+            super().wheelEvent(event)
+            return
+
+        # Cursor position as viewport fraction
+        vp_x = (mx - img_rect.left()) / max(img_rect.width(), 1)
+        vp_y = (my - img_rect.top()) / max(img_rect.height(), 1)
+
+        # Zoom factor: scroll up = zoom in, scroll down = zoom out
+        delta = event.angleDelta().y()
+        factor = 1.2 if delta > 0 else 1.0 / 1.2
+
+        # Current viewport spans
+        h_start, h_end = self._view_h
+        v_start, v_end = self._view_v
+        h_span = h_end - h_start
+        v_span = v_end - v_start
+
+        # Cursor global fraction (position in data space under the cursor)
+        cursor_gx = h_start + vp_x * h_span
+        cursor_gy = v_start + vp_y * v_span
+
+        # New spans after zoom
+        new_h_span = h_span / factor
+        new_v_span = v_span / factor
+
+        # Clamp zoom: data span from 1/32 (32x zoom) to 4x (0.25x zoom)
+        min_span = 1.0 / 32.0
+        max_span = 4.0
+        new_h_span = max(min_span, min(max_span, new_h_span))
+        new_v_span = max(min_span, min(max_span, new_v_span))
+
+        # Recalculate viewport so cursor stays at the same data position
+        new_h_start = cursor_gx - vp_x * new_h_span
+        new_h_end = new_h_start + new_h_span
+        new_v_start = cursor_gy - vp_y * new_v_span
+        new_v_end = new_v_start + new_v_span
+
+        # Clamp with 10% overscroll margin
+        margin = 0.1
+        if new_h_start < -margin:
+            new_h_start = -margin
+            new_h_end = new_h_start + new_h_span
+        if new_h_end > 1.0 + margin:
+            new_h_end = 1.0 + margin
+            new_h_start = new_h_end - new_h_span
+        if new_v_start < -margin:
+            new_v_start = -margin
+            new_v_end = new_v_start + new_v_span
+        if new_v_end > 1.0 + margin:
+            new_v_end = 1.0 + margin
+            new_v_start = new_v_end - new_v_span
+
+        self._view_h = (new_h_start, new_h_end)
+        self._view_v = (new_v_start, new_v_end)
+        avg_span = (new_h_span + new_v_span) / 2.0
+        self._zoom_scale = 1.0 / avg_span if avg_span > 0 else 1.0
+
+        self._build_image_from_normalized()
+        self.view_changed.emit()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._has_data:
+            self._reset_zoom()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def mouseMoveEvent(self, event):
         if not self._has_data:
             super().mouseMoveEvent(event)
+            return
+
+        # Middle-button pan
+        if self._panning and self._pan_last is not None:
+            img_rect = self._image_rect()
+            dx = event.position().x() - self._pan_last[0]
+            dy = event.position().y() - self._pan_last[1]
+            self._pan_last = (event.position().x(), event.position().y())
+
+            h_start, h_end = self._view_h
+            v_start, v_end = self._view_v
+            h_span = h_end - h_start
+            v_span = v_end - v_start
+
+            frac_dx = -dx / max(img_rect.width(), 1) * h_span
+            frac_dy = -dy / max(img_rect.height(), 1) * v_span
+
+            new_h_start = h_start + frac_dx
+            new_h_end = h_end + frac_dx
+            new_v_start = v_start + frac_dy
+            new_v_end = v_end + frac_dy
+
+            margin = 0.1
+            if new_h_start < -margin:
+                shift = -margin - new_h_start
+                new_h_start += shift
+                new_h_end += shift
+            if new_h_end > 1.0 + margin:
+                shift = (1.0 + margin) - new_h_end
+                new_h_start += shift
+                new_h_end += shift
+            if new_v_start < -margin:
+                shift = -margin - new_v_start
+                new_v_start += shift
+                new_v_end += shift
+            if new_v_end > 1.0 + margin:
+                shift = (1.0 + margin) - new_v_end
+                new_v_start += shift
+                new_v_end += shift
+
+            self._view_h = (new_h_start, new_h_end)
+            self._view_v = (new_v_start, new_v_end)
+            self._build_image_from_normalized()
+            self.view_changed.emit()
             return
 
         result = self._pixel_to_seismic(event.position())
@@ -492,7 +690,11 @@ class ProfileVD(QWidget):
 
         self.cursor_moved.emit(h_val, v_val)
 
+        # Emit 3D-aware cursor signal for panel linkage
         info = self._slice_info
+        if info and info.slice_type:
+            self.cursor_moved_3d.emit(h_val, v_val, info.slice_type)
+
         if info and self._data is not None:
             n_samples, n_traces = self._data.shape
             if 0 <= row_idx < n_samples and 0 <= col_idx < n_traces:
@@ -506,6 +708,13 @@ class ProfileVD(QWidget):
     def mousePressEvent(self, event):
         if not self._has_data:
             super().mousePressEvent(event)
+            return
+
+        # Middle-button pan
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._panning = True
+            self._pan_last = (event.position().x(), event.position().y())
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
             return
 
         img_rect = self._image_rect()
@@ -586,6 +795,11 @@ class ProfileVD(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton and self._panning:
+            self._panning = False
+            self._pan_last = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            return
         if self._annotation_drag_idx is not None:
             self._annotation_drag_idx = None
             return

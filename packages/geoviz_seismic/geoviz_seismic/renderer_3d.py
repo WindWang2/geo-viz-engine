@@ -28,9 +28,11 @@ class Renderer3D(QWidget):
 
     slice_changed = Signal(str, int)  # (slice_type, position)
     arbitrary_slice_changed = Signal(object)  # polyline slice data (np.ndarray)
+    jump_to_position = Signal(float, float, float)  # (il_idx, xl_idx, t_idx)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._press_pos = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -65,6 +67,9 @@ class Renderer3D(QWidget):
         self._view.setCameraPosition(distance=500, elevation=30, azimuth=45)
         layout.addWidget(self._view, 1)
 
+        # Install event filter for click-to-jump detection
+        self._view.installEventFilter(self)
+
         # Add base grid for environment context
         self._base_grid = gl.GLGridItem()
         self._base_grid.setSize(500, 500)
@@ -93,6 +98,7 @@ class Renderer3D(QWidget):
         self._picks_visual = None
         self._annotation_items: list = []  # GLTextItem references
         self._bbox_visual = None
+        self._cursor_sphere = None  # GLScatterPlotItem for linked cursor
 
     @staticmethod
     def _make_slider(layout: QHBoxLayout, label: str, color: str):
@@ -346,7 +352,7 @@ class Renderer3D(QWidget):
     def _clear_visuals(self):
         for v in (self._volume_visual, self._img_il, self._img_xl,
                   self._img_t, self._img_arb, self._horizon_visual,
-                  self._picks_visual, self._bbox_visual):
+                  self._picks_visual, self._bbox_visual, self._cursor_sphere):
             if v is not None:
                 try:
                     self._view.removeItem(v)
@@ -381,6 +387,7 @@ class Renderer3D(QWidget):
         self._img_arb = None
         self._horizon_visual = None
         self._bbox_visual = None
+        self._cursor_sphere = None
         
         # Clear polyline curtain items & data
         for item in getattr(self, '_arb_curtain_items', []):
@@ -719,6 +726,129 @@ class Renderer3D(QWidget):
         except Exception as e:
             logger.error(f"Failed to render polyline curtain: {e}")
 
+    def eventFilter(self, obj, event):
+        """Detect left-clicks on 3D view for jump-to-position navigation."""
+        from PySide6.QtCore import QEvent
+        if obj is not self._view:
+            return False
+        if event.type() == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._press_pos = event.position()
+        elif event.type() == QEvent.Type.MouseButtonRelease:
+            if event.button() == Qt.MouseButton.LeftButton and self._press_pos is not None:
+                release_pos = event.position()
+                dx = release_pos.x() - self._press_pos.x()
+                dy = release_pos.y() - self._press_pos.y()
+                self._press_pos = None
+                if dx * dx + dy * dy < 25:  # 5px threshold
+                    self._handle_3d_click(release_pos.x(), release_pos.y())
+        return False
+
+    def _handle_3d_click(self, px: float, py: float):
+        """Ray-cast from screen point into volume bounding box and emit jump."""
+        if not self._loaded:
+            return
+        result = self._ray_box_intersect(px, py)
+        if result is not None:
+            il_idx, xl_idx, t_idx = result
+            self.jump_to_position.emit(il_idx, xl_idx, t_idx)
+
+    def _ray_box_intersect(self, px: float, py: float):
+        """Compute 3D volume coordinates by ray-box intersection (slab method).
+
+        Uses the view and projection matrices to unproject screen coordinates
+        into a world-space ray, then intersects against the volume AABB.
+        Returns (il_idx, xl_idx, t_idx) or None.
+        """
+        try:
+            view = self._view
+            w = view.width()
+            h = view.height()
+            if w <= 0 or h <= 0:
+                return None
+
+            # Get view and projection matrices from pyqtgraph
+            vm = view.viewMatrix()
+            pm = view.projectionMatrix()
+
+            # NDC coordinates (flip y for OpenGL)
+            ndc_x = (2.0 * px / w) - 1.0
+            ndc_y = 1.0 - (2.0 * py / h)
+
+            # Compute inverse view-projection matrix
+            vpm = pm * vm
+            inv = vpm.inverted()
+            if inv[1] != 0:
+                inv_mat = inv[0]
+            else:
+                return None
+
+            # Near and far points in world space
+            from PySide6.QtGui import QVector4D
+            near = inv_mat.map(QVector4D(ndc_x, ndc_y, -1.0, 1.0))
+            far = inv_mat.map(QVector4D(ndc_x, ndc_y, 1.0, 1.0))
+            if abs(near.w()) < 1e-8 or abs(far.w()) < 1e-8:
+                return None
+            near_w = QVector3D(near.x() / near.w(), near.y() / near.w(), near.z() / near.w())
+            far_w = QVector3D(far.x() / far.w(), far.y() / far.w(), far.z() / far.w())
+
+            # Ray direction
+            direction = far_w - near_w
+            length = direction.length()
+            if length < 1e-8:
+                return None
+            direction = direction / length
+
+            origin = near_w
+
+            # AABB bounds in world space
+            ni, nx, nt = self._volume_data_cpu.shape
+            si, sx, st = self._volume_spacing
+            box_min = QVector3D(0, 0, 0)
+            box_max = QVector3D(ni * si, nx * sx, nt * st)
+
+            # Slab method for ray-AABB intersection
+            t_min = -1e30
+            t_max = 1e30
+            for i, (o, d, bmin, bmax) in enumerate([
+                (origin.x(), direction.x(), box_min.x(), box_max.x()),
+                (origin.y(), direction.y(), box_min.y(), box_max.y()),
+                (origin.z(), direction.z(), box_min.z(), box_max.z()),
+            ]):
+                if abs(d) < 1e-10:
+                    if o < bmin or o > bmax:
+                        return None
+                else:
+                    t1 = (bmin - o) / d
+                    t2 = (bmax - o) / d
+                    if t1 > t2:
+                        t1, t2 = t2, t1
+                    t_min = max(t_min, t1)
+                    t_max = min(t_max, t2)
+                    if t_min > t_max:
+                        return None
+
+            if t_min < 0:
+                t_min = t_max
+            if t_min < 0:
+                return None
+
+            # Intersection point
+            hit = origin + direction * t_min
+
+            # Convert world coordinates to volume indices
+            il_idx = hit.x() / si
+            xl_idx = hit.y() / sx
+            t_idx = hit.z() / st
+
+            il_idx = max(0.0, min(il_idx, ni - 1))
+            xl_idx = max(0.0, min(xl_idx, nx - 1))
+            t_idx = max(0.0, min(t_idx, nt - 1))
+
+            return il_idx, xl_idx, t_idx
+        except Exception:
+            return None
+
     def _on_slider(self, slice_type: str, value: int):
         if slice_type == "inline":
             self._il_slider._val_label.setText(str(value))
@@ -734,6 +864,31 @@ class Renderer3D(QWidget):
 
         if value >= 0:
             self.slice_changed.emit(slice_type, value)
+
+    def set_position_external(self, slice_type: str, position: int):
+        """Set a slice position from an external source (toolbar slider, etc.).
+
+        Updates the internal state, syncs the 3D slider with blockSignals,
+        and triggers slice plane update + signal emission.
+        """
+        if not self._loaded:
+            return
+        slider_map = {
+            "inline": (self._il_slider, "_il_pos"),
+            "crossline": (self._xl_slider, "_xl_pos"),
+            "time": (self._t_slider, "_t_pos"),
+        }
+        entry = slider_map.get(slice_type)
+        if entry is None:
+            return
+        slider, attr = entry
+        slider.blockSignals(True)
+        slider.setValue(position)
+        slider._val_label.setText(str(position))
+        slider.blockSignals(False)
+        setattr(self, attr, position)
+        self._update_slice_planes()
+        self.slice_changed.emit(slice_type, position)
 
     def set_horizon_picks(self, points: list[tuple[float, float, float]]):
         """Render manually picked horizon points as a 3D scatter plot.
@@ -764,6 +919,25 @@ class Renderer3D(QWidget):
             pos=pos, color=color, size=8, pxMode=True
         )
         self._view.addItem(self._picks_visual)
+
+    def set_cursor_position(self, il_val: float, xl_val: float, t_val: float):
+        """Update the linked cursor sphere position in 3D space.
+
+        Args:
+            il_val, xl_val, t_val: Coordinate values in seismic units.
+        """
+        if not self._loaded:
+            return
+        si, sx, st = self._volume_spacing
+        pos = np.array([[il_val * si, xl_val * sx, t_val * st]], dtype=np.float32)
+        if self._cursor_sphere is None:
+            self._cursor_sphere = gl.GLScatterPlotItem(
+                pos=pos, color=np.array([[1.0, 1.0, 0.0, 1.0]], dtype=np.float32),
+                size=12, pxMode=True,
+            )
+            self._view.addItem(self._cursor_sphere)
+        else:
+            self._cursor_sphere.setData(pos=pos)
 
     def set_annotations(self, annotations: list[tuple[float, float, float, str]]):
         """Render text annotations in 3D space.

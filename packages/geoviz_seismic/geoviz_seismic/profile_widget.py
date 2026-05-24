@@ -112,6 +112,14 @@ class ProfileWidget(QWidget):
         """Delegate polyline clearing down to underlying renderer."""
         self._vd.clear_polyline()
 
+    def reset_zoom(self) -> None:
+        """Reset the VD viewport to show the full data extent."""
+        self._vd._reset_zoom()
+
+    def vd(self) -> ProfileVD:
+        """Return the underlying ProfileVD renderer."""
+        return self._vd
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         if self._overlay.isVisible():
