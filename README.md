@@ -2,8 +2,8 @@
 
 ![PySide6](https://img.shields.io/badge/PySide6-6.6+-41CD52?logo=qt)
 ![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python)
-![QPainter](https://img.shields.io/badge/QPainter-Well_Log-41CD52)
-![PyVista](https://img.shields.io/badge/pyqtgraph-OpenGL-5896FF)
+![ECharts](https://img.shields.io/badge/ECharts-Well_Log-41CD52)
+![pyqtgraph](https://img.shields.io/badge/pyqtgraph-OpenGL-5896FF)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 面向地质工程师和科研人员的**跨平台桌面应用**，提供测井数据可视化、井位地图、地震体三维显示等功能。
@@ -14,11 +14,11 @@
 
 ## About / 项目简介
 
-GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质数据可视化桌面应用：
+GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地质数据可视化桌面应用：
 
 - **UI 框架（PySide6/Qt）**：窗口管理、页面导航、文件对话框、表格展示
 - **测井渲染（ECharts SVG）**：测井曲线、岩性柱、沉积相综合柱状图，通过独立 `geoviz-well-log` 包提供
-- **3D 渲染（PyVista/VTK）**：地震体三维显示、任意方向剖面、等值面提取
+- **3D 渲染（pyqtgraph OpenGL）**：地震体三维显示、任意方向剖面、等值面提取
 - **地图（MapLibre GL）**：井位分布、底图、交互选井
 
 目标用户：地质工程师、测井分析人员、地球科学领域科研人员。
@@ -39,7 +39,7 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质
 │  │ 🌍   │  PaleoMap    ECharts + GeoJSON           │    │
 │  │ ⛏   │  WellLogPage ECharts + WebEngine         │    │
 │  │ ⛓   │  CrossWell   Multi-ECharts + Sync        │    │
-│  │ 🧊   │  SeismicPage PyVista + VTK               │    │
+│  │ 🧊   │  SeismicPage pyqtgraph OpenGL            │    │
 │  │ 📁   │  DataPage    QTableWidget + 文件对话框     │    │
 │  │ 🛠   │  ToolsPage   独立小工具集                 │    │
 │  └──────┴──────────────────────────────────────────┘    │
@@ -57,8 +57,8 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质
 │                                                         │
 │  packages/geoviz-seismic/                               │
 │  ┌─────────────────────────────────────────────────┐    │
-│  │  独立地震可视化引擎 (PyVista + segyio)           │    │
-│  │  ├── Renderer3D     PyVista 3D 体渲染            │    │
+│  │  独立地震可视化引擎 (pyqtgraph + segyio)          │    │
+│  │  ├── Renderer3D     pyqtgraph 3D 体渲染          │    │
 │  │  ├── SeismicLoader  SEGY 按需切片读取            │    │
 │  │  ├── ProfileVD/Wiggle 2D 剖面显示               │    │
 │  │  ├── SeismicView    组合 3D+2D+工具栏            │    │
@@ -76,7 +76,7 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质
 |------|------|------|
 | UI 框架 | PySide6 6.6+ | 桌面窗口、导航、控件 |
 | 测井渲染 | ECharts 5.x (SVG) | 曲线、岩性/相柱状图（通过 `geoviz-well-log` 包） |
-| 3D 渲染 | PyVista 0.43+ / VTK | 地震体三维显示、剖面切片 |
+| 3D 渲染 | pyqtgraph 0.13+ / PyOpenGL | 地震体三维显示、剖面切片 |
 | 地图 | MapLibre GL (QWebEngineView) | 井位地图、交互选井 |
 | 数据模型 | Pydantic v2 | 强类型数据验证与序列化 |
 | Excel 解析 | python-calamine | 基于 Rust 的极速表格数据解析引擎 |
@@ -120,9 +120,9 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质
 ### 地震 3D
 
 - **独立渲染引擎**：底层 `geoviz-seismic` 包可脱离主应用独立使用，支持 `pip install` 后在任何 PySide6 项目中集成。
-- SEGY 文件加载（segyio）→ PyVista UniformGrid → 三维体渲染
+- SEGY 文件加载（segyio）→ pyqtgraph GLVolumeItem → 三维体渲染
 - 交互式切片平面（inline/crossline/time），拖拽实时更新 2D 剖面
-- 2D 剖面双模式：VD 热图（Variable Density）与 Wiggle 波形，支持 VisPy GPU 加速
+- 2D 剖面双模式：VD 热图（Variable Density）与 Wiggle 波形，支持 CuPy GPU 加速（NumPy 自动回退）
 - 层位文件加载与 3D 曲面叠加，支持 nearest/RBF 插值
 - 内置合成地震数据演示（含断层、倾斜反射层、噪声）
 - 4 种色标：seismic、gray、jet、hsv
@@ -131,7 +131,7 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质
 ### 数据管理
 
 - 文件导入：Excel (.xlsx)、LAS (.las)、SEGY (.sgy)
-- 极速缓存：采用 Rust Calamine 引擎 + Pickle 二进制缓存，实现数十万点 Excel 数据 10毫秒级"秒开"。
+- 极速缓存：采用 Rust Calamine 引擎 + Pydantic-based JSON 缓存，实现数十万点 Excel 数据 10 毫秒级"秒开"。
 - 井位坐标表格展示
 
 ---
@@ -155,7 +155,7 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + PyVista** 的单进程地质
 ### 前置条件
 
 - Python 3.12+
-- 系统依赖：OpenGL 驱动（PyVista/VTK 需要）
+- 系统依赖：OpenGL 驱动（pyqtgraph OpenGL 需要）
 
 ### 开发模式
 
@@ -206,11 +206,11 @@ geo-viz-engine/
 │   │   └── README.md              # 包使用指南 + API 参考 + 示例
 │   └── geoviz_seismic/            # 独立地震可视化包 (pip installable)
 │       ├── geoviz_seismic/
-│       │   ├── renderer_3d.py     # PyVista 3D 体渲染 + 交互切片
+│       │   ├── renderer_3d.py     # pyqtgraph 3D 体渲染 + 交互切片
 │       │   ├── seismic_view.py    # 组合 3D+2D+工具栏完整组件
 │       │   ├── loader.py          # SEGY 按需切片 (segyio)
 │       │   ├── profile_vd.py      # VD 热图渲染
-│       │   ├── profile_wiggle.py  # Wiggle 波形渲染 (VisPy 回退)
+│       │   ├── profile_wiggle.py  # Wiggle 波形渲染 (QPainter)
 │       │   ├── profile_widget.py  # VD/Wiggle 统一切换
 │       │   ├── horizon.py         # 层位解析 + nearest/RBF 填充
 │       │   ├── colormap.py        # seismic/gray/jet/hsv 色标
