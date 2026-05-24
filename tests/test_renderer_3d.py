@@ -31,10 +31,10 @@ def test_renderer_3d_signals():
 
 def test_renderer_3d_add_horizon(qtbot):
     from geoviz_seismic.renderer_3d import Renderer3D
-    
+
     widget = Renderer3D()
     qtbot.addWidget(widget)
-    # Must have volume context to render properly in scene logic usually but standalone check:
     h_data = np.zeros((5, 5), dtype=np.float32)
-    widget.add_horizon(h_data)
-    assert widget._horizon_visual is not None
+    widget.add_horizon(h_data, name="test_horizon")
+    assert "test_horizon" in widget._horizons
+    assert widget._horizons["test_horizon"] is not None

@@ -1,5 +1,6 @@
+import time
 import pytest
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QApplication
 from src.pages.well_log import WellLogPage
 from geoviz_well_log.models import WellLogData, WellIntervals, IntervalItem, CurveData, FaciesData
 from geoviz_well_log.renderer.curve_track import CurveTrack
@@ -7,6 +8,16 @@ from geoviz_well_log.renderer.lithology_track import LithologyTrack
 from geoviz_well_log.renderer.interval_track import IntervalTrack
 from geoviz_well_log.renderer.depth_track import DepthTrack
 from geoviz_well_log.renderer.systems_tract import SystemsTractTrack, _TRACT_COLORS, _TRACT_SHAPES
+
+
+def _wait_for_load(page, timeout=5.0):
+    """Wait for the async load thread to finish, processing Qt events."""
+    deadline = time.monotonic() + timeout
+    while page._load_thread is not None and page._load_thread.isRunning():
+        QApplication.processEvents()
+        time.sleep(0.01)
+        if time.monotonic() > deadline:
+            pytest.fail("Timed out waiting for well load thread to finish")
 
 
 @pytest.fixture
@@ -41,6 +52,7 @@ def test_well_log_page_mapping(qtbot, mock_well_data, monkeypatch):
     page = WellLogPage()
     qtbot.addWidget(page)
     page.load_well("TestWell")
+    _wait_for_load(page)
 
     tracks = page._all_tracks
     track_labels = [t.label for t in tracks]
@@ -82,6 +94,7 @@ def test_systems_tract_colors_and_shapes(qtbot, monkeypatch):
     page = WellLogPage()
     qtbot.addWidget(page)
     page.load_well("TestWell")
+    _wait_for_load(page)
 
     st_track = next((t for t in page._all_tracks if isinstance(t, SystemsTractTrack)), None)
     assert st_track is not None, "SystemsTractTrack not found in tracks"
@@ -110,6 +123,7 @@ def test_stratigraphy_interval_track_created(qtbot, monkeypatch):
     page = WellLogPage()
     qtbot.addWidget(page)
     page.load_well("TestWell")
+    _wait_for_load(page)
 
     system_track = next((t for t in page._all_tracks if t.label == "系"), None)
     assert system_track is not None
@@ -137,6 +151,7 @@ def test_ai_facies_prediction_applies_tracks(qtbot, monkeypatch, tmp_path):
     page = WellLogPage()
     qtbot.addWidget(page)
     page.load_well("TestWell")
+    _wait_for_load(page)
 
     records = [{"深度": 1000.0, "预测相": "1", "置信度": 0.95}]
     page._apply_ai_prediction(records)
