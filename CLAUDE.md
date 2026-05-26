@@ -132,9 +132,18 @@ PySide6 (Qt for Python) — Single Process
   - `utils/` — constants (re-exports PATTERN_MAP from package)
   - `resources/` — Icons, Qt resource files
 - `data/` — Well coordinates JSON, well log Excel, XML data files
+- `samples/` — Demo assets and example GeoJSON
 - `tests/` — pytest test files
-- `scripts/` — build.py (PyInstaller)
+- `scripts/` — build.py (PyInstaller), build_with_conda.bat (Windows)
 - `docs/` — Design specs, methodology documents
+  - `docs/screenshots/references/` — Reference images (lithology layouts, mockups)
+  - `docs/screenshots/qa/` — QA / regression screenshots
+  - `docs/releases/` — Per-version release notes
+- `archive/` — Retired code kept for reference, not built or imported
+  - `archive/scripts/` — Ad-hoc debug/probe scripts from earlier dev cycles
+  - `archive/web-echarts/` — Older standalone ECharts web experiment (full Tauri+React+FastAPI architecture lives at git tag `v0.1-web`)
+  - `archive/web-deps/` — Leftover `package.json` / `package-lock.json` from the web era
+  - `archive/misc/` — Stale one-shot artifacts (`diff.txt`, `.coverage`)
 
 ## Development Notes
 

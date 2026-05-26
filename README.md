@@ -247,10 +247,22 @@ geo-viz-engine/
 │   │   └── constants.py           # 常量 (PATTERN_MAP re-export)
 │   └── resources/                 # 图标、Qt 资源
 ├── data/                          # 井坐标、测井、地震数据
+├── samples/                       # 示例 GeoJSON / 演示资源
 ├── tests/                         # pytest 测试
 ├── scripts/
-│   └── build.py                   # PyInstaller 打包脚本
-└── docs/                          # 设计文档、方法论文档
+│   ├── build.py                   # PyInstaller 打包脚本
+│   └── build_with_conda.bat       # Windows + conda 构建脚本
+├── docs/                          # 设计文档、方法论文档
+│   ├── releases/                  # 各版本发布说明
+│   └── screenshots/               # 文档配图统一目录
+│       ├── references/            #   参考图、设计稿
+│       └── qa/                    #   QA / 截图比对产物
+└── archive/                       # 历史代码归档（不参与构建/引用）
+    ├── README.md                  # 归档说明
+    ├── scripts/                   # 早期一次性调试/验证脚本
+    ├── web-echarts/               # 旧 ECharts 实验工程（更早完整 Web 架构见 v0.1-web tag）
+    ├── web-deps/                  # 旧 Web 时代遗留的 package.json
+    └── misc/                      # diff.txt、.coverage 等一次性产物
 ```
 
 ---

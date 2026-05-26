@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **仓库结构整理**：将根目录散落的临时调试脚本、旧 ECharts Web 实验工程、`package.json`/`node_modules` 等遗留产物迁入 `archive/` 归档目录（`scripts/`、`web-echarts/`、`web-deps/`、`misc/`），全部通过 `git mv` 保留历史。
+- **截图统一**：根目录散落的参考图与 QA 截图收纳至 `docs/screenshots/{references,qa}/`。
+- **杂项归位**：`sample_paleo.geojson` → `samples/`，`build_with_conda.bat` → `scripts/`。
+
+### Removed
+- 从 git 索引彻底移除 `node_modules/`（1909 文件），并在 `.gitignore` 中加入 `node_modules/`、`.coverage`、根目录散落图片防护。
+
 ## [0.6.2] - 2026-05-12
 
 ### Security
