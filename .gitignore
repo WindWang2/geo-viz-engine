@@ -11,6 +11,7 @@ src-python/.pytest_cache/
 # Node
 src-web/node_modules/
 src-web/dist/
+node_modules/
 
 # Rust
 src-tauri/target/
@@ -50,3 +51,13 @@ tmp/
 *.tmp
 .worktrees/
 .superpowers/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Stray captures at repo root (use docs/screenshots/ instead)
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
