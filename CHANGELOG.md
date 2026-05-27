@@ -4,12 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **新增独立包 `geoviz-map`**：基于 QPainter + Web Mercator 投影的地理可视化引擎，6 个 layer 组合渲染（背景/经纬网/世界陆地/中国省界/参考标签/井点），支持视口剔除、cursor-anchored 滚轮缩放、拖拽平移、井点 hover/click hit-test。可独立 pip install 后嵌入任意 PySide6 项目。
+
 ### Changed
+- **MapPage 渲染重写**：井位分布图从 QWebEngineView + MapLibre GL 迁移到原生 QPainter（通过 `geoviz_map` 包），1:1 视觉/交互对齐。消除了 Windows 上 WebEngine + OpenGL 上下文冲突的潜在隐患。
 - **仓库结构整理**：将根目录散落的临时调试脚本、旧 ECharts Web 实验工程、`package.json`/`node_modules` 等遗留产物迁入 `archive/` 归档目录（`scripts/`、`web-echarts/`、`web-deps/`、`misc/`），全部通过 `git mv` 保留历史。
 - **截图统一**：根目录散落的参考图与 QA 截图收纳至 `docs/screenshots/{references,qa}/`。
 - **杂项归位**：`sample_paleo.geojson` → `samples/`，`build_with_conda.bat` → `scripts/`。
 
 ### Removed
+- 删除 `src/pages/map/renderer.py`（394 行 MapLibre 嵌入实现）。
+- 删除 `src/pages/map/assets/maplibre-gl.{js,css}`（~640 KB 内联资产）。
+- `well://` 自定义 URL scheme 与 `QWebEnginePage` 子类一并消失。
 - 从 git 索引彻底移除 `node_modules/`（1909 文件），并在 `.gitignore` 中加入 `node_modules/`、`.coverage`、根目录散落图片防护。
 
 ## [0.6.2] - 2026-05-12

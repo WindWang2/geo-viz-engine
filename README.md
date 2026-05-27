@@ -35,7 +35,7 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 │  ┌──────┬──────────────────────────────────────────┐    │
 │  │ 侧栏 │  QStackedWidget (7 页面)                  │    │
 │  │      │                                          │    │
-│  │ 🗺   │  MapPage     QWebEngineView + MapLibre   │    │
+│  │ 🗺   │  MapPage     QPainter (geoviz-map)        │    │
 │  │ 🌍   │  PaleoMap    ECharts + GeoJSON           │    │
 │  │ ⛏   │  WellLogPage ECharts + WebEngine         │    │
 │  │ ⛓   │  CrossWell   Multi-ECharts + Sync        │    │
@@ -66,6 +66,16 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 │  │  └── ColormapManager 色标管理                    │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                         │
+│  packages/geoviz-map/                                   │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  独立地图可视化引擎 (QPainter + Web Mercator)     │    │
+│  │  ├── MapCanvas      组合 6 个 layer              │    │
+│  │  ├── Projection     Web Mercator (MapLibre 兼容) │    │
+│  │  ├── Viewport       center+zoom 像素映射         │    │
+│  │  ├── ZoomPanHandler 拖拽+滚轮缩放                │    │
+│  │  └── Layers         背景/网格/地块/标签/井点      │    │
+│  └─────────────────────────────────────────────────┘    │
+│                                                         │
 │  src/   data/ loaders & models │ pages/ UI              │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -77,7 +87,7 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 | UI 框架 | PySide6 6.6+ | 桌面窗口、导航、控件 |
 | 测井渲染 | ECharts 5.x (SVG) | 曲线、岩性/相柱状图（通过 `geoviz-well-log` 包） |
 | 3D 渲染 | pyqtgraph 0.13+ / PyOpenGL | 地震体三维显示、剖面切片 |
-| 地图 | MapLibre GL (QWebEngineView) | 井位地图、交互选井 |
+| 地图 | QPainter (geoviz-map) | 井位地图、Web Mercator 投影、交互选井 |
 | 数据模型 | Pydantic v2 | 强类型数据验证与序列化 |
 | Excel 解析 | python-calamine | 基于 Rust 的极速表格数据解析引擎 |
 | 数据处理 | pandas 2.x / numpy 1.26+ | 表格数据、数值计算 |
@@ -204,18 +214,27 @@ geo-viz-engine/
 │   │   │   └── web_dist/          # ECharts JS 打包
 │   │   ├── pyproject.toml
 │   │   └── README.md              # 包使用指南 + API 参考 + 示例
-│   └── geoviz_seismic/            # 独立地震可视化包 (pip installable)
-│       ├── geoviz_seismic/
-│       │   ├── renderer_3d.py     # pyqtgraph 3D 体渲染 + 交互切片
-│       │   ├── seismic_view.py    # 组合 3D+2D+工具栏完整组件
-│       │   ├── loader.py          # SEGY 按需切片 (segyio)
-│       │   ├── profile_vd.py      # VD 热图渲染
-│       │   ├── profile_wiggle.py  # Wiggle 波形渲染 (QPainter)
-│       │   ├── profile_widget.py  # VD/Wiggle 统一切换
-│       │   ├── horizon.py         # 层位解析 + nearest/RBF 填充
-│       │   ├── colormap.py        # seismic/gray/jet/hsv 色标
-│       │   ├── cache.py           # LRU 切片缓存
-│       │   └── models.py          # SeismicVolumeMeta, SliceInfo 等
+│   ├── geoviz_seismic/            # 独立地震可视化包 (pip installable)
+│   │   ├── geoviz_seismic/
+│   │   │   ├── renderer_3d.py     # pyqtgraph 3D 体渲染 + 交互切片
+│   │   │   ├── seismic_view.py    # 组合 3D+2D+工具栏完整组件
+│   │   │   ├── loader.py          # SEGY 按需切片 (segyio)
+│   │   │   ├── profile_vd.py      # VD 热图渲染
+│   │   │   ├── profile_wiggle.py  # Wiggle 波形渲染 (QPainter)
+│   │   │   ├── profile_widget.py  # VD/Wiggle 统一切换
+│   │   │   ├── horizon.py         # 层位解析 + nearest/RBF 填充
+│   │   │   ├── colormap.py        # seismic/gray/jet/hsv 色标
+│   │   │   ├── cache.py           # LRU 切片缓存
+│   │   │   └── models.py          # SeismicVolumeMeta, SliceInfo 等
+│   │   └── pyproject.toml
+│   └── geoviz_map/                # 独立地图可视化包 (pip installable)
+│       ├── geoviz_map/
+│       │   ├── canvas.py          # MapCanvas (QWidget 组合 layers)
+│       │   ├── projection.py      # Web Mercator 投影
+│       │   ├── viewport.py        # center+zoom → 像素映射
+│       │   ├── zoom_pan.py        # 拖拽 + 滚轮缩放
+│       │   ├── layers/            # 背景/网格/地块/标签/井点
+│       │   └── models.py          # WellMarker, ReferenceLabel
 │       └── pyproject.toml
 ├── src/                           # 主应用代码
 │   ├── main.py                    # 入口 (QApplication)
