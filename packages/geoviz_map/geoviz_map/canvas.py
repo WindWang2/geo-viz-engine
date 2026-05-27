@@ -31,6 +31,7 @@ class MapCanvas(QWidget):
                  parent: QWidget | None = None):
         super().__init__(parent)
         self.setMouseTracking(True)
+        self._press_pos: QPointF | None = None
         if initial_center is None:
             if wells:
                 avg_lng = sum(w.lng for w in wells) / len(wells)
@@ -102,22 +103,18 @@ class MapCanvas(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        was_dragging = self._zoom_pan.is_dragging()
         release_pos = QPointF(event.position())
         # Distinguish click vs drag: if total drag is small, treat as click
         drag_distance = 0.0
-        if hasattr(self, "_press_pos"):
+        if self._press_pos is not None:
             dx = release_pos.x() - self._press_pos.x()
             dy = release_pos.y() - self._press_pos.y()
             drag_distance = (dx * dx + dy * dy) ** 0.5
         self._zoom_pan.end_drag()
         if drag_distance < 4.0:
-            # Hit-test top-down (wells layer is topmost interactive)
-            for layer in reversed(self._layers):
-                name = layer.hit_test(release_pos, self._viewport)
-                if name:
-                    self.well_clicked.emit(name)
-                    return
+            name = self._wells_layer.hit_test(release_pos, self._viewport)
+            if name:
+                self.well_clicked.emit(name)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         delta = event.angleDelta().y() / 120.0  # one notch = 1.0
