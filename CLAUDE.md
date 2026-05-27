@@ -36,7 +36,7 @@ PySide6 (Qt for Python) — Single Process
 ├── MainWindow (app.py)
 │   ├── Sidebar (7 icon+text buttons)
 │   └── QStackedWidget (7 pages)
-│       ├── MapPage        → QWebEngineView + MapLibre GL
+│       ├── MapPage        → QPainter (via geoviz-map package)
 │       ├── PaleoMapPage   → ECharts + GeoJSON (paleo_map/ folder)
 │       ├── WellLogPage    → ECharts (via geoviz-well-log package)
 │       ├── CrossWellPage  → Multi-ECharts + Correlation Polygons
@@ -53,18 +53,24 @@ PySide6 (Qt for Python) — Single Process
 │   │   ├── models.py            → Pydantic data models
 │   │   ├── sync_manager.py      → Multi-well zoom sync
 │   │   └── connection_overlay.py → Cross-well correlation polygons
-│   └── geoviz-seismic/    → Independent pyqtgraph-based seismic visualization engine
-│       ├── renderer_3d.py       → Renderer3D (pyqtgraph GLViewWidget + interactive slice planes)
-│       ├── seismic_view.py      → SeismicView (3D + 2D profile + toolbar)
-│       ├── loader.py            → SeismicLoader (segyio on-demand slicing)
-│       ├── profile_vd.py        → VD heatmap profile rendering
-│       ├── profile_wiggle.py    → Wiggle trace rendering (QPainter)
-│       ├── profile_widget.py    → Unified VD/Wiggle switcher
-│       ├── gpu_ops.py           → CuPy GPU acceleration (optional, NumPy fallback)
-│       ├── horizon.py           → HorizonParser (nearest/RBF fill)
-│       ├── colormap.py          → ColormapManager (seismic/gray/jet/hsv)
-│       ├── cache.py             → SeismicCache (LRU slice cache)
-│       └── models.py            → SeismicVolumeMeta, SliceInfo, HorizonData
+│   ├── geoviz-seismic/    → Independent pyqtgraph-based seismic visualization engine
+│   │   ├── renderer_3d.py       → Renderer3D (pyqtgraph GLViewWidget + interactive slice planes)
+│   │   ├── seismic_view.py      → SeismicView (3D + 2D profile + toolbar)
+│   │   ├── loader.py            → SeismicLoader (segyio on-demand slicing)
+│   │   ├── profile_vd.py        → VD heatmap profile rendering
+│   │   ├── profile_wiggle.py    → Wiggle trace rendering (QPainter)
+│   │   ├── profile_widget.py    → Unified VD/Wiggle switcher
+│   │   ├── gpu_ops.py           → CuPy GPU acceleration (optional, NumPy fallback)
+│   │   ├── horizon.py           → HorizonParser (nearest/RBF fill)
+│   │   ├── colormap.py          → ColormapManager (seismic/gray/jet/hsv)
+│   │   ├── cache.py             → SeismicCache (LRU slice cache)
+│   │   └── models.py            → SeismicVolumeMeta, SliceInfo, HorizonData
+│   └── geoviz-map/        → Independent QPainter-based geographic map engine
+│       ├── canvas.py            → MapCanvas (QWidget composite layers)
+│       ├── projection.py        → Web Mercator (MapLibre-compatible)
+│       ├── viewport.py          → MapViewport (center+zoom → pixel mapping)
+│       ├── zoom_pan.py          → ZoomPanHandler (drag pan + wheel zoom)
+│       └── layers/              → Background, Graticule, GeoJsonPolygon, Reference, Wells
 ├── src/data/              → (loaders, models, cache, well_registry)
 └── src/pages/             → (each page in its own subfolder with renderer/loader)
 ```
@@ -72,10 +78,11 @@ PySide6 (Qt for Python) — Single Process
 - **No IPC, no HTTP, no token auth** — all data flows through direct Python function calls within a single process.
 - **Independent Package**: `geoviz-well-log` is a fully decoupled rendering engine. It contains all data transformation (`payload_builder`), track management (`TrackManager`), vector export (`export`), and rendering (`ChartEngine`) logic. It can be `pip install`-ed and used in any PySide6 project.
 - **Independent Package**: `geoviz-seismic` is a fully decoupled seismic visualization engine. It contains 3D volume rendering (`Renderer3D`), SEGY loading (`SeismicLoader`), 2D profile display (`ProfileVD`/`ProfileWiggle`), horizon parsing (`HorizonParser`), and composite widget (`SeismicView`). It can be `pip install`-ed and used in any PySide6 project.
+- **Independent Package**: `geoviz-map` is a fully decoupled geographic map engine using only QPainter. Web Mercator projection compatible with MapLibre GL. Layer-based architecture for offline GeoJSON rendering, well markers, reference labels. Can be `pip install`-ed and used in any PySide6 project.
 - **WellLogPage is thin**: Only ~350 lines of UI orchestration. Calls `build_tracks_from_data()` and `TrackManager` from the package. AI prediction business logic (API calls, Excel writing) stays in the page layer.
 - **Data layer**: `src/data/loaders.py` handles lasio (LAS), segyio (SEGY), openpyxl (Excel), and JSON loading. `src/data/models.py` defines Pydantic models. `src/data/cache.py` provides in-memory caching. `src/data/well_registry.py` maps well names to loader functions.
 - **Well log rendering flow**: `WellLogData` → `build_tracks_from_data()` → track pool → `TrackManager.build_payload()` → JSON → `ChartEngine.render_data()` → ECharts SVG rendering.
-- **Map**: QWebEngineView embeds MapLibre GL JS. Well click events relay from JS → Qt WebChannel → Python.
+- **Map**: Native QPainter via `geoviz-map` package. World/China GeoJSON loaded once at init into cached `QPainterPath` (per-feature in world coords), then painted with a single world→screen `QTransform` per frame. Viewport bbox culling skips off-screen polygons. Well click events emitted via Qt `Signal(str)` (`MapCanvas.well_clicked`).
 - **Seismic**: pyqtgraph OpenGL renders 3D volumes and slices. Supports SEGY loading via segyio.
 
 ## Key Code Patterns
@@ -117,6 +124,13 @@ PySide6 (Qt for Python) — Single Process
   - `geoviz_seismic/colormap.py` — ColormapManager (seismic/gray/jet/hsv)
   - `geoviz_seismic/cache.py` — SeismicCache (LRU slice cache)
   - `geoviz_seismic/models.py` — SeismicVolumeMeta, SliceInfo, HorizonData
+- `packages/geoviz_map/` — Independent geographic map visualization package
+  - `geoviz_map/canvas.py` — MapCanvas (QWidget composite of all layers)
+  - `geoviz_map/projection.py` — Web Mercator projection
+  - `geoviz_map/viewport.py` — center+zoom → screen pixel mapping
+  - `geoviz_map/zoom_pan.py` — Drag pan + cursor-anchored wheel zoom
+  - `geoviz_map/layers/` — Background, Graticule, GeoJsonPolygon, ReferenceLabels, Wells
+  - `geoviz_map/models.py` — WellMarker, ReferenceLabel
 - `src/` — Main application code
   - `main.py` — Entry point (QApplication)
   - `app.py` — MainWindow + sidebar navigation
@@ -132,9 +146,18 @@ PySide6 (Qt for Python) — Single Process
   - `utils/` — constants (re-exports PATTERN_MAP from package)
   - `resources/` — Icons, Qt resource files
 - `data/` — Well coordinates JSON, well log Excel, XML data files
+- `samples/` — Demo assets and example GeoJSON
 - `tests/` — pytest test files
-- `scripts/` — build.py (PyInstaller)
+- `scripts/` — build.py (PyInstaller), build_with_conda.bat (Windows)
 - `docs/` — Design specs, methodology documents
+  - `docs/screenshots/references/` — Reference images (lithology layouts, mockups)
+  - `docs/screenshots/qa/` — QA / regression screenshots
+  - `docs/releases/` — Per-version release notes
+- `archive/` — Retired code kept for reference, not built or imported
+  - `archive/scripts/` — Ad-hoc debug/probe scripts from earlier dev cycles
+  - `archive/web-echarts/` — Older standalone ECharts web experiment (full Tauri+React+FastAPI architecture lives at git tag `v0.1-web`)
+  - `archive/web-deps/` — Leftover `package.json` / `package-lock.json` from the web era
+  - `archive/misc/` — Stale one-shot artifacts (`diff.txt`, `.coverage`)
 
 ## Development Notes
 

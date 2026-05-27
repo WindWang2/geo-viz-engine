@@ -18,6 +18,7 @@ dependencies = [
     "PyOpenGL>=3.1.0",
     "geoviz-well-log",
     "geoviz-seismic",
+    "geoviz-map",
 ]
 
 [project.optional-dependencies]
@@ -41,11 +42,13 @@ environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'", "sys_plat
 members = [
     "packages/geoviz_well_log",
     "packages/geoviz_seismic",
+    "packages/geoviz_map",
 ]
 
 [tool.uv.sources]
 geoviz-well-log = { workspace = true }
 geoviz-seismic = { workspace = true }
+geoviz-map = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
