@@ -113,7 +113,7 @@ class Renderer3D(QWidget):
         slider.setStyleSheet(
             "QSlider::groove:horizontal{height:4px;background:#e2e8f0;border-radius:2px;}"
             f"QSlider::handle:horizontal{{background:{color};width:14px;height:14px;"
-            "margin:-5px 0;border-radius:7px;}}"
+            "margin:-5px 0;border-radius:7px;}"
         )
         layout.addWidget(slider, 1)
         val_lbl = QLabel("0")
