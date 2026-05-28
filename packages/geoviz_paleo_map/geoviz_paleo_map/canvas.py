@@ -554,12 +554,7 @@ class PaleoMapCanvas(QWidget):
         self._topology_model.clear_dirty()
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
-        if self._hierarchy is None:
-            return
-
         pos = QPointF(event.pos())
-        feature_id = self._hierarchy_hit_test_id(pos)
-
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
@@ -579,38 +574,111 @@ class PaleoMapCanvas(QWidget):
             }
         """)
 
-        level_labels = {"facies": "相", "sub_facies": "亚相", "micro_facies": "微相"}
-
-        if feature_id:
-            node = self._hierarchy.get_node(feature_id)
-            if node is not None:
-                # Find root node and check if there is an active lock in this branch
-                root_node = self._find_root_node(feature_id)
-                active_lock_res = self._find_active_lock_in_subtree(root_node) if root_node is not None else None
-
-                if active_lock_res is not None:
-                    locked_fid, lock_lvl = active_lock_res
-                    locked_node = self._hierarchy.get_node(locked_fid)
-                    if locked_node is not None:
-                        display_name = locked_node.feature.display_name
-                        lvl_lbl = level_labels.get(locked_node.feature.level, locked_node.feature.level)
-                        act_unlock = QAction(f"解除锁定: {display_name} ({lvl_lbl})", self)
-                        act_unlock.triggered.connect(lambda: self.toggle_lock(locked_fid))
-                        menu.addAction(act_unlock)
-                else:
-                    display_name = node.feature.display_name
-                    lvl_lbl = level_labels.get(node.feature.level, node.feature.level)
-                    act_lock = QAction(f"锁定层级: {display_name} ({lvl_lbl})", self)
-                    act_lock.triggered.connect(lambda: self.toggle_lock(feature_id))
-                    menu.addAction(act_lock)
+        if self._edit_mode and self._topology_model is not None:
+            # Edit mode context menu
+            vid = self._edit_overlay.hit_test_vertex(pos, self._viewport)
+            if vid is not None:
+                act_del_v = QAction("删除节点", self)
+                act_del_v.triggered.connect(lambda: self._context_delete_vertex(vid))
+                menu.addAction(act_del_v)
                 menu.addSeparator()
 
-        panel_visible = self._locked_panel.isVisible()
-        act_toggle = QAction("显示锁定层级面板" if not panel_visible else "隐藏锁定层级面板", self)
-        act_toggle.triggered.connect(self._toggle_locked_panel)
-        menu.addAction(act_toggle)
+            selected = self._edit_engine.selected_id
+            if selected:
+                act_del_p = QAction("删除多边形", self)
+                act_del_p.triggered.connect(self._context_delete_polygon)
+                menu.addAction(act_del_p)
+
+                act_edit_attr = QAction("编辑属性...", self)
+                act_edit_attr.triggered.connect(lambda: self._context_edit_attributes(selected))
+                menu.addAction(act_edit_attr)
+        else:
+            # View mode context menu (existing hierarchy lock behavior)
+            if self._hierarchy is None:
+                menu.exec(event.globalPos())
+                return
+
+            feature_id = self._hierarchy_hit_test_id(pos)
+            level_labels = {"facies": "相", "sub_facies": "亚相", "micro_facies": "微相"}
+
+            if feature_id:
+                node = self._hierarchy.get_node(feature_id)
+                if node is not None:
+                    root_node = self._find_root_node(feature_id)
+                    active_lock_res = self._find_active_lock_in_subtree(root_node) if root_node is not None else None
+
+                    if active_lock_res is not None:
+                        locked_fid, lock_lvl = active_lock_res
+                        locked_node = self._hierarchy.get_node(locked_fid)
+                        if locked_node is not None:
+                            display_name = locked_node.feature.display_name
+                            lvl_lbl = level_labels.get(locked_node.feature.level, locked_node.feature.level)
+                            act_unlock = QAction(f"解除锁定: {display_name} ({lvl_lbl})", self)
+                            act_unlock.triggered.connect(lambda: self.toggle_lock(locked_fid))
+                            menu.addAction(act_unlock)
+                    else:
+                        display_name = node.feature.display_name
+                        lvl_lbl = level_labels.get(node.feature.level, node.feature.level)
+                        act_lock = QAction(f"锁定层级: {display_name} ({lvl_lbl})", self)
+                        act_lock.triggered.connect(lambda: self.toggle_lock(feature_id))
+                        menu.addAction(act_lock)
+                    menu.addSeparator()
+
+            panel_visible = self._locked_panel.isVisible()
+            act_toggle = QAction("显示锁定层级面板" if not panel_visible else "隐藏锁定层级面板", self)
+            act_toggle.triggered.connect(self._toggle_locked_panel)
+            menu.addAction(act_toggle)
 
         menu.exec(event.globalPos())
+
+    def _context_delete_vertex(self, vid: int) -> None:
+        cmd = self._edit_engine.delete_selected_vertex(vid)
+        if cmd:
+            self._undo_mgr.execute(cmd, self._topology_model)
+            self._rebuild_topology_paths()
+            self.update()
+
+    def _context_delete_polygon(self) -> None:
+        cmd = self._edit_engine.delete_selected_polygon()
+        if cmd:
+            self._undo_mgr.execute(cmd, self._topology_model)
+            self._rebuild_topology_paths()
+            self.selection_changed.emit("")
+            self.update()
+
+    def _context_edit_attributes(self, feature_id: str) -> None:
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox
+        ref = self._topology_model.get_feature(feature_id) if self._topology_model else None
+        if ref is None:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("编辑属性")
+        form = QFormLayout(dlg)
+        facies_input = QLineEdit(ref.properties.get("facies", ""))
+        name_input = QLineEdit(ref.properties.get("name", ""))
+        boundary_combo = QComboBox()
+        boundary_combo.addItems(["无", "实测界线", "推测界线", "断层"])
+        bt = ref.properties.get("boundary_type")
+        boundary_combo.setCurrentText({"confirmed": "实测界线", "inferred": "推测界线", "fault": "断层"}.get(bt, "无"))
+        form.addRow("相名:", facies_input)
+        form.addRow("显示名:", name_input)
+        form.addRow("界线类型:", boundary_combo)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        old_props = dict(ref.properties)
+        new_props = dict(ref.properties)
+        new_props["facies"] = facies_input.text()
+        new_props["name"] = name_input.text()
+        bt_map = {"实测界线": "confirmed", "推测界线": "inferred", "断层": "fault"}
+        new_props["boundary_type"] = bt_map.get(boundary_combo.currentText())
+        from geoviz_paleo_map.edit_commands import EditAttributesCmd
+        cmd = EditAttributesCmd(feature_id, old_props, new_props)
+        self._undo_mgr.execute(cmd, self._topology_model)
+        self.update()
 
     def _hierarchy_hit_test(self, pos: QPointF) -> str | None:
         """Hit-test the active level's polygon layer, return hierarchy label."""
