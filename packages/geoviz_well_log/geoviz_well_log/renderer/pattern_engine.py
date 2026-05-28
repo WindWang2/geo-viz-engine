@@ -82,3 +82,56 @@ class PatternEngine:
         if hex_color is None:
             return None
         return QColor(hex_color)
+
+    _SORTED_COLOR_KEYS = sorted(FACIES_COLORS.keys(), key=len, reverse=True)
+
+    def get_color_fuzzy(self, name: str) -> QColor | None:
+        """Return a QColor by substring match against FACIES_COLORS.
+
+        Longest keys are tried first so '粉砂岩' matches before '砂岩'.
+        """
+        hex_color = FACIES_COLORS.get(name)
+        if hex_color is not None:
+            return QColor(hex_color)
+        for key in self._SORTED_COLOR_KEYS:
+            if key in name:
+                return QColor(FACIES_COLORS[key])
+        return None
+
+    def get_composite_brush(self, name: str, base_color: QColor,
+                            alpha: float = 0.6) -> QBrush | None:
+        """Return a tiled QBrush of base_color overlaid with the SVG pattern
+        for `name` at the given alpha.
+
+        Returns None if no pattern matches `name`. Cached per (name, color hex).
+        """
+        cache_key = f"composite::{name}::{base_color.name()}::{alpha:.2f}"
+        if not hasattr(self, "_composite_cache"):
+            self._composite_cache: dict[str, QBrush] = {}
+        if cache_key in self._composite_cache:
+            return self._composite_cache[cache_key]
+
+        pattern_id = self._fuzzy_lookup(name)
+        if pattern_id is None:
+            return None
+
+        filename = pattern_id.replace("-", "_")
+        svg_path = self._ASSETS_DIR / f"{filename}.svg"
+        if not svg_path.exists():
+            return None
+
+        renderer = QSvgRenderer(str(svg_path))
+        if not renderer.isValid():
+            return None
+
+        size = QSize(self._tile_size, self._tile_size)
+        pm = QPixmap(size)
+        pm.fill(base_color)
+        painter = QPainter(pm)
+        painter.setOpacity(alpha)
+        renderer.render(painter)
+        painter.end()
+
+        brush = QBrush(pm)
+        self._composite_cache[cache_key] = brush
+        return brush

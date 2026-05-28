@@ -36,7 +36,7 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 │  │ 侧栏 │  QStackedWidget (7 页面)                  │    │
 │  │      │                                          │    │
 │  │ 🗺   │  MapPage     QPainter (geoviz-map)        │    │
-│  │ 🌍   │  PaleoMap    ECharts + GeoJSON           │    │
+│  │ 🌍   │  PaleoMap    QPainter (geoviz-paleo-map)  │    │
 │  │ ⛏   │  WellLogPage ECharts + WebEngine         │    │
 │  │ ⛓   │  CrossWell   Multi-ECharts + Sync        │    │
 │  │ 🧊   │  SeismicPage pyqtgraph OpenGL            │    │
@@ -74,6 +74,15 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 │  │  ├── Viewport       center+zoom 像素映射         │    │
 │  │  ├── ZoomPanHandler 拖拽+滚轮缩放                │    │
 │  │  └── Layers         背景/网格/地块/标签/井点      │    │
+│  └─────────────────────────────────────────────────┘    │
+│                                                         │
+│  packages/geoviz-paleo-map/                             │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  独立古地理可视化引擎 (QPainter + Plate Carrée)   │    │
+│  │  ├── PaleoMapCanvas 组合 8 个 layer              │    │
+│  │  ├── FaciesStyleResolver 每相缓存复合纹理         │    │
+│  │  ├── Layers         背景/多边形/标签/井点         │    │
+│  │  └── Chrome         标题/指北/比例尺/图例         │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                         │
 │  src/   data/ loaders & models │ pages/ UI              │
@@ -227,14 +236,23 @@ geo-viz-engine/
 │   │   │   ├── cache.py           # LRU 切片缓存
 │   │   │   └── models.py          # SeismicVolumeMeta, SliceInfo 等
 │   │   └── pyproject.toml
-│   └── geoviz_map/                # 独立地图可视化包 (pip installable)
-│       ├── geoviz_map/
-│       │   ├── canvas.py          # MapCanvas (QWidget 组合 layers)
-│       │   ├── projection.py      # Web Mercator 投影
+│   ├── geoviz_map/                # 独立地图可视化包 (pip installable)
+│   │   ├── geoviz_map/
+│   │   │   ├── canvas.py          # MapCanvas (QWidget 组合 layers)
+│   │   │   ├── projection.py      # Web Mercator 投影
+│   │   │   ├── viewport.py        # center+zoom → 像素映射
+│   │   │   ├── zoom_pan.py        # 拖拽 + 滚轮缩放
+│   │   │   ├── layers/            # 背景/网格/地块/标签/井点
+│   │   │   └── models.py          # WellMarker, ReferenceLabel
+│   │   └── pyproject.toml
+│   └── geoviz_paleo_map/          # 独立古地理可视化包 (pip installable)
+│       ├── geoviz_paleo_map/
+│       │   ├── canvas.py          # PaleoMapCanvas (8 个 layer)
+│       │   ├── projection.py      # Plate Carrée 投影
 │       │   ├── viewport.py        # center+zoom → 像素映射
 │       │   ├── zoom_pan.py        # 拖拽 + 滚轮缩放
-│       │   ├── layers/            # 背景/网格/地块/标签/井点
-│       │   └── models.py          # WellMarker, ReferenceLabel
+│       │   ├── style.py           # FaciesStyleResolver
+│       │   └── layers/            # 8 个渲染层
 │       └── pyproject.toml
 ├── src/                           # 主应用代码
 │   ├── main.py                    # 入口 (QApplication)
@@ -244,8 +262,7 @@ geo-viz-engine/
 │   │   │   ├── page.py            #   MapPage (MapLibre GL)
 │   │   │   └── renderer.py        #   QWebEngineView + MapLibre
 │   │   ├── paleo_map/             # 古地理图
-│   │   │   ├── page.py            #   PaleoMapPage
-│   │   │   ├── renderer.py        #   ECharts QWebEngineView 渲染
+│   │   │   ├── page.py            #   PaleoMapPage (调用 geoviz-paleo-map)
 │   │   │   └── loader.py          #   CSV/Excel/GeoJSON 数据加载
 │   │   ├── well_log/              # 井剖面 (UI 编排，调用 geoviz-well-log)
 │   │   │   └── page.py

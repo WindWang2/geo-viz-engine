@@ -6,14 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **新增独立包 `geoviz-map`**：基于 QPainter + Web Mercator 投影的地理可视化引擎，6 个 layer 组合渲染（背景/经纬网/世界陆地/中国省界/参考标签/井点），支持视口剔除、cursor-anchored 滚轮缩放、拖拽平移、井点 hover/click hit-test。可独立 pip install 后嵌入任意 PySide6 项目。
+- **新增独立包 `geoviz-paleo-map`**：基于 QPainter + Plate Carrée 投影的古地理图引擎，8 个 layer（4 数据层 + 4 chrome）。复用 `geoviz-well-log.PatternEngine` 并新增 `get_composite_brush` / `get_color_fuzzy` 两个公共方法。
 
 ### Changed
+- **PaleoMap 渲染重写**：古地理图从 QWebEngineView + ECharts 迁移到原生 QPainter。1:1 视觉/交互对齐（背景、polygon 复合花纹、边界样式、井位、标题、指北针、比例尺、图例、tooltip）。tempfile-based GeoJSON 中转移除，`load_features(features, period_name, wells)` 直接消费 dict。
 - **MapPage 渲染重写**：井位分布图从 QWebEngineView + MapLibre GL 迁移到原生 QPainter（通过 `geoviz_map` 包），1:1 视觉/交互对齐。消除了 Windows 上 WebEngine + OpenGL 上下文冲突的潜在隐患。
 - **仓库结构整理**：将根目录散落的临时调试脚本、旧 ECharts Web 实验工程、`package.json`/`node_modules` 等遗留产物迁入 `archive/` 归档目录（`scripts/`、`web-echarts/`、`web-deps/`、`misc/`），全部通过 `git mv` 保留历史。
 - **截图统一**：根目录散落的参考图与 QA 截图收纳至 `docs/screenshots/{references,qa}/`。
 - **杂项归位**：`sample_paleo.geojson` → `samples/`，`build_with_conda.bat` → `scripts/`。
 
 ### Removed
+- 删除 `src/pages/paleo_map/renderer.py`（411 行含 295 行内联 HTML/JS）和 `_write_period_geojsons` / `_period_geojson_files` / `_cleanup_tmp` 中转代码。
+- `_PaleoMapPage(QWebEnginePage)` 子类 + tempfile 中转一并消失。主应用零 WebEngine import。
 - 删除 `src/pages/map/renderer.py`（394 行 MapLibre 嵌入实现）。
 - 删除 `src/pages/map/assets/maplibre-gl.{js,css}`（~640 KB 内联资产）。
 - `well://` 自定义 URL scheme 与 `QWebEnginePage` 子类一并消失。

@@ -37,7 +37,7 @@ PySide6 (Qt for Python) — Single Process
 │   ├── Sidebar (7 icon+text buttons)
 │   └── QStackedWidget (7 pages)
 │       ├── MapPage        → QPainter (via geoviz-map package)
-│       ├── PaleoMapPage   → ECharts + GeoJSON (paleo_map/ folder)
+│       ├── PaleoMapPage   → QPainter (via geoviz-paleo-map package)
 │       ├── WellLogPage    → ECharts (via geoviz-well-log package)
 │       ├── CrossWellPage  → Multi-ECharts + Correlation Polygons
 │       ├── SeismicPage    → pyqtgraph OpenGL + CuPy
@@ -65,12 +65,19 @@ PySide6 (Qt for Python) — Single Process
 │   │   ├── colormap.py          → ColormapManager (seismic/gray/jet/hsv)
 │   │   ├── cache.py             → SeismicCache (LRU slice cache)
 │   │   └── models.py            → SeismicVolumeMeta, SliceInfo, HorizonData
-│   └── geoviz-map/        → Independent QPainter-based geographic map engine
-│       ├── canvas.py            → MapCanvas (QWidget composite layers)
-│       ├── projection.py        → Web Mercator (MapLibre-compatible)
-│       ├── viewport.py          → MapViewport (center+zoom → pixel mapping)
-│       ├── zoom_pan.py          → ZoomPanHandler (drag pan + wheel zoom)
-│       └── layers/              → Background, Graticule, GeoJsonPolygon, Reference, Wells
+│   ├── geoviz-map/        → Independent QPainter-based geographic map engine
+│   │   ├── canvas.py            → MapCanvas (QWidget composite layers)
+│   │   ├── projection.py        → Web Mercator (MapLibre-compatible)
+│   │   ├── viewport.py          → MapViewport (center+zoom → pixel mapping)
+│   │   ├── zoom_pan.py          → ZoomPanHandler (drag pan + wheel zoom)
+│   │   └── layers/              → Background, Graticule, GeoJsonPolygon, Reference, Wells
+│   └── geoviz-paleo-map/  → Independent QPainter-based paleogeographic map engine
+│       ├── canvas.py            → PaleoMapCanvas (QWidget composite of 8 layers)
+│       ├── projection.py        → Plate Carrée (identity lng/lat → x/y)
+│       ├── viewport.py          → PaleoMapViewport (center+zoom → pixel mapping)
+│       ├── zoom_pan.py          → ZoomPanHandler
+│       ├── style.py             → FaciesStyleResolver (per-facies brush cache)
+│       └── layers/              → Background, FaciesPolygons, RegionLabels, WellsScatter, Title, NorthArrow, ScaleBar, Legend
 ├── src/data/              → (loaders, models, cache, well_registry)
 └── src/pages/             → (each page in its own subfolder with renderer/loader)
 ```
@@ -79,10 +86,12 @@ PySide6 (Qt for Python) — Single Process
 - **Independent Package**: `geoviz-well-log` is a fully decoupled rendering engine. It contains all data transformation (`payload_builder`), track management (`TrackManager`), vector export (`export`), and rendering (`ChartEngine`) logic. It can be `pip install`-ed and used in any PySide6 project.
 - **Independent Package**: `geoviz-seismic` is a fully decoupled seismic visualization engine. It contains 3D volume rendering (`Renderer3D`), SEGY loading (`SeismicLoader`), 2D profile display (`ProfileVD`/`ProfileWiggle`), horizon parsing (`HorizonParser`), and composite widget (`SeismicView`). It can be `pip install`-ed and used in any PySide6 project.
 - **Independent Package**: `geoviz-map` is a fully decoupled geographic map engine using only QPainter. Web Mercator projection compatible with MapLibre GL. Layer-based architecture for offline GeoJSON rendering, well markers, reference labels. Can be `pip install`-ed and used in any PySide6 project.
+- **Independent Package**: `geoviz-paleo-map` is a fully decoupled paleogeographic map engine using only QPainter. Plate Carrée projection. Per-feature composite SVG pattern fills via `geoviz-well-log.PatternEngine` extensions (`get_composite_brush`, `get_color_fuzzy`). 8 layers: 4 data-driven + 4 chrome. Can be `pip install`-ed and used in any PySide6 project.
 - **WellLogPage is thin**: Only ~350 lines of UI orchestration. Calls `build_tracks_from_data()` and `TrackManager` from the package. AI prediction business logic (API calls, Excel writing) stays in the page layer.
 - **Data layer**: `src/data/loaders.py` handles lasio (LAS), segyio (SEGY), openpyxl (Excel), and JSON loading. `src/data/models.py` defines Pydantic models. `src/data/cache.py` provides in-memory caching. `src/data/well_registry.py` maps well names to loader functions.
 - **Well log rendering flow**: `WellLogData` → `build_tracks_from_data()` → track pool → `TrackManager.build_payload()` → JSON → `ChartEngine.render_data()` → ECharts SVG rendering.
 - **Map**: Native QPainter via `geoviz-map` package. World/China GeoJSON loaded once at init into cached `QPainterPath` (per-feature in world coords), then painted with a single world→screen `QTransform` per frame. Viewport bbox culling skips off-screen polygons. Well click events emitted via Qt `Signal(str)` (`MapCanvas.well_clicked`).
+- **PaleoMap**: Native QPainter via `geoviz-paleo-map` package. Per-feature `FaciesStyle` resolved from facies name → base color + composite QBrush (from PatternEngine). Tooltip hit-test runs bbox prefilter then `QPainterPath.contains`. Tempfile-based GeoJSON middleware is gone — `load_features(features, period_name, wells)` accepts a Python dict directly.
 - **Seismic**: pyqtgraph OpenGL renders 3D volumes and slices. Supports SEGY loading via segyio.
 
 ## Key Code Patterns
@@ -131,12 +140,19 @@ PySide6 (Qt for Python) — Single Process
   - `geoviz_map/zoom_pan.py` — Drag pan + cursor-anchored wheel zoom
   - `geoviz_map/layers/` — Background, Graticule, GeoJsonPolygon, ReferenceLabels, Wells
   - `geoviz_map/models.py` — WellMarker, ReferenceLabel
+- `packages/geoviz_paleo_map/` — Independent paleogeographic map visualization package
+  - `geoviz_paleo_map/canvas.py` — PaleoMapCanvas (8-layer composite)
+  - `geoviz_paleo_map/projection.py` — Plate Carrée
+  - `geoviz_paleo_map/viewport.py` — center+zoom → screen pixel mapping
+  - `geoviz_paleo_map/zoom_pan.py` — Drag pan + cursor-anchored wheel zoom
+  - `geoviz_paleo_map/style.py` — FaciesStyleResolver
+  - `geoviz_paleo_map/layers/` — Background, FaciesPolygons, RegionLabels, WellsScatter, Title, NorthArrow, ScaleBar, Legend
 - `src/` — Main application code
   - `main.py` — Entry point (QApplication)
   - `app.py` — MainWindow + sidebar navigation
   - `pages/` — Page widgets, each in its own subfolder
     - `map/` — MapPage + MapRenderer
-    - `paleo_map/` — PaleoMapPage + PaleoMapRenderer + PaleoDataLoader
+    - `paleo_map/` — PaleoMapPage + PaleoDataLoader
     - `well_log/` — WellLogPage (calls geoviz-well-log package)
     - `cross_well/` — CrossWellPage
     - `seismic/` — SeismicPage (thin wrapper around SeismicView)

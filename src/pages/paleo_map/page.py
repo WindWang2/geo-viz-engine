@@ -1,14 +1,37 @@
 import json
+import math
 import os
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QStackedWidget, QMessageBox, QComboBox,
     QSplitter, QDialog, QRadioButton, QButtonGroup, QDialogButtonBox,
 )
 
-from src.pages.paleo_map.renderer import PaleoMapRenderer
+from geoviz_paleo_map import PaleoMapCanvas
+from geoviz_paleo_map.hierarchy import FaciesHierarchy
+
 from src.pages.paleo_map.loader import PaleoDataLoader
+from src.utils.paths import get_data_dir
+
+
+
+
+def _load_well_markers() -> list[dict]:
+    """Load wells in {name, lng, lat} format for PaleoMapCanvas."""
+    try:
+        path = get_data_dir() / "well_coordinates.json"
+        if not path.exists():
+            return []
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return [
+            {"name": w["well_name"], "lng": w["longitude"], "lat": w["latitude"]}
+            for w in data.get("wells", [])
+        ]
+    except (OSError, KeyError, json.JSONDecodeError):
+        return []
 
 
 class PaleoMapPage(QWidget):
@@ -16,7 +39,8 @@ class PaleoMapPage(QWidget):
         super().__init__()
         self.setAcceptDrops(True)
         self._periods: dict[str, list[dict]] = {}
-        self._period_geojson_files: dict[str, str] = {}
+        self._hierarchies: dict[str, FaciesHierarchy] = {}
+        self._multi_file_periods: dict[str, list[str]] = {}  # period -> [file_paths] for sibling discovery
         self._current_period = ""
         self._compare_mode = False
 
@@ -84,6 +108,7 @@ class PaleoMapPage(QWidget):
         tb_layout.addWidget(QLabel("时期:"))
         tb_layout.addWidget(self._period_combo)
         tb_layout.addWidget(self._compare_btn)
+
         tb_layout.addStretch()
         tb_layout.addWidget(export_btn)
 
@@ -92,32 +117,20 @@ class PaleoMapPage(QWidget):
         # Map view area (single or split)
         self._map_layout = QVBoxLayout()
         self._map_layout.setContentsMargins(0, 0, 0, 0)
-        self.map_view = PaleoMapRenderer(self)
+        self.map_view = PaleoMapCanvas(parent=self)
         self._map_layout.addWidget(self.map_view)
         map_layout.addLayout(self._map_layout, 1)
 
         self.stack.addWidget(self.map_container)
         self.stack.setCurrentWidget(self.empty_widget)
 
+
+
     # --- Period Management ---
 
-    def _add_periods(self, periods: dict[str, list[dict]], geojson_files: dict[str, str]):
-        # Clean up stale temp files from previous loads
-        for name, path in list(self._period_geojson_files.items()):
-            if name not in periods:
-                try: os.unlink(path)
-                except OSError: pass
-                del self._period_geojson_files[name]
-
+    def _add_periods(self, periods: dict[str, list[dict]]):
         for name, features in periods.items():
-            self._periods[name] = features
-            if name in geojson_files:
-                old_path = self._period_geojson_files.get(name)
-                new_path = geojson_files[name]
-                if old_path and old_path != new_path:
-                    try: os.unlink(old_path)
-                    except OSError: pass
-                self._period_geojson_files[name] = new_path
+            self._periods.setdefault(name, []).extend(features)
 
         self._period_combo.blockSignals(True)
         self._period_combo.clear()
@@ -136,17 +149,34 @@ class PaleoMapPage(QWidget):
             return
         self._current_period = period_name
 
-        geojson_path = self._period_geojson_files.get(period_name)
-        if geojson_path:
-            self.map_view.load_geojson(geojson_path, period_name=period_name)
+        features = self._periods.get(period_name)
+        if features is not None:
+            hierarchy = self._hierarchies.get(period_name)
+            if hierarchy is not None:
+                self.map_view.load_hierarchy(hierarchy,
+                                             period_name=period_name,
+                                             wells=_load_well_markers())
+            else:
+                self.map_view.load_features(features,
+                                            period_name=period_name,
+                                            wells=_load_well_markers())
+
 
         if self._compare_mode and hasattr(self, 'map_view_b'):
             other_periods = [p for p in self._periods if p != period_name]
             if other_periods:
                 other = other_periods[0]
-                path_b = self._period_geojson_files.get(other)
-                if path_b:
-                    self.map_view_b.load_geojson(path_b, period_name=other)
+                features_b = self._periods.get(other)
+                if features_b is not None:
+                    hierarchy_b = self._hierarchies.get(other)
+                    if hierarchy_b is not None:
+                        self.map_view_b.load_hierarchy(hierarchy_b,
+                                                       period_name=other,
+                                                       wells=_load_well_markers())
+                    else:
+                        self.map_view_b.load_features(features_b,
+                                                      period_name=other,
+                                                      wells=_load_well_markers())
 
     # --- Compare Mode ---
 
@@ -164,19 +194,17 @@ class PaleoMapPage(QWidget):
     def _start_compare(self):
         old_view = self.map_view
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.map_view = PaleoMapRenderer(self)
-        self.map_view_b = PaleoMapRenderer(self)
+        self.map_view = PaleoMapCanvas(parent=self)
+        self.map_view_b = PaleoMapCanvas(parent=self)
         self._splitter.addWidget(self.map_view)
         self._splitter.addWidget(self.map_view_b)
         self._map_layout.addWidget(self._splitter)
-        old_view._cleanup_tmp()
         old_view.deleteLater()
         self._on_period_changed(self._current_period)
 
     def _stop_compare(self):
         if hasattr(self, 'map_view_b'):
             try:
-                self.map_view_b._cleanup_tmp()
                 self.map_view_b.deleteLater()
             except RuntimeError:
                 pass
@@ -184,7 +212,7 @@ class PaleoMapPage(QWidget):
         if hasattr(self, '_splitter'):
             self._splitter.setParent(None)
             del self._splitter
-        self.map_view = PaleoMapRenderer(self)
+        self.map_view = PaleoMapCanvas(parent=self)
         self._map_layout.addWidget(self.map_view)
         self._on_period_changed(self._current_period)
 
@@ -193,7 +221,7 @@ class PaleoMapPage(QWidget):
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            if urls and urls[0].toLocalFile().lower().endswith(('.json', '.geojson', '.csv', '.xlsx')):
+            if any(u.toLocalFile().lower().endswith(('.json', '.geojson', '.csv', '.xlsx')) for u in urls):
                 event.acceptProposedAction()
                 return
         event.ignore()
@@ -201,33 +229,34 @@ class PaleoMapPage(QWidget):
     def dropEvent(self, event):
         urls = event.mimeData().urls()
         if urls:
-            self._load_file(urls[0].toLocalFile())
+            paths = [u.toLocalFile() for u in urls
+                     if u.toLocalFile().lower().endswith(('.json', '.geojson', '.csv', '.xlsx'))]
+            if paths:
+                self._load_files(paths)
 
     def _on_load_clicked(self):
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_paths, _ = QFileDialog.getOpenFileNames(
             self, "选择古地理数据文件", "",
             "数据文件 (*.json *.geojson *.csv *.xlsx)"
         )
-        if file_path:
-            self._load_file(file_path)
+        if file_paths:
+            self._load_files(file_paths)
 
-    def _load_file(self, file_path: str):
-        if not os.path.exists(file_path):
-            QMessageBox.warning(self, "错误", "文件不存在！")
-            return
+    def _load_files(self, file_paths: list[str]):
+        for fp in file_paths:
+            if not os.path.exists(fp):
+                QMessageBox.warning(self, "错误", f"文件不存在：{fp}")
+                return
 
         from PySide6.QtGui import QCursor
         self.setCursor(QCursor(Qt.CursorShape.WaitCursor))
         try:
-            fmt = PaleoDataLoader.detect_format(file_path)
-            if fmt is None:
-                QMessageBox.critical(self, "格式错误", "不支持的文件格式。请使用 GeoJSON 或 CSV 文件。")
-                return
-
-            loader = PaleoDataLoader(file_path)
-            periods = loader.load()
-            geojson_files = self._write_period_geojsons(periods, file_path)
-            self._add_periods(periods, geojson_files)
+            if len(file_paths) == 1:
+                # Single file: use auto-discovery for siblings
+                periods = self._load_single_file(file_paths[0])
+            else:
+                # Multiple files: load all, merge by period, build hierarchy
+                periods = self._load_multi_files(file_paths)
 
             if not periods or all(len(f) == 0 for f in periods.values()):
                 QMessageBox.information(self, "提示",
@@ -242,19 +271,36 @@ class PaleoMapPage(QWidget):
         finally:
             self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
 
-    def _write_period_geojsons(self, periods: dict, source_path: str) -> dict[str, str]:
-        import tempfile
-        result = {}
-        for name, features in periods.items():
-            geojson = {"type": "FeatureCollection", "features": features}
-            tmp = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".geojson", delete=False, encoding="utf-8",
-                prefix=f"paleo_{name}_"
-            )
-            json.dump(geojson, tmp, ensure_ascii=False)
-            tmp.close()
-            result[name] = tmp.name
-        return result
+    def _load_single_file(self, file_path: str) -> dict[str, list[dict]]:
+        """Load one file, auto-discover siblings for hierarchy."""
+        fmt = PaleoDataLoader.detect_format(file_path)
+        if fmt is None:
+            QMessageBox.critical(self, "格式错误", "不支持的文件格式。请使用 GeoJSON 或 CSV 文件。")
+            return {}
+
+        siblings = PaleoDataLoader.discover_sibling_levels(file_path)
+        if len(siblings) > 1:
+            return self._load_multi_files(list(siblings.values()))
+
+        loader = PaleoDataLoader(file_path)
+        periods = loader.load()
+        self._add_periods(periods)
+        return periods
+
+    def _load_multi_files(self, file_paths: list[str]) -> dict[str, list[dict]]:
+        """Load multiple files, merge by period, build hierarchy."""
+        merged: dict[str, list[dict]] = {}
+        for fp in file_paths:
+            fmt = PaleoDataLoader.detect_format(fp)
+            if fmt is None:
+                continue
+            loader = PaleoDataLoader(fp)
+            for period_name, features in loader.load().items():
+                merged.setdefault(period_name, []).extend(features)
+        for period_name, feats in merged.items():
+            self._hierarchies[period_name] = FaciesHierarchy.from_features(feats)
+        self._add_periods(merged)
+        return merged
 
     # --- Export ---
 

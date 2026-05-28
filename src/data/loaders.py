@@ -257,27 +257,6 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
             mx += 10.0
         return (float(round(mn, 1)), float(round(mx, 1)))
 
-    from src.utils.constants import PATTERN_MAP
-    from geoviz_well_log.configs.laolong1 import LITHOLOGY_MAPPING, FACIES_MAPPING
-    
-    def get_pattern_and_color(name, is_facies=False):
-        if not name: return "", "#ffffff"
-        mapping = FACIES_MAPPING if is_facies else LITHOLOGY_MAPPING
-        
-        pat = ""
-        for k in sorted(PATTERN_MAP.keys(), key=len, reverse=True):
-            if k in name:
-                pat = PATTERN_MAP[k]
-                break
-                
-        col = "#ffffff"
-        for k in sorted(mapping.colors.keys(), key=len, reverse=True):
-            if k in name:
-                col = mapping.colors[k]
-                break
-                
-        return pat, col
-
     excel_file = pd.ExcelFile(path, engine="calamine")
     sheet_names = excel_file.sheet_names
     all_sheets = pd.read_excel(excel_file, sheet_name=None)  # dict[str, DataFrame]
@@ -296,10 +275,6 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
     micro_phase = []
     
     datum_elevation = 0.0
-    custom_tracks = []
-    
-    # 1. Depth Track
-    custom_tracks.append({"type": "DepthTrack", "name": "深度", "width": 6})
 
     # 2. Process Curve Sheets
     for s in sheet_names:
@@ -366,20 +341,6 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
                     line_style = "solid"
                     if any(k in c_str.upper() for k in ("RXO", "RS", "LLS", "AC", "DT")):
                         line_style = "dashed"
-
-                    curve_data = [[d, (v if not math.isnan(v) else None)] for d, v in zip(depths, vals)]
-                    custom_tracks.append({
-                        "type": "CurveTrack",
-                        "name": c_str,
-                        "width": 14,
-                        "series": [{
-                            "name": c_str,
-                            "color": color,
-                            "lineStyle": line_style,
-                            "rangeLabel": f"{rng[0]} - {rng[1]}",
-                            "data": curve_data
-                        }]
-                    })
             except Exception as e:
                 print(f"Error processing sheet {s}: {e}")
                 
@@ -511,54 +472,6 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
                     systems_tract.extend(items)
                 else:
                     lithology_desc.extend(items)
-                    
-                apply_pattern = "岩性" in tn or "相" in tn or "岩性" in s or "相" in s
-                track_type = "LithologyTrack" if "岩性" in tn or "岩性" in s else "IntervalTrack"
-                
-                # Apply grouping and renaming
-                display_name = tn
-                parent_group = ""
-                
-                if "相" in tn or "相" in s:
-                    if "测试" not in tn and "结论" not in tn:
-                        parent_group = "沉积相"
-                        display_name = tn.replace("沉积", "") # 沉积相->相, 沉积亚相->亚相
-                        
-                if "单位" in s or tn in ("系", "统", "组", "段", "底层系统", "地层系统"):
-                    parent_group = "地层系统"
-
-                track = {
-                    "type": track_type,
-                    "name": display_name,
-                    "width": 12 if "描述" in tn or "结论" in tn else 8,
-                    "textOrientation": "vertical" if any(k in tn for k in ("组", "段", "相", "界")) else "horizontal",
-                    "data": []
-                }
-                
-                is_facies = parent_group == "沉积相"
-                for i in items:
-                    pat, col = "", "#ffffff"
-                    if apply_pattern:
-                        pat, col = get_pattern_and_color(i.name, is_facies)
-                        
-                    if track_type == "LithologyTrack" and col == "#ffffff":
-                        col = "#cbd5e0"
-                    elif col == "#ffffff" and is_facies:
-                        col = "#ecfeff" # fallback for facies
-
-                    track["data"].append({
-                        "top": i.top,
-                        "bottom": i.bottom,
-                        "name": i.name,
-                        "color": col,
-                        "lithology": pat
-                    })
-                
-                if parent_group:
-                    track["parentGroup"] = parent_group
-                    track["group"] = parent_group
-                
-                custom_tracks.append(track)
         except Exception as e:
             print(f"Error processing child sheet {s}: {e}")
             
@@ -584,30 +497,6 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
         
     top_d, bot_d = (min(all_depths), max(all_depths)) if all_depths else (0, 1000)
 
-    # Sort custom tracks based on Laolong's standard order
-    laolong_order = [
-        "系", "统", "组", "地层系统", 
-        "AC", "GR", 
-        "深度", 
-        "岩性", "岩性剖面", 
-        "RT", "RXO",
-        "岩性描述", 
-        "微相", "亚相", "沉积相", "相", 
-        "体系域", "层序"
-    ]
-    def get_track_order(track):
-        name = track["name"]
-        for i, ref in enumerate(laolong_order):
-            if name == ref:
-                return i
-            if ref in name:
-                if ref in ("AC", "GR", "RT", "RXO") and ref != name:
-                    continue
-                return i
-        return 999
-
-    custom_tracks.sort(key=lambda t: (get_track_order(t), t["name"]))
-
     return WellLogData(
         well_name=well_name or "NewWell",
         top_depth=top_d,
@@ -615,7 +504,6 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
         datum_elevation=datum_elevation,
         curves=curves,
         intervals=intervals,
-        custom_tracks=custom_tracks
     )
 
 def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path: Path | None = None) -> WellLogData:
@@ -632,7 +520,7 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
     except OSError:
         mtime = 0
         
-    PARSER_VERSION = "v2"
+    PARSER_VERSION = "v3"
     xml_mtime = 0
     if xml_path and xml_path.exists():
         try:
@@ -655,7 +543,11 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
     if cache_file.exists():
         try:
             with open(cache_file, "r", encoding="utf-8") as f:
-                return WellLogData.model_validate_json(f.read())
+                raw = json.load(f)
+            # Fix None→NaN in curve values (JSON null from float('nan') serialization)
+            for curve in raw.get("curves", []):
+                curve["values"] = [v if v is not None else float("nan") for v in curve["values"]]
+            return WellLogData.model_validate(raw)
         except Exception as e:
             print(f"Failed to load cache for {well_name}: {e}")
             
@@ -678,10 +570,13 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
     else:
         data = load_well_log_laolong1(path, well_name)
         
-    # Save cache
+    # Save cache (NaN-safe: model_dump_json converts float('nan')→null which breaks deserialization)
     try:
+        cache_dict = data.model_dump()
+        for curve in cache_dict.get("curves", []):
+            curve["values"] = [None if v != v else v for v in curve["values"]]
         with open(cache_file, "w", encoding="utf-8") as f:
-            f.write(data.model_dump_json())
+            json.dump(cache_dict, f, ensure_ascii=False)
     except Exception as e:
         print(f"Failed to save cache for {well_name}: {e}")
         
