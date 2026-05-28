@@ -12,6 +12,7 @@ from geoviz_paleo_map.projection import lnglat_to_world
 from geoviz_paleo_map.style import FaciesStyleResolver, boundary_pen
 from geoviz_paleo_map.viewport import PaleoMapViewport
 from geoviz_paleo_map.hierarchy import FaciesHierarchy
+from geoviz_paleo_map.screen_path_cache import ScreenPathCache
 
 
 @dataclass
@@ -110,6 +111,7 @@ class FaciesPolygonsLayer(PaleoLayer):
         self._locked_ids = locked_ids or {}
         self._selected_id: str | None = None
         self._topology_model = None  # set externally when edit mode is active
+        self._screen_cache = ScreenPathCache()
         self._items: list[_Item] = []
         for feat in features:
             geom = feat.get("geometry") or {}
@@ -190,10 +192,9 @@ class FaciesPolygonsLayer(PaleoLayer):
             for item in self._items:
                 if item.feature_id == fid:
                     item.path = new_path
-                    # Recompute bbox
                     br = new_path.boundingRect()
                     item.bbox = (br.left(), br.top(), br.right(), br.bottom())
-        # Rebuild quadtree if any paths changed
+            self._screen_cache.mark_dirty(fid)
         if feature_ids and self._items:
             min_x = min(item.bbox[0] for item in self._items)
             min_y = min(item.bbox[1] for item in self._items)
@@ -241,16 +242,9 @@ class FaciesPolygonsLayer(PaleoLayer):
 
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
         vp_bbox = viewport.world_bbox()
-        s = viewport.scale
-        cx, cy = viewport.center_world
-        ox = viewport.width / 2
-        oy = viewport.height / 2
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.save()
-        painter.translate(ox, oy)
-        painter.scale(s, -s)
-        painter.translate(-cx, -cy)
 
         # 1. Spatial Index query for visible items
         visible_items: list[_Item] = []
@@ -265,21 +259,22 @@ class FaciesPolygonsLayer(PaleoLayer):
             key = (item.facies_name, item.boundary_kind)
             groups.setdefault(key, []).append(item)
 
-        # 3. Draw visible polygons FILLS ONLY
+        # 3. Draw visible polygons FILLS ONLY (screen-space paths)
         has_selection = self._selected_id is not None
         for (facies_name, boundary_kind), items in groups.items():
             style = self._resolver.resolve(facies_name)
             painter.setPen(QPen(Qt.PenStyle.NoPen))
             for item in items:
+                screen_path = self._screen_cache.get_or_build(
+                    item.feature_id, item.path, viewport)
                 if has_selection and item.feature_id != self._selected_id:
-                    # Dim non-selected polygons
                     painter.setOpacity(0.6)
                     painter.setBrush(style.brush)
-                    painter.drawPath(item.path)
+                    painter.drawPath(screen_path)
                     painter.setOpacity(1.0)
                 else:
                     painter.setBrush(style.brush)
-                    painter.drawPath(item.path)
+                    painter.drawPath(screen_path)
 
         # 3b. Draw selection glow
         if has_selection:
@@ -289,20 +284,22 @@ class FaciesPolygonsLayer(PaleoLayer):
                     glow_pen.setCosmetic(True)
                     painter.setPen(glow_pen)
                     painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.drawPath(item.path)
+                    screen_path = self._screen_cache.get_or_build(
+                        item.feature_id, item.path, viewport)
+                    painter.drawPath(screen_path)
                     break
 
-        # 4. Draw hierarchical borders (Facies >= SubFacies >= MicroFacies in thickness)
+        # 4. Draw hierarchical borders
         if self._hierarchy is not None and self._active_level is not None:
             levels_order = ["facies", "sub_facies", "micro_facies"]
             max_depth = levels_order.index(self._active_level) if self._active_level in levels_order else 0
-            
+
             for locked_lvl in self._locked_ids.values():
                 if locked_lvl in levels_order:
                     depth = levels_order.index(locked_lvl)
                     if depth > max_depth:
                         max_depth = depth
-            
+
             all_levels = levels_order[:max_depth + 1]
             draw_levels = [lvl for lvl in ["micro_facies", "sub_facies", "facies"] if lvl in all_levels]
 
@@ -341,12 +338,10 @@ class FaciesPolygonsLayer(PaleoLayer):
                     levels = ["facies", "sub_facies", "micro_facies"]
                     active_depth = levels.index(self._active_level) if self._active_level in levels else 0
                     lvl_depth = levels.index(lvl) if lvl in levels else 0
-                    
+
                     if active_lock is not None:
                         active_lock_depth = levels.index(active_lock) if active_lock in levels else 0
 
-                    # If this border level is deeper than the active level,
-                    # we only draw it if it's inside a subtree locked to a level at least as deep as lvl
                     if lvl_depth > active_depth:
                         if active_lock is None or lvl_depth > active_lock_depth:
                             continue
@@ -355,19 +350,21 @@ class FaciesPolygonsLayer(PaleoLayer):
                     if active_lock is not None and lvl_depth > active_lock_depth:
                         is_faded = True
 
+                    screen_border = self._screen_cache.get_or_build(
+                        border_item.feature_id, border_item.path, viewport)
                     if is_faded:
                         faded_pen = QPen(pen)
                         color = faded_pen.color()
-                        color.setAlpha(45)  # faded to ~17% opacity
+                        color.setAlpha(45)
                         faded_pen.setColor(color)
                         faded_pen.setWidthF(0.7)
                         painter.setPen(faded_pen)
-                        painter.drawPath(border_item.path)
+                        painter.drawPath(screen_border)
                         painter.setPen(pen)
                     else:
-                        painter.drawPath(border_item.path)
+                        painter.drawPath(screen_border)
         else:
-            # Simple fallback path (original behavior for non-hierarchical or simple map)
+            # Simple fallback (non-hierarchical)
             for (facies_name, boundary_kind), items in groups.items():
                 style = self._resolver.resolve(facies_name)
                 if self._default_pen is not None:
@@ -378,7 +375,9 @@ class FaciesPolygonsLayer(PaleoLayer):
                 painter.setPen(pen)
                 painter.setBrush(style.brush)
                 for item in items:
-                    painter.drawPath(item.path)
+                    screen_path = self._screen_cache.get_or_build(
+                        item.feature_id, item.path, viewport)
+                    painter.drawPath(screen_path)
 
         painter.restore()
 
