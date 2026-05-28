@@ -102,3 +102,48 @@ def test_model_is_dirty():
     v = model.add_vertex(0.0, 0.0)
     model.mark_dirty()
     assert model.is_dirty
+
+
+def test_model_build_path():
+    model = TopologyModel()
+    v0 = model.add_vertex(0.0, 0.0)
+    v1 = model.add_vertex(1.0, 0.0)
+    v2 = model.add_vertex(0.5, 1.0)
+    ring = RingRef(vertex_ids=[v0.id, v1.id, v2.id, v0.id])
+    model.add_feature("tri", [ring], "facies", None, None, {})
+    path = model.build_path("tri")
+    assert path is not None
+    assert not path.isEmpty()
+
+
+def test_model_to_geojson_roundtrip():
+    model = TopologyModel()
+    v0 = model.add_vertex(10.0, 20.0)
+    v1 = model.add_vertex(30.0, 20.0)
+    v2 = model.add_vertex(30.0, 40.0)
+    v3 = model.add_vertex(10.0, 40.0)
+    ring = RingRef(vertex_ids=[v0.id, v1.id, v2.id, v3.id, v0.id])
+    model.add_feature("sq", [ring], "facies", "parent1", "src.geojson", {"name": "square"})
+    geo = model.to_geojson()
+    assert geo["type"] == "FeatureCollection"
+    assert len(geo["features"]) == 1
+    feat = geo["features"][0]
+    assert feat["type"] == "Feature"
+    assert feat["geometry"]["type"] == "Polygon"
+    assert feat["properties"]["id"] == "sq"
+    assert feat["properties"]["level"] == "facies"
+    assert feat["properties"]["parent_id"] == "parent1"
+    coords = feat["geometry"]["coordinates"][0]
+    assert len(coords) == 5  # closed ring
+
+
+def test_model_dirty_tracking():
+    model = TopologyModel()
+    v0 = model.add_vertex(0.0, 0.0)
+    v1 = model.add_vertex(1.0, 0.0)
+    v2 = model.add_vertex(0.5, 1.0)
+    ring = RingRef(vertex_ids=[v0.id, v1.id, v2.id, v0.id])
+    model.add_feature("f1", [ring], "facies", None, None, {})
+    assert "f1" in model.get_dirty_ids()
+    model.clear_dirty()
+    assert len(model.get_dirty_ids()) == 0

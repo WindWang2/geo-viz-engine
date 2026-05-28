@@ -39,6 +39,7 @@ class TopologyModel:
         self._vertices: dict[int, TopologyVertex] = {}
         self._features: dict[str, FeatureRef] = {}
         self._edge_index: dict[tuple[int, int], set[str]] = {}
+        self._vertex_to_features: dict[int, set[str]] = {}
         self._path_cache: dict[str, QPainterPath] = {}
         self._dirty_ids: set[str] = set()
         self._next_vertex_id: int = 0
@@ -55,7 +56,7 @@ class TopologyModel:
         return self._vertices.get(vid)
 
     def all_vertices(self) -> dict[int, TopologyVertex]:
-        return self._vertices
+        return dict(self._vertices)
 
     def add_feature(self, feature_id: str, rings: list[RingRef],
                     level: str, parent_id: str | None,
@@ -66,7 +67,10 @@ class TopologyModel:
             properties=dict(properties),
         )
         self._features[feature_id] = ref
-        # Register edges
+        # Register vertex reverse index and edges
+        for ring in rings:
+            for vid in ring.vertex_ids:
+                self._vertex_to_features.setdefault(vid, set()).add(feature_id)
         for ring in rings:
             ids = ring.vertex_ids
             for i in range(len(ids) - 1):
@@ -79,7 +83,7 @@ class TopologyModel:
         return self._features.get(feature_id)
 
     def all_features(self) -> dict[str, FeatureRef]:
-        return self._features
+        return dict(self._features)
 
     def move_vertex(self, vid: int, new_x: float, new_y: float) -> list[str]:
         """Move a vertex and return list of affected feature IDs."""
@@ -88,17 +92,7 @@ class TopologyModel:
             return []
         v.x = new_x
         v.y = new_y
-        affected = set()
-        # Find features whose rings contain this vertex
-        for fid, ref in self._features.items():
-            for ring in ref.rings:
-                if vid in ring.vertex_ids:
-                    affected.add(fid)
-                    break
-        # Find features sharing edges with this vertex
-        for edge, fids in self._edge_index.items():
-            if vid in edge:
-                affected.update(fids)
+        affected = self._vertex_to_features.get(vid, set())
         for fid in affected:
             self._mark_feature_dirty(fid)
         self.is_dirty = True
