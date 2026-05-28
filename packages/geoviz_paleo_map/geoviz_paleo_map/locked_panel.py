@@ -5,23 +5,62 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QAbstractItemView
+    QListWidget, QListWidgetItem, QAbstractItemView, QComboBox
 )
 
 
 class LockedItemWidget(QWidget):
-    """Custom list item widget displaying locked feature name and level with a hover-red delete button."""
+    """Custom list item widget displaying locked feature name and a level selector with a hover-red delete button."""
 
-    def __init__(self, feature_id: str, name: str, level_name: str, on_unlock, parent=None):
+    def __init__(self, feature_id: str, name: str, current_lock_level: str, on_level_changed, on_unlock, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(4)
 
-        lbl = QLabel(f"{name} ({level_name})")
-        lbl.setStyleSheet("color: #334155; font-size: 10px;")
+        # Name label
+        lbl = QLabel(name)
+        lbl.setStyleSheet("color: #1e293b; font-size: 10px; font-weight: bold;")
+        lbl.setToolTip(name)
         layout.addWidget(lbl, 1)
 
+        # Level selector combobox
+        self.combo = QComboBox()
+        self.combo.addItems(["相", "亚相", "微相"])
+        self.combo.setStyleSheet("""
+            QComboBox {
+                border: 1px solid #cbd5e1;
+                border-radius: 4px;
+                background: #f8fafc;
+                color: #334155;
+                font-size: 9px;
+                padding: 1px 4px;
+                min-width: 55px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background: #ffffff;
+                border: 1px solid #cbd5e1;
+                font-size: 9px;
+                color: #334155;
+            }
+        """)
+
+        # Map DB level strings to index
+        level_map = ["facies", "sub_facies", "micro_facies"]
+        if current_lock_level in level_map:
+            self.combo.setCurrentIndex(level_map.index(current_lock_level))
+        else:
+            self.combo.setCurrentIndex(0)
+
+        self.combo.currentIndexChanged.connect(
+            lambda index: on_level_changed(feature_id, level_map[index])
+        )
+        layout.addWidget(self.combo)
+
+        # Unlock / Delete button
         btn = QPushButton("✕")
         btn.setFixedSize(14, 14)
         btn.setToolTip("解除锁定")
@@ -46,6 +85,7 @@ class LockedItemWidget(QWidget):
 class LockedObjectsPanel(QWidget):
     """Floating list panel showing all currently locked objects in a glassmorphic card."""
     unlock_requested = Signal(str)
+    level_changed = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -86,7 +126,7 @@ class LockedObjectsPanel(QWidget):
         layout.addWidget(self.empty_lbl, 1)
 
     def update_items(self, locked_items: list[tuple[str, str, str]]) -> None:
-        """Update the list. locked_items is a list of (feature_id, display_name, level_label)."""
+        """Update the list. locked_items is a list of (feature_id, display_name, current_lock_level)."""
         self.list_widget.clear()
         if not locked_items:
             self.list_widget.hide()
@@ -96,13 +136,16 @@ class LockedObjectsPanel(QWidget):
             self.list_widget.show()
             for fid, name, lvl in locked_items:
                 item = QListWidgetItem(self.list_widget)
-                widget = LockedItemWidget(fid, name, lvl, self._on_unlock_click, self)
+                widget = LockedItemWidget(fid, name, lvl, self._on_level_changed, self._on_unlock_click, self)
                 item.setSizeHint(widget.sizeHint())
                 self.list_widget.addItem(item)
                 self.list_widget.setItemWidget(item, widget)
 
     def _on_unlock_click(self, feature_id: str) -> None:
         self.unlock_requested.emit(feature_id)
+
+    def _on_level_changed(self, feature_id: str, new_level: str) -> None:
+        self.level_changed.emit(feature_id, new_level)
 
     def paintEvent(self, event) -> None:
         p = QPainter(self)

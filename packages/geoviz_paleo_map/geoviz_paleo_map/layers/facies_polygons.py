@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
 from geoviz_paleo_map.layers.base import PaleoLayer
 from geoviz_paleo_map.projection import lnglat_to_world
 from geoviz_paleo_map.style import FaciesStyleResolver, boundary_pen
 from geoviz_paleo_map.viewport import PaleoMapViewport
+from geoviz_paleo_map.hierarchy import FaciesHierarchy
 
 
 @dataclass
@@ -98,9 +99,15 @@ class QuadtreeNode:
 
 class FaciesPolygonsLayer(PaleoLayer):
     def __init__(self, features: list[dict], style_resolver: FaciesStyleResolver,
-                 default_pen: QPen | None = None):
+                 default_pen: QPen | None = None,
+                 hierarchy: FaciesHierarchy | None = None,
+                 active_level: str | None = None,
+                 locked_ids: dict[str, str] | None = None):
         self._resolver = style_resolver
         self._default_pen = default_pen
+        self._hierarchy = hierarchy
+        self._active_level = active_level
+        self._locked_ids = locked_ids or {}
         self._items: list[_Item] = []
         for feat in features:
             geom = feat.get("geometry") or {}
@@ -131,6 +138,38 @@ class FaciesPolygonsLayer(PaleoLayer):
                 self._quadtree_root.insert(item)
         else:
             self._quadtree_root = None
+
+        # Build quadtrees for each hierarchy level for borders drawing
+        self._level_quadtrees: dict[str, QuadtreeNode | None] = {}
+        if self._hierarchy is not None:
+            for lvl in ["facies", "sub_facies", "micro_facies"]:
+                lvl_items = []
+                lvl_features = self._hierarchy.get_features_at_level(lvl)
+                for ff in lvl_features:
+                    geom = ff.geometry or {}
+                    gtype = geom.get("type")
+                    if gtype == "Polygon":
+                        rings = [geom["coordinates"]]
+                    elif gtype == "MultiPolygon":
+                        rings = geom["coordinates"]
+                    else:
+                        continue
+                    for poly in rings:
+                        item = self._build_item(poly, ff.facies_name, ff.id, None)
+                        if item is not None:
+                            lvl_items.append(item)
+
+                if lvl_items:
+                    min_x = min(item.bbox[0] for item in lvl_items)
+                    min_y = min(item.bbox[1] for item in lvl_items)
+                    max_x = max(item.bbox[2] for item in lvl_items)
+                    max_y = max(item.bbox[3] for item in lvl_items)
+                    root_node = QuadtreeNode((min_x, min_y, max_x, max_y))
+                    for item in lvl_items:
+                        root_node.insert(item)
+                    self._level_quadtrees[lvl] = root_node
+                else:
+                    self._level_quadtrees[lvl] = None
 
     @staticmethod
     def _build_item(poly: list[list[list[float]]],
@@ -194,18 +233,101 @@ class FaciesPolygonsLayer(PaleoLayer):
             key = (item.facies_name, item.boundary_kind)
             groups.setdefault(key, []).append(item)
 
-        # 3. Draw visible polygons sorted by styles to minimize painter context changes
+        # 3. Draw visible polygons FILLS ONLY (NoPen to avoid gaps/ugly overlaps)
         for (facies_name, boundary_kind), items in groups.items():
             style = self._resolver.resolve(facies_name)
-            if self._default_pen is not None:
-                pen = QPen(self._default_pen)
-            else:
-                pen = boundary_pen(boundary_kind)
-            pen.setCosmetic(True)
-            painter.setPen(pen)
+            painter.setPen(QPen(Qt.PenStyle.NoPen))
             painter.setBrush(style.brush)
             for item in items:
                 painter.drawPath(item.path)
+
+        # 4. Draw hierarchical borders (Facies >= SubFacies >= MicroFacies in thickness)
+        if self._hierarchy is not None and self._active_level is not None:
+            levels_order = ["facies", "sub_facies", "micro_facies"]
+            max_depth = levels_order.index(self._active_level) if self._active_level in levels_order else 0
+            
+            for locked_lvl in self._locked_ids.values():
+                if locked_lvl in levels_order:
+                    depth = levels_order.index(locked_lvl)
+                    if depth > max_depth:
+                        max_depth = depth
+            
+            all_levels = levels_order[:max_depth + 1]
+            draw_levels = [lvl for lvl in ["micro_facies", "sub_facies", "facies"] if lvl in all_levels]
+
+            border_pens = {
+                "facies": QPen(QColor("#1a202c"), 2.0),
+                "sub_facies": QPen(QColor("#4a5568"), 1.5),
+                "micro_facies": QPen(QColor("#a0aec0"), 1.0),
+            }
+
+            for lvl in draw_levels:
+                pen = border_pens[lvl]
+                pen.setCosmetic(True)
+                painter.setPen(pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+
+                visible_borders = []
+                root_node = self._level_quadtrees.get(lvl)
+                if root_node is not None:
+                    root_node.query(vp_bbox, visible_borders)
+                else:
+                    visible_borders = []
+
+                for border_item in visible_borders:
+                    active_lock = None
+                    active_lock_depth = 0
+                    if self._hierarchy is not None and self._locked_ids:
+                        node = self._hierarchy.get_node(border_item.feature_id)
+                        if node is not None:
+                            ancestors = self._hierarchy.get_ancestors(border_item.feature_id)
+                            chain = ancestors + [node.feature]
+                            for f in chain:
+                                if f.id in self._locked_ids:
+                                    active_lock = self._locked_ids[f.id]
+                                    break
+
+                    levels = ["facies", "sub_facies", "micro_facies"]
+                    active_depth = levels.index(self._active_level) if self._active_level in levels else 0
+                    lvl_depth = levels.index(lvl) if lvl in levels else 0
+                    
+                    if active_lock is not None:
+                        active_lock_depth = levels.index(active_lock) if active_lock in levels else 0
+
+                    # If this border level is deeper than the active level,
+                    # we only draw it if it's inside a subtree locked to a level at least as deep as lvl
+                    if lvl_depth > active_depth:
+                        if active_lock is None or lvl_depth > active_lock_depth:
+                            continue
+
+                    is_faded = False
+                    if active_lock is not None and lvl_depth > active_lock_depth:
+                        is_faded = True
+
+                    if is_faded:
+                        faded_pen = QPen(pen)
+                        color = faded_pen.color()
+                        color.setAlpha(45)  # faded to ~17% opacity
+                        faded_pen.setColor(color)
+                        faded_pen.setWidthF(0.7)
+                        painter.setPen(faded_pen)
+                        painter.drawPath(border_item.path)
+                        painter.setPen(pen)
+                    else:
+                        painter.drawPath(border_item.path)
+        else:
+            # Simple fallback path (original behavior for non-hierarchical or simple map)
+            for (facies_name, boundary_kind), items in groups.items():
+                style = self._resolver.resolve(facies_name)
+                if self._default_pen is not None:
+                    pen = QPen(self._default_pen)
+                else:
+                    pen = boundary_pen(boundary_kind)
+                pen.setCosmetic(True)
+                painter.setPen(pen)
+                painter.setBrush(style.brush)
+                for item in items:
+                    painter.drawPath(item.path)
 
         painter.restore()
 
