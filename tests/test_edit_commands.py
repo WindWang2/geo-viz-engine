@@ -232,3 +232,104 @@ def test_undo_manager_can_undo_can_redo_and_clear():
     mgr.clear()
     assert not mgr.can_undo()
     assert not mgr.can_redo()
+
+
+# ---------------------------------------------------------------------------
+# Edge-case tests
+# ---------------------------------------------------------------------------
+
+def test_undo_manager_redo_on_empty_stack():
+    """Redo with nothing on redo stack returns False."""
+    model = TopologyModel()
+    mgr = UndoManager()
+    result = mgr.redo(model)
+    assert result is False
+
+
+def test_move_vertex_cmd_feature_not_found():
+    """MoveVertexCmd.execute on a vertex that doesn't exist — no crash."""
+    model = TopologyModel()
+    # Vertex 999 doesn't exist in model
+    cmd = MoveVertexCmd(999, 0.0, 0.0, 1.0, 1.0)
+    # Should not raise
+    cmd.execute(model)
+    assert model.get_vertex(999) is None
+
+    # Undo should also not crash
+    cmd.undo(model)
+
+
+def test_insert_vertex_cmd_undo_new_vertex_not_in_ring():
+    """InsertVertexCmd.undo when _new_vertex_id not in ring — graceful."""
+    model = _make_model_with_two_features()
+    ref = model.get_feature("A")
+    ids = ref.rings[0].vertex_ids
+    edge = (ids[0], ids[1])
+
+    cmd = InsertVertexCmd(2.5, 0.0, edge, "A", 0, 1)
+    cmd.execute(model)
+    new_vid = cmd._new_vertex_id
+    assert new_vid is not None
+
+    # Manually remove the vertex from ring to simulate inconsistency
+    ring = ref.rings[0]
+    if new_vid in ring.vertex_ids:
+        ring.vertex_ids.remove(new_vid)
+
+    # Undo should handle gracefully (idx < 0 → early return)
+    cmd.undo(model)
+
+
+def test_insert_vertex_cmd_undo_no_new_vertex():
+    """InsertVertexCmd.undo when execute was never called."""
+    model = _make_model_with_two_features()
+    ref = model.get_feature("A")
+    ids = ref.rings[0].vertex_ids
+    edge = (ids[0], ids[1])
+
+    cmd = InsertVertexCmd(2.5, 0.0, edge, "A", 0, 1)
+    # Don't execute — _new_vertex_id is None
+    cmd.undo(model)  # should not crash
+
+
+def test_delete_vertex_cmd_vid_not_in_ring():
+    """DeleteVertexCmd.execute when vertex_id not in ring — graceful."""
+    model = _make_model_with_two_features()
+    # Use a vertex ID that is valid but not in feature "A"'s ring
+    # Create a standalone vertex
+    v = model.add_vertex(999.0, 999.0)
+    cmd = DeleteVertexCmd(v.id, v.x, v.y, "A", 0, 999)
+    # execute should return early since vid not in ring
+    cmd.execute(model)
+    # Feature "A" should be unchanged
+    assert model.get_feature("A") is not None
+
+
+def test_delete_vertex_cmd_feature_not_found():
+    """DeleteVertexCmd.execute when feature doesn't exist."""
+    model = TopologyModel()
+    cmd = DeleteVertexCmd(0, 0.0, 0.0, "nonexistent", 0, 0)
+    cmd.execute(model)  # should not crash
+
+
+def test_delete_polygon_cmd_feature_not_found():
+    """DeletePolygonCmd.execute when feature doesn't exist."""
+    model = TopologyModel()
+    cmd = DeletePolygonCmd("nonexistent", [], "facies", {})
+    cmd.execute(model)  # should not crash
+    assert model.get_feature("nonexistent") is None
+
+
+def test_edit_attributes_cmd_feature_not_found():
+    """EditAttributesCmd.execute when feature doesn't exist."""
+    model = TopologyModel()
+    cmd = EditAttributesCmd("nonexistent", {}, {"key": "value"})
+    cmd.execute(model)  # should not crash
+
+
+def test_edit_attributes_cmd_undo_feature_not_found():
+    """EditAttributesCmd.undo when feature doesn't exist."""
+    model = TopologyModel()
+    cmd = EditAttributesCmd("nonexistent", {}, {"key": "value"})
+    # Don't execute, just undo — _snapshot is None
+    cmd.undo(model)  # should not crash
