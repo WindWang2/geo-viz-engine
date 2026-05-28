@@ -1,6 +1,176 @@
-"""Tests for ScreenPathCache."""
+"""Tests for PaintScheduler, LayerPixmapCache, and ScreenPathCache."""
 import pytest
-from PySide6.QtGui import QPainterPath
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QPainter, QPainterPath, QPixmap
+from PySide6.QtWidgets import QWidget
+
+
+class TestPaintScheduler:
+    def test_coalesces_multiple_schedule_calls(self, qtbot):
+        """Multiple schedule() calls before timer fires should produce one update."""
+        from geoviz_paleo_map.paint_scheduler import PaintScheduler
+
+        widget = QWidget()
+        qtbot.addWidget(widget)
+        widget.resize(100, 100)
+        widget.show()
+
+        update_count = 0
+        original_update = widget.update
+
+        def counting_update():
+            nonlocal update_count
+            update_count += 1
+            original_update()
+
+        widget.update = counting_update
+        scheduler = PaintScheduler(widget)
+
+        for _ in range(5):
+            scheduler.schedule()
+
+        qtbot.wait(50)
+        assert update_count == 1
+
+    def test_schedule_after_fire_allows_new_update(self, qtbot):
+        """After timer fires, a new schedule() should work."""
+        from geoviz_paleo_map.paint_scheduler import PaintScheduler
+
+        widget = QWidget()
+        qtbot.addWidget(widget)
+        widget.resize(100, 100)
+        widget.show()
+
+        update_count = 0
+        original_update = widget.update
+
+        def counting_update():
+            nonlocal update_count
+            update_count += 1
+            original_update()
+
+        widget.update = counting_update
+        scheduler = PaintScheduler(widget)
+
+        scheduler.schedule()
+        qtbot.wait(50)
+        assert update_count == 1
+
+        scheduler.schedule()
+        qtbot.wait(50)
+        assert update_count == 2
+
+
+class TestLayerPixmapCache:
+    def test_first_paint_renders_layer(self, qtbot):
+        from geoviz_paleo_map.paint_scheduler import LayerPixmapCache
+        from geoviz_paleo_map.viewport import PaleoMapViewport
+
+        class StubLayer:
+            painted = False
+            def paint(self, painter, viewport):
+                self.painted = True
+
+        layer = StubLayer()
+        cache = LayerPixmapCache(layer)
+
+        widget = QWidget()
+        qtbot.addWidget(widget)
+        painter = QPainter(widget)
+        vp = PaleoMapViewport(center_lng=115.0, center_lat=30.0,
+                              zoom=2.0, width=400, height=300)
+        cache.paint(painter, vp)
+        painter.end()
+        assert layer.painted
+
+    def test_second_paint_uses_cache(self, qtbot):
+        from geoviz_paleo_map.paint_scheduler import LayerPixmapCache
+        from geoviz_paleo_map.viewport import PaleoMapViewport
+
+        render_count = 0
+
+        class StubLayer:
+            def paint(self, painter, viewport):
+                nonlocal render_count
+                render_count += 1
+
+        layer = StubLayer()
+        cache = LayerPixmapCache(layer)
+
+        widget = QWidget()
+        qtbot.addWidget(widget)
+        vp = PaleoMapViewport(center_lng=115.0, center_lat=30.0,
+                              zoom=2.0, width=400, height=300)
+
+        painter = QPainter(widget)
+        cache.paint(painter, vp)
+        painter.end()
+        assert render_count == 1
+
+        painter = QPainter(widget)
+        cache.paint(painter, vp)
+        painter.end()
+        assert render_count == 1
+
+    def test_zoom_change_triggers_rerender(self, qtbot):
+        from geoviz_paleo_map.paint_scheduler import LayerPixmapCache
+        from geoviz_paleo_map.viewport import PaleoMapViewport
+
+        render_count = 0
+
+        class StubLayer:
+            def paint(self, painter, viewport):
+                nonlocal render_count
+                render_count += 1
+
+        layer = StubLayer()
+        cache = LayerPixmapCache(layer)
+
+        widget = QWidget()
+        qtbot.addWidget(widget)
+        vp1 = PaleoMapViewport(center_lng=115.0, center_lat=30.0,
+                               zoom=2.0, width=400, height=300)
+        vp2 = PaleoMapViewport(center_lng=115.0, center_lat=30.0,
+                               zoom=3.0, width=400, height=300)
+
+        painter = QPainter(widget)
+        cache.paint(painter, vp1)
+        painter.end()
+
+        painter = QPainter(widget)
+        cache.paint(painter, vp2)
+        painter.end()
+        assert render_count == 2
+
+    def test_mark_dirty_triggers_rerender(self, qtbot):
+        from geoviz_paleo_map.paint_scheduler import LayerPixmapCache
+        from geoviz_paleo_map.viewport import PaleoMapViewport
+
+        render_count = 0
+
+        class StubLayer:
+            def paint(self, painter, viewport):
+                nonlocal render_count
+                render_count += 1
+
+        layer = StubLayer()
+        cache = LayerPixmapCache(layer)
+
+        widget = QWidget()
+        qtbot.addWidget(widget)
+        vp = PaleoMapViewport(center_lng=115.0, center_lat=30.0,
+                              zoom=2.0, width=400, height=300)
+
+        painter = QPainter(widget)
+        cache.paint(painter, vp)
+        painter.end()
+        assert render_count == 1
+
+        cache.mark_dirty()
+        painter = QPainter(widget)
+        cache.paint(painter, vp)
+        painter.end()
+        assert render_count == 2
 
 
 class TestScreenPathCache:
