@@ -24,6 +24,7 @@ from geoviz_paleo_map.topology import TopologyModel, TopologyBuilder
 from geoviz_paleo_map.edit_commands import UndoManager
 from geoviz_paleo_map.edit_engine import EditEngine
 from geoviz_paleo_map.edit_overlay import EditOverlayLayer
+from geoviz_paleo_map.paint_scheduler import PaintScheduler, LayerPixmapCache
 from geoviz_paleo_map.viewport import PaleoMapViewport
 from geoviz_paleo_map.zoom_pan import ZoomPanHandler
 from geoviz_paleo_map.floating_slider import FloatingScaleSlider
@@ -67,6 +68,7 @@ class PaleoMapCanvas(QWidget):
             ScaleBarLayer(),
             self._legend_layer,
         ]
+        self._rebuild_layer_caches()
         self._current_hover: str | None = None
         self._hierarchy: FaciesHierarchy | None = None
         self._level_groups: dict[str, list[PaleoLayer]] = {}
@@ -95,6 +97,13 @@ class PaleoMapCanvas(QWidget):
         self._undo_mgr = UndoManager()
         self._edit_engine = EditEngine(self._edit_overlay, self._undo_mgr)
 
+        self._scheduler = PaintScheduler(self)
+        self._layer_caches: list[LayerPixmapCache] = []
+
+    def _rebuild_layer_caches(self) -> None:
+        """Rebuild LayerPixmapCache wrappers for current layer list."""
+        self._layer_caches = [LayerPixmapCache(layer) for layer in self._layers]
+
     # --- Edit mode properties ---
 
     @property
@@ -114,7 +123,7 @@ class PaleoMapCanvas(QWidget):
         elif not value and self._edit_overlay in self._layers:
             self._layers.remove(self._edit_overlay)
         self.edit_mode_changed.emit(value)
-        self.update()
+        self._scheduler.schedule()
 
     @property
     def topology_model(self) -> TopologyModel | None:
@@ -167,7 +176,8 @@ class PaleoMapCanvas(QWidget):
         self._topology_model = TopologyBuilder.from_features(features)
         self._edit_engine.set_model(self._topology_model)
         self._update_locked_panel()
-        self.update()
+        self._rebuild_layer_caches()
+        self._scheduler.schedule()
         self._update_slider_params()
 
     def load_hierarchy(self, hierarchy: FaciesHierarchy,
@@ -226,7 +236,8 @@ class PaleoMapCanvas(QWidget):
         # Build topology model for editing
         self._topology_model = TopologyBuilder.from_hierarchy(hierarchy)
         self._edit_engine.set_model(self._topology_model)
-        self.update()
+        self._rebuild_layer_caches()
+        self._scheduler.schedule()
         self._update_slider_params()
 
     # (outgoing_level, incoming_level, blend) — blend ∈ [0,1]
@@ -262,15 +273,14 @@ class PaleoMapCanvas(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         try:
-            # Rebuild active layers if needed (e.g. if level changed)
             if self._hierarchy is not None:
                 current_level = self._resolve_level_name()
                 if current_level != self._current_active_level:
                     self._current_active_level = current_level
                     self._update_active_layers()
 
-            for layer in self._layers:
-                layer.paint(painter, self._viewport)
+            for cache in self._layer_caches:
+                cache.paint(painter, self._viewport)
         finally:
             painter.end()
 
@@ -281,7 +291,7 @@ class PaleoMapCanvas(QWidget):
         self._cached_level = ""
         self._cached_zoom = -1.0
         self.zoom_changed.emit(self._viewport.zoom)
-        self.update()
+        self._scheduler.schedule()
 
     def _resolve_level_name(self) -> str:
         z = self._viewport.zoom
@@ -386,6 +396,7 @@ class PaleoMapCanvas(QWidget):
             ScaleBarLayer(),
             LegendLayer(seen, self._resolver),
         ]
+        self._rebuild_layer_caches()
 
     def _update_locked_panel(self) -> None:
         if not hasattr(self, "_locked_panel"):
@@ -415,14 +426,14 @@ class PaleoMapCanvas(QWidget):
 
         self._update_active_layers()
         self._update_locked_panel()
-        self.update()
+        self._scheduler.schedule()
 
     def update_lock_level(self, feature_id: str, new_level: str) -> None:
         if feature_id in self._locked_ids:
             self._locked_ids[feature_id] = new_level
             self._update_active_layers()
             self._update_locked_panel()
-            self.update()
+            self._scheduler.schedule()
 
     def _toggle_locked_panel(self) -> None:
         if hasattr(self, "_locked_panel"):
@@ -452,7 +463,7 @@ class PaleoMapCanvas(QWidget):
                     QPointF(event.position()), self._viewport, event.button())
                 if consumed:
                     self.selection_changed.emit(self._edit_engine.selected_id or "")
-                    self.update()
+                    self._scheduler.schedule()
                     return
             self._zoom_pan.start_drag(QPointF(event.position()))
             self._press_pos = QPointF(event.position())
@@ -462,11 +473,11 @@ class PaleoMapCanvas(QWidget):
         if self._edit_mode:
             consumed = self._edit_engine.handle_mouse_move(pos, self._viewport)
             if consumed:
-                self.update()
+                self._scheduler.schedule()
                 return
         if self._zoom_pan.is_dragging():
             self._zoom_pan.update_drag(pos)
-            self.update()
+            self._scheduler.schedule()
             return
         # Hover hit-test
         if self._hierarchy is not None:
@@ -489,7 +500,7 @@ class PaleoMapCanvas(QWidget):
                 if cmd is not None:
                     self._undo_mgr.execute(cmd, self._topology_model)
                     self._rebuild_topology_paths()
-                    self.update()
+                    self._scheduler.schedule()
                 return
             self._zoom_pan.end_drag()
 
@@ -500,7 +511,7 @@ class PaleoMapCanvas(QWidget):
             if cmd is not None:
                 self._undo_mgr.execute(cmd, self._topology_model)
                 self._rebuild_topology_paths()
-                self.update()
+                self._scheduler.schedule()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         delta = event.angleDelta().y() / 120.0
@@ -511,19 +522,19 @@ class PaleoMapCanvas(QWidget):
         self.zoom_changed.emit(self._viewport.zoom)
         if hasattr(self, "_scale_slider"):
             self._scale_slider.set_zoom(self._viewport.zoom)
-        self.update()
+        self._scheduler.schedule()
 
     def keyPressEvent(self, event) -> None:
         from PySide6.QtGui import QKeySequence
         if event.matches(QKeySequence.StandardKey.Undo):
             if self._topology_model and self._undo_mgr.undo(self._topology_model):
                 self._rebuild_topology_paths()
-                self.update()
+                self._scheduler.schedule()
             return
         if event.matches(QKeySequence.StandardKey.Redo):
             if self._topology_model and self._redo():
                 self._rebuild_topology_paths()
-                self.update()
+                self._scheduler.schedule()
             return
         if event.key() == Qt.Key.Key_E and not event.modifiers():
             self.edit_mode = not self.edit_mode
@@ -534,7 +545,7 @@ class PaleoMapCanvas(QWidget):
             if cmd:
                 self._undo_mgr.execute(cmd, self._topology_model)
                 self._rebuild_topology_paths()
-                self.update()
+                self._scheduler.schedule()
             return
         super().keyPressEvent(event)
 
@@ -552,6 +563,10 @@ class PaleoMapCanvas(QWidget):
                 layer.set_topology_model(self._topology_model)
                 layer.rebuild_dirty_paths(dirty)
         self._topology_model.clear_dirty()
+        # Mark affected layer caches dirty
+        for i, layer in enumerate(self._layers):
+            if isinstance(layer, FaciesPolygonsLayer) and i < len(self._layer_caches):
+                self._layer_caches[i].mark_dirty()
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         pos = QPointF(event.pos())
@@ -636,7 +651,7 @@ class PaleoMapCanvas(QWidget):
         if cmd:
             self._undo_mgr.execute(cmd, self._topology_model)
             self._rebuild_topology_paths()
-            self.update()
+            self._scheduler.schedule()
 
     def _context_delete_polygon(self) -> None:
         cmd = self._edit_engine.delete_selected_polygon()
@@ -644,7 +659,7 @@ class PaleoMapCanvas(QWidget):
             self._undo_mgr.execute(cmd, self._topology_model)
             self._rebuild_topology_paths()
             self.selection_changed.emit("")
-            self.update()
+            self._scheduler.schedule()
 
     def _context_edit_attributes(self, feature_id: str) -> None:
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox
@@ -678,7 +693,7 @@ class PaleoMapCanvas(QWidget):
         from geoviz_paleo_map.edit_commands import EditAttributesCmd
         cmd = EditAttributesCmd(feature_id, old_props, new_props)
         self._undo_mgr.execute(cmd, self._topology_model)
-        self.update()
+        self._scheduler.schedule()
 
     def _hierarchy_hit_test(self, pos: QPointF) -> str | None:
         """Hit-test the active level's polygon layer, return hierarchy label."""
