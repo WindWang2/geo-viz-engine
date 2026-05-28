@@ -142,6 +142,13 @@ class FaciesHierarchy:
         chain.reverse()
         return chain
 
+    def get_children(self, feature_id: str) -> list[FaciesFeature]:
+        """Get direct children of a feature."""
+        node = self._by_id.get(feature_id)
+        if node is None:
+            return []
+        return [child.feature for child in node.children]
+
     def get_hierarchy_label(self, feature_id: str) -> str:
         """Build a display string like '相: 三角洲 > 亚相: 三角洲前缘'."""
         ancestors = self.get_ancestors(feature_id)
