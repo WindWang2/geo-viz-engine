@@ -204,19 +204,7 @@ class TopologyBuilder:
             else:
                 continue
 
-            rings: list[RingRef] = []
-            for ring_coords in all_rings:
-                if not ring_coords:
-                    continue
-                vid_list: list[int] = []
-                for coord in ring_coords:
-                    if len(coord) < 2:
-                        continue
-                    x, y = float(coord[0]), float(coord[1])
-                    vid = cls._find_or_create_vertex(model, x, y, grid)
-                    vid_list.append(vid)
-                if vid_list:
-                    rings.append(RingRef(vertex_ids=vid_list))
+            rings = cls._build_rings(model, all_rings, grid)
 
             if rings:
                 model.add_feature(
@@ -246,19 +234,7 @@ class TopologyBuilder:
             else:
                 continue
 
-            rings: list[RingRef] = []
-            for ring_coords in all_rings:
-                if not ring_coords:
-                    continue
-                vid_list: list[int] = []
-                for coord in ring_coords:
-                    if len(coord) < 2:
-                        continue
-                    x, y = float(coord[0]), float(coord[1])
-                    vid = cls._find_or_create_vertex(model, x, y, grid)
-                    vid_list.append(vid)
-                if vid_list:
-                    rings.append(RingRef(vertex_ids=vid_list))
+            rings = cls._build_rings(model, all_rings, grid)
 
             if rings:
                 sf = (source_files or {}).get(ff.level)
@@ -269,8 +245,6 @@ class TopologyBuilder:
                     "level": ff.level,
                     "period": ff.period,
                 }
-                if ff.parent_id:
-                    props["parent_id"] = ff.parent_id
                 model.add_feature(
                     feature_id=ff.id,
                     rings=rings,
@@ -301,6 +275,23 @@ class TopologyBuilder:
         v = model.add_vertex(x, y)
         grid[(gx, gy)] = v.id
         return v.id
+
+    @classmethod
+    def _build_rings(cls, model: TopologyModel, all_rings: list, grid: dict) -> list[RingRef]:
+        rings: list[RingRef] = []
+        for ring_coords in all_rings:
+            if not ring_coords:
+                continue
+            vid_list: list[int] = []
+            for coord in ring_coords:
+                if len(coord) < 2:
+                    continue
+                x, y = float(coord[0]), float(coord[1])
+                vid = cls._find_or_create_vertex(model, x, y, grid)
+                vid_list.append(vid)
+            if vid_list:
+                rings.append(RingRef(vertex_ids=vid_list))
+        return rings
 
 
 def _walk_hierarchy(roots):
