@@ -125,3 +125,51 @@ class PaleoDataLoader:
             result.setdefault(period, []).append(feat)
 
         return result
+
+    @staticmethod
+    def discover_sibling_levels(file_path: str) -> dict[str, str]:
+        """If the file's features have a 'level' property, discover sibling files
+        with the same naming pattern containing other levels.
+
+        Returns dict mapping level name -> file path for discovered files.
+        The original file is included.
+        """
+        path = Path(file_path)
+        if path.suffix.lower() not in (".json", ".geojson"):
+            return {}
+
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            features = data.get("features", [])
+            if not features:
+                return {}
+            level = (features[0].get("properties") or {}).get("level")
+            if not level:
+                return {}
+        except (json.JSONDecodeError, OSError, IndexError):
+            return {}
+
+        # Look for sibling files with similar naming pattern
+        # e.g. test_paleo_facies.geojson, test_paleo_sub_facies.geojson, test_paleo_micro_facies.geojson
+        stem = path.stem
+        parent = path.parent
+        siblings = {}
+        for f in sorted(parent.glob("*.geojson")):
+            if f == path or not f.exists():
+                continue
+            try:
+                with open(f, encoding="utf-8") as fh:
+                    d = json.load(fh)
+                feats = d.get("features", [])
+                if not feats:
+                    continue
+                flevel = (feats[0].get("properties") or {}).get("level")
+                if flevel:
+                    siblings[flevel] = str(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+        # Include the original file
+        siblings[level] = file_path
+        return siblings

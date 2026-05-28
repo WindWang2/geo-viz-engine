@@ -1,6 +1,6 @@
 [project]
 name = "geo-viz-engine"
-version = "0.6.2"
+version = "0.6.3"
 description = "地质数据可视化桌面引擎"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -19,6 +19,7 @@ dependencies = [
     "geoviz-well-log",
     "geoviz-seismic",
     "geoviz-map",
+    "geoviz-paleo-map",
 ]
 
 [project.optional-dependencies]
@@ -28,7 +29,7 @@ dev = [
     "PyInstaller>=6.0",
 ]
 gpu = [
-    "cupy-cuda13x",
+    "cupy-cuda13x; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 
 [build-system]
@@ -43,12 +44,14 @@ members = [
     "packages/geoviz_well_log",
     "packages/geoviz_seismic",
     "packages/geoviz_map",
+    "packages/geoviz_paleo_map",
 ]
 
 [tool.uv.sources]
 geoviz-well-log = { workspace = true }
 geoviz-seismic = { workspace = true }
 geoviz-map = { workspace = true }
+geoviz-paleo-map = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

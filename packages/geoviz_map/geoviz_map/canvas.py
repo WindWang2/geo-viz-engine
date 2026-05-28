@@ -120,5 +120,6 @@ class MapCanvas(QWidget):
         delta = event.angleDelta().y() / 120.0  # one notch = 1.0
         if delta == 0:
             return
-        self._zoom_pan.wheel_zoom(QPointF(event.position()), delta_steps=delta)
+        # Multiply delta by 0.15 to make scrolling zoom smooth and precise
+        self._zoom_pan.wheel_zoom(QPointF(event.position()), delta_steps=delta * 0.15)
         self.update()

@@ -32,6 +32,11 @@ def test_load_well_log_converted(monkeypatch):
     monkeypatch.setattr("pandas.ExcelFile", lambda path, engine=None: mock_excel_file)
     
     def mock_read_excel(path, sheet_name):
+        if sheet_name is None:
+            return {
+                "测井曲线": pd.DataFrame({"深度": [100, 110], "GR": [45, 55], "CAL": [20, 22]}),
+                "岩性道": pd.DataFrame({"顶深": [100], "底深": [110], "岩性": ["砂岩"]}),
+            }
         if sheet_name == "测井曲线":
             return pd.DataFrame({"深度": [100, 110], "GR": [45, 55], "CAL": [20, 22]})
         elif sheet_name == "岩性道":
