@@ -20,6 +20,10 @@ from geoviz_paleo_map.layers.scale_bar import ScaleBarLayer
 from geoviz_paleo_map.layers.title import TitleLayer
 from geoviz_paleo_map.layers.wells_scatter import WellsScatterLayer
 from geoviz_paleo_map.style import FaciesStyleResolver
+from geoviz_paleo_map.topology import TopologyModel, TopologyBuilder
+from geoviz_paleo_map.edit_commands import UndoManager
+from geoviz_paleo_map.edit_engine import EditEngine
+from geoviz_paleo_map.edit_overlay import EditOverlayLayer
 from geoviz_paleo_map.viewport import PaleoMapViewport
 from geoviz_paleo_map.zoom_pan import ZoomPanHandler
 from geoviz_paleo_map.floating_slider import FloatingScaleSlider
@@ -29,6 +33,8 @@ from geoviz_paleo_map.locked_panel import LockedObjectsPanel
 class PaleoMapCanvas(QWidget):
     polygon_hovered = Signal(str)  # facies name, "" when leave
     zoom_changed = Signal(float)   # current zoom level
+    edit_mode_changed = Signal(bool)
+    selection_changed = Signal(str)  # feature_id or ""
 
     def __init__(self, pattern_engine: PatternEngine | None = None,
                  parent: QWidget | None = None):
@@ -82,6 +88,46 @@ class PaleoMapCanvas(QWidget):
         self._locked_panel.unlock_requested.connect(self.toggle_lock)
         self._locked_panel.level_changed.connect(self.update_lock_level)
 
+        # Edit mode
+        self._edit_mode = False
+        self._topology_model: TopologyModel | None = None
+        self._edit_overlay = EditOverlayLayer()
+        self._undo_mgr = UndoManager()
+        self._edit_engine = EditEngine(self._edit_overlay, self._undo_mgr)
+
+    # --- Edit mode properties ---
+
+    @property
+    def edit_mode(self) -> bool:
+        return self._edit_mode
+
+    @edit_mode.setter
+    def edit_mode(self, value: bool) -> None:
+        if value == self._edit_mode:
+            return
+        self._edit_mode = value
+        self._zoom_pan.enabled = not value
+        if not value:
+            self._edit_engine.select(None)
+        if value and self._edit_overlay not in self._layers:
+            self._layers.append(self._edit_overlay)
+        elif not value and self._edit_overlay in self._layers:
+            self._layers.remove(self._edit_overlay)
+        self.edit_mode_changed.emit(value)
+        self.update()
+
+    @property
+    def topology_model(self) -> TopologyModel | None:
+        return self._topology_model
+
+    @property
+    def undo_manager(self) -> UndoManager:
+        return self._undo_mgr
+
+    @property
+    def edit_engine(self) -> EditEngine:
+        return self._edit_engine
+
     def load_features(self, features: list[dict],
                       period_name: str = "",
                       wells: list[dict] | None = None) -> None:
@@ -117,6 +163,9 @@ class PaleoMapCanvas(QWidget):
         self._period_name = period_name
         self._wells_data = wells or []
         self._locked_ids = {}
+        # Build topology model for editing
+        self._topology_model = TopologyBuilder.from_features(features)
+        self._edit_engine.set_model(self._topology_model)
         self._update_locked_panel()
         self.update()
         self._update_slider_params()
@@ -174,6 +223,9 @@ class PaleoMapCanvas(QWidget):
         self._cached_zoom = -1.0
         level = self._resolve_level()
         self._layers = self._level_groups.get(level, [])
+        # Build topology model for editing
+        self._topology_model = TopologyBuilder.from_hierarchy(hierarchy)
+        self._edit_engine.set_model(self._topology_model)
         self.update()
         self._update_slider_params()
 
@@ -395,11 +447,23 @@ class PaleoMapCanvas(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._edit_mode:
+                consumed = self._edit_engine.handle_mouse_press(
+                    QPointF(event.position()), self._viewport, event.button())
+                if consumed:
+                    self.selection_changed.emit(self._edit_engine.selected_id or "")
+                    self.update()
+                    return
             self._zoom_pan.start_drag(QPointF(event.position()))
             self._press_pos = QPointF(event.position())
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         pos = QPointF(event.position())
+        if self._edit_mode:
+            consumed = self._edit_engine.handle_mouse_move(pos, self._viewport)
+            if consumed:
+                self.update()
+                return
         if self._zoom_pan.is_dragging():
             self._zoom_pan.update_drag(pos)
             self.update()
@@ -419,7 +483,24 @@ class PaleoMapCanvas(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._edit_mode:
+                cmd = self._edit_engine.handle_mouse_release(
+                    QPointF(event.position()), self._viewport, event.button())
+                if cmd is not None:
+                    self._undo_mgr.execute(cmd, self._topology_model)
+                    self._rebuild_topology_paths()
+                    self.update()
+                return
             self._zoom_pan.end_drag()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if self._edit_mode and event.button() == Qt.MouseButton.LeftButton:
+            cmd = self._edit_engine.handle_double_click(
+                QPointF(event.position()), self._viewport)
+            if cmd is not None:
+                self._undo_mgr.execute(cmd, self._topology_model)
+                self._rebuild_topology_paths()
+                self.update()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         delta = event.angleDelta().y() / 120.0
@@ -431,6 +512,46 @@ class PaleoMapCanvas(QWidget):
         if hasattr(self, "_scale_slider"):
             self._scale_slider.set_zoom(self._viewport.zoom)
         self.update()
+
+    def keyPressEvent(self, event) -> None:
+        from PySide6.QtGui import QKeySequence
+        if event.matches(QKeySequence.StandardKey.Undo):
+            if self._undo_mgr.undo(self._topology_model):
+                self._rebuild_topology_paths()
+                self.update()
+            return
+        if event.matches(QKeySequence.StandardKey.Redo):
+            if self._redo():
+                self._rebuild_topology_paths()
+                self.update()
+            return
+        if event.key() == Qt.Key.Key_E and not event.modifiers():
+            self.edit_mode = not self.edit_mode
+            return
+        if event.key() == Qt.Key.Key_Delete and self._edit_mode:
+            cmd = self._edit_engine.delete_selected_vertex(
+                self._edit_overlay._hovered_vertex_id) if self._edit_overlay._hovered_vertex_id else None
+            if cmd:
+                self._undo_mgr.execute(cmd, self._topology_model)
+                self._rebuild_topology_paths()
+                self.update()
+            return
+        super().keyPressEvent(event)
+
+    def _redo(self) -> bool:
+        return self._undo_mgr.redo(self._topology_model)
+
+    def _rebuild_topology_paths(self) -> None:
+        if self._topology_model is None:
+            return
+        dirty = self._topology_model.get_dirty_ids()
+        if not dirty:
+            return
+        for layer in self._layers:
+            if isinstance(layer, FaciesPolygonsLayer):
+                layer.set_topology_model(self._topology_model)
+                layer.rebuild_dirty_paths(dirty)
+        self._topology_model.clear_dirty()
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         if self._hierarchy is None:
