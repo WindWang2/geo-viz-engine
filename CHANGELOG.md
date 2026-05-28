@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-05-28
+
 ### Added
 - **新增独立包 `geoviz-map`**：基于 QPainter + Web Mercator 投影的地理可视化引擎，6 个 layer 组合渲染（背景/经纬网/世界陆地/中国省界/参考标签/井点），支持视口剔除、cursor-anchored 滚轮缩放、拖拽平移、井点 hover/click hit-test。可独立 pip install 后嵌入任意 PySide6 项目。
 - **新增独立包 `geoviz-paleo-map`**：基于 QPainter + Plate Carrée 投影的古地理图引擎，8 个 layer（4 数据层 + 4 chrome）。复用 `geoviz-well-log.PatternEngine` 并新增 `get_composite_brush` / `get_color_fuzzy` 两个公共方法。
