@@ -147,3 +147,105 @@ def test_model_dirty_tracking():
     assert "f1" in model.get_dirty_ids()
     model.clear_dirty()
     assert len(model.get_dirty_ids()) == 0
+
+
+# --- TopologyBuilder tests ---
+
+from geoviz_paleo_map.topology import TopologyBuilder
+
+
+def test_builder_from_features_simple():
+    """Build topology from two adjacent squares sharing an edge."""
+    features = [
+        {
+            "type": "Feature",
+            "properties": {"id": "A", "facies": "砂岩", "level": "facies"},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[110, 20], [115, 20], [115, 30], [110, 30], [110, 20]]],
+            },
+        },
+        {
+            "type": "Feature",
+            "properties": {"id": "B", "facies": "泥岩", "level": "facies"},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[115, 20], [120, 20], [120, 30], [115, 30], [115, 20]]],
+            },
+        },
+    ]
+    model = TopologyBuilder.from_features(features)
+    assert len(model.all_features()) == 2
+    # Shared edge: (115,20)-(115,30) — vertices should be deduplicated
+    f_a = model.get_feature("A")
+    f_b = model.get_feature("B")
+    assert f_a is not None
+    assert f_b is not None
+    # Find shared vertex IDs
+    a_ids = set(f_a.rings[0].vertex_ids)
+    b_ids = set(f_b.rings[0].vertex_ids)
+    shared_ids = a_ids & b_ids
+    assert len(shared_ids) >= 2, "At least 2 vertices should be shared"
+
+
+def test_builder_vertex_dedup_tolerance():
+    """Vertices within 1e-6 degrees should be deduplicated."""
+    features = [
+        {
+            "type": "Feature",
+            "properties": {"id": "A", "facies": "砂岩"},
+            "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]},
+        },
+        {
+            "type": "Feature",
+            "properties": {"id": "B", "facies": "泥岩"},
+            # Offset by 5e-7 (within tolerance)
+            "geometry": {"type": "Polygon", "coordinates": [[[1 + 5e-7, 0], [2, 0], [2, 1], [1, 1], [1 + 5e-7, 0]]]},
+        },
+    ]
+    model = TopologyBuilder.from_features(features)
+    total_vertices = len(model.all_vertices())
+    # Should have 6 unique vertices (not 10) due to dedup
+    assert total_vertices == 6
+
+
+def test_builder_multipolygon():
+    """MultiPolygon features produce multiple rings."""
+    features = [
+        {
+            "type": "Feature",
+            "properties": {"id": "MP", "facies": "砂岩"},
+            "geometry": {
+                "type": "MultiPolygon",
+                "coordinates": [
+                    [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+                    [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]],
+                ],
+            },
+        },
+    ]
+    model = TopologyBuilder.from_features(features)
+    ref = model.get_feature("MP")
+    assert ref is not None
+    assert len(ref.rings) == 2
+
+
+def test_builder_from_hierarchy():
+    """Build topology from FaciesHierarchy."""
+    from geoviz_paleo_map.hierarchy import FaciesHierarchy, FaciesFeature, FaciesNode
+
+    features = [
+        FaciesFeature(id="root", facies_name="砂岩", display_name="砂岩",
+                       level="facies", period="C1", parent_id=None,
+                       geometry={"type": "Polygon", "coordinates": [[[0,0],[10,0],[10,10],[0,10],[0,0]]]}),
+        FaciesFeature(id="child1", facies_name="细砂岩", display_name="细砂岩",
+                       level="sub_facies", period="C1", parent_id="root",
+                       geometry={"type": "Polygon", "coordinates": [[[0,0],[5,0],[5,10],[0,10],[0,0]]]}),
+        FaciesFeature(id="child2", facies_name="粗砂岩", display_name="粗砂岩",
+                       level="sub_facies", period="C1", parent_id="root",
+                       geometry={"type": "Polygon", "coordinates": [[[5,0],[10,0],[10,10],[5,10],[5,0]]]}),
+    ]
+    hierarchy = FaciesHierarchy._build_tree(features)
+    model = TopologyBuilder.from_hierarchy(hierarchy)
+    assert len(model.all_features()) == 3
+    assert model.get_feature("root") is not None

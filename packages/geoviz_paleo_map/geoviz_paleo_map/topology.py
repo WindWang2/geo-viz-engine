@@ -1,6 +1,7 @@
 """Topology model for shared-vertex polygon editing."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, Qt
@@ -175,3 +176,137 @@ class TopologyModel:
                 feat.setdefault("properties", {})["parent_id"] = ref.parent_id
             features.append(feat)
         return {"type": "FeatureCollection", "features": features}
+
+
+class TopologyBuilder:
+    """Builds a TopologyModel from GeoJSON features with spatial vertex deduplication."""
+
+    _DEDUP_TOLERANCE = 1e-6  # ~0.1m in degrees
+
+    @classmethod
+    def from_features(cls, features: list[dict],
+                      source_file: str | None = None) -> TopologyModel:
+        model = TopologyModel()
+        grid: dict[tuple[int, int], int] = {}  # quantized (x,y) -> vertex_id
+
+        for feat in features:
+            geom = feat.get("geometry") or {}
+            props = feat.get("properties") or {}
+            gtype = geom.get("type")
+            feature_id = props.get("id", "")
+
+            if gtype == "Polygon":
+                # GeoJSON Polygon coords: list of rings
+                all_rings = geom["coordinates"]
+            elif gtype == "MultiPolygon":
+                # GeoJSON MultiPolygon coords: list of polygons, each a list of rings
+                all_rings = [ring for poly in geom["coordinates"] for ring in poly]
+            else:
+                continue
+
+            rings: list[RingRef] = []
+            for ring_coords in all_rings:
+                if not ring_coords:
+                    continue
+                vid_list: list[int] = []
+                for coord in ring_coords:
+                    if len(coord) < 2:
+                        continue
+                    x, y = float(coord[0]), float(coord[1])
+                    vid = cls._find_or_create_vertex(model, x, y, grid)
+                    vid_list.append(vid)
+                if vid_list:
+                    rings.append(RingRef(vertex_ids=vid_list))
+
+            if rings:
+                model.add_feature(
+                    feature_id=feature_id,
+                    rings=rings,
+                    level=props.get("level", "facies"),
+                    parent_id=props.get("parent_id"),
+                    source_file=source_file,
+                    properties=props,
+                )
+        return model
+
+    @classmethod
+    def from_hierarchy(cls, hierarchy,
+                       source_files: dict[str, str] | None = None) -> TopologyModel:
+        model = TopologyModel()
+        grid: dict[tuple[int, int], int] = {}
+
+        for node in _walk_hierarchy(hierarchy.roots):
+            ff = node.feature
+            geom = ff.geometry or {}
+            gtype = geom.get("type")
+            if gtype == "Polygon":
+                all_rings = geom["coordinates"]
+            elif gtype == "MultiPolygon":
+                all_rings = [ring for poly in geom["coordinates"] for ring in poly]
+            else:
+                continue
+
+            rings: list[RingRef] = []
+            for ring_coords in all_rings:
+                if not ring_coords:
+                    continue
+                vid_list: list[int] = []
+                for coord in ring_coords:
+                    if len(coord) < 2:
+                        continue
+                    x, y = float(coord[0]), float(coord[1])
+                    vid = cls._find_or_create_vertex(model, x, y, grid)
+                    vid_list.append(vid)
+                if vid_list:
+                    rings.append(RingRef(vertex_ids=vid_list))
+
+            if rings:
+                sf = (source_files or {}).get(ff.level)
+                props = {
+                    "facies": ff.facies_name,
+                    "name": ff.display_name,
+                    "id": ff.id,
+                    "level": ff.level,
+                    "period": ff.period,
+                }
+                if ff.parent_id:
+                    props["parent_id"] = ff.parent_id
+                model.add_feature(
+                    feature_id=ff.id,
+                    rings=rings,
+                    level=ff.level,
+                    parent_id=ff.parent_id,
+                    source_file=sf,
+                    properties=props,
+                )
+        return model
+
+    @classmethod
+    def _find_or_create_vertex(cls, model: TopologyModel,
+                               x: float, y: float,
+                               grid: dict[tuple[int, int], int]) -> int:
+        tol = cls._DEDUP_TOLERANCE
+        # Check grid cell and neighbors
+        gx = math.floor(x / tol)
+        gy = math.floor(y / tol)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                key = (gx + dx, gy + dy)
+                vid = grid.get(key)
+                if vid is not None:
+                    v = model.get_vertex(vid)
+                    if v is not None and abs(v.x - x) < tol and abs(v.y - y) < tol:
+                        return vid
+        # Create new vertex
+        v = model.add_vertex(x, y)
+        grid[(gx, gy)] = v.id
+        return v.id
+
+
+def _walk_hierarchy(roots):
+    """Yield all FaciesNode objects in a tree via DFS."""
+    stack = list(roots)
+    while stack:
+        node = stack.pop()
+        yield node
+        stack.extend(node.children)
