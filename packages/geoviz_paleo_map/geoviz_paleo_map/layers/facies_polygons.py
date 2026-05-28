@@ -108,6 +108,8 @@ class FaciesPolygonsLayer(PaleoLayer):
         self._hierarchy = hierarchy
         self._active_level = active_level
         self._locked_ids = locked_ids or {}
+        self._selected_id: str | None = None
+        self._topology_model = None  # set externally when edit mode is active
         self._items: list[_Item] = []
         for feat in features:
             geom = feat.get("geometry") or {}
@@ -171,6 +173,36 @@ class FaciesPolygonsLayer(PaleoLayer):
                 else:
                     self._level_quadtrees[lvl] = None
 
+    def set_selected(self, feature_id: str | None) -> None:
+        self._selected_id = feature_id
+
+    def set_topology_model(self, model) -> None:
+        self._topology_model = model
+
+    def rebuild_dirty_paths(self, feature_ids: set[str]) -> None:
+        """Rebuild QPainterPaths for features whose topology has changed."""
+        if self._topology_model is None:
+            return
+        for fid in feature_ids:
+            new_path = self._topology_model.build_path(fid)
+            if new_path is None:
+                continue
+            for item in self._items:
+                if item.feature_id == fid:
+                    item.path = new_path
+                    # Recompute bbox
+                    br = new_path.boundingRect()
+                    item.bbox = (br.left(), br.top(), br.right(), br.bottom())
+        # Rebuild quadtree if any paths changed
+        if feature_ids and self._items:
+            min_x = min(item.bbox[0] for item in self._items)
+            min_y = min(item.bbox[1] for item in self._items)
+            max_x = max(item.bbox[2] for item in self._items)
+            max_y = max(item.bbox[3] for item in self._items)
+            self._quadtree_root = QuadtreeNode((min_x, min_y, max_x, max_y))
+            for item in self._items:
+                self._quadtree_root.insert(item)
+
     @staticmethod
     def _build_item(poly: list[list[list[float]]],
                     facies_name: str,
@@ -233,13 +265,32 @@ class FaciesPolygonsLayer(PaleoLayer):
             key = (item.facies_name, item.boundary_kind)
             groups.setdefault(key, []).append(item)
 
-        # 3. Draw visible polygons FILLS ONLY (NoPen to avoid gaps/ugly overlaps)
+        # 3. Draw visible polygons FILLS ONLY
+        has_selection = self._selected_id is not None
         for (facies_name, boundary_kind), items in groups.items():
             style = self._resolver.resolve(facies_name)
             painter.setPen(QPen(Qt.PenStyle.NoPen))
-            painter.setBrush(style.brush)
             for item in items:
-                painter.drawPath(item.path)
+                if has_selection and item.feature_id != self._selected_id:
+                    # Dim non-selected polygons
+                    painter.setOpacity(0.6)
+                    painter.setBrush(style.brush)
+                    painter.drawPath(item.path)
+                    painter.setOpacity(1.0)
+                else:
+                    painter.setBrush(style.brush)
+                    painter.drawPath(item.path)
+
+        # 3b. Draw selection glow
+        if has_selection:
+            for item in visible_items:
+                if item.feature_id == self._selected_id:
+                    glow_pen = QPen(QColor("#3182ce"), 3.0)
+                    glow_pen.setCosmetic(True)
+                    painter.setPen(glow_pen)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.drawPath(item.path)
+                    break
 
         # 4. Draw hierarchical borders (Facies >= SubFacies >= MicroFacies in thickness)
         if self._hierarchy is not None and self._active_level is not None:

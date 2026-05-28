@@ -20,6 +20,10 @@ from geoviz_paleo_map.layers.scale_bar import ScaleBarLayer
 from geoviz_paleo_map.layers.title import TitleLayer
 from geoviz_paleo_map.layers.wells_scatter import WellsScatterLayer
 from geoviz_paleo_map.style import FaciesStyleResolver
+from geoviz_paleo_map.topology import TopologyModel, TopologyBuilder
+from geoviz_paleo_map.edit_commands import UndoManager
+from geoviz_paleo_map.edit_engine import EditEngine
+from geoviz_paleo_map.edit_overlay import EditOverlayLayer
 from geoviz_paleo_map.viewport import PaleoMapViewport
 from geoviz_paleo_map.zoom_pan import ZoomPanHandler
 from geoviz_paleo_map.floating_slider import FloatingScaleSlider
@@ -29,6 +33,8 @@ from geoviz_paleo_map.locked_panel import LockedObjectsPanel
 class PaleoMapCanvas(QWidget):
     polygon_hovered = Signal(str)  # facies name, "" when leave
     zoom_changed = Signal(float)   # current zoom level
+    edit_mode_changed = Signal(bool)
+    selection_changed = Signal(str)  # feature_id or ""
 
     def __init__(self, pattern_engine: PatternEngine | None = None,
                  parent: QWidget | None = None):
@@ -82,6 +88,46 @@ class PaleoMapCanvas(QWidget):
         self._locked_panel.unlock_requested.connect(self.toggle_lock)
         self._locked_panel.level_changed.connect(self.update_lock_level)
 
+        # Edit mode
+        self._edit_mode = False
+        self._topology_model: TopologyModel | None = None
+        self._edit_overlay = EditOverlayLayer()
+        self._undo_mgr = UndoManager()
+        self._edit_engine = EditEngine(self._edit_overlay, self._undo_mgr)
+
+    # --- Edit mode properties ---
+
+    @property
+    def edit_mode(self) -> bool:
+        return self._edit_mode
+
+    @edit_mode.setter
+    def edit_mode(self, value: bool) -> None:
+        if value == self._edit_mode:
+            return
+        self._edit_mode = value
+        self._zoom_pan.enabled = not value
+        if not value:
+            self._edit_engine.select(None)
+        if value and self._edit_overlay not in self._layers:
+            self._layers.append(self._edit_overlay)
+        elif not value and self._edit_overlay in self._layers:
+            self._layers.remove(self._edit_overlay)
+        self.edit_mode_changed.emit(value)
+        self.update()
+
+    @property
+    def topology_model(self) -> TopologyModel | None:
+        return self._topology_model
+
+    @property
+    def undo_manager(self) -> UndoManager:
+        return self._undo_mgr
+
+    @property
+    def edit_engine(self) -> EditEngine:
+        return self._edit_engine
+
     def load_features(self, features: list[dict],
                       period_name: str = "",
                       wells: list[dict] | None = None) -> None:
@@ -117,6 +163,9 @@ class PaleoMapCanvas(QWidget):
         self._period_name = period_name
         self._wells_data = wells or []
         self._locked_ids = {}
+        # Build topology model for editing
+        self._topology_model = TopologyBuilder.from_features(features)
+        self._edit_engine.set_model(self._topology_model)
         self._update_locked_panel()
         self.update()
         self._update_slider_params()
@@ -174,6 +223,9 @@ class PaleoMapCanvas(QWidget):
         self._cached_zoom = -1.0
         level = self._resolve_level()
         self._layers = self._level_groups.get(level, [])
+        # Build topology model for editing
+        self._topology_model = TopologyBuilder.from_hierarchy(hierarchy)
+        self._edit_engine.set_model(self._topology_model)
         self.update()
         self._update_slider_params()
 
@@ -395,11 +447,23 @@ class PaleoMapCanvas(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._edit_mode:
+                consumed = self._edit_engine.handle_mouse_press(
+                    QPointF(event.position()), self._viewport, event.button())
+                if consumed:
+                    self.selection_changed.emit(self._edit_engine.selected_id or "")
+                    self.update()
+                    return
             self._zoom_pan.start_drag(QPointF(event.position()))
             self._press_pos = QPointF(event.position())
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         pos = QPointF(event.position())
+        if self._edit_mode:
+            consumed = self._edit_engine.handle_mouse_move(pos, self._viewport)
+            if consumed:
+                self.update()
+                return
         if self._zoom_pan.is_dragging():
             self._zoom_pan.update_drag(pos)
             self.update()
@@ -419,7 +483,24 @@ class PaleoMapCanvas(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._edit_mode:
+                cmd = self._edit_engine.handle_mouse_release(
+                    QPointF(event.position()), self._viewport, event.button())
+                if cmd is not None:
+                    self._undo_mgr.execute(cmd, self._topology_model)
+                    self._rebuild_topology_paths()
+                    self.update()
+                return
             self._zoom_pan.end_drag()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if self._edit_mode and event.button() == Qt.MouseButton.LeftButton:
+            cmd = self._edit_engine.handle_double_click(
+                QPointF(event.position()), self._viewport)
+            if cmd is not None:
+                self._undo_mgr.execute(cmd, self._topology_model)
+                self._rebuild_topology_paths()
+                self.update()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         delta = event.angleDelta().y() / 120.0
@@ -432,13 +513,48 @@ class PaleoMapCanvas(QWidget):
             self._scale_slider.set_zoom(self._viewport.zoom)
         self.update()
 
-    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
-        if self._hierarchy is None:
+    def keyPressEvent(self, event) -> None:
+        from PySide6.QtGui import QKeySequence
+        if event.matches(QKeySequence.StandardKey.Undo):
+            if self._topology_model and self._undo_mgr.undo(self._topology_model):
+                self._rebuild_topology_paths()
+                self.update()
             return
+        if event.matches(QKeySequence.StandardKey.Redo):
+            if self._topology_model and self._redo():
+                self._rebuild_topology_paths()
+                self.update()
+            return
+        if event.key() == Qt.Key.Key_E and not event.modifiers():
+            self.edit_mode = not self.edit_mode
+            return
+        if event.key() == Qt.Key.Key_Delete and self._edit_mode:
+            cmd = self._edit_engine.delete_selected_vertex(
+                self._edit_overlay._hovered_vertex_id) if self._edit_overlay._hovered_vertex_id else None
+            if cmd:
+                self._undo_mgr.execute(cmd, self._topology_model)
+                self._rebuild_topology_paths()
+                self.update()
+            return
+        super().keyPressEvent(event)
 
+    def _redo(self) -> bool:
+        return self._undo_mgr.redo(self._topology_model)
+
+    def _rebuild_topology_paths(self) -> None:
+        if self._topology_model is None:
+            return
+        dirty = self._topology_model.get_dirty_ids()
+        if not dirty:
+            return
+        for layer in self._layers:
+            if isinstance(layer, FaciesPolygonsLayer):
+                layer.set_topology_model(self._topology_model)
+                layer.rebuild_dirty_paths(dirty)
+        self._topology_model.clear_dirty()
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         pos = QPointF(event.pos())
-        feature_id = self._hierarchy_hit_test_id(pos)
-
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
@@ -458,38 +574,111 @@ class PaleoMapCanvas(QWidget):
             }
         """)
 
-        level_labels = {"facies": "相", "sub_facies": "亚相", "micro_facies": "微相"}
-
-        if feature_id:
-            node = self._hierarchy.get_node(feature_id)
-            if node is not None:
-                # Find root node and check if there is an active lock in this branch
-                root_node = self._find_root_node(feature_id)
-                active_lock_res = self._find_active_lock_in_subtree(root_node) if root_node is not None else None
-
-                if active_lock_res is not None:
-                    locked_fid, lock_lvl = active_lock_res
-                    locked_node = self._hierarchy.get_node(locked_fid)
-                    if locked_node is not None:
-                        display_name = locked_node.feature.display_name
-                        lvl_lbl = level_labels.get(locked_node.feature.level, locked_node.feature.level)
-                        act_unlock = QAction(f"解除锁定: {display_name} ({lvl_lbl})", self)
-                        act_unlock.triggered.connect(lambda: self.toggle_lock(locked_fid))
-                        menu.addAction(act_unlock)
-                else:
-                    display_name = node.feature.display_name
-                    lvl_lbl = level_labels.get(node.feature.level, node.feature.level)
-                    act_lock = QAction(f"锁定层级: {display_name} ({lvl_lbl})", self)
-                    act_lock.triggered.connect(lambda: self.toggle_lock(feature_id))
-                    menu.addAction(act_lock)
+        if self._edit_mode and self._topology_model is not None:
+            # Edit mode context menu
+            vid = self._edit_overlay.hit_test_vertex(pos, self._viewport)
+            if vid is not None:
+                act_del_v = QAction("删除节点", self)
+                act_del_v.triggered.connect(lambda: self._context_delete_vertex(vid))
+                menu.addAction(act_del_v)
                 menu.addSeparator()
 
-        panel_visible = self._locked_panel.isVisible()
-        act_toggle = QAction("显示锁定层级面板" if not panel_visible else "隐藏锁定层级面板", self)
-        act_toggle.triggered.connect(self._toggle_locked_panel)
-        menu.addAction(act_toggle)
+            selected = self._edit_engine.selected_id
+            if selected:
+                act_del_p = QAction("删除多边形", self)
+                act_del_p.triggered.connect(self._context_delete_polygon)
+                menu.addAction(act_del_p)
+
+                act_edit_attr = QAction("编辑属性...", self)
+                act_edit_attr.triggered.connect(lambda: self._context_edit_attributes(selected))
+                menu.addAction(act_edit_attr)
+        else:
+            # View mode context menu (existing hierarchy lock behavior)
+            if self._hierarchy is None:
+                menu.exec(event.globalPos())
+                return
+
+            feature_id = self._hierarchy_hit_test_id(pos)
+            level_labels = {"facies": "相", "sub_facies": "亚相", "micro_facies": "微相"}
+
+            if feature_id:
+                node = self._hierarchy.get_node(feature_id)
+                if node is not None:
+                    root_node = self._find_root_node(feature_id)
+                    active_lock_res = self._find_active_lock_in_subtree(root_node) if root_node is not None else None
+
+                    if active_lock_res is not None:
+                        locked_fid, lock_lvl = active_lock_res
+                        locked_node = self._hierarchy.get_node(locked_fid)
+                        if locked_node is not None:
+                            display_name = locked_node.feature.display_name
+                            lvl_lbl = level_labels.get(locked_node.feature.level, locked_node.feature.level)
+                            act_unlock = QAction(f"解除锁定: {display_name} ({lvl_lbl})", self)
+                            act_unlock.triggered.connect(lambda: self.toggle_lock(locked_fid))
+                            menu.addAction(act_unlock)
+                    else:
+                        display_name = node.feature.display_name
+                        lvl_lbl = level_labels.get(node.feature.level, node.feature.level)
+                        act_lock = QAction(f"锁定层级: {display_name} ({lvl_lbl})", self)
+                        act_lock.triggered.connect(lambda: self.toggle_lock(feature_id))
+                        menu.addAction(act_lock)
+                    menu.addSeparator()
+
+            panel_visible = self._locked_panel.isVisible()
+            act_toggle = QAction("显示锁定层级面板" if not panel_visible else "隐藏锁定层级面板", self)
+            act_toggle.triggered.connect(self._toggle_locked_panel)
+            menu.addAction(act_toggle)
 
         menu.exec(event.globalPos())
+
+    def _context_delete_vertex(self, vid: int) -> None:
+        cmd = self._edit_engine.delete_selected_vertex(vid)
+        if cmd:
+            self._undo_mgr.execute(cmd, self._topology_model)
+            self._rebuild_topology_paths()
+            self.update()
+
+    def _context_delete_polygon(self) -> None:
+        cmd = self._edit_engine.delete_selected_polygon()
+        if cmd:
+            self._undo_mgr.execute(cmd, self._topology_model)
+            self._rebuild_topology_paths()
+            self.selection_changed.emit("")
+            self.update()
+
+    def _context_edit_attributes(self, feature_id: str) -> None:
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox
+        ref = self._topology_model.get_feature(feature_id) if self._topology_model else None
+        if ref is None:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("编辑属性")
+        form = QFormLayout(dlg)
+        facies_input = QLineEdit(ref.properties.get("facies", ""))
+        name_input = QLineEdit(ref.properties.get("name", ""))
+        boundary_combo = QComboBox()
+        boundary_combo.addItems(["无", "实测界线", "推测界线", "断层"])
+        bt = ref.properties.get("boundary_type")
+        boundary_combo.setCurrentText({"confirmed": "实测界线", "inferred": "推测界线", "fault": "断层"}.get(bt, "无"))
+        form.addRow("相名:", facies_input)
+        form.addRow("显示名:", name_input)
+        form.addRow("界线类型:", boundary_combo)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        old_props = dict(ref.properties)
+        new_props = dict(ref.properties)
+        new_props["facies"] = facies_input.text()
+        new_props["name"] = name_input.text()
+        bt_map = {"实测界线": "confirmed", "推测界线": "inferred", "断层": "fault"}
+        new_props["boundary_type"] = bt_map.get(boundary_combo.currentText())
+        from geoviz_paleo_map.edit_commands import EditAttributesCmd
+        cmd = EditAttributesCmd(feature_id, old_props, new_props)
+        self._undo_mgr.execute(cmd, self._topology_model)
+        self.update()
 
     def _hierarchy_hit_test(self, pos: QPointF) -> str | None:
         """Hit-test the active level's polygon layer, return hierarchy label."""

@@ -14,12 +14,17 @@ class ZoomPanHandler:
         self.viewport = viewport
         self.min_zoom = min_zoom
         self.max_zoom = max_zoom
+        self.enabled: bool = True
         self._drag_anchor: QPointF | None = None
 
     def start_drag(self, pt: QPointF) -> None:
+        if not self.enabled:
+            return
         self._drag_anchor = QPointF(pt)
 
     def update_drag(self, pt: QPointF) -> None:
+        if not self.enabled:
+            return
         if self._drag_anchor is None:
             return
         dx = pt.x() - self._drag_anchor.x()

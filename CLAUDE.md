@@ -77,6 +77,11 @@ PySide6 (Qt for Python) — Single Process
 │       ├── viewport.py          → PaleoMapViewport (center+zoom → pixel mapping)
 │       ├── zoom_pan.py          → ZoomPanHandler
 │       ├── style.py             → FaciesStyleResolver (per-facies brush cache)
+│       ├── topology.py          → TopologyModel, TopologyBuilder
+│       ├── edit_commands.py     → EditCommand hierarchy, UndoManager
+│       ├── edit_engine.py       → EditEngine (selection, drag, CRUD)
+│       ├── edit_overlay.py      → EditOverlayLayer
+│       ├── save_export.py       → save/export functions
 │       └── layers/              → Background, FaciesPolygons, RegionLabels, WellsScatter, Title, NorthArrow, ScaleBar, Legend
 ├── src/data/              → (loaders, models, cache, well_registry)
 └── src/pages/             → (each page in its own subfolder with renderer/loader)
@@ -146,6 +151,11 @@ PySide6 (Qt for Python) — Single Process
   - `geoviz_paleo_map/viewport.py` — center+zoom → screen pixel mapping
   - `geoviz_paleo_map/zoom_pan.py` — Drag pan + cursor-anchored wheel zoom
   - `geoviz_paleo_map/style.py` — FaciesStyleResolver
+  - `geoviz_paleo_map/topology.py` — TopologyModel, TopologyBuilder
+  - `geoviz_paleo_map/edit_commands.py` — EditCommand hierarchy, UndoManager
+  - `geoviz_paleo_map/edit_engine.py` — EditEngine (selection, drag, CRUD)
+  - `geoviz_paleo_map/edit_overlay.py` — EditOverlayLayer
+  - `geoviz_paleo_map/save_export.py` — save/export functions
   - `geoviz_paleo_map/layers/` — Background, FaciesPolygons, RegionLabels, WellsScatter, Title, NorthArrow, ScaleBar, Legend
 - `src/` — Main application code
   - `main.py` — Entry point (QApplication)

@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-29
+
+### Added
+- **古地理图多边形编辑模式**：支持对古地理图多边形进行交互式编辑，包括顶点拖拽、多边形拖拽、顶点插入/删除、多边形创建/删除等操作。编辑模式通过工具栏"编辑模式"按钮或快捷键 E 切换。
+- **共享顶点拓扑保持**：引入拓扑模型（TopologyModel），相邻多边形共享顶点引用。移动一个顶点时，所有相邻多边形同步更新，确保拓扑关系一致。
+- **撤销/重做支持**：基于命令模式（Command Pattern）实现完整的撤销/重做功能，支持 Ctrl+Z / Ctrl+Shift+Z 快捷键。包含 MoveVertexCmd、InsertVertexCmd、DeleteVertexCmd、CreatePolygonCmd、DeletePolygonCmd、EditAttributesCmd 等命令类型。
+- **编辑模式上下文菜单**：右键菜单支持删除顶点、删除多边形、编辑属性（相名称、显示名称、边界类型）等操作。
+- **GeoJSON 保存与导出**：支持将编辑后的拓扑模型保存为 GeoJSON 文件，以及导出为 PNG / PDF / SVG 格式。支持按层级拆分保存到原始文件。
+- **编辑覆盖层**：在编辑模式下显示顶点手柄（蓝色圆点）、边高亮（橙色）、共享顶点指示（绿色），提供直观的编辑反馈。
+- **FaciesHierarchy.get_children 方法**：新增获取指定特征直接子节点的方法。
+
+### Changed
+- **ZoomPanHandler 编辑模式禁用**：编辑模式下自动禁用平移缩放操作，避免编辑冲突。
+- **FaciesPolygonsLayer 选择高亮**：编辑模式下选中的多边形显示高亮发光效果，未选中的多边形自动变暗。
+- **TopologyBuilder 代码重构**：提取 `_build_rings` 辅助方法，统一 `from_features` 和 `from_hierarchy` 的环构建逻辑。
+
+### Fixed
+- **DeleteVertexCmd 共享顶点修复**：修复删除共享顶点时错误清除所有关联特征引用的问题，现在仅移除当前特征的引用。
+- **DeletePolygonCmd.undo 修复**：修复撤销删除多边形时创建孤立顶点的问题，正确引用已存在的顶点 ID。
+- **InsertVertexCmd / DeleteVertexCmd 边索引一致性**：修复边索引在插入/删除顶点时的不一致问题。
+- **EditAttributesCmd 撤销修复**：基于快照实现属性编辑的撤销，确保完整恢复原始属性。
+- **to_geojson 修复**：修复带孔洞的环使用 MultiPolygon 而非 Polygon 类型的问题。
+
 ## [0.6.4] - 2026-05-28
 
 ### Added
