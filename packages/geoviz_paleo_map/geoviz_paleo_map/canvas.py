@@ -70,7 +70,7 @@ class PaleoMapCanvas(QWidget):
         # State fields for dynamic layers and locking
         self._period_name = ""
         self._wells_data: list[dict] = []
-        self._locked_ids: set[str] = set()
+        self._locked_ids: dict[str, str] = {}
         self._current_active_level = ""
 
         # Floating interactive scale slider
@@ -80,6 +80,7 @@ class PaleoMapCanvas(QWidget):
         # Floating interactive locked objects panel
         self._locked_panel = LockedObjectsPanel(self)
         self._locked_panel.unlock_requested.connect(self.toggle_lock)
+        self._locked_panel.level_changed.connect(self.update_lock_level)
 
     def load_features(self, features: list[dict],
                       period_name: str = "",
@@ -115,7 +116,7 @@ class PaleoMapCanvas(QWidget):
         ]
         self._period_name = period_name
         self._wells_data = wells or []
-        self._locked_ids = set()
+        self._locked_ids = {}
         self._update_locked_panel()
         self.update()
         self._update_slider_params()
@@ -146,6 +147,7 @@ class PaleoMapCanvas(QWidget):
                     "name": ff.display_name,
                     "id": ff.id,
                     "boundary_type": None,
+                    "level": ff.level,
                 }, "geometry": ff.geometry}
                 for ff in hierarchy.get_features_at_level(level)
             ]
@@ -153,11 +155,12 @@ class PaleoMapCanvas(QWidget):
                 continue
 
             seen = {(f.get("properties") or {}).get("facies") for f in feats if (f.get("properties") or {}).get("facies")}
-            poly = FaciesPolygonsLayer(feats, self._resolver, default_pen=pens[level])
+            poly = FaciesPolygonsLayer(feats, self._resolver, default_pen=pens[level], hierarchy=hierarchy, active_level=level, locked_ids=self._locked_ids)
 
             group: list[PaleoLayer] = [BackgroundLayer(), poly]
             group.append(RegionLabelsLayer(feats, self._resolver,
-                                           font_size=font_sizes[level]))
+                                           font_size=font_sizes[level],
+                                           locked_ids=set(self._locked_ids.keys())))
             group.extend([
                 WellsScatterLayer(wells or []),
                 TitleLayer(title),
@@ -235,23 +238,55 @@ class PaleoMapCanvas(QWidget):
                 return self._LEVEL_ORDER[i]
         return self._LEVEL_ORDER[-1]
 
-    def _collect_visible_features(self, node: FaciesNode, active_level: str, out: list[FaciesFeature]) -> None:
-        if node.feature.id in self._locked_ids or node.feature.level == active_level:
-            out.append(node.feature)
-            return
+    def _find_active_lock_in_subtree(self, node: FaciesNode) -> tuple[str, str] | None:
+        if node.feature.id in self._locked_ids:
+            return node.feature.id, self._locked_ids[node.feature.id]
+        for child in node.children:
+            res = self._find_active_lock_in_subtree(child)
+            if res is not None:
+                return res
+        return None
+
+    def _find_root_node(self, feature_id: str) -> FaciesNode | None:
+        if self._hierarchy is None:
+            return None
+        node = self._hierarchy.get_node(feature_id)
+        if node is None:
+            return None
+        ancestors = self._hierarchy.get_ancestors(feature_id)
+        if ancestors:
+            root_id = ancestors[0].id
+            return self._hierarchy.get_node(root_id)
+        return node
+
+    def _collect_visible_features(self, node: FaciesNode, active_level: str, out: list[FaciesFeature], effective_level: str | None = None, is_branch_locked: bool = False, active_locked_ids: set[str] | None = None) -> None:
+        if effective_level is None:
+            # We are at a root node. Find if there is an active lock in this root's subtree.
+            lock_res = self._find_active_lock_in_subtree(node)
+            if lock_res is not None:
+                locked_id, lock_level = lock_res
+                effective_level = lock_level
+                is_branch_locked = True
+            else:
+                effective_level = active_level
+                is_branch_locked = False
 
         levels = ["facies", "sub_facies", "micro_facies"]
         node_depth = levels.index(node.feature.level) if node.feature.level in levels else 0
-        active_depth = levels.index(active_level) if active_level in levels else 0
+        target_depth = levels.index(effective_level) if effective_level in levels else 0
 
-        if node_depth < active_depth:
+        if node_depth < target_depth:
             if node.children:
                 for child in node.children:
-                    self._collect_visible_features(child, active_level, out)
+                    self._collect_visible_features(child, active_level, out, effective_level, is_branch_locked, active_locked_ids)
             else:
                 out.append(node.feature)
+                if is_branch_locked and active_locked_ids is not None:
+                    active_locked_ids.add(node.feature.id)
         else:
             out.append(node.feature)
+            if is_branch_locked and active_locked_ids is not None:
+                active_locked_ids.add(node.feature.id)
 
     def _update_active_layers(self) -> None:
         """Dynamically build layers for the current active level and locked features."""
@@ -260,8 +295,9 @@ class PaleoMapCanvas(QWidget):
 
         active_level = self._resolve_level_name()
         visible_features = []
+        active_locked_ids = set()
         for root in self._hierarchy.roots:
-            self._collect_visible_features(root, active_level, visible_features)
+            self._collect_visible_features(root, active_level, visible_features, active_locked_ids=active_locked_ids)
 
         feats = [
             {"type": "Feature", "properties": {
@@ -269,6 +305,7 @@ class PaleoMapCanvas(QWidget):
                 "name": ff.display_name,
                 "id": ff.id,
                 "boundary_type": None,
+                "level": ff.level,
             }, "geometry": ff.geometry}
             for ff in visible_features
         ]
@@ -281,8 +318,8 @@ class PaleoMapCanvas(QWidget):
         font_sizes = {"facies": 11, "sub_facies": 8, "micro_facies": 7}
 
         level = active_level
-        poly = FaciesPolygonsLayer(feats, self._resolver, default_pen=pens.get(level, pens["micro_facies"]))
-        labels = RegionLabelsLayer(feats, self._resolver, font_size=font_sizes.get(level, 7))
+        poly = FaciesPolygonsLayer(feats, self._resolver, default_pen=pens.get(level, pens["micro_facies"]), hierarchy=self._hierarchy, active_level=active_level, locked_ids=self._locked_ids)
+        labels = RegionLabelsLayer(feats, self._resolver, font_size=font_sizes.get(level, 7), locked_ids=active_locked_ids)
         
         seen = {ff.facies_name for ff in visible_features if ff.facies_name}
         title = f"{self._period_name}岩相古地理图" if self._period_name else ""
@@ -302,22 +339,24 @@ class PaleoMapCanvas(QWidget):
         if not hasattr(self, "_locked_panel"):
             return
         
-        level_labels = {"facies": "相", "sub_facies": "亚相", "micro_facies": "微相"}
         items = []
         if self._hierarchy is not None:
-            for fid in sorted(self._locked_ids):
+            for fid in sorted(self._locked_ids.keys()):
                 node = self._hierarchy.get_node(fid)
                 if node is not None:
-                    lvl_lbl = level_labels.get(node.feature.level, node.feature.level)
-                    items.append((fid, node.feature.display_name, lvl_lbl))
+                    current_lock = self._locked_ids[fid]
+                    items.append((fid, node.feature.display_name, current_lock))
         
         self._locked_panel.update_items(items)
 
-    def toggle_lock(self, feature_id: str) -> None:
+    def toggle_lock(self, feature_id: str, lock_level: str | None = None) -> None:
         if feature_id in self._locked_ids:
-            self._locked_ids.remove(feature_id)
+            del self._locked_ids[feature_id]
         else:
-            self._locked_ids.add(feature_id)
+            if lock_level is None:
+                node = self._hierarchy.get_node(feature_id) if self._hierarchy else None
+                lock_level = node.feature.level if node else "facies"
+            self._locked_ids[feature_id] = lock_level
         
         if self._locked_ids and hasattr(self, "_locked_panel"):
             self._locked_panel.show()
@@ -325,6 +364,13 @@ class PaleoMapCanvas(QWidget):
         self._update_active_layers()
         self._update_locked_panel()
         self.update()
+
+    def update_lock_level(self, feature_id: str, new_level: str) -> None:
+        if feature_id in self._locked_ids:
+            self._locked_ids[feature_id] = new_level
+            self._update_active_layers()
+            self._update_locked_panel()
+            self.update()
 
     def _toggle_locked_panel(self) -> None:
         if hasattr(self, "_locked_panel"):
@@ -417,14 +463,22 @@ class PaleoMapCanvas(QWidget):
         if feature_id:
             node = self._hierarchy.get_node(feature_id)
             if node is not None:
-                display_name = node.feature.display_name
-                lvl_lbl = level_labels.get(node.feature.level, node.feature.level)
+                # Find root node and check if there is an active lock in this branch
+                root_node = self._find_root_node(feature_id)
+                active_lock_res = self._find_active_lock_in_subtree(root_node) if root_node is not None else None
 
-                if feature_id in self._locked_ids:
-                    act_unlock = QAction(f"解除锁定: {display_name} ({lvl_lbl})", self)
-                    act_unlock.triggered.connect(lambda: self.toggle_lock(feature_id))
-                    menu.addAction(act_unlock)
+                if active_lock_res is not None:
+                    locked_fid, lock_lvl = active_lock_res
+                    locked_node = self._hierarchy.get_node(locked_fid)
+                    if locked_node is not None:
+                        display_name = locked_node.feature.display_name
+                        lvl_lbl = level_labels.get(locked_node.feature.level, locked_node.feature.level)
+                        act_unlock = QAction(f"解除锁定: {display_name} ({lvl_lbl})", self)
+                        act_unlock.triggered.connect(lambda: self.toggle_lock(locked_fid))
+                        menu.addAction(act_unlock)
                 else:
+                    display_name = node.feature.display_name
+                    lvl_lbl = level_labels.get(node.feature.level, node.feature.level)
                     act_lock = QAction(f"锁定层级: {display_name} ({lvl_lbl})", self)
                     act_lock.triggered.connect(lambda: self.toggle_lock(feature_id))
                     menu.addAction(act_lock)

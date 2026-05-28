@@ -106,3 +106,114 @@ def test_skips_non_polygon_geometries():
     # Should construct without error and paint as no-op
     p = QPainter(img); layer.paint(p, vp); p.end()
     assert layer.hit_test_polygon(QPointF(200, 200), vp) is None
+
+
+def test_hierarchical_borders_painting():
+    from geoviz_paleo_map.hierarchy import FaciesHierarchy, FaciesFeature, FaciesNode
+    img, vp, resolver = _setup()
+    f1 = FaciesFeature(id="f1", facies_name="砂岩", display_name="f", level="facies", period="P", parent_id=None, geometry=SAND_FEATURE["geometry"])
+    f2 = FaciesFeature(id="f2", facies_name="粉砂岩", display_name="sf", level="sub_facies", parent_id="f1", period="P", geometry=SAND_FEATURE["geometry"])
+    hier = FaciesHierarchy(roots=[], by_id={"f1": FaciesNode(f1), "f2": FaciesNode(f2)})
+    hier._by_id["f1"].children.append(hier._by_id["f2"])
+
+    layer = FaciesPolygonsLayer([SAND_FEATURE], resolver, hierarchy=hier, active_level="sub_facies")
+    assert "facies" in layer._level_quadtrees
+    assert "sub_facies" in layer._level_quadtrees
+    assert layer._level_quadtrees["facies"] is not None
+
+    p = QPainter(img)
+    layer.paint(p, vp)
+    p.end()
+
+
+def test_hierarchical_borders_levels():
+    from geoviz_paleo_map.hierarchy import FaciesHierarchy, FaciesFeature, FaciesNode
+    img, vp, resolver = _setup()
+    f1 = FaciesFeature(id="f1", facies_name="砂岩", display_name="f", level="facies", period="P", parent_id=None, geometry=SAND_FEATURE["geometry"])
+    f2 = FaciesFeature(id="f2", facies_name="粉砂岩", display_name="sf", level="sub_facies", parent_id="f1", period="P", geometry=SAND_FEATURE["geometry"])
+    f3 = FaciesFeature(id="f3", facies_name="细粉砂岩", display_name="mf", level="micro_facies", parent_id="f2", period="P", geometry=SAND_FEATURE["geometry"])
+    hier = FaciesHierarchy(roots=[], by_id={"f1": FaciesNode(f1), "f2": FaciesNode(f2), "f3": FaciesNode(f3)})
+    hier._by_id["f1"].children.append(hier._by_id["f2"])
+    hier._by_id["f2"].children.append(hier._by_id["f3"])
+
+    for lvl in ["facies", "sub_facies", "micro_facies"]:
+        layer = FaciesPolygonsLayer([SAND_FEATURE], resolver, hierarchy=hier, active_level=lvl)
+        assert layer._level_quadtrees["facies"] is not None
+        assert layer._level_quadtrees["sub_facies"] is not None
+        assert layer._level_quadtrees["micro_facies"] is not None
+
+        p = QPainter(img)
+        layer.paint(p, vp)
+        p.end()
+
+
+def test_locked_borders_enforced_at_shallow_active_level():
+    from geoviz_paleo_map.hierarchy import FaciesHierarchy, FaciesFeature, FaciesNode
+    img, vp, resolver = _setup()
+    
+    # We have parent f1 (facies) -> child f2 (sub_facies) -> grandchild f3 (micro_facies)
+    f1 = FaciesFeature(id="f1", facies_name="砂岩", display_name="f", level="facies", period="P", parent_id=None, geometry=SAND_FEATURE["geometry"])
+    f2 = FaciesFeature(id="f2", facies_name="粉砂岩", display_name="sf", level="sub_facies", parent_id="f1", period="P", geometry=SAND_FEATURE["geometry"])
+    f3 = FaciesFeature(id="f3", facies_name="细粉砂岩", display_name="mf", level="micro_facies", parent_id="f2", period="P", geometry=SAND_FEATURE["geometry"])
+    
+    hier = FaciesHierarchy(roots=[FaciesNode(f1)], by_id={"f1": FaciesNode(f1), "f2": FaciesNode(f2), "f3": FaciesNode(f3)})
+    hier._by_id["f1"].children.append(hier._by_id["f2"])
+    hier._by_id["f2"].children.append(hier._by_id["f3"])
+
+    class MockPainter:
+        def __init__(self):
+            self.drawn_pens = []
+            self.current_pen = None
+            self._render_hints = {}
+        def setRenderHint(self, hint, on):
+            self._render_hints[hint] = on
+        def save(self): pass
+        def translate(self, x, y): pass
+        def scale(self, sx, sy): pass
+        def restore(self): pass
+        def setPen(self, pen):
+            self.current_pen = pen
+        def setBrush(self, brush): pass
+        def drawPath(self, path):
+            from PySide6.QtCore import Qt
+            if self.current_pen is not None and self.current_pen.style() != Qt.PenStyle.NoPen:
+                from PySide6.QtGui import QPen
+                self.drawn_pens.append(QPen(self.current_pen))
+
+    # Case 1: active_level is "facies", locked to "sub_facies"
+    # We should paint "facies" and "sub_facies" borders, but NOT "micro_facies".
+    layer1 = FaciesPolygonsLayer([SAND_FEATURE], resolver, hierarchy=hier, active_level="facies", locked_ids={"f1": "sub_facies"})
+    p1 = MockPainter()
+    layer1.paint(p1, vp)
+    
+    widths1 = [pen.widthF() for pen in p1.drawn_pens]
+    # facies: 2.0, sub_facies: 1.5, micro_facies: 1.0. Order of drawing is thinnest to thickest: ["sub_facies", "facies"]
+    # So width list should contain 1.5 and 2.0. No 1.0 (micro_facies).
+    assert 2.0 in widths1
+    assert 1.5 in widths1
+    assert 1.0 not in widths1
+
+    # Case 2: active_level is "facies", locked to "micro_facies"
+    # We should paint "facies", "sub_facies", and "micro_facies" borders.
+    layer2 = FaciesPolygonsLayer([SAND_FEATURE], resolver, hierarchy=hier, active_level="facies", locked_ids={"f1": "micro_facies"})
+    p2 = MockPainter()
+    layer2.paint(p2, vp)
+    
+    widths2 = [pen.widthF() for pen in p2.drawn_pens]
+    assert 2.0 in widths2
+    assert 1.5 in widths2
+    assert 1.0 in widths2
+
+    # Case 3: active_level is "facies", NOT locked.
+    # We should paint ONLY "facies" borders (2.0).
+    layer3 = FaciesPolygonsLayer([SAND_FEATURE], resolver, hierarchy=hier, active_level="facies", locked_ids={})
+    p3 = MockPainter()
+    layer3.paint(p3, vp)
+    
+    widths3 = [pen.widthF() for pen in p3.drawn_pens]
+    assert 2.0 in widths3
+    assert 1.5 not in widths3
+    assert 1.0 not in widths3
+
+
+
