@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 
 from geoviz_paleo_map.topology import TopologyModel, RingRef
 
@@ -83,11 +82,24 @@ class InsertVertexCmd(EditCommand):
         ref = model.get_feature(self.feature_id)
         if ref is None or self.ring_index >= len(ref.rings):
             return
+        ring = ref.rings[self.ring_index]
+        ids = ring.vertex_ids
+        # Capture old edge before insertion
+        if self.insert_index > 0 and self.insert_index < len(ids):
+            old_v1 = ids[self.insert_index - 1]
+            old_v2 = ids[self.insert_index]
+            old_edge = (min(old_v1, old_v2), max(old_v1, old_v2))
+            fids = model._edge_index.get(old_edge)
+            if fids:
+                fids.discard(self.feature_id)
+                if not fids:
+                    del model._edge_index[old_edge]
+        # Now insert vertex
         v = model.add_vertex(self.x, self.y)
         self._new_vertex_id = v.id
-        ref.rings[self.ring_index].vertex_ids.insert(self.insert_index, v.id)
+        ring.vertex_ids.insert(self.insert_index, v.id)
         # Register new edges
-        ids = ref.rings[self.ring_index].vertex_ids
+        ids = ring.vertex_ids
         if self.insert_index > 0:
             e1 = (min(ids[self.insert_index - 1], v.id), max(ids[self.insert_index - 1], v.id))
             model._edge_index.setdefault(e1, set()).add(self.feature_id)
@@ -103,17 +115,30 @@ class InsertVertexCmd(EditCommand):
         if ref is None or self.ring_index >= len(ref.rings):
             return
         ring = ref.rings[self.ring_index]
-        if self._new_vertex_id in ring.vertex_ids:
-            ring.vertex_ids.remove(self._new_vertex_id)
+        idx = ring.vertex_ids.index(self._new_vertex_id) if self._new_vertex_id in ring.vertex_ids else -1
+        if idx < 0:
+            return
+        # Capture neighbors for edge restoration
+        prev_vid = ring.vertex_ids[idx - 1] if idx > 0 else None
+        next_vid = ring.vertex_ids[idx + 1] if idx < len(ring.vertex_ids) - 1 else None
+        # Remove new edges from index
+        for neighbor in [prev_vid, next_vid]:
+            if neighbor is not None:
+                edge = (min(self._new_vertex_id, neighbor), max(self._new_vertex_id, neighbor))
+                fids = model._edge_index.get(edge)
+                if fids:
+                    fids.discard(self.feature_id)
+                    if not fids:
+                        del model._edge_index[edge]
+        # Restore old edge
+        if prev_vid is not None and next_vid is not None:
+            old_edge = (min(prev_vid, next_vid), max(prev_vid, next_vid))
+            model._edge_index.setdefault(old_edge, set()).add(self.feature_id)
+        # Remove vertex from ring
+        ring.vertex_ids.remove(self._new_vertex_id)
         # Remove vertex from model
         model._vertices.pop(self._new_vertex_id, None)
-        # Clean edge index
-        edges_to_clean = []
-        for edge, fids in model._edge_index.items():
-            if self._new_vertex_id in edge:
-                edges_to_clean.append(edge)
-        for edge in edges_to_clean:
-            del model._edge_index[edge]
+        model._vertex_to_features.pop(self._new_vertex_id, None)
         model.mark_dirty()
 
 
@@ -134,8 +159,28 @@ class DeleteVertexCmd(EditCommand):
         if ref is None or self.ring_index >= len(ref.rings):
             return
         ring = ref.rings[self.ring_index]
-        if self.vertex_id in ring.vertex_ids:
-            ring.vertex_ids.remove(self.vertex_id)
+        idx = ring.vertex_ids.index(self.vertex_id) if self.vertex_id in ring.vertex_ids else -1
+        if idx < 0:
+            return
+        # Capture neighbors for edge cleanup
+        prev_vid = ring.vertex_ids[idx - 1] if idx > 0 else None
+        next_vid = ring.vertex_ids[idx + 1] if idx < len(ring.vertex_ids) - 1 else None
+        # Clean edges connecting deleted vertex to neighbors
+        for neighbor in [prev_vid, next_vid]:
+            if neighbor is not None:
+                edge = (min(self.vertex_id, neighbor), max(self.vertex_id, neighbor))
+                fids = model._edge_index.get(edge)
+                if fids:
+                    fids.discard(self.feature_id)
+                    if not fids:
+                        del model._edge_index[edge]
+        # Restore old edge between neighbors
+        if prev_vid is not None and next_vid is not None:
+            old_edge = (min(prev_vid, next_vid), max(prev_vid, next_vid))
+            model._edge_index.setdefault(old_edge, set()).add(self.feature_id)
+        # Remove vertex
+        ring.vertex_ids.remove(self.vertex_id)
+        model._vertex_to_features.pop(self.vertex_id, None)
         model.mark_dirty()
 
     def undo(self, model: TopologyModel) -> None:
@@ -143,12 +188,30 @@ class DeleteVertexCmd(EditCommand):
         if ref is None or self.ring_index >= len(ref.rings):
             return
         ring = ref.rings[self.ring_index]
-        ring.vertex_ids.insert(self.remove_index, self.vertex_id)
         # Restore vertex if removed
         if self.vertex_id not in model._vertices:
             from geoviz_paleo_map.topology import TopologyVertex
             model._vertices[self.vertex_id] = TopologyVertex(
                 x=self.x, y=self.y, id=self.vertex_id)
+        # Insert back at original position
+        ring.vertex_ids.insert(self.remove_index, self.vertex_id)
+        # Restore edges: remove the neighbor-to-neighbor edge, add edges to restored vertex
+        if self.remove_index > 0 and self.remove_index < len(ring.vertex_ids) - 1:
+            prev_vid = ring.vertex_ids[self.remove_index - 1]
+            next_vid = ring.vertex_ids[self.remove_index + 1]
+            # Remove the edge that was created between neighbors during execute
+            old_edge = (min(prev_vid, next_vid), max(prev_vid, next_vid))
+            fids = model._edge_index.get(old_edge)
+            if fids:
+                fids.discard(self.feature_id)
+                if not fids:
+                    del model._edge_index[old_edge]
+            # Restore edges to deleted vertex
+            for neighbor in [prev_vid, next_vid]:
+                edge = (min(self.vertex_id, neighbor), max(self.vertex_id, neighbor))
+                model._edge_index.setdefault(edge, set()).add(self.feature_id)
+        # Restore vertex_to_features
+        model._vertex_to_features.setdefault(self.vertex_id, set()).add(self.feature_id)
         model.mark_dirty()
 
 
@@ -196,9 +259,14 @@ class CreatePolygonCmd(EditCommand):
                     edges_to_remove.append(edge)
         for edge in edges_to_remove:
             del model._edge_index[edge]
-        # Remove vertices
+        # Remove vertices and their reverse index entries
         for vid in self._created_vertex_ids:
             model._vertices.pop(vid, None)
+            vtf = model._vertex_to_features.get(vid)
+            if vtf:
+                vtf.discard(self.feature_id)
+                if not vtf:
+                    del model._vertex_to_features[vid]
         model._path_cache.pop(self.feature_id, None)
         model._dirty_ids.discard(self.feature_id)
         model.mark_dirty()
@@ -273,21 +341,25 @@ class EditAttributesCmd(EditCommand):
 
     def __init__(self, feature_id: str, old_props: dict, new_props: dict):
         self.feature_id = feature_id
-        self.old_props = old_props
-        self.new_props = new_props
+        self.old_props = dict(old_props)  # full snapshot
+        self.new_props = dict(new_props)
+        self._snapshot: dict | None = None
 
     def execute(self, model: TopologyModel) -> None:
         ref = model.get_feature(self.feature_id)
         if ref is None:
             return
+        self._snapshot = dict(ref.properties)  # snapshot before change
+        ref.properties.clear()
         ref.properties.update(self.new_props)
         model.mark_dirty()
 
     def undo(self, model: TopologyModel) -> None:
         ref = model.get_feature(self.feature_id)
-        if ref is None:
+        if ref is None or self._snapshot is None:
             return
-        ref.properties.update(self.old_props)
+        ref.properties.clear()
+        ref.properties.update(self._snapshot)
         model.mark_dirty()
 
 
