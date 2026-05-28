@@ -29,7 +29,7 @@ dev = [
     "PyInstaller>=6.0",
 ]
 gpu = [
-    "cupy-cuda13x",
+    "cupy-cuda13x; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 
 [build-system]
