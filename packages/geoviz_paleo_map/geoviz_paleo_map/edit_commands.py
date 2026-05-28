@@ -180,7 +180,11 @@ class DeleteVertexCmd(EditCommand):
             model._edge_index.setdefault(old_edge, set()).add(self.feature_id)
         # Remove vertex
         ring.vertex_ids.remove(self.vertex_id)
-        model._vertex_to_features.pop(self.vertex_id, None)
+        vtf = model._vertex_to_features.get(self.vertex_id)
+        if vtf:
+            vtf.discard(self.feature_id)
+            if not vtf:
+                del model._vertex_to_features[self.vertex_id]
         model.mark_dirty()
 
     def undo(self, model: TopologyModel) -> None:
@@ -312,11 +316,9 @@ class DeletePolygonCmd(EditCommand):
         model.mark_dirty()
 
     def undo(self, model: TopologyModel) -> None:
-        # Recreate vertices
-        for ring_coords in self.ring_coords:
-            for x, y in ring_coords:
-                model.add_vertex(x, y)
-        # Recreate feature
+        # Vertices were NOT removed by execute — they still exist.
+        # Just rebuild the feature referencing the existing vertex IDs.
+
         rings = []
         idx = 0
         for ring_coords in self.ring_coords:

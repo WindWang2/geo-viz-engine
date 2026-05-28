@@ -516,12 +516,12 @@ class PaleoMapCanvas(QWidget):
     def keyPressEvent(self, event) -> None:
         from PySide6.QtGui import QKeySequence
         if event.matches(QKeySequence.StandardKey.Undo):
-            if self._undo_mgr.undo(self._topology_model):
+            if self._topology_model and self._undo_mgr.undo(self._topology_model):
                 self._rebuild_topology_paths()
                 self.update()
             return
         if event.matches(QKeySequence.StandardKey.Redo):
-            if self._redo():
+            if self._topology_model and self._redo():
                 self._rebuild_topology_paths()
                 self.update()
             return
