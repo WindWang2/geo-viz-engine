@@ -167,10 +167,7 @@ class TopologyModel:
                     coords.append(ring_coords)
             if not coords:
                 continue
-            if len(coords) == 1:
-                geometry = {"type": "Polygon", "coordinates": coords}
-            else:
-                geometry = {"type": "MultiPolygon", "coordinates": [coords]}
+            geometry = {"type": "Polygon", "coordinates": coords}
             feat = {
                 "type": "Feature",
                 "properties": dict(ref.properties),
