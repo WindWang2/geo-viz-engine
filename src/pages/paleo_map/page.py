@@ -109,6 +109,30 @@ class PaleoMapPage(QWidget):
         tb_layout.addWidget(self._period_combo)
         tb_layout.addWidget(self._compare_btn)
 
+        self._edit_btn = QPushButton("编辑模式")
+        self._edit_btn.setCheckable(True)
+        self._edit_btn.setToolTip("切换编辑模式 (E)")
+        self._edit_btn.setStyleSheet(
+            "QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;"
+            "border-radius:4px;padding:6px 12px;}"
+            "QPushButton:hover{background:#e2e8f0;}"
+            "QPushButton:checked{background:#dbeafe;color:#1d4ed8;border-color:#93c5fd;}"
+        )
+        self._edit_btn.clicked.connect(self._toggle_edit_mode)
+
+        self._save_btn = QPushButton("保存")
+        self._save_btn.setToolTip("保存编辑 (Ctrl+S)")
+        self._save_btn.setStyleSheet(
+            "QPushButton{background:#059669;color:#fff;border:none;border-radius:4px;"
+            "padding:6px 14px;font-weight:600;}"
+            "QPushButton:hover{background:#047857;}"
+        )
+        self._save_btn.clicked.connect(self._on_save_clicked)
+        self._save_btn.setVisible(False)
+
+        tb_layout.addWidget(self._edit_btn)
+        tb_layout.addWidget(self._save_btn)
+
         tb_layout.addStretch()
         tb_layout.addWidget(export_btn)
 
@@ -119,6 +143,8 @@ class PaleoMapPage(QWidget):
         self._map_layout.setContentsMargins(0, 0, 0, 0)
         self.map_view = PaleoMapCanvas(parent=self)
         self._map_layout.addWidget(self.map_view)
+        self.map_view.edit_mode_changed.connect(self._on_edit_mode_changed)
+        self.map_view.selection_changed.connect(self._on_selection_changed)
         map_layout.addLayout(self._map_layout, 1)
 
         self.stack.addWidget(self.map_container)
@@ -215,6 +241,32 @@ class PaleoMapPage(QWidget):
         self.map_view = PaleoMapCanvas(parent=self)
         self._map_layout.addWidget(self.map_view)
         self._on_period_changed(self._current_period)
+
+    # --- Edit Mode ---
+
+    def _toggle_edit_mode(self, checked: bool) -> None:
+        self.map_view.edit_mode = checked
+        self._save_btn.setVisible(checked)
+
+    def _on_save_clicked(self) -> None:
+        model = self.map_view.topology_model
+        if model is None:
+            return
+        self._save_as(model)
+
+    def _save_as(self, model) -> None:
+        from geoviz_paleo_map.save_export import save_geojson
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存 GeoJSON", "paleo_edited.geojson", "GeoJSON (*.geojson *.json)")
+        if path:
+            save_geojson(model, path)
+            QMessageBox.information(self, "保存成功", f"已保存到: {path}")
+
+    def _on_edit_mode_changed(self, active: bool) -> None:
+        self._edit_btn.setChecked(active)
+
+    def _on_selection_changed(self, feature_id: str) -> None:
+        pass  # Future: update properties panel
 
     # --- File Loading ---
 
