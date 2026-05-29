@@ -609,7 +609,7 @@ class SeismicView(QWidget):
         bar.addWidget(QLabel(" 色标:"))
         bar.addWidget(self._cmap_combo)
         self._attr_combo = QComboBox()
-        self._attr_combo.addItems(["振幅", "包络"])
+        self._attr_combo.addItems(["振幅", "包络", "瞬时相位", "瞬时频率", "RMS振幅", "甜点", "相对阻抗"])
         self._attr_combo.currentIndexChanged.connect(self._on_attr_changed)
 
         bar.addWidget(QLabel(" 裁剪:"))
@@ -884,10 +884,27 @@ class SeismicView(QWidget):
 
     def _apply_attr(self, data: np.ndarray) -> np.ndarray:
         """Apply the current attribute mode to slice data."""
-        if self._attr_combo.currentIndex() == 1:
-            from .attributes import compute_envelope
-            return compute_envelope(data, axis=0)
-        return data
+        idx = self._attr_combo.currentIndex()
+        if idx == 0:
+            return data
+        from . import attributes as _attr
+        _FN = [
+            None,                          # 0: amplitude (raw)
+            _attr.compute_envelope,        # 1
+            _attr.compute_instantaneous_phase,  # 2
+            _attr.compute_instantaneous_frequency,  # 3
+            _attr.compute_rms_amplitude,   # 4
+            _attr.compute_sweetness,       # 5
+            _attr.compute_relative_impedance,  # 6
+        ]
+        fn = _FN[idx] if idx < len(_FN) else None
+        if fn is None:
+            return data
+        kwargs = {}
+        if fn in (_attr.compute_instantaneous_frequency, _attr.compute_sweetness):
+            si = self._meta.sample_interval if self._meta else 1.0
+            kwargs["sample_interval"] = si / 1000.0  # ms → s
+        return fn(data, axis=0, **kwargs)
 
     def _export_slice(self, slice_type: str):
         """Export the current slice data or rendered image."""
@@ -1071,8 +1088,6 @@ class SeismicView(QWidget):
 
     def _apply_current_attr(self):
         """Re-render all cached slice data with the current attribute mode."""
-        from .attributes import compute_envelope
-
         attr_mode = self._attr_combo.currentIndex()
         for st in ("inline", "crossline", "time"):
             raw = self._slice_data.get(st)
@@ -1091,8 +1106,8 @@ class SeismicView(QWidget):
                 info = existing_info
 
             display = raw
-            if attr_mode == 1:
-                display = compute_envelope(raw, axis=0)
+            if attr_mode != 0:
+                display = self._apply_attr(raw)
 
             pw.update_profile(display, slice_info=info)
 
