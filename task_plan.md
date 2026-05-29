@@ -42,15 +42,15 @@ Phase 6 (Sub-phase 3 — 新建 geoviz-well-tie 包)
 - [x] 新增 tests（7 个测试，全部通过）
 - **Status:** complete
 
-### Phase 6: Phase 6 Sub-phase 3 — 新建 geoviz-well-tie 包
-- [ ] Package scaffold（pyproject.toml, __init__.py）
-- [ ] 数据模型（WellTieData, SyntheticSeismogram, Wavelet）
-- [ ] 反射系数计算（sonic × density → impedance → reflectivity）
-- [ ] 合成地震记录生成（reflectivity ⊛ Ricker wavelet）
-- [ ] 井震标定可视化面板（synthetic vs seismic 对比显示）
-- [ ] 与 geoviz-seismic / geoviz-well-log 集成
-- [ ] 新增 tests
-- **Status:** pending
+### Phase 6: Phase 6 Sub-phase 3 — 新建 geoviz-well-tie 包 ✅
+- [x] Package scaffold（pyproject.toml, __init__.py, README.md）
+- [x] Ricker + Ormsby 子波生成（wavelet.py）
+- [x] 反射系数计算（sonic × density → impedance → reflectivity, synthetic.py）
+- [x] 合成地震记录生成（reflectivity ⊛ wavelet, synthetic.py）
+- [x] 井震标定（WellTieCalibration: T-D 转换, sonic 积分, 深度→TWT 重采样, calibration.py）
+- [x] 新增 tests（15 个测试，全部通过）
+- [ ] 与 geoviz-seismic / geoviz-well-log 集成（可视化面板 — 后续 phase）
+- **Status:** complete（核心库完成，可视化集成留待后续）
 
 ### Phase 7: Phase 6 Sub-phase 4 — 高级可视化
 - [ ] RGB 属性融合（三频段/三属性 → R/G/B）
@@ -61,7 +61,7 @@ Phase 6 (Sub-phase 3 — 新建 geoviz-well-tie 包)
 ## Key Questions
 1. ~~Phase 6 优先做地震属性分析还是井震结合？~~ → 先做属性计算（Sub-phase 1），再做井震结合（Sub-phase 3）
 2. ~~Phase 6 是否需要新的独立 package？~~ → 属性分析扩展现有包，井震结合新建 `geoviz-well-tie`
-3. 是否引入 `bruges` 库？（Ricker/Ormsby 子波生成）→ 待定，可选
+3. ~~是否引入 `bruges` 库？~~ → 不引入，自行实现 Ricker/Ormsby，纯 NumPy，零额外依赖
 4. Sub-phase 划分是否合理？→ 待用户确认
 
 ## Decisions Made
