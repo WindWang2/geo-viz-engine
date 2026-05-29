@@ -38,7 +38,7 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 │  │ 🗺   │  MapPage     QPainter (geoviz-map)        │    │
 │  │ 🌍   │  PaleoMap    QPainter (geoviz-paleo-map)  │    │
 │  │ ⛏   │  WellLogPage ECharts + WebEngine         │    │
-│  │ ⛓   │  CrossWell   Multi-ECharts + Sync        │    │
+│  │ ⛓   │  CrossWell   QPainter (geoviz-cross-well)│    │
 │  │ 🧊   │  SeismicPage pyqtgraph OpenGL            │    │
 │  │ 📁   │  DataPage    QTableWidget + 文件对话框     │    │
 │  │ 🛠   │  ToolsPage   独立小工具集                 │    │
@@ -115,14 +115,16 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 - 6 种岩性 SVG 花纹（砂岩、粉砂岩、泥岩、页岩、灰岩、白云岩）— GB/T 附录M
 - 10 种沉积相 SVG 纹理（潮坪、陆棚、砂坪等）— GB/T 附录O
 
-### 连井对比 — 地层与构造剖面
+### 连井对比 — 地层对比与相关分析
 
+- **独立渲染引擎**：底层 `geoviz-cross-well` 包可脱离主应用独立使用，支持 `pip install` 后在任何 PySide6 项目中集成。
+- **层位顶面数据库**：支持从 CSV 加载层位顶面数据，以虚线标注并自动配色。可交互调整深度。
+- **手动拾取**：在测井曲线上点击放置地层拾取点，Shift+点击跨井连接拾取，自动绘制贝塞尔相关连线。
+- **撤销/重做**：完整的拾取操作撤销栈（Ctrl+Z / Ctrl+Y），支持拾取放置、连接、删除等操作。
+- **DTW 自动对比**：基于动态时间规整（Dynamic Time Warping）的自动层位对比，以虚线"幽灵拾取"展示建议，点击接受或右键拒绝。
+- **地震校深**：加载 checkshot CSV，支持深度-时间域转换与双轴显示。
 - **智能相连通**：基于层序地层学骨架（Sequence/Member），自动跨井追踪并绘制彩色沉积相连通多边形。
-- **手动关联交互**：支持用户直接在 GUI 上点击两口井的特定层位，实现自定义"Click to Link"连通。
 - **全画幅视口同步**：多口井的滚动与缩放实现毫秒级锁步（Lock-step）联动。
-- **双重对齐模式**：
-  - **地层拉平**：选择任意层序顶面作为基准线，动态计算深度补偿，实现水平拉平展示。
-  - **海拔 (TVDSS) 对齐**：自动提取补心高，按绝对海拔真实还原构造起伏。
 - **超宽 SVG 导出**：支持一键导出高清 SVG 矢量图长卷。
 
 ### 工具箱
@@ -164,7 +166,7 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 | Phase 2 | ✅ 已完成 | 多井对比、相变连通模型、地层拉平、TVDSS对齐、全画幅SVG导出、Calamine解析加速 |
 | Phase 3 | ✅ 已完成 | 测井引擎独立化、轨道管理器、矢量导出、AI预测集成、测井选择器 |
 | Phase 4 | ✅ 已完成 | 地震可视化独立化、3D体渲染+2D剖面、SEGY按需切片、层位解析 |
-| Phase 5 | 📋 待规划 | LAS 上传与解析、层序地层分析工具、交互编辑连线 |
+| Phase 5 | 🔄 进行中 | 连井对比拾取工作流（层位顶面、手动拾取+撤销、DTW自动对比、地震校深） |
 | Phase 6 | 📋 待规划 | 地震属性分析、井震结合 |
 
 ---
@@ -253,6 +255,15 @@ geo-viz-engine/
 │       │   ├── zoom_pan.py        # 拖拽 + 滚轮缩放
 │       │   ├── style.py           # FaciesStyleResolver
 │       │   └── layers/            # 8 个渲染层
+│       └── pyproject.toml
+│   └── geoviz_cross_well/         # 独立连井对比包 (pip installable)
+│       ├── geoviz_cross_well/
+│       │   ├── canvas.py          # CrossWellCanvas + PickingOverlay
+│       │   ├── tops_model.py      # FormationTopsModel (CSV I/O)
+│       │   ├── picks_model.py     # HorizonPicksModel + UndoManager
+│       │   ├── correlation_layer.py # CorrelationLayer (bezier ties)
+│       │   ├── dtw_engine.py      # DTWEngine (banded DTW)
+│       │   └── seismic_tie.py     # SeismicTie (checkshot T-D)
 │       └── pyproject.toml
 ├── src/                           # 主应用代码
 │   ├── main.py                    # 入口 (QApplication)
