@@ -20,6 +20,7 @@ dependencies = [
     "geoviz-seismic",
     "geoviz-map",
     "geoviz-paleo-map",
+    "geoviz-cross-well",
 ]
 
 [project.optional-dependencies]
@@ -45,6 +46,7 @@ members = [
     "packages/geoviz_seismic",
     "packages/geoviz_map",
     "packages/geoviz_paleo_map",
+    "packages/geoviz_cross_well",
 ]
 
 [tool.uv.sources]
@@ -52,6 +54,7 @@ geoviz-well-log = { workspace = true }
 geoviz-seismic = { workspace = true }
 geoviz-map = { workspace = true }
 geoviz-paleo-map = { workspace = true }
+geoviz-cross-well = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

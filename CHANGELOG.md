@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-29
+
+### Added
+- **连井对比拾取工作流（`geoviz-cross-well` 包）**：新增独立 `geoviz-cross-well` 包，在现有 QPainter 连井渲染器上叠加专业地层对比工作流。包可独立 pip install 使用。
+  - `FormationTopsModel`：层位顶面数据库，支持 CSV 加载/保存，自动地质调色板配色，虚线标注 + 标签。
+  - `HorizonPicksModel` + `PicksUndoManager`：手动地层拾取与完整的两栈撤销/重做（Ctrl+Z / Ctrl+Y）。支持拾取放置、跨井连接、深度调整、删除等操作。
+  - `CorrelationLayer`：贝塞尔曲线相关连线渲染。手动拾取为实线，DTW 建议为虚线"幽灵拾取"。
+  - `DTWEngine`：基于 Sakoe-Chiba 带约束的动态时间规整（DTW）自动层位对比，输出归一化代价与置信度。
+  - `SeismicTie`：checkshot CSV 加载与深度-时间（T-D）插值，支持双轴显示。
+  - `CrossWellCanvas`：组合 `CrossWellWidget` + `PickingOverlay` + 事件过滤器（拾取/导航模式路由）。
+- **CrossWellPage 工具栏重构**：分组工具栏（数据/视图/对比/导出），新增层位导入、域切换（MD/TWT）、状态栏（深度、井数、拾取模式）、富空状态引导页。
+- **26 条新增测试**：覆盖层位模型 CSV 往返、拾取模型撤销/重做/JSON 序列化、DTW 引擎（相同/偏移/短/空曲线）、地震校深插值。
+
 ## [0.7.0] - 2026-05-29
 
 ### Added
