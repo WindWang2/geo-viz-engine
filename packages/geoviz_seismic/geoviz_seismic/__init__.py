@@ -8,7 +8,7 @@ Works in any PySide6 project: ``pip install geoviz-seismic``.
 
 from .cache import SeismicCache
 from .colormap import ColormapManager
-from .horizon import HorizonParser, HorizonAxes
+from .horizon import HorizonParser, HorizonAxes, extract_along_horizon
 from .loader import SeismicLoader
 from .models import SeismicVolumeMeta, SliceInfo, HorizonData
 from .profile_vd import ProfileVD
@@ -33,4 +33,5 @@ __all__ = [
     "SeismicVolumeMeta",
     "SliceInfo",
     "HorizonData",
+    "extract_along_horizon",
 ]
