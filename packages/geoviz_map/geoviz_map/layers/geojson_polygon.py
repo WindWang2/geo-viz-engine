@@ -13,6 +13,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
 from geoviz_map.layers.base import MapLayer
 from geoviz_map.projection import lnglat_to_world
+from geoviz_map.screen_path_cache import ScreenPathCache
 from geoviz_map.viewport import MapViewport
 
 
@@ -28,9 +29,9 @@ class GeoJsonPolygonLayer(MapLayer):
         self.fill_color = QColor(fill_color)
         self.border_color = QColor(border_color)
         self.border_width = border_width
-        # Per-feature: (world_path, world_bbox)
-        self._features: list[tuple[QPainterPath, tuple[float, float, float, float]]] = []
-        for feat in geojson.get("features", []):
+        self._features: list[tuple[str, QPainterPath, tuple[float, float, float, float]]] = []
+        self._screen_cache = ScreenPathCache()
+        for idx, feat in enumerate(geojson.get("features", [])):
             if feature_filter is not None and not feature_filter(feat.get("properties", {})):
                 continue
             geom = feat.get("geometry") or {}
@@ -44,7 +45,7 @@ class GeoJsonPolygonLayer(MapLayer):
             for poly in rings:
                 path, bbox = self._build_path(poly)
                 if path is not None:
-                    self._features.append((path, bbox))
+                    self._features.append((f"geojson_{idx}", path, bbox))
 
     @staticmethod
     def _build_path(poly: list[list[list[float]]]) -> tuple[QPainterPath | None,
@@ -85,29 +86,19 @@ class GeoJsonPolygonLayer(MapLayer):
 
     def paint(self, painter: QPainter, viewport: MapViewport) -> None:
         vp_bbox = viewport.world_bbox()
-        s = viewport.scale
-        cx, cy = viewport.center_world
-        ox = viewport.width / 2
-        oy = viewport.height / 2
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.save()
-        # Build a transform: world (x,y) → screen
-        # sx = (x - cx) * s + ox
-        # sy = (cy - y) * s + oy   (y flipped)
-        # Equivalent: translate(ox, oy); scale(s, -s); translate(-cx, -cy)
-        painter.translate(ox, oy)
-        painter.scale(s, -s)
-        painter.translate(-cx, -cy)
 
         pen = QPen(self.border_color, self.border_width)
-        pen.setCosmetic(True)  # width stays constant in screen pixels
+        pen.setCosmetic(True)
         painter.setPen(pen)
         painter.setBrush(self.fill_color)
 
-        for path, bbox in self._features:
+        for feat_id, path, bbox in self._features:
             if not self._bbox_overlaps(vp_bbox, bbox):
                 continue
-            painter.drawPath(path)
+            screen_path = self._screen_cache.get_or_build(feat_id, path, viewport)
+            painter.drawPath(screen_path)
 
         painter.restore()

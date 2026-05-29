@@ -6,11 +6,14 @@ from geoviz_paleo_map.locked_panel import LockedObjectsPanel
 from geoviz_paleo_map.topology import TopologyModel, TopologyBuilder
 from geoviz_paleo_map.edit_engine import EditEngine
 from geoviz_paleo_map.edit_commands import UndoManager
+from geoviz_paleo_map.paint_scheduler import PaintScheduler, LayerPixmapCache
+from geoviz_paleo_map.screen_path_cache import ScreenPathCache
 
 __all__ = [
     "PaleoMapCanvas", "FaciesHierarchy", "FloatingScaleSlider",
     "LockedObjectsPanel", "TopologyModel", "TopologyBuilder",
     "EditEngine", "UndoManager",
+    "PaintScheduler", "LayerPixmapCache", "ScreenPathCache",
 ]
 
 

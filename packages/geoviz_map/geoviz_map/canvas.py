@@ -12,6 +12,7 @@ from geoviz_map.layers.graticule import GraticuleLayer
 from geoviz_map.layers.reference import ReferenceLabelsLayer
 from geoviz_map.layers.wells import WellsLayer
 from geoviz_map.models import ReferenceLabel, WellMarker
+from geoviz_map.paint_scheduler import PaintScheduler, LayerPixmapCache
 from geoviz_map.viewport import MapViewport
 from geoviz_map.zoom_pan import ZoomPanHandler
 
@@ -67,12 +68,15 @@ class MapCanvas(QWidget):
             self._wells_layer,
         ]
 
+        self._scheduler = PaintScheduler(self)
+        self._layer_caches = [LayerPixmapCache(layer) for layer in self._layers]
+
     # Painting -----------------------------------------------------------
     def paintEvent(self, event):
         painter = QPainter(self)
         try:
-            for layer in self._layers:
-                layer.paint(painter, self._viewport)
+            for cache in self._layer_caches:
+                cache.paint(painter, self._viewport)
         finally:
             painter.end()
 
@@ -91,14 +95,14 @@ class MapCanvas(QWidget):
         pos = QPointF(event.position())
         if self._zoom_pan.is_dragging():
             self._zoom_pan.update_drag(pos)
-            self.update()
+            self._scheduler.schedule()
         else:
             # Hover hit-test
             name = self._wells_layer.hit_test(pos, self._viewport)
             if name != self._wells_layer.hovered_name:
                 self._wells_layer.set_hovered(name)
                 self.well_hovered.emit(name or "")
-                self.update()
+                self._scheduler.schedule()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -122,4 +126,4 @@ class MapCanvas(QWidget):
             return
         # Multiply delta by 0.15 to make scrolling zoom smooth and precise
         self._zoom_pan.wheel_zoom(QPointF(event.position()), delta_steps=delta * 0.15)
-        self.update()
+        self._scheduler.schedule()
