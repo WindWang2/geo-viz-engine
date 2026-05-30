@@ -1,5 +1,6 @@
 from PySide6.QtGui import QBrush, QColor
 from geoviz_paleo_map.models import FaciesStyle
+from geoviz_paleo_map.style import FaciesStyleResolver
 from geoviz_well_log.renderer.pattern_engine import PatternEngine
 
 
@@ -33,3 +34,26 @@ def test_get_facies_brush_caches_by_pattern_and_color():
     a = engine.get_facies_brush("shoreface", color)
     b = engine.get_facies_brush("shoreface", color)
     assert a is b
+
+
+def test_resolver_returns_pattern_id_for_known_facies(qtbot):
+    engine = PatternEngine()
+    resolver = FaciesStyleResolver(engine)
+    style = resolver.resolve("滨岸")
+    assert style.pattern_id == "shoreface"
+
+
+def test_resolver_returns_none_pattern_id_for_unknown_facies(qtbot):
+    engine = PatternEngine()
+    resolver = FaciesStyleResolver(engine)
+    style = resolver.resolve("无此相")
+    assert style.pattern_id is None
+
+
+def test_resolver_facies_brush_is_composite(qtbot):
+    """Facies with pattern should return a composite brush (not solid color)."""
+    engine = PatternEngine()
+    resolver = FaciesStyleResolver(engine)
+    style = resolver.resolve("三角洲")
+    assert style.pattern_id == "delta"
+    assert isinstance(style.brush, QBrush)
