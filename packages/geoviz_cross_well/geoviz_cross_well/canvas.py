@@ -60,6 +60,8 @@ class PickingOverlay(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self._paint_tops(painter)
         self._paint_ties(painter)
+        if self._depth_domain == "TWT" and self._seismic_tie is not None:
+            self._paint_twt_axis(painter)
         painter.end()
 
     def _paint_tops(self, painter: QPainter):
@@ -96,6 +98,39 @@ class PickingOverlay(QWidget):
             self._selected_pick_id,
             self._hover_pick_id,
         )
+
+    def _paint_twt_axis(self, painter: QPainter):
+        """Render TWT axis labels alongside the leftmost canvas depth axis."""
+        overlay = self._widget._overlay
+        if not self._widget._canvases:
+            return
+        first_canvas = self._widget._canvases[0]
+        if not self._seismic_tie.well_names():
+            return
+        well = self._seismic_tie.well_names()[0]
+
+        font = QFont()
+        font.setPointSize(7)
+        painter.setFont(font)
+        twt_color = QColor(0, 100, 180)
+        painter.setPen(QPen(twt_color, 1.0))
+
+        canvas_left = overlay._canvas_left(first_canvas)
+        axis_x = canvas_left - 42
+
+        depth_top = CrossWellWidget._y_to_depth(first_canvas, 0)
+        depth_bot = CrossWellWidget._y_to_depth(first_canvas, first_canvas.height())
+        if depth_top is None or depth_bot is None:
+            return
+
+        depth_range = np.linspace(depth_top, depth_bot, 10)
+        twt_values = self._seismic_tie.table_for_well(well).calibration.depth_to_twt(depth_range)
+
+        for depth, twt in zip(depth_range, twt_values):
+            y = overlay.depth_to_y(first_canvas, depth)
+            painter.drawText(QPointF(axis_x, y + 3), f"{twt:.0f}")
+
+        painter.drawText(QPointF(axis_x, overlay.depth_to_y(first_canvas, depth_top) - 10), "TWT(ms)")
 
 
 class _PickEventFilter(QObject):
@@ -191,6 +226,13 @@ class CrossWellCanvas(QWidget):
 
     def _handle_pick_click(self, event) -> bool:
         pos = event.pos()
+
+        # Check if clicking on an existing DTW ghost pick → accept it
+        existing = self._pick_at(pos)
+        if existing is not None and existing.source == "dtw":
+            self._picks_model.accept_dtw_pick(existing.pick_id)
+            return True
+
         canvas, well_idx = self._canvas_at(pos)
         if canvas is None:
             return False

@@ -28,7 +28,12 @@
 - Side benefit: `interpolate_twt` / `interpolate_depth` now support array inputs
 - TDD: 4 red → all green + 5 regression = 9 new tests
 - Dependency: cross-well now depends on well-tie (pure NumPy, zero Qt)
-- 589 passed, 0 failed
+
+#### Phase 2 Legacy: DTW Ghost Picks + Dual-Axis (DONE ✅)
+- `_handle_pick_click`: left-click on DTW ghost pick now calls `accept_dtw_pick()` (source → manual)
+- `_paint_twt_axis`: PickingOverlay renders TWT scale labels when domain="TWT" and seismic_tie loaded
+- 8 new tests (DTW accept model 4 + dual-axis 4), all green
+- 43 cross-well tests total, 589 full suite
 
 ## Test Results History
 | Date | Tests | Status |
@@ -51,8 +56,7 @@
 | What have I done? | A7 dedup — 1 file changed, 9 new tests, 589 green |
 
 ## Pending Items
-- Commit A7 dedup work
-- Phase 2 遗留项：DTW ghost picks UX、SeismicTie 双轴显示
+- Commit Phase 2 legacy work
 
 ## Errors Encountered
 | Error | Resolution |

@@ -112,6 +112,21 @@
 geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
 ```
 
+## Phase 2 Legacy: DTW Ghost Picks + Dual-Axis
+
+### DTW Ghost Pick Accept
+- Left-click on DTW ghost pick → `_pick_at()` finds it → `accept_dtw_pick()` changes source to "manual"
+- Right-click on DTW ghost pick → `reject_dtw_pick()` deletes it (already worked)
+- The `_pick_at()` method searches picks by position proximity (5.0 depth tolerance)
+- Placement: checked before `_canvas_at()` so DTW picks anywhere on the canvas are caught first
+
+### TWT Dual-Axis Rendering
+- `PickingOverlay._paint_twt_axis()` renders TWT labels when `_depth_domain == "TWT"` and `_seismic_tie` loaded
+- Uses `seismic_tie.table_for_well(well).calibration.depth_to_twt()` for batch array conversion
+- 10 evenly spaced ticks from top to bottom of leftmost canvas
+- Labels rendered at canvas_left - 42 px, header "TWT(ms)" above
+- Only renders when both conditions met (domain=TWT AND seismic_tie has data)
+
 ## Resources
 - SEG Wiki 瞬时属性：https://wiki.seg.org/wiki/Instantaneous_attributes_-_book
 - SEG Wiki 甜点属性：https://wiki.seg.org/wiki/Sweetness
