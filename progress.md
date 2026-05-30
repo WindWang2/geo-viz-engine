@@ -1,6 +1,6 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–8 COMPLETE, Legacy cleanup IN PROGRESS
+## Project Status: Phase 1–10 COMPLETE, Refactor COMPLETE, Awaiting next phase
 
 ### Session: 2026-05-30 (Phase 8 + Legacy)
 
@@ -48,6 +48,7 @@
 | 2026-05-30 (Phase 9) | 600 passed | ✅ |
 | 2026-05-30 (Phase 9b) | 601 passed | ✅ |
 | 2026-05-31 (Phase 10) | 617 passed | ✅ |
+| 2026-05-31 (Refactor) | 617 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
@@ -57,6 +58,20 @@
 | What's the goal? | Maintain 617 green tests; plan and execute next phase on user direction |
 | What have I learned? | PatternEngine composite brush pipeline; QSvgGenerator limitations (raster patterns); spec has 16 facies types (not 24); CMYK mapping viable for small palettes; PaintScheduler needs RuntimeError guard on deleted widgets; GPU coherence offload pattern (CuPy per-chunk) |
 | What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 9b GPU + Phase 10 PaleoMap — 617 green, all pushed |
+
+### Session: 2026-05-31 (Refactor — seismic_view.py split)
+
+#### Refactor Completed
+- `seismic_view.py`: 1471 → 1283 lines (-188)
+- New `workers.py`: SyntheticWorker + SegyLoadWorker + generate_synthetic
+- New `colorbar_widget.py`: ColorbarWidget standalone
+- New `dialogs/crossplot.py`: CrossplotDialog + CrossplotCanvas
+- New `dialogs/horizon_manager.py`: HorizonManagerDialog
+- Removed unused Qt imports (QPainter, QColor, QLinearGradient, QThread, Signal)
+- 617 tests passed, 3 skipped
+
+#### Commits
+- `3e3b5ce6` — refactor: split seismic_view.py into focused modules
 
 #### Phase 9: Coherence (C3 eigenstructure) (DONE ✅)
 - `compute_coherence_c3` — C3 eigenstructure coherence via power iteration

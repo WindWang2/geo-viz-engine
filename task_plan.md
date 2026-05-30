@@ -6,7 +6,7 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 ## Current State
 - **Branch:** main (synced with origin)
 - **Tests:** 617 passed, 3 skipped
-- **Latest commit:** `8ca37621 feat: export new public APIs (export_vector_svg, export_professional_figure)`
+- **Latest commit:** `3e3b5ce6 refactor: split seismic_view.py into focused modules`
 - **Active phase:** Phase 11 — Awaiting user direction
 - **Design spec:** `docs/superpowers/specs/2026-05-30-paleo-map-texture-export-design.md`
 - **Implementation plan:** `docs/superpowers/plans/2026-05-30-paleo-map-texture-export.md`
@@ -48,6 +48,7 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 | Phase 9 | Coherence (C3 eigenstructure) 相干属性 | ✅ — `compute_coherence_c3` + GPU加速 + 12 tests |
 | Phase 9b | GPU Acceleration for Coherence | ✅ — CuPy offload, 1.5-1.9x speedup, numerically identical |
 | Phase 10 | PaleoMap 纹理填充渲染 + 专业图件导出 | ✅ — 13 图案 SVG + PatternEngine 扩展 + 矢量 SVG 导出 + 出版级图框 (617 tests) |
+| Refactor | seismic_view.py 拆分 | ✅ — workers/colorbar/dialogs 提取，1471→1283 行，617 tests |
 
 ## Roadmap: Future Phases
 
@@ -91,3 +92,4 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 - cross-well 现依赖 well-tie（纯 NumPy，零 Qt）
 - VERSION (0.7.0) 与 CHANGELOG (0.10.0) 不同步 — 用户有意为之
 - Phase 10 shipped: `8ca37621` — 13 facies patterns + vector SVG export + professional figure export
+- Refactor shipped: `3e3b5ce6` — seismic_view.py split into workers/colorbar/dialogs modules
