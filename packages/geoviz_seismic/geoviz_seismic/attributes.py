@@ -158,6 +158,134 @@ def compute_spectral_decomposition(
     return result
 
 
+def _power_iteration_c3(traces, n_iter: int = 10):
+    """Power iteration for λ_max / trace(C) coherence.
+
+    Works with both NumPy and CuPy arrays — dispatches via the array's
+    module (traces.__class__).
+    """
+    xp = traces.__class__.__module__.split(".")[0]
+    if xp == "cupy":
+        import cupy as cp
+
+        xp = cp
+    else:
+        xp = np
+
+    v = xp.ones((traces.shape[0], traces.shape[1], 1), dtype=xp.float32)
+    Tt = traces.transpose(0, 2, 1)
+    for _ in range(n_iter):
+        v = traces @ (Tt @ v)
+        v = v / xp.maximum(xp.linalg.norm(v, axis=-2, keepdims=True), 1e-10)
+
+    lambda_max = xp.sum((Tt @ v) ** 2, axis=(1, 2))
+    total_energy = xp.sum(traces ** 2, axis=(1, 2))
+    return xp.where(total_energy > 0, lambda_max / total_energy, 1.0)
+
+
+def compute_coherence_c3(
+    data: np.ndarray,
+    win_il: int = 5,
+    win_xl: int = 5,
+    win_t: int = 5,
+    use_gpu: bool = False,
+) -> np.ndarray:
+    """C3 eigenstructure coherence (Marfurt et al., 1998).
+
+    Computes coherence from the ratio of the largest eigenvalue to the
+    trace of the covariance matrix built from a 3-D analysis window.
+    Uses power iteration for efficiency — avoids full eigendecomposition
+    and never materialises the full covariance matrix.
+
+    Args:
+        data: 3-D seismic amplitude array (n_il, n_xl, n_samples), or 2-D
+            (n_xl, n_samples) treated as a single inline.
+        win_il: Half-window in inline direction (total = 2*win_il+1).
+        win_xl: Half-window in crossline direction (total = 2*win_xl+1).
+        win_t: Half-window in time direction (total = 2*win_t+1).
+        use_gpu: If True and CuPy is available, offloads the power-iteration
+            step to the GPU per-chunk for significant speed-up on large
+            volumes.
+
+    Returns:
+        Coherence array (same shape as input) with values in [0, 1].
+    """
+    from numpy.lib.stride_tricks import sliding_window_view
+
+    try:
+        import cupy as cp
+
+        _has_cupy = True
+    except Exception:
+        _has_cupy = False
+
+    gpu_active = use_gpu and _has_cupy
+
+    data = np.asarray(data, dtype=np.float32)
+    was_2d = data.ndim == 2
+    if was_2d:
+        data = data[np.newaxis, :, :]
+
+    n_il, n_xl, n_t = data.shape
+    result = np.ones(data.shape, dtype=np.float32)
+
+    wil = min(2 * win_il + 1, n_il)
+    wxl = min(2 * win_xl + 1, n_xl)
+    wt = min(2 * win_t + 1, n_t)
+    # Force odd window sizes for symmetric padding
+    if wil % 2 == 0:
+        wil -= 1
+    if wxl % 2 == 0:
+        wxl -= 1
+    if wt % 2 == 0:
+        wt -= 1
+    n_traces = wil * wxl
+
+    # Pad with reflect mode at boundaries
+    pad_il, pad_xl, pad_t = (wil - 1) // 2, (wxl - 1) // 2, (wt - 1) // 2
+    padded = np.pad(
+        data,
+        ((pad_il, pad_il), (pad_xl, pad_xl), (pad_t, pad_t)),
+        mode="reflect",
+    )
+
+    # Adaptive chunk size — target ~100 MB for traces array
+    max_bytes = 100_000_000
+    positions = max(1, max_bytes // (n_traces * wt * 4))
+    chunk_xl = max(1, min(n_xl, positions // n_t))
+
+    n_power_iter = 10
+
+    for il in range(n_il):
+        strip = padded[il : il + wil, :, :]
+
+        for xl0 in range(0, n_xl, chunk_xl):
+            xl1 = min(xl0 + chunk_xl, n_xl)
+            cxl = xl1 - xl0
+
+            xl_end = xl0 + cxl + wxl - 1
+            chunk = strip[:, xl0:xl_end, :]
+
+            # sliding_window_view: (wil, cxl, n_t, wxl, wt)
+            swv = sliding_window_view(chunk, (wxl, wt), axis=(1, 2))
+            traces = np.ascontiguousarray(swv.transpose(1, 2, 0, 3, 4))
+            traces = traces.reshape(cxl * n_t, n_traces, wt)
+
+            if gpu_active:
+                traces_gpu = cp.asarray(traces)
+                coh = _power_iteration_c3(traces_gpu, n_power_iter)
+                coh = cp.asnumpy(coh).astype(np.float32)
+            else:
+                coh = _power_iteration_c3(traces, n_power_iter)
+                coh = coh.astype(np.float32)
+
+            result[il, xl0:xl1, :] = coh.reshape(cxl, n_t)
+
+    if was_2d:
+        result = result[0]
+    return result
+
+
 def fuse_rgb(
     attr_r: np.ndarray,
     attr_g: np.ndarray,
