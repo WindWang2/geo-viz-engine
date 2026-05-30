@@ -85,6 +85,14 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 │  │  └── Chrome         标题/指北/比例尺/图例         │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                         │
+│  packages/geoviz-well-tie/                              │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  独立井震结合库 (pure NumPy, no Qt)              │    │
+│  │  ├── WellTieCalibration T-D 转换与重采样          │    │
+│  │  ├── Synthetic       Ricker/Ormsby 合成记录       │    │
+│  │  └── AutoTie         互相关自动标定               │    │
+│  └─────────────────────────────────────────────────┘    │
+│                                                         │
 │  src/   data/ loaders & models │ pages/ UI              │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -146,7 +154,10 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 - 2D 剖面双模式：VD 热图（Variable Density）与 Wiggle 波形，支持 CuPy GPU 加速（NumPy 自动回退）
 - 层位文件加载与 3D 曲面叠加，支持 nearest/RBF 插值
 - 内置合成地震数据演示（含断层、倾斜反射层、噪声）
-- 4 种色标：seismic、gray、jet、hsv
+- 井震标定面板（WellTiePanel）：Ricker/Ormsby 子波选择、频率滑块、合成记录生成、Auto-Tie 互相关定位、T-D 标定表导出
+- 合成记录叠合显示：QPainter wiggle trace overlay on ProfileVD
+- BinGridGeometry 空间参考：井位 XY → 地震 inline/crossline 映射
+- 61 条新增测试（4 个测试文件），总计 589 条测试通过
 - LRU 切片缓存（默认 50 条），拖拽切片 200ms 防抖
 
 ### 数据管理
@@ -168,6 +179,8 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 | Phase 4 | ✅ 已完成 | 地震可视化独立化、3D体渲染+2D剖面、SEGY按需切片、层位解析 |
 | Phase 5 | ✅ 已完成 | 连井对比拾取工作流（层位顶面、手动拾取+撤销、DTW自动对比、地震校深） |
 | Phase 6 | ✅ 已完成 | 地震属性分析（瞬时频率/RMS/甜点/相对阻抗）、沿层位提取、井震结合（合成地震记录+标定） |
+| Phase 7 | ✅ 已完成 | STFT 谱分解、RGB 属性融合、属性交叉图 |
+| Phase 8 | ✅ 已完成 | 井震结合可视化集成（WellTiePanel 面板、合成记录叠合、Auto-Tie 互相关、BinGridGeometry 空间参考） |
 
 ---
 
@@ -264,6 +277,12 @@ geo-viz-engine/
 │       │   ├── correlation_layer.py # CorrelationLayer (bezier ties)
 │       │   ├── dtw_engine.py      # DTWEngine (banded DTW)
 │       │   └── seismic_tie.py     # SeismicTie (checkshot T-D)
+│       └── pyproject.toml
+│   └── geoviz_well_tie/          # 独立井震结合库 (pip installable, pure NumPy)
+│       ├── geoviz_well_tie/
+│       │   ├── calibration.py  # WellTieCalibration (T-D 转换)
+│       │   ├── synthetic.py    # Ricker/Ormsby 子波 + 合成记录
+│       │   └── auto_tie.py     # 互相关自动标定
 │       └── pyproject.toml
 ├── src/                           # 主应用代码
 │   ├── main.py                    # 入口 (QApplication)

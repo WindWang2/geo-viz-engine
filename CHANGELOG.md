@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-30
+
+### Added
+- **井震结合可视化集成（Phase 8）**：将 `geoviz-well-tie` 纯 NumPy 库与 `geoviz-seismic` 可视化引擎完整集成，实现合成地震记录与实际地震剖面的交互对比。
+  - `WellTiePanel`：持久化面板，含 Ricker/Ormsby 子波选择、峰值频率滑块、f1-f4 Ormsby 参数滑块、合成记录生成、Auto-Tie 互相关标定、CC 系数和时移量读数、T-D 标定表 CSV 导出。
+  - `SeismicView` 工具栏新增"井震标定"可切换按钮，首次点击创建 WellTiePanel（懒加载），后续 toggle 仅隐藏/显示（面板持久化不重建）。
+  - `ProfileVD` 合成记录叠合 API：`set_synthetic_overlay(h_position, twt, values)` 在地震剖面上绘制 QPainter wiggle trace 合成记录叠合。
+  - `BinGridGeometry`：Pydantic 模型，支持井位 XY 坐标 → 地震 inline/crossline 映射（方位角从北顺时针）。
+  - `SeismicVolumeMeta.xy_to_il_xl()`：委托 BinGridGeometry 实现坐标转换。
+  - `SeismicLoader.read_trace(iline, xline)`：按 inline/crossline 读取单道数据。
+  - `auto_tie()` / `auto_tie_with_quality()`：基于 `numpy.correlate` 的互相关自动时移估计。
+  - `generate_synthetic_twt()`：单位安全包装（dt_ms → dt_seconds），自动构建 midpoint calibration 解决反射系数 N-1 对齐问题。
+  - `resample_to_seismic_grid()`：将任意 TWT 域数据重采样到地震网格。
+- **61 条新增测试**（4 个测试文件）：pipeline 完整流程、空间参考、auto-tie 互相关、WellTiePanel 面板 + SeismicView 集成。总计 589 条测试全部通过。
+
+## [0.9.0] - 2026-05-30
+
+### Added
+- **STFT 谱分解与 RGB 属性融合（Phase 7）**：基于 `scipy.signal.stft` 的时频分析，支持三频段 RGB 合成显示。
+  - `attributes.py` 新增 `spectral_decompose()`：STFT 带通滤波器组，输出三频段振幅。
+  - `fuse_rgb()`：将三个属性体融合为 RGB 三通道数组。
+  - `ProfileVD.render_rgba()`：RGBA 直通渲染，跳过色标映射，直接显示 RGB 融合结果。
+  - 属性交叉图：QPainter 散点对话框，支持任意两种属性（如频率 vs 包络）的交叉分析。
+- **地震属性分析扩展（Phase 6 续）**：
+  - `extract_along_horizon()`：沿层位提取属性值。
+  - 新增瞬时频率、RMS 振幅、甜点属性、相对声阻抗 4 种属性。
+  - `ColormapManager` 新增 viridis 和 phase_wheel 色标。
+
 ## [0.8.0] - 2026-05-29
 
 ### Added

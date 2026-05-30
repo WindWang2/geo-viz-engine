@@ -64,7 +64,12 @@ PySide6 (Qt for Python) — Single Process
 │   │   ├── horizon.py           → HorizonParser (nearest/RBF fill)
 │   │   ├── colormap.py          → ColormapManager (seismic/gray/jet/hsv)
 │   │   ├── cache.py             → SeismicCache (LRU slice cache)
-│   │   └── models.py            → SeismicVolumeMeta, SliceInfo, HorizonData
+│   │   ├── models.py            → SeismicVolumeMeta, SliceInfo, HorizonData, BinGridGeometry
+│   │   └── well_tie_panel.py    → WellTiePanel (wavelet controls, auto-tie, export)
+│   ├── geoviz-well-tie/   → Independent well-seismic tie library (pure NumPy)
+│   │   ├── calibration.py       → WellTieCalibration (T-D conversion, resample)
+│   │   ├── synthetic.py         → Ricker/Ormsby wavelet + synthetic seismogram
+│   │   └── auto_tie.py          → auto_tie cross-correlation (shift + CC)
 │   ├── geoviz-map/        → Independent QPainter-based geographic map engine
 │   │   ├── canvas.py            → MapCanvas (QWidget composite layers)
 │   │   ├── projection.py        → Web Mercator (MapLibre-compatible)
@@ -100,12 +105,13 @@ PySide6 (Qt for Python) — Single Process
 - **Independent Package**: `geoviz-map` is a fully decoupled geographic map engine using only QPainter. Web Mercator projection compatible with MapLibre GL. Layer-based architecture for offline GeoJSON rendering, well markers, reference labels. Can be `pip install`-ed and used in any PySide6 project.
 - **Independent Package**: `geoviz-paleo-map` is a fully decoupled paleogeographic map engine using only QPainter. Plate Carrée projection. Per-feature composite SVG pattern fills via `geoviz-well-log.PatternEngine` extensions (`get_composite_brush`, `get_color_fuzzy`). 8 layers: 4 data-driven + 4 chrome. Can be `pip install`-ed and used in any PySide6 project.
 - **Independent Package**: `geoviz-cross-well` is a fully decoupled cross-well correlation engine that composes `geoviz_well_log.WellLogCanvas` for rendering. Adds formation tops database (CSV I/O), manual horizon picking with undo/redo (PicksUndoManager), DTW auto-correlation (banded Sakoe-Chiba), bezier correlation ties, and seismic tie (checkshot T-D conversion). Can be `pip install`-ed and used in any PySide6 project.
+- **Independent Package**: `geoviz-well-tie` is a pure-NumPy well-seismic tie library with no Qt dependency. Provides Ricker/Ormsby wavelet generation, synthetic seismogram computation, WellTieCalibration (T-D conversion via sonic integration), auto-tie cross-correlation (shift + quality), and seismic grid resampling. Can be `pip install`-ed and used in any Python project.
 - **WellLogPage is thin**: Only ~350 lines of UI orchestration. Calls `build_tracks_from_data()` and `TrackManager` from the package. AI prediction business logic (API calls, Excel writing) stays in the page layer.
 - **Data layer**: `src/data/loaders.py` handles lasio (LAS), segyio (SEGY), openpyxl (Excel), and JSON loading. `src/data/models.py` defines Pydantic models. `src/data/cache.py` provides in-memory caching. `src/data/well_registry.py` maps well names to loader functions.
 - **Well log rendering flow**: `WellLogData` → `build_tracks_from_data()` → track pool → `TrackManager.build_payload()` → JSON → `ChartEngine.render_data()` → ECharts SVG rendering.
 - **Map**: Native QPainter via `geoviz-map` package. World/China GeoJSON loaded once at init into cached `QPainterPath` (per-feature in world coords), then painted with a single world→screen `QTransform` per frame. Viewport bbox culling skips off-screen polygons. Well click events emitted via Qt `Signal(str)` (`MapCanvas.well_clicked`).
 - **PaleoMap**: Native QPainter via `geoviz-paleo-map` package. Per-feature `FaciesStyle` resolved from facies name → base color + composite QBrush (from PatternEngine). Tooltip hit-test runs bbox prefilter then `QPainterPath.contains`. Tempfile-based GeoJSON middleware is gone — `load_features(features, period_name, wells)` accepts a Python dict directly.
-- **Seismic**: pyqtgraph OpenGL renders 3D volumes and slices. Supports SEGY loading via segyio.
+- **Seismic**: pyqtgraph OpenGL renders 3D volumes and slices. Supports SEGY loading via segyio. Well-tie panel (WellTiePanel) toggled from toolbar provides wavelet controls, synthetic trace generation, auto-tie cross-correlation, and T-D calibration export. Synthetic overlay renders as QPainter wiggle trace on ProfileVD. BinGridGeometry maps well XY coordinates to seismic inline/crossline indices.
 
 ## Key Code Patterns
 
@@ -116,7 +122,7 @@ PySide6 (Qt for Python) — Single Process
 - **Map well markers**: MapLibre GL renders GeoJSON well features as circles. Click events sent via Qt WebChannel bridge (`MapBridge.onWellClicked`).
 - **Well selection**: Two paths — map click (`_on_well_clicked`) or combo box in toolbar (`_on_well_selected`). Both call `WellLogPage.load_well()`.
 - **Seismic rendering**: `SeismicView` (in `geoviz-seismic` package) combines `Renderer3D` (pyqtgraph GLViewWidget 3D volume + interactive slice planes) with `ProfileWidget` (VD heatmap / Wiggle trace) and toolbar. `SeismicPage` is a thin wrapper (~5 lines) inheriting `SeismicView`. Data transposed from segyio convention `(n_traces, n_samples)` to display convention `(n_samples, n_traces)` before rendering. Optional CuPy GPU acceleration for volume slicing and colormapping.
-- **Data models**: Pydantic `BaseModel` — `WellLogData`, `CurveData`, `LithologyInterval`, `FaciesInterval`, `WellCoordinates`. Seismic models (`SeismicVolumeMeta`, `SliceInfo`, `HorizonData`) live in `geoviz-seismic` package.
+- **Data models**: Pydantic `BaseModel` — `WellLogData`, `CurveData`, `LithologyInterval`, `FaciesInterval`, `WellCoordinates`. Seismic models (`SeismicVolumeMeta`, `SliceInfo`, `HorizonData`, `BinGridGeometry`) live in `geoviz-seismic` package.
 - **Navigation**: `MainWindow._switch_page(index)` — sidebar buttons are checkable, clicking switches `QStackedWidget` index.
 - **Tests**: pytest + pytest-qt. Test files in `tests/`. Qt widget tests use `qtbot` fixture.
 
@@ -145,7 +151,12 @@ PySide6 (Qt for Python) — Single Process
   - `geoviz_seismic/horizon.py` — HorizonParser (nearest/RBF fill)
   - `geoviz_seismic/colormap.py` — ColormapManager (seismic/gray/jet/hsv)
   - `geoviz_seismic/cache.py` — SeismicCache (LRU slice cache)
-  - `geoviz_seismic/models.py` — SeismicVolumeMeta, SliceInfo, HorizonData
+  - `geoviz_seismic/models.py` — SeismicVolumeMeta, SliceInfo, HorizonData, BinGridGeometry
+  - `geoviz_seismic/well_tie_panel.py` — WellTiePanel (wavelet controls, auto-tie, export)
+  - `packages/geoviz_well_tie/` — Independent well-seismic tie library (pure NumPy, no Qt)
+  - `geoviz_well_tie/calibration.py` — WellTieCalibration (T-D conversion, resample)
+  - `geoviz_well_tie/synthetic.py` — Ricker/Ormsby wavelet + synthetic seismogram
+  - `geoviz_well_tie/auto_tie.py` — auto_tie cross-correlation (shift + CC)
 - `packages/geoviz_map/` — Independent geographic map visualization package
   - `geoviz_map/canvas.py` — MapCanvas (QWidget composite of all layers)
   - `geoviz_map/projection.py` — Web Mercator projection
@@ -207,7 +218,8 @@ PySide6 (Qt for Python) — Single Process
 - **pyqtgraph OpenGL**: Uses pyqtgraph.opengl.GLViewWidget (inherits QOpenGLWidget) for 3D seismic rendering. Must be initialized before any QWebEngineView on Windows to avoid GPU context conflicts.
 - **QWebEngineView**: Requires `PySide6.QtWebEngineWidgets`. MapLibre GL JS loads from CDN — first load requires internet.
 - **Package can be used standalone**: `from geoviz_well_log import ChartEngine, TrackManager, build_tracks_from_data` works without the main app.
-- **Seismic package can be used standalone**: `from geoviz_seismic import SeismicView, SeismicLoader, Renderer3D` works without the main app. Optional CuPy acceleration for GPU-accelerated volume slicing.
+- **Seismic package can be used standalone**: `from geoviz_seismic import SeismicView, SeismicLoader, Renderer3D` works without the main app. Optional CuPy acceleration for GPU-accelerated volume slicing. Well-tie panel and synthetic overlay included.
+- **Well-tie package can be used standalone**: `from geoviz_well_tie import WellTieCalibration, generate_synthetic_twt, auto_tie_with_quality` works without the main app or Qt. Pure NumPy.
 
 ## gstack
 Use the /browse skill from gstack for all web browsing.
