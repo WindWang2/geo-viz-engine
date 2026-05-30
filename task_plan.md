@@ -5,8 +5,8 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 
 ## Current State
 - **Branch:** main (synced with origin)
-- **Tests:** 589 passed, 3 skipped
-- **Latest commit:** `743ead59 feat: add DTW ghost pick left-click accept and TWT dual-axis display`
+- **Tests:** 601 passed, 3 skipped
+- **Latest commit:** `27f790d4 docs: update progress and task plan for Phase 9 coherence + GPU`
 
 ## Completed Phases (Summary)
 
@@ -42,7 +42,7 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 
 | Phase | Feature | Status |
 |-------|---------|--------|
-| Phase 9 | Coherence (C3 eigenstructure) 相干属性 | ✅ — `compute_coherence_c3` + 11 tests |
+| Phase 9 | Coherence (C3 eigenstructure) 相干属性 | ✅ — `compute_coherence_c3` + GPU加速 + 12 tests |
 
 ## Unimplemented Features (Future)
 
@@ -61,6 +61,6 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 | VERSION 保持 0.7.0 | 用户选择不随 CHANGELOG 同步版本号 |
 
 ## Notes
-- 589 tests 全绿
+- 601 tests 全绿
 - cross-well 现依赖 well-tie（纯 NumPy，零 Qt）
 - VERSION (0.7.0) 与 CHANGELOG (0.10.0) 不同步 — 用户有意为之
