@@ -52,6 +52,7 @@ class ProfileVD(QWidget):
         self._image: QPixmap | None = None
         self._data: np.ndarray | None = None
         self._normalized: np.ndarray | None = None
+        self._rgba_override: np.ndarray | None = None
         self._has_data = False
         self._colormap_name = "seismic"
         self._slice_info = None
@@ -189,6 +190,7 @@ class ProfileVD(QWidget):
     ) -> None:
         """Convert *data* to an RGBA image and schedule a repaint."""
         self._data = data.astype(np.float32, copy=False)
+        self._rgba_override = None
         if colormap is not None:
             self._colormap_name = colormap
         self._slice_info = slice_info
@@ -198,6 +200,30 @@ class ProfileVD(QWidget):
         self._view_h = (0.0, 1.0)
         self._view_v = (0.0, 1.0)
         self._renormalize()
+
+    def render_rgba(
+        self,
+        rgba: np.ndarray,
+        slice_info=None,
+    ) -> None:
+        """Render a pre-composed RGBA image directly (e.g. RGB attribute fusion).
+
+        Args:
+            rgba: (H, W, 4) uint8 RGBA array.
+            slice_info: Optional slice metadata for axes.
+        """
+        assert rgba.ndim == 3 and rgba.shape[2] == 4, f"Expected (H,W,4), got {rgba.shape}"
+        self._rgba_override = rgba.astype(np.uint8, copy=True)
+        # Store synthetic float data for amplitude readout (not meaningful for RGB)
+        self._data = np.zeros(rgba.shape[:2], dtype=np.float32)
+        self._normalized = None
+        self._slice_info = slice_info
+        self._has_data = True
+        self._colormap_name = "__rgb__"
+        self._zoom_scale = 1.0
+        self._view_h = (0.0, 1.0)
+        self._view_v = (0.0, 1.0)
+        self._build_image_from_rgba()
 
     def _renormalize(self):
         """Compute normalized data using percentile clipping."""
@@ -286,6 +312,9 @@ class ProfileVD(QWidget):
 
     def _build_image_from_normalized(self) -> None:
         """Map the visible portion of normalized data through the colour LUT."""
+        if self._rgba_override is not None:
+            self._build_image_from_rgba()
+            return
         if self._normalized is None:
             return
 
@@ -318,6 +347,33 @@ class ProfileVD(QWidget):
             sub_traces,
             sub_samples,
             sub_traces * 4,
+            QImage.Format.Format_RGBA8888,
+        )
+        self._image = QPixmap.fromImage(img.copy())
+        self.update()
+
+    def _build_image_from_rgba(self) -> None:
+        """Render pre-composed RGBA data, respecting the current viewport."""
+        if self._rgba_override is None:
+            return
+        n_rows, n_cols, _ = self._rgba_override.shape
+
+        h_start, h_end = self._view_h
+        v_start, v_end = self._view_v
+        col_start = max(0, int(h_start * (n_cols - 1)))
+        col_end = min(n_cols, int(h_end * (n_cols - 1)) + 1)
+        row_start = max(0, int(v_start * (n_rows - 1)))
+        row_end = min(n_rows, int(v_end * (n_rows - 1)) + 1)
+        col_end = max(col_start + 1, col_end)
+        row_end = max(row_start + 1, row_end)
+
+        sub = self._rgba_override[row_start:row_end, col_start:col_end]
+        sub_rows, sub_cols = sub.shape[0], sub.shape[1]
+        img = QImage(
+            sub.tobytes(),
+            sub_cols,
+            sub_rows,
+            sub_cols * 4,
             QImage.Format.Format_RGBA8888,
         )
         self._image = QPixmap.fromImage(img.copy())
