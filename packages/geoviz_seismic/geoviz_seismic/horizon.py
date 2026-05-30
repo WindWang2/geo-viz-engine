@@ -1,4 +1,4 @@
-"""Horizon file parsing and interpolation (nearest / RBF)."""
+"""Horizon file parsing, interpolation (nearest / RBF), and attribute extraction."""
 
 from __future__ import annotations
 
@@ -157,3 +157,66 @@ class HorizonParser:
             val = float(nums[2]) * self._scale
             points[(il, xl)] = val
         return points
+
+
+def extract_along_horizon(
+    volume: np.ndarray,
+    grid: np.ndarray,
+    dt_ms: float,
+    t0_ms: float = 0.0,
+    window: int = 0,
+) -> np.ndarray:
+    """Extract seismic amplitudes along a horizon surface.
+
+    For each ``(il, xl)`` position in *grid*, the TWT value is converted
+    to a sample index and the corresponding sample is read from *volume*.
+
+    Args:
+        volume: Seismic volume with shape ``(nI, nX, nS)`` (inline, crossline,
+            sample) and float32 dtype.
+        grid: Horizon grid ``(nI, nX)`` in milliseconds (from
+            :meth:`HorizonParser.parse`). NaN marks absent picks.
+        dt_ms: Sample interval in milliseconds.
+        t0_ms: Time of first sample in milliseconds.
+        window: Half-window in samples. ``0`` extracts a single sample per
+            trace; ``N > 0`` extracts ``2N + 1`` samples centred on the
+            horizon, and the result is the RMS over the window.
+
+    Returns:
+        ``(nI, nX)`` float32 attribute map. NaN where *grid* is NaN or the
+        extraction window extends outside the volume.
+    """
+    nI, nX, nS = volume.shape
+    result = np.full((nI, nX), np.nan, dtype=np.float32)
+    valid = np.isfinite(grid)
+    if not valid.any():
+        return result
+
+    sample_idx = np.where(valid, (grid - t0_ms) / dt_ms, 0).astype(np.int32)
+    sample_idx = np.clip(sample_idx, 0, nS - 1)
+
+    if window <= 0:
+        result[valid] = np.take_along_axis(
+            volume.reshape(nI * nX, nS),
+            sample_idx.reshape(nI * nX, 1),
+            axis=1,
+        ).reshape(nI, nX)[valid]
+    else:
+        half = window
+        extracted = np.full((nI, nX, 2 * half + 1), np.nan, dtype=np.float32)
+        for k, offset in enumerate(range(-half, half + 1)):
+            idx = sample_idx + offset
+            in_bounds = valid & (idx >= 0) & (idx < nS)
+            idx_safe = np.clip(idx, 0, nS - 1)
+            vals = np.take_along_axis(
+                volume.reshape(nI * nX, nS),
+                idx_safe.reshape(nI * nX, 1),
+                axis=1,
+            ).reshape(nI, nX)
+            extracted[in_bounds, k] = vals[in_bounds]
+        mean_sq = np.nanmean(extracted ** 2, axis=2)
+        result = np.sqrt(np.maximum(mean_sq, 0)).astype(np.float32)
+        all_nan = np.all(np.isnan(extracted), axis=2)
+        result[all_nan] = np.nan
+
+    return result

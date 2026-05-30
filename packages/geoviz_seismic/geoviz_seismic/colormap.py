@@ -62,6 +62,33 @@ def _build_hsv(n: int) -> np.ndarray:
     return rgba
 
 
+def _build_viridis(n: int) -> np.ndarray:
+    """Perceptually uniform sequential colormap (viridis-like)."""
+    t = np.linspace(0, 1, n)
+    # Viridis keypoints
+    xp = [0.0, 0.25, 0.5, 0.75, 1.0]
+    fp_r = [68, 59, 33, 95, 253]
+    fp_g = [1, 82, 145, 180, 231]
+    fp_b = [84, 139, 140, 86, 37]
+    rgba = np.zeros((n, 4), dtype=np.uint8)
+    rgba[:, 0] = np.interp(t, xp, fp_r).astype(np.uint8)
+    rgba[:, 1] = np.interp(t, xp, fp_g).astype(np.uint8)
+    rgba[:, 2] = np.interp(t, xp, fp_b).astype(np.uint8)
+    rgba[:, 3] = 255
+    return rgba
+
+
+def _build_phase_wheel(n: int) -> np.ndarray:
+    """Circular colormap for phase data (wraps around)."""
+    t = np.linspace(0, 1, n, endpoint=False)
+    rgba = np.zeros((n, 4), dtype=np.uint8)
+    rgba[:, 0] = ((0.5 + 0.5 * np.cos(2 * np.pi * t)) * 255).astype(np.uint8)
+    rgba[:, 1] = ((0.5 + 0.5 * np.cos(2 * np.pi * t - 2 * np.pi / 3)) * 255).astype(np.uint8)
+    rgba[:, 2] = ((0.5 + 0.5 * np.cos(2 * np.pi * t - 4 * np.pi / 3)) * 255).astype(np.uint8)
+    rgba[:, 3] = 255
+    return rgba
+
+
 class ColormapManager:
     """Registry of seismic colour maps with LUT caching.
 
@@ -73,12 +100,16 @@ class ColormapManager:
     GRAY = "gray"
     JET = "jet"
     HSV = "hsv"
+    VIRIDIS = "viridis"
+    PHASE_WHEEL = "phase_wheel"
 
     _COLORMAPS = {
         "seismic": _build_seismic,
         "gray": _build_gray,
         "jet": _build_jet,
         "hsv": _build_hsv,
+        "viridis": _build_viridis,
+        "phase_wheel": _build_phase_wheel,
     }
 
     _LUT_CACHE: dict[str, np.ndarray] = {}
