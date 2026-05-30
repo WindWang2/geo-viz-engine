@@ -8,12 +8,15 @@ from geoviz_paleo_map.edit_engine import EditEngine
 from geoviz_paleo_map.edit_commands import UndoManager
 from geoviz_paleo_map.paint_scheduler import PaintScheduler, LayerPixmapCache
 from geoviz_paleo_map.screen_path_cache import ScreenPathCache
+from geoviz_paleo_map.save_export import export_vector_svg
+from geoviz_paleo_map.export_professional import export_professional_figure
 
 __all__ = [
     "PaleoMapCanvas", "FaciesHierarchy", "FloatingScaleSlider",
     "LockedObjectsPanel", "TopologyModel", "TopologyBuilder",
     "EditEngine", "UndoManager",
     "PaintScheduler", "LayerPixmapCache", "ScreenPathCache",
+    "export_vector_svg", "export_professional_figure",
 ]
 
 

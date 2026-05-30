@@ -28,7 +28,11 @@ class PaintScheduler:
 
     def _do_update(self) -> None:
         self._pending = False
-        self._widget.update()
+        try:
+            self._widget.update()
+        except RuntimeError:
+            # Widget already destroyed (e.g. test teardown)
+            pass
 
 
 class LayerPixmapCache:
