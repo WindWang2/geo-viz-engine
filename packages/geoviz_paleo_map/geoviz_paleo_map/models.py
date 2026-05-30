@@ -12,3 +12,4 @@ class FaciesStyle:
 
     base_color: QColor
     brush: QBrush
+    pattern_id: str | None = None
