@@ -135,3 +135,38 @@ class PatternEngine:
         brush = QBrush(pm)
         self._composite_cache[cache_key] = brush
         return brush
+
+    def get_facies_brush(self, pattern_id: str, base_color: QColor,
+                         alpha: float = 0.3) -> QBrush | None:
+        """Return a composite brush for a facies pattern tile.
+
+        Looks up SVG files in the `facies/` subdirectory under assets/patterns.
+        Renders base_color background with the black SVG pattern overlaid at alpha.
+        Cached per (pattern_id, color hex, alpha).
+        """
+        cache_key = f"facies::{pattern_id}::{base_color.name()}::{alpha:.2f}"
+        if not hasattr(self, "_facies_cache"):
+            self._facies_cache: dict[str, QBrush] = {}
+        if cache_key in self._facies_cache:
+            return self._facies_cache[cache_key]
+
+        filename = pattern_id.replace("-", "_")
+        svg_path = self._ASSETS_DIR / "facies" / f"{filename}.svg"
+        if not svg_path.exists():
+            return None
+
+        renderer = QSvgRenderer(str(svg_path))
+        if not renderer.isValid():
+            return None
+
+        size = QSize(self._tile_size, self._tile_size)
+        pm = QPixmap(size)
+        pm.fill(base_color)
+        painter = QPainter(pm)
+        painter.setOpacity(alpha)
+        renderer.render(painter)
+        painter.end()
+
+        brush = QBrush(pm)
+        self._facies_cache[cache_key] = brush
+        return brush
