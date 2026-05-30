@@ -16,6 +16,7 @@ from .profile_wiggle import ProfileWiggle
 from .profile_widget import ProfileWidget
 from .renderer_3d import Renderer3D
 from .seismic_view import SeismicView
+from . import attributes
 
 __version__ = "0.1.2"
 
@@ -33,5 +34,6 @@ __all__ = [
     "SeismicVolumeMeta",
     "SliceInfo",
     "HorizonData",
+    "attributes",
     "extract_along_horizon",
 ]

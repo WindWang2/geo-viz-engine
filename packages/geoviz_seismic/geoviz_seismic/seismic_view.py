@@ -609,13 +609,47 @@ class SeismicView(QWidget):
         bar.addWidget(QLabel(" 色标:"))
         bar.addWidget(self._cmap_combo)
         self._attr_combo = QComboBox()
-        self._attr_combo.addItems(["振幅", "包络", "瞬时相位", "瞬时频率", "RMS振幅", "甜点", "相对阻抗"])
+        self._attr_combo.addItems(["振幅", "包络", "瞬时相位", "瞬时频率", "RMS振幅", "甜点", "相对阻抗", "RGB融合"])
         self._attr_combo.currentIndexChanged.connect(self._on_attr_changed)
+
+        # RGB fusion channel selectors (hidden until RGB mode selected)
+        self._rgb_r_combo = QComboBox()
+        self._rgb_g_combo = QComboBox()
+        self._rgb_b_combo = QComboBox()
+        _attr_names = ["包络", "瞬时频率", "RMS振幅", "甜点", "相对阻抗"]
+        for combo in (self._rgb_r_combo, self._rgb_g_combo, self._rgb_b_combo):
+            combo.addItems(_attr_names)
+            combo.setVisible(False)
+            combo.currentIndexChanged.connect(self._on_rgb_channels_changed)
+        # Default: envelope=R, frequency=G, RMS=B
+        self._rgb_r_combo.setCurrentIndex(0)
+        self._rgb_g_combo.setCurrentIndex(1)
+        self._rgb_b_combo.setCurrentIndex(2)
+        self._rgb_r_label = QLabel(" R:")
+        self._rgb_g_label = QLabel(" G:")
+        self._rgb_b_label = QLabel(" B:")
+        for lbl in (self._rgb_r_label, self._rgb_g_label, self._rgb_b_label):
+            lbl.setVisible(False)
+
+        # Crossplot button
+        crossplot_btn = QPushButton("交叉图")
+        crossplot_btn.setStyleSheet(
+            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
+            "border-radius: 4px; padding: 0 10px; font-size: 13px; }"
+        )
+        crossplot_btn.clicked.connect(self._on_crossplot)
 
         bar.addWidget(QLabel(" 裁剪:"))
         bar.addWidget(self._clip_spin)
         bar.addWidget(QLabel(" 属性:"))
         bar.addWidget(self._attr_combo)
+        bar.addWidget(self._rgb_r_label)
+        bar.addWidget(self._rgb_r_combo)
+        bar.addWidget(self._rgb_g_label)
+        bar.addWidget(self._rgb_g_combo)
+        bar.addWidget(self._rgb_b_label)
+        bar.addWidget(self._rgb_b_combo)
+        bar.addWidget(crossplot_btn)
         bar.addWidget(self._slice_label)
         bar.addSeparator()
         bar.addWidget(QLabel(" IL:"))
@@ -887,6 +921,8 @@ class SeismicView(QWidget):
         idx = self._attr_combo.currentIndex()
         if idx == 0:
             return data
+        if idx == 7:  # RGB fusion — handled separately in _apply_rgb_fusion
+            return data
         from . import attributes as _attr
         _FN = [
             None,                          # 0: amplitude (raw)
@@ -905,6 +941,39 @@ class SeismicView(QWidget):
             si = self._meta.sample_interval if self._meta else 1.0
             kwargs["sample_interval"] = si / 1000.0  # ms → s
         return fn(data, axis=0, **kwargs)
+
+    def _get_attr_fn(self, combo_idx: int):
+        """Return the attribute function for a given RGB channel combo index."""
+        from . import attributes as _attr
+        _FN = [
+            _attr.compute_envelope,        # 0
+            _attr.compute_instantaneous_frequency,  # 1
+            _attr.compute_rms_amplitude,   # 2
+            _attr.compute_sweetness,       # 3
+            _attr.compute_relative_impedance,  # 4
+        ]
+        return _FN[combo_idx] if combo_idx < len(_FN) else _attr.compute_envelope
+
+    def _apply_rgb_fusion(self, data: np.ndarray) -> np.ndarray | None:
+        """Compute RGB fusion from three attribute channels. Returns (H,W,4) RGBA or None."""
+        from . import attributes as _attr
+        si = self._meta.sample_interval if self._meta else 1.0
+        si_s = si / 1000.0
+
+        def _compute(ch_combo_idx: int) -> np.ndarray:
+            fn = self._get_attr_fn(ch_combo_idx)
+            kwargs = {}
+            if fn in (_attr.compute_instantaneous_frequency, _attr.compute_sweetness):
+                kwargs["sample_interval"] = si_s
+            return fn(data, axis=0, **kwargs)
+
+        r_attr = _compute(self._rgb_r_combo.currentIndex())
+        g_attr = _compute(self._rgb_g_combo.currentIndex())
+        b_attr = _compute(self._rgb_b_combo.currentIndex())
+
+        rgb = _attr.fuse_rgb(r_attr, g_attr, b_attr)
+        alpha = np.full((*rgb.shape[:2], 1), 255, dtype=np.uint8)
+        return np.concatenate([rgb, alpha], axis=-1)
 
     def _export_slice(self, slice_type: str):
         """Export the current slice data or rendered image."""
@@ -1084,7 +1153,85 @@ class SeismicView(QWidget):
             self._renderer_3d.set_opacity_mode(modes[index])
 
     def _on_attr_changed(self, index: int):
+        # Toggle RGB channel selectors visibility
+        is_rgb = (index == 7)
+        for w in (self._rgb_r_combo, self._rgb_g_combo, self._rgb_b_combo,
+                  self._rgb_r_label, self._rgb_g_label, self._rgb_b_label):
+            w.setVisible(is_rgb)
         self._apply_current_attr()
+
+    def _on_rgb_channels_changed(self):
+        if self._attr_combo.currentIndex() == 7:
+            self._apply_current_attr()
+
+    def _on_crossplot(self):
+        """Open an attribute crossplot dialog for the current slice."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout
+        from PySide6.QtGui import QPainter, QPen, QColor
+
+        raw = self._slice_data.get("inline") or self._slice_data.get("crossline") or self._slice_data.get("time")
+        if raw is None:
+            return
+
+        from . import attributes as _attr
+        si = self._meta.sample_interval if self._meta else 1.0
+        si_s = si / 1000.0
+        env = _attr.compute_envelope(raw, axis=0)
+        freq = _attr.compute_instantaneous_frequency(raw, axis=0, sample_interval=si_s)
+
+        # Subsample for performance
+        step = max(1, env.size // 5000)
+        x = freq.flatten()[::step]
+        y = env.flatten()[::step]
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("属性交叉图 — 频率 vs 包络")
+        dlg.resize(500, 500)
+
+        class _CrossplotCanvas(QWidget):
+            def __init__(self, x_data, y_data, parent=None):
+                super().__init__(parent)
+                self._x = x_data
+                self._y = y_data
+                self.setMinimumSize(400, 400)
+
+            def paintEvent(self, event):
+                p = QPainter(self)
+                p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                r = self.rect().adjusted(40, 20, -20, -30)
+
+                # Axes
+                p.setPen(QPen(QColor(100, 100, 100), 1))
+                p.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
+                p.drawLine(r.left(), r.top(), r.left(), r.bottom())
+
+                # Labels
+                p.drawText(r.center().x() - 30, r.bottom() + 22, "瞬时频率 (Hz)")
+                p.save()
+                p.translate(12, r.center().y() + 30)
+                p.rotate(-90)
+                p.drawText(0, 0, "包络")
+                p.restore()
+
+                xlo, xhi = float(np.nanpercentile(self._x, 1)), float(np.nanpercentile(self._x, 99))
+                ylo, yhi = float(np.nanpercentile(self._y, 1)), float(np.nanpercentile(self._y, 99))
+                if xhi <= xlo:
+                    xhi = xlo + 1
+                if yhi <= ylo:
+                    yhi = ylo + 1
+
+                pen = QPen(QColor(30, 100, 200, 60), 2)
+                p.setPen(pen)
+                for xi, yi in zip(self._x, self._y):
+                    px = r.left() + (xi - xlo) / (xhi - xlo) * r.width()
+                    py = r.bottom() - (yi - ylo) / (yhi - ylo) * r.height()
+                    if r.left() <= px <= r.right() and r.top() <= py <= r.bottom():
+                        p.drawPoint(int(px), int(py))
+                p.end()
+
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(_CrossplotCanvas(x, y))
+        dlg.exec()
 
     def _apply_current_attr(self):
         """Re-render all cached slice data with the current attribute mode."""
@@ -1104,6 +1251,12 @@ class SeismicView(QWidget):
             existing_info = pw._vd.slice_info() if pw._vd else None
             if existing_info:
                 info = existing_info
+
+            if attr_mode == 7:  # RGB fusion
+                rgba = self._apply_rgb_fusion(raw)
+                if rgba is not None:
+                    pw._vd.render_rgba(rgba, slice_info=info)
+                continue
 
             display = raw
             if attr_mode != 0:
