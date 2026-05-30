@@ -151,6 +151,9 @@ class SeismicView(QWidget):
             "inline": None, "crossline": None, "time": None, "arbitrary": None
         }
 
+        # Well-tie panel state (created lazily on toggle)
+        self._well_tie_panel = None
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -663,6 +666,19 @@ class SeismicView(QWidget):
         bar.addWidget(self._tb_t_slider)
         bar.addSeparator()
         bar.addWidget(self._readout_label)
+
+        # Well-tie toggle button
+        self._well_tie_btn = QPushButton("井震标定")
+        self._well_tie_btn.setCheckable(True)
+        self._well_tie_btn.setStyleSheet(
+            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
+            "border-radius: 4px; padding: 0 10px; font-size: 13px; } "
+            "QPushButton:checked { background: #ebf8ff; border-color: #4299e1; }"
+        )
+        self._well_tie_btn.toggled.connect(self._on_well_tie_toggled)
+        bar.addSeparator()
+        bar.addWidget(self._well_tie_btn)
+
         return bar
 
     def _build_slice_info(self, slice_type: str, position: int,
@@ -1404,6 +1420,23 @@ class SeismicView(QWidget):
     def _on_annotation_toggled(self, checked: bool):
         for pw in (self._profile_il, self._profile_xl, self._profile_t):
             pw._vd.enable_annotation_mode(checked)
+
+    def _on_well_tie_toggled(self, checked: bool):
+        """Toggle the WellTiePanel visibility."""
+        from .well_tie_panel import WellTiePanel
+
+        if checked:
+            if self._well_tie_panel is None:
+                self._well_tie_panel = WellTiePanel()
+                self._well_tie_panel.setMaximumWidth(320)
+                # Insert into the main layout alongside the splitter
+                h_layout = self.layout().itemAt(2)
+                if h_layout and isinstance(h_layout, QHBoxLayout):
+                    h_layout.insertWidget(0, self._well_tie_panel)
+            self._well_tie_panel.show()
+        else:
+            if self._well_tie_panel is not None:
+                self._well_tie_panel.hide()
 
     def _on_annotation_added(self, h_val: float, v_val: float, text: str):
         """An annotation was placed on a profile panel; sync to 3D."""

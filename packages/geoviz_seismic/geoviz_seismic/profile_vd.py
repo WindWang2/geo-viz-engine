@@ -85,6 +85,9 @@ class ProfileVD(QWidget):
         self._panning: bool = False
         self._pan_last: tuple[float, float] | None = None
 
+        # Synthetic overlay state
+        self._synthetic_overlay: dict | None = None
+
         # Cursor signal throttle (~60 fps)
         self._cursor_timer = QTimer(self)
         self._cursor_timer.setInterval(16)
@@ -176,8 +179,93 @@ class ProfileVD(QWidget):
         if abs(pct - self._clip_pct) < 0.01:
             return
         self._clip_pct = pct
-        if self._has_data and self._data is not None:
+        if self._has_data:
             self._renormalize()
+
+    # ------------------------------------------------------------------
+    # Synthetic overlay API
+    # ------------------------------------------------------------------
+
+    def set_synthetic_overlay(
+        self,
+        h_position: float,
+        twt: np.ndarray,
+        values: np.ndarray,
+        label: str = "",
+        color: str = "#ff0000",
+    ):
+        """Set a synthetic trace overlay at the given horizontal position.
+
+        Args:
+            h_position: Horizontal seismic coordinate (e.g. crossline number).
+            twt: TWT values for each sample in the synthetic trace.
+            values: Synthetic trace amplitude values.
+            label: Display label for the well.
+            color: Trace color (hex string).
+        """
+        self._synthetic_overlay = {
+            "h_position": h_position,
+            "twt": np.asarray(twt, dtype=np.float64),
+            "values": np.asarray(values, dtype=np.float32),
+            "label": label,
+            "color": color,
+        }
+        self.update()
+
+    def clear_synthetic_overlay(self):
+        """Remove the synthetic trace overlay."""
+        self._synthetic_overlay = None
+        self.update()
+
+    def _draw_synthetic_overlay(self, painter: QPainter, img_rect):
+        """Draw the synthetic wiggle trace overlay on the seismic section."""
+        if self._synthetic_overlay is None or self._slice_info is None:
+            return
+        ov = self._synthetic_overlay
+        h_pos = ov["h_position"]
+        twt = ov["twt"]
+        values = ov["values"]
+        color = QColor(ov["color"])
+
+        # Find pixel x for the well position
+        pos = self._seismic_to_pixel(h_pos, twt[0] if len(twt) > 0 else 0)
+        if pos is None:
+            return
+        px_x = pos[0]
+        if px_x < img_rect.left() or px_x > img_rect.right():
+            return  # well outside viewport
+
+        # Scale factor for wiggle width (pixels per unit amplitude)
+        wiggle_width = img_rect.width() * 0.03
+        amp_max = max(np.max(np.abs(values)), 1e-6)
+
+        # Build polyline
+        points = []
+        for i in range(len(twt)):
+            pixel = self._seismic_to_pixel(h_pos, twt[i])
+            if pixel is None:
+                continue
+            px_y = pixel[1]
+            px_offset = values[i] / amp_max * wiggle_width
+            points.append((px_x + px_offset, px_y))
+
+        if len(points) < 2:
+            return
+
+        # Draw wiggle
+        pen = QPen(color, 1.5)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        from PySide6.QtGui import QPolygonF
+        from PySide6.QtCore import QPointF
+        polygon = QPolygonF([QPointF(x, y) for x, y in points])
+        painter.drawPolyline(polygon)
+
+        # Draw label
+        if ov["label"]:
+            painter.setPen(QPen(color, 1))
+            painter.setFont(QFont("Monospace", 8))
+            painter.drawText(int(px_x) - 20, img_rect.top() + 12, ov["label"])
 
     def clip_percentile(self) -> float:
         return self._clip_pct
@@ -410,6 +498,9 @@ class ProfileVD(QWidget):
 
         # 2. Draw coordinate axes
         self._draw_axes(painter, img_rect)
+
+        # 2.5 Draw synthetic overlay (between axes and crosshair)
+        self._draw_synthetic_overlay(painter, img_rect)
 
         # 3. Draw cross-hair from linked panels
         self._draw_crosshair(painter, img_rect)

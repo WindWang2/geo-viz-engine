@@ -35,11 +35,13 @@ class WellTieCalibration:
 
     def depth_to_twt(self, depth: float | np.ndarray) -> float | np.ndarray:
         """Convert depth(s) to two-way travel time via interpolation."""
-        return float(np.interp(depth, self._depths, self._twt))
+        result = np.interp(depth, self._depths, self._twt)
+        return float(result) if np.ndim(result) == 0 else result
 
     def twt_to_depth(self, twt: float | np.ndarray) -> float | np.ndarray:
         """Convert two-way travel time to depth via interpolation."""
-        return float(np.interp(twt, self._twt, self._depths))
+        result = np.interp(twt, self._twt, self._depths)
+        return float(result) if np.ndim(result) == 0 else result
 
     def resample_to_twt(
         self,
@@ -85,3 +87,38 @@ class WellTieCalibration:
         twt = np.zeros_like(depths)
         twt[1:] = np.cumsum(dt) / 1000.0  # µs → ms
         return cls(depths, twt)
+
+    def to_td_pairs(self) -> dict[str, np.ndarray]:
+        """Export T-D pairs as a dict for CSV serialization."""
+        return {
+            "depth_m": self._depths.copy(),
+            "twt_ms": self._twt.copy(),
+        }
+
+
+def resample_to_seismic_grid(
+    values: np.ndarray,
+    src_twt: np.ndarray,
+    dt_ms: float,
+    t0_ms: float,
+    n_samples: int,
+) -> np.ndarray:
+    """Resample trace values from an irregular TWT grid to the seismic volume's regular grid.
+
+    Values outside the source TWT range are zero-filled.
+
+    Args:
+        values: Trace values sampled at *src_twt* positions.
+        src_twt: Source TWT positions (may be irregular).
+        dt_ms: Seismic volume sample interval in milliseconds.
+        t0_ms: Seismic volume first sample time in milliseconds.
+        n_samples: Number of output samples.
+
+    Returns:
+        ``(n_samples,)`` float32 resampled trace.
+    """
+    values = np.asarray(values, dtype=np.float64)
+    src_twt = np.asarray(src_twt, dtype=np.float64)
+    target_twt = np.arange(n_samples, dtype=np.float64) * dt_ms + t0_ms
+    result = np.interp(target_twt, src_twt, values, left=0.0, right=0.0)
+    return result.astype(np.float32)

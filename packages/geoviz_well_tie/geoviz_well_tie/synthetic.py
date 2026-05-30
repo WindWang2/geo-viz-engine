@@ -67,3 +67,42 @@ def generate_synthetic(
     else:
         synthetic = np.convolve(reflectivity, wavelet, mode="same")
     return synthetic.astype(np.float32)
+
+
+def generate_synthetic_twt(
+    reflectivity: np.ndarray,
+    wavelet_type: str = "ricker",
+    dt_ms: float = 4.0,
+    peak_freq: float = 25.0,
+    *,
+    f1: float = 5.0,
+    f2: float = 10.0,
+    f3: float = 40.0,
+    f4: float = 50.0,
+) -> np.ndarray:
+    """Unit-safe wrapper: generate synthetic accepting *dt_ms* (milliseconds).
+
+    Internally converts to seconds for wavelet generation, then convolves.
+
+    Args:
+        reflectivity: ``(N,)`` reflectivity series.
+        wavelet_type: ``"ricker"`` or ``"ormsby"``.
+        dt_ms: Sample interval in milliseconds.
+        peak_freq: Peak frequency in Hz (Ricker only).
+        f1..f4: Ormsby frequency parameters (Hz).
+
+    Returns:
+        ``(N,)`` float32 synthetic trace.
+    """
+    from .wavelet import ricker_wavelet, ormsby_wavelet
+
+    dt_sec = dt_ms / 1000.0
+    n_ref = len(reflectivity)
+    n_wavelet = min(81, max(21, n_ref if n_ref > 0 else 21))
+
+    if wavelet_type == "ormsby":
+        w = ormsby_wavelet(n_wavelet, dt=dt_sec, f1=f1, f2=f2, f3=f3, f4=f4)
+    else:
+        w = ricker_wavelet(n_wavelet, dt=dt_sec, peak_freq=peak_freq)
+
+    return generate_synthetic(reflectivity, w)

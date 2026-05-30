@@ -131,6 +131,29 @@ class SeismicLoader:
                 f"(available: 0-{meta.n_samples - 1})."
             ) from e
 
+    def read_trace(self, iline: int, xline: int) -> np.ndarray:
+        """Read a single trace at the given (inline, crossline) position.
+
+        Returns:
+            ``(n_samples,)`` float32 trace.
+        """
+        try:
+            f = self._open()
+            meta = self._meta or self.inspect()
+            # Use segyio's trace sorting to index efficiently
+            inline_data = np.asarray(f.iline[iline], dtype=np.float32)
+            xl_idx = (xline - meta.xline_start) // meta.xline_step
+            if xl_idx < 0 or xl_idx >= inline_data.shape[0]:
+                raise ValueError(
+                    f"Crossline {xline} out of range "
+                    f"(available: {meta.xline_start}-{meta.xline_start + (meta.n_crosslines - 1) * meta.xline_step})."
+                )
+            return inline_data[xl_idx, :]
+        except (KeyError, ValueError) as e:
+            raise ValueError(
+                f"Failed to read trace at ({iline}, {xline}) from {self._path}: {e}"
+            ) from e
+
     def get_volume_downsampled(self, factor: tuple[int, int, int] = (4, 4, 2)) -> np.ndarray:
         """Read the full volume with stride-based downsampling.
 

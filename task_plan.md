@@ -1,84 +1,98 @@
-# Task Plan: GeoViz Engine Phase 6 (地震属性分析 + 井震结合)
+# Task Plan: GeoViz Engine — 项目总览与下一步规划
 
 ## Goal
-在 geoviz-seismic 包中扩展地震属性分析功能（Tier 1 瞬时属性族），并新建 geoviz-well-tie 包实现井震结合工作流（合成地震记录、井震标定）。
+GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Phase 1–7 已全部完成并合并到 main。下一步规划待用户定义。
 
-## Current Phase
-Phase 6 ✅ COMPLETE — PR #19 merged to main
+## Current State
+- **Branch:** main (所有 feature 分支已合并)
+- **Tests:** 528 passed, 3 skipped
+- **Merged PRs:** #16, #17, #18, #19, #20
+- **Latest commit:** `43c2e373 Merge pull request #20 from WindWang2/feat/advanced-viz`
 
-## Phases
+## Completed Phases (Summary)
 
-### Phase 1: 现状盘点与 PR 合并 ✅
-- [x] PR #18 合并到 main
-- [x] 更新 README Roadmap Phase 5 为 ✅
-- [x] 回到 main 分支
-- **Status:** complete
+| Phase | Content | PR | Status |
+|-------|---------|-----|--------|
+| Phase 1 | PySide6 骨架、导航、单井剖面、地图、地震3D、数据管理 | — | ✅ |
+| Phase 2 | 多井对比、相变连通、地层拉平、TVDSS对齐、SVG导出 | — | ✅ |
+| Phase 3 | 测井引擎独立化、轨道管理器、矢量导出、AI预测集成 | — | ✅ |
+| Phase 4 | 地震可视化独立化、3D体渲染+2D剖面、SEGY按需切片 | — | ✅ |
+| Phase 5 | 连井对比拾取工作流（层位顶面、手动拾取、DTW、地震校深） | #18 | ✅ |
+| Phase 6 | 地震属性分析（5属性+色标）、沿层位提取、井震结合包 | #19 | ✅ |
+| Phase 7 | STFT谱分解、RGB属性融合、属性交叉图 | #20 | ✅ |
 
-### Phase 2: Phase 5 遗留项评估
-- [ ] 确认 cross-well 功能无遗漏
-- [ ] DTW ghost picks UX 评估
-- [ ] SeismicTie 双轴显示完整性
-- **Status:** pending（可选，不阻塞 Phase 6）
+## Packages (6 independent pip-installable packages)
 
-### Phase 3: Phase 6 需求分析 ✅
-- [x] 调研地震属性分析功能需求
-- [x] 调研井震结合功能需求
-- [x] 评估现有 geoviz-seismic 包扩展性
-- [x] 确定 sub-phases 划分
-- **Status:** complete
+| Package | 功能 | 文件数 |
+|---------|------|--------|
+| geoviz-well-log | ECharts SVG 测井渲染 | ~12 modules |
+| geoviz-seismic | pyqtgraph OpenGL 地震可视化 + 属性计算 | ~12 modules |
+| geoviz-map | QPainter 井位地图 (Web Mercator) | ~6 modules |
+| geoviz-paleo-map | QPainter 古地理图 (Plate Carrée) + 编辑 | ~14 modules |
+| geoviz-cross-well | 连井对比 (DTW、层位拾取、地震校深) | ~6 modules |
+| geoviz-well-tie | 井震结合 (合成地震记录、标定) | ~4 modules |
 
-### Phase 4: Phase 6 Sub-phase 1 — 扩展属性计算 ✅
-- [x] 扩展 `attributes.py`：instantaneous frequency, RMS, sweetness, relative impedance
-- [x] 扩展 `ColormapManager`：属性专用色标 (viridis, phase_wheel)
-- [x] 扩展工具栏 combo box：新增属性选项（7 个：振幅/包络/瞬时相位/瞬时频率/RMS振幅/甜点/相对阻抗）
-- [x] 新增 tests（8 个新测试，全部通过）
-- [x] 提交并推送到 feat/seismic-attributes 分支
-- **Status:** complete
+## Potential Next Steps (待用户选择)
 
-### Phase 5: Phase 6 Sub-phase 2 — 沿层位属性提取 ✅
-- [x] `horizon.py` 新增 `extract_along_horizon(volume, grid, dt_ms, t0_ms, window)` 函数
-- [x] 支持 single-sample 和 windowed RMS 提取
-- [x] 导出至 `__init__.py`
-- [x] 新增 tests（7 个测试，全部通过）
-- **Status:** complete
+### Option A: Phase 8 — 高级地震分析
+- Coherence (C3 eigenstructure) 相干属性
+- Curvature 曲率属性（需先算 dip/azimuth）
+- 3D 属性体渲染（Renderer3D 双体支持）
 
-### Phase 6: Phase 6 Sub-phase 3 — 新建 geoviz-well-tie 包 ✅
-- [x] Package scaffold（pyproject.toml, __init__.py, README.md）
-- [x] Ricker + Ormsby 子波生成（wavelet.py）
-- [x] 反射系数计算（sonic × density → impedance → reflectivity, synthetic.py）
-- [x] 合成地震记录生成（reflectivity ⊛ wavelet, synthetic.py）
-- [x] 井震标定（WellTieCalibration: T-D 转换, sonic 积分, 深度→TWT 重采样, calibration.py）
-- [x] 新增 tests（15 个测试，全部通过）
-- [ ] 与 geoviz-seismic / geoviz-well-log 集成（可视化面板 — 后续 phase）
-- **Status:** complete（核心库完成，可视化集成留待后续）
+### Option B: Phase 8 — 井震结合可视化集成
+- geoviz-well-tie 与 SeismicView 的可视化面板集成
+- 合成地震记录与实际地震剖面对比显示
+- 井震标定交互（stretch/squeeze）
 
-### Phase 7: Phase 6 Sub-phase 4 — 高级可视化
-- [ ] RGB 属性融合（三频段/三属性 → R/G/B）
-- [ ] 属性交叉图（attribute crossplot）
-- [ ] 可选：Spectral Decomposition (STFT)
-- **Status:** pending
+### Option C: Phase 8 — 地图/古地图增强
+- 地图性能优化（已有 PaintScheduler + LayerPixmapCache）
+- 古地图编辑模式完善
+- GeoJSON 拓扑编辑高级功能
 
-## Key Questions
-1. ~~Phase 6 优先做地震属性分析还是井震结合？~~ → 先做属性计算（Sub-phase 1），再做井震结合（Sub-phase 3）
-2. ~~Phase 6 是否需要新的独立 package？~~ → 属性分析扩展现有包，井震结合新建 `geoviz-well-tie`
-3. ~~是否引入 `bruges` 库？~~ → 不引入，自行实现 Ricker/Ormsby，纯 NumPy，零额外依赖
-4. Sub-phase 划分是否合理？→ 待用户确认
+### Option D: Phase 8 — 工程化 / 发布
+- PyInstaller 打包测试
+- 文档完善（API docs、用户手册）
+- CI/CD pipeline
 
-## Decisions Made
+## Key Decisions (Historical)
 | Decision | Rationale |
 |----------|-----------|
 | 属性分析扩展现有 geoviz-seismic | attributes.py 已有骨架，工具栏已有 combo，ProfileVD 支持任意数据 |
 | 井震结合新建 geoviz-well-tie | 数据模型不同（井路径、合成记录），遵循独立 package 模式 |
 | Tier 1 属性优先 | 纯 NumPy/SciPy，改动最小，用户立即可用 |
-| 沿层位提取作为独立 sub-phase | 需要扩展 HorizonParser，但与属性计算逻辑正交 |
-| RGB 融合放最后 | 需要新的 QImage 合成逻辑，优先级低于核心属性 |
+| RGB 融合放 Phase 7 | 需要新的 QImage 合成逻辑，优先级低于核心属性 |
+| 不引入 bruges 库 | 自行实现 Ricker/Ormsby，纯 NumPy，零额外依赖 |
 
 ## Errors Encountered
-| Error | Attempt | Resolution |
-|-------|---------|------------|
+| Error | Resolution |
+|-------|------------|
+| STFT Zxx indexing axis error (Phase 7) | Zxx shape is (n_traces, n_freqs, n_frames); mask on axis 1 not 2 |
+| istft missing axis parameter (Phase 7) | scipy.signal.istft 不支持 axis 参数，移除 |
+| ndarray.moveaxis AttributeError (Phase 7) | moveaxis 是 numpy 模块函数，不是 ndarray 方法 |
 
 ## Notes
-- Phase 5 已完成，PR #18 已合并
-- 现有 attributes.py 已有 envelope + phase
-- 485 tests 全绿
-- 项目版本: 0.8.0
+- Phase 2 遗留项（cross-well 功能确认、DTW ghost picks UX、SeismicTie 双轴显示）仍为 pending
+- geoviz-well-tie 核心库完成，可视化集成留待后续
+- 528 tests 全绿
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | CLEAN | 6 proposals, 6 accepted, 0 deferred |
+| Codex Review | `/codex review` | Independent 2nd opinion | 1 | issues_found | findings from prior review |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 3 | issues_open | 22 findings: 7 critical, 8 high, 7 medium |
+| Design Review | `/plan-design-review` | UI/UX gaps | 2 | issues_open | 3 unresolved decisions (stale — from prior branch) |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 1 | success | 7 findings, 7 fixes applied |
+
+### Eng Review Summary (Run 3 — Phase 8 Well-Seismic Tie)
+
+**Architecture (9 issues):** SeismicVolumeMeta lacks spatial reference (blocker), no overlay API in ProfileVD, render_rgba zeros _data, attribute transform breaks raw data path, dt unit mismatch (sec vs ms), toolbar overcrowding, code duplication with cross-well SeismicTie, no read_trace() convenience method.
+
+**Data Flow (3 bugs):** Reflectivity length N-1 vs depth array N mismatch, missing resample-to-seismic-grid function, dt unit mismatch between wavelet (sec) and calibration (ms).
+
+**Tests (6 gaps):** No ProfileWidget tests, no attribute rendering tests, no well-tie pipeline integration test, no synthetic edge cases, no cross-well tests, no overlay rendering tests. Estimated +25-35 tests needed.
+
+**Performance (4 issues):** Image rebuild on every viewport change, synthetic resample on every slider drag (needs debounce), QPainter polyline for deep wells (needs subsampling).
+
+**VERDICT:** CEO CLEARED. Eng review found 7 critical issues that must be resolved before implementation. Priority order: (1) Fix A1 spatial reference, (2) Fix data flow bugs 1-3, (3) Implement overlay API + WellTiePanel, (4) Add test coverage.

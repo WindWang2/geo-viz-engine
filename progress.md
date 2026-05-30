@@ -1,87 +1,59 @@
-# Progress Log
+# Progress Log — GeoViz Engine
 
-## Session: 2026-05-29
+## Project Status: Phase 1–7 COMPLETE, Phase 8 IN PROGRESS
 
-### Phase 1: 现状盘点与 PR 合并
-- **Status:** complete
-- Actions taken:
-  - PR #18 squash-merged to main
-  - README Roadmap updated: Phase 5 ✅, Phase 6 🔄
+### Session: 2026-05-30 (Phase 8)
 
-### Phase 3: Phase 6 需求分析
-- **Status:** complete
-- Actions taken:
-  - 调研地震属性族 + 井震结合工作流
-  - 分析 geoviz-seismic 扩展性
-  - 确定 package 策略和 sub-phase 划分
+#### Reviews Completed
+- CEO Review: CLEAN — 6/6 proposals accepted, Well-Seismic Tie Visualization selected (SELECTIVE EXPANSION mode)
+- Eng Review (Run 3): 22 findings — 7 critical, 8 high, 7 medium
 
-### Phase 4: Sub-phase 1 — 扩展属性计算
-- **Status:** in_progress
-- **Started:** 2026-05-29 23:45
-- Actions taken:
-  - 扩展 `attributes.py`：新增 5 个属性函数
-    - `compute_instantaneous_frequency()` — gradient of unwrapped phase / 2π
-    - `compute_rms_amplitude()` — uniform_filter1d windowed RMS
-    - `compute_sweetness()` — envelope / sqrt(freq)
-    - `compute_relative_impedance()` — cumsum
-    - `_analytic_signal()` helper（去重 hilbert 调用）
-  - 扩展 `colormap.py`：新增 2 个属性专用色标
-    - `viridis` — 感知均匀顺序色标（用于 envelope, RMS, sweetness）
-    - `phase_wheel` — 圆形色标（用于相位数据）
-  - 扩展 `seismic_view.py` 工具栏 combo box：
-    - 7 个选项：振幅/包络/瞬时相位/瞬时频率/RMS振幅/甜点/相对阻抗
-    - `_apply_attr()` 重构为 dispatch table
-    - `_apply_current_attr()` 简化为复用 `_apply_attr()`
-  - 新增 `test_attributes_extended.py`：8 个测试
-- Files created/modified:
-  - packages/geoviz_seismic/geoviz_seismic/attributes.py (extended)
-  - packages/geoviz_seismic/geoviz_seismic/colormap.py (extended)
-  - packages/geoviz_seismic/geoviz_seismic/seismic_view.py (extended)
-  - tests/test_attributes_extended.py (new)
-- Test results: 490 passed, 0 failed
+#### Sub-phase 1: Core Library + Spatial Reference + Overlay API (DONE ✅)
+- 8 files modified across geoviz-well-tie and geoviz-seismic packages
+- 44 new tests, all green → 572 total
+- Key additions: generate_synthetic_twt, resample_to_seismic_grid, BinGridGeometry, auto_tie, ProfileVD overlay API, read_trace
 
-## Test Results
-| Test | Scope | Expected | Actual | Status |
-|------|-------|----------|--------|--------|
-| 8 new attribute tests | Package | All pass | All pass | ✓ |
-| 7 horizon extract tests | Package | All pass | All pass | ✓ |
-| 15 well-tie tests | Package | All pass | All pass | ✓ |
-| 512 full suite | All | All pass | All pass | ✓ |
+#### Sub-phase 2: WellTiePanel + SeismicView Integration (DONE ✅)
+- `well_tie_panel.py` — WellTiePanel widget with wavelet controls, auto-tie, export
+- `seismic_view.py` — toolbar toggle button + lazy panel creation
+- 17 new tests, all green → 589 total
+- WellTiePanel API: set_calibration(), set_well_logs(), generate_synthetic(), auto_tie()
+- SeismicView integration: _well_tie_btn checkable toggle, _well_tie_panel persistent panel
+- Panel persists on toggle off/on (same object, not recreated)
 
-## Error Log
-| Timestamp | Error | Attempt | Resolution |
-|-----------|-------|---------|------------|
+## Test Results History
+| Date | Tests | Status |
+|------|-------|--------|
+| 2026-05-29 (Phase 4) | 490 passed | ✅ |
+| 2026-05-29 (Phase 5) | 497 passed | ✅ |
+| 2026-05-29 (Phase 6) | 512 passed | ✅ |
+| 2026-05-30 (Phase 7) | 528 passed | ✅ |
+| 2026-05-30 (Phase 8.1) | 572 passed | ✅ |
+| 2026-05-30 (Phase 8.2) | 589 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 6 COMPLETE, PR #19 merged to main |
-| Where am I going? | Phase 7 (Sub-phase 4: 高级可视化) or new task |
-| What's the goal? | Phase 6 done. Next: RGB fusion, crossplot, STFT |
-| What have I learned? | 沿层位提取用 np.take_along_axis 向量化; 井震结合纯 NumPy 即可实现 |
-| What have I done? | Sub-phase 1-3: 5 attrs + 2 colormaps + extract_along_horizon + geoviz-well-tie package |
+| Where am I? | Phase 8 Sub-phase 2 COMPLETE — WellTiePanel + SeismicView integration done, 589 tests green |
+| Where am I going? | Commit Phase 8 work, then address remaining eng review items (A7 dedup, Phase 2 legacy items) |
+| What's the goal? | Complete Well-Seismic Tie Visualization feature with persistent panel, auto-tie, and overlay |
+| What have I learned? | Midpoint calibration for reflectivity, QPainter overlay patterns, BinGridGeometry azimuth convention |
+| What have I done? | Sub-phase 1 (44 tests) → Sub-phase 2 (17 tests) → 589 total green |
 
-## Session: 2026-05-29 (continued)
+## Pending Items
+- Phase 8: Consider committing all work (572 existing + 17 new = 589 tests)
+- A7: Code deduplication between cross-well SeismicTie and geoviz-well-tie (deferred)
+- Phase 2 遗留项：cross-well 功能确认、DTW ghost picks UX、SeismicTie 双轴显示
 
-### Phase 5: Sub-phase 2 — 沿层位属性提取
-- **Status:** complete
-- Actions taken:
-  - `horizon.py` 新增 `extract_along_horizon(volume, grid, dt_ms, t0_ms, window)`
-  - 支持 single-sample 和 windowed RMS 提取
-  - 导出至 `__init__.py`
-  - 新增 `test_horizon_extract.py`：7 个测试
-- Test results: 497 passed
-
-### Phase 6: Sub-phase 3 — 新建 geoviz-well-tie 包
-- **Status:** complete
-- Actions taken:
-  - 新建 `packages/geoviz_well_tie/` 独立 package
-  - `wavelet.py`：Ricker + Ormsby 子波生成
-  - `synthetic.py`：反射系数 + 合成地震记录
-  - `calibration.py`：WellTieCalibration (T-D 转换, sonic 积分, 深度→TWT 重采样)
-  - 接入 workspace (`pyproject.toml`)
-  - 新增 `test_well_tie.py`：15 个测试
-- Test results: 512 passed
+## Errors Encountered
+| Error | Resolution |
+|-------|------------|
+| depth_to_twt TypeError on array input | np.ndim check — float for scalar, array for array |
+| BinGridGeometry il/xl swapped | il = (-dx*sin + dy*cos)/spacing (inline along azimuth from north) |
+| QPainter.drawPolyline(*args) TypeError | drawPolyline(QPolygonF(list)) — PySide6 takes single QPolygonF |
+| set_clip_percentile empty if body | Restored original method body lost during overlay insertion |
+| Reflectivity N-1 vs depth N mismatch | Build midpoint WellTieCalibration at (depths[:-1]+depths[1:])/2 |
+| Auto-tie sign convention | Positive shift = synthetic late (should move down), test updated |
 
 ---
 *Update after completing each phase or encountering errors*
