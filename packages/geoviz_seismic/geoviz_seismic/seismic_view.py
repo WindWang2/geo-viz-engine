@@ -2,127 +2,23 @@ from __future__ import annotations
 
 import logging
 import numpy as np
-from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QPushButton, QComboBox, QLabel, QFileDialog, QToolBar,
     QDoubleSpinBox, QSlider,
 )
-from PySide6.QtGui import QPainter, QLinearGradient, QColor
 
 from .renderer_3d import Renderer3D
 from .profile_widget import ProfileWidget
 from .loader import SeismicLoader
 from .horizon import HorizonParser
 from .cache import SeismicCache
+from .colorbar_widget import ColorbarWidget
+from .workers import SyntheticWorker, SegyLoadWorker
+from .dialogs.crossplot import CrossplotDialog
+from .dialogs.horizon_manager import HorizonManagerDialog
 from .models import SeismicVolumeMeta, SliceInfo
-
-
-def _generate_synthetic(
-    n_inlines: int = 200, n_crosslines: int = 200,
-    n_samples: int = 200,
-) -> np.ndarray:
-    """Generate synthetic seismic with geologically realistic structure:
-    horizontal reflectors with gentle dip, a fault offset, and noise."""
-    t = np.linspace(0, 4 * np.pi, n_samples, dtype=np.float32)
-    il = np.arange(n_inlines, dtype=np.float32)
-    xl = np.arange(n_crosslines, dtype=np.float32)
-    
-    dip_il = 0.02 * il[:, np.newaxis, np.newaxis]
-    dip_xl = 0.015 * xl[np.newaxis, :, np.newaxis]
-    t_3d = t[np.newaxis, np.newaxis, :]
-    
-    reflector = np.sin(t_3d + dip_il + dip_xl) + 0.5 * np.sin(2.3 * t_3d + dip_il + dip_xl)
-    field = reflector.copy()
-    
-    fault_il = n_inlines // 2
-    offset = 5
-    field[fault_il:, :, offset:] = field[fault_il:, :, :-offset].copy()
-    field[fault_il:, :, :offset] = 0
-    rng = np.random.default_rng(42)
-    noise = rng.normal(0, 0.15, field.shape).astype(np.float32)
-    return field + noise
-
-
-class _SyntheticWorker(QThread):
-    """Background thread for synthetic data generation."""
-    done = Signal(object)  # np.ndarray
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-    def run(self):
-        data = _generate_synthetic()
-        self.done.emit(data)
-
-
-class _SegyLoadWorker(QThread):
-    """Background thread for SEGY file loading."""
-    done = Signal(object)  # tuple: (meta, vol, raw, path)
-    error = Signal(str)
-
-    def __init__(self, path: str, parent=None):
-        super().__init__(parent)
-        self._path = path
-
-    def run(self):
-        try:
-            loader = SeismicLoader(self._path)
-            meta = loader.inspect()
-            vol = loader.get_volume_downsampled(factor=(4, 4, 2))
-            mid_il = meta.iline_start + (meta.n_inlines // 2) * meta.iline_step
-            mid_xl = meta.xline_start + (meta.n_crosslines // 2) * meta.xline_step
-            mid_t = meta.n_samples // 2  # index
-            
-            raw_il = loader.read_inline(mid_il)
-            raw_xl = loader.read_crossline(mid_xl)
-            raw_t = loader.read_timeslice(mid_t)
-            
-            # Close file handle on worker thread; main thread re-opens lazily
-            loader.close()
-            self.done.emit((meta, vol, raw_il, raw_xl, raw_t, self._path))
-        except Exception as exc:
-            self.error.emit(str(exc))
-
-
-class ColorbarWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedWidth(60)
-        self._cmap_name = "seismic"
-        self._min_val = -1.0
-        self._max_val = 1.0
-
-    def set_colormap(self, name: str):
-        self._cmap_name = name
-        self.update()
-
-    def set_range(self, min_val: float, max_val: float):
-        self._min_val = min_val
-        self._max_val = max_val
-        self.update()
-
-    def paintEvent(self, event):
-        from .colormap import ColormapManager
-        painter = QPainter(self)
-        rect = self.rect()
-        
-        # Draw gradient
-        grad = QLinearGradient(0, rect.bottom() - 20, 0, 20)
-        lut = ColormapManager.get_colormap(self._cmap_name)
-        for i in range(len(lut)):
-            pos = i / (len(lut) - 1)
-            r, g, b, a = lut[i]
-            grad.setColorAt(pos, QColor(r, g, b, 255))
-        
-        bar_rect = rect.adjusted(10, 20, -30, -20)
-        painter.fillRect(bar_rect, grad)
-        
-        # Draw text labels
-        painter.setPen(QColor(100, 100, 100))
-        painter.drawText(bar_rect.right() + 5, bar_rect.top() + 10, f"{self._max_val:.1f}")
-        painter.drawText(bar_rect.right() + 5, bar_rect.bottom(), f"{self._min_val:.1f}")
-        painter.drawText(bar_rect.right() + 5, bar_rect.center().y() + 5, f"{(self._max_val+self._min_val)/2:.1f}")
 
 class SeismicView(QWidget):
     """High-level composite widget for seismic data visualization.
@@ -288,7 +184,7 @@ class SeismicView(QWidget):
             self.load_segy_async(path)
         else:
             self._profile_il.set_overlay_text("生成合成数据...")
-            self._synth_worker = _SyntheticWorker(self)
+            self._synth_worker = SyntheticWorker(self)
             self._synth_worker.done.connect(self._on_synthetic_ready)
             self._synth_worker.start()
 
@@ -387,7 +283,7 @@ class SeismicView(QWidget):
             self._segy_worker.done.disconnect(self._on_segy_ready)
             self._segy_worker.error.disconnect(self._on_segy_error)
         self._profile_il.set_overlay_text("加载 SEGY...")
-        self._segy_worker = _SegyLoadWorker(path, self)
+        self._segy_worker = SegyLoadWorker(path, self)
         self._segy_worker.done.connect(self._on_segy_ready)
         self._segy_worker.error.connect(self._on_segy_error)
         self._segy_worker.start()
@@ -1036,7 +932,7 @@ class SeismicView(QWidget):
                 and self._synth_worker.isRunning()):
             self._synth_worker.done.disconnect(self._on_synthetic_ready)
         self._profile_widget.set_overlay_text("生成合成数据...")
-        self._synth_worker = _SyntheticWorker(self)
+        self._synth_worker = SyntheticWorker(self)
         self._synth_worker.done.connect(self._on_synthetic_ready)
         self._synth_worker.start()
 
@@ -1090,39 +986,11 @@ class SeismicView(QWidget):
         self._readout_label.setText(f"已移除层位: {name}")
 
     def _show_horizon_list(self):
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout
-        dialog = QDialog(self)
-        dialog.setWindowTitle("层位管理")
-        dialog.setMinimumSize(300, 300)
-        layout = QVBoxLayout(dialog)
-
-        list_widget = QListWidget()
-        for name in self._horizon_grids:
-            list_widget.addItem(name)
-        layout.addWidget(list_widget)
-
-        def remove_selected():
-            item = list_widget.currentItem()
-            if item:
-                name = item.text()
-                self._remove_horizon(name)
-                list_widget.takeItem(list_widget.row(item))
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        remove_btn = QPushButton("移除选中")
-        remove_btn.setStyleSheet(
-            "QPushButton { background: #fed7d7; color: #9b2c2c; "
-            "border: 1px solid #feb2b2; border-radius: 4px; "
-            "padding: 0 12px; font-size: 13px; }"
+        dialog = HorizonManagerDialog(
+            list(self._horizon_grids.keys()),
+            remove_callback=self._remove_horizon,
+            parent=self,
         )
-        remove_btn.clicked.connect(remove_selected)
-        close_btn = QPushButton("关闭")
-        close_btn.clicked.connect(dialog.accept)
-        btn_layout.addWidget(remove_btn)
-        btn_layout.addWidget(close_btn)
-        layout.addLayout(btn_layout)
-
         dialog.exec()
 
     def _on_mode_changed(self, index: int):
@@ -1182,71 +1050,15 @@ class SeismicView(QWidget):
 
     def _on_crossplot(self):
         """Open an attribute crossplot dialog for the current slice."""
-        from PySide6.QtWidgets import QDialog, QVBoxLayout
-        from PySide6.QtGui import QPainter, QPen, QColor
-
-        raw = self._slice_data.get("inline") or self._slice_data.get("crossline") or self._slice_data.get("time")
+        raw = (
+            self._slice_data.get("inline")
+            or self._slice_data.get("crossline")
+            or self._slice_data.get("time")
+        )
         if raw is None:
             return
-
-        from . import attributes as _attr
         si = self._meta.sample_interval if self._meta else 1.0
-        si_s = si / 1000.0
-        env = _attr.compute_envelope(raw, axis=0)
-        freq = _attr.compute_instantaneous_frequency(raw, axis=0, sample_interval=si_s)
-
-        # Subsample for performance
-        step = max(1, env.size // 5000)
-        x = freq.flatten()[::step]
-        y = env.flatten()[::step]
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("属性交叉图 — 频率 vs 包络")
-        dlg.resize(500, 500)
-
-        class _CrossplotCanvas(QWidget):
-            def __init__(self, x_data, y_data, parent=None):
-                super().__init__(parent)
-                self._x = x_data
-                self._y = y_data
-                self.setMinimumSize(400, 400)
-
-            def paintEvent(self, event):
-                p = QPainter(self)
-                p.setRenderHint(QPainter.RenderHint.Antialiasing)
-                r = self.rect().adjusted(40, 20, -20, -30)
-
-                # Axes
-                p.setPen(QPen(QColor(100, 100, 100), 1))
-                p.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
-                p.drawLine(r.left(), r.top(), r.left(), r.bottom())
-
-                # Labels
-                p.drawText(r.center().x() - 30, r.bottom() + 22, "瞬时频率 (Hz)")
-                p.save()
-                p.translate(12, r.center().y() + 30)
-                p.rotate(-90)
-                p.drawText(0, 0, "包络")
-                p.restore()
-
-                xlo, xhi = float(np.nanpercentile(self._x, 1)), float(np.nanpercentile(self._x, 99))
-                ylo, yhi = float(np.nanpercentile(self._y, 1)), float(np.nanpercentile(self._y, 99))
-                if xhi <= xlo:
-                    xhi = xlo + 1
-                if yhi <= ylo:
-                    yhi = ylo + 1
-
-                pen = QPen(QColor(30, 100, 200, 60), 2)
-                p.setPen(pen)
-                for xi, yi in zip(self._x, self._y):
-                    px = r.left() + (xi - xlo) / (xhi - xlo) * r.width()
-                    py = r.bottom() - (yi - ylo) / (yhi - ylo) * r.height()
-                    if r.left() <= px <= r.right() and r.top() <= py <= r.bottom():
-                        p.drawPoint(int(px), int(py))
-                p.end()
-
-        layout = QVBoxLayout(dlg)
-        layout.addWidget(_CrossplotCanvas(x, y))
+        dlg = CrossplotDialog(raw, si / 1000.0, parent=self)
         dlg.exec()
 
     def _apply_current_attr(self):

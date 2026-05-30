@@ -7,7 +7,7 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 - **Branch:** main (synced with origin)
 - **Tests:** 617 passed, 3 skipped
 - **Latest commit:** `8ca37621 feat: export new public APIs (export_vector_svg, export_professional_figure)`
-- **Active phase:** Phase 10 — PaleoMap 纹理填充渲染 + 专业图件导出
+- **Active phase:** Phase 11 — Awaiting user direction
 - **Design spec:** `docs/superpowers/specs/2026-05-30-paleo-map-texture-export-design.md`
 - **Implementation plan:** `docs/superpowers/plans/2026-05-30-paleo-map-texture-export.md`
 
@@ -46,14 +46,36 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 | Phase | Feature | Status |
 |-------|---------|--------|
 | Phase 9 | Coherence (C3 eigenstructure) 相干属性 | ✅ — `compute_coherence_c3` + GPU加速 + 12 tests |
+| Phase 9b | GPU Acceleration for Coherence | ✅ — CuPy offload, 1.5-1.9x speedup, numerically identical |
 | Phase 10 | PaleoMap 纹理填充渲染 + 专业图件导出 | ✅ — 13 图案 SVG + PatternEngine 扩展 + 矢量 SVG 导出 + 出版级图框 (617 tests) |
 
-## Unimplemented Features (Future)
+## Roadmap: Future Phases
 
-| Priority | Feature | Complexity |
-|----------|---------|------------|
-| Tier 3 | Curvature 曲率属性 | 中 — 需先实现 dip/azimuth |
-| Tier 3 | 3D 属性体渲染 | 中 — Renderer3D 双体支持 |
+### Phase 11: Curvature 曲率属性 (Tier 3)
+**Goal:** 实现地层曲率分析，用于裂缝预测和构造解释。
+- **Pre-req:** Dip/Azimuth 计算（结构张量或平面拟合）
+- **Curvature types:** Gaussian, Mean, Maximum, Minimum, Dip, Strike
+- **Integration:** `attributes.py` 新增 `compute_curvature_*` 系列函数
+- **GPU support:** CuPy offload (reuse Phase 9b chunking pattern)
+- **Tests:** ~15 new tests
+- **Complexity:** 中
+
+### Phase 12: 3D 属性体渲染 (Tier 3)
+**Goal:** Renderer3D 支持同时渲染原始地震体 + 属性体（如 coherence 体）。
+- **Dual-volume rendering:** 原始振幅体 + 属性体叠合显示
+- **Blending modes:** 叠加、透明融合、属性体作为染色层
+- **UI:** SeismicView 工具栏新增体选择/融合控制
+- **Performance:** 共享纹理内存，避免双份 GPU 显存占用
+- **Tests:** ~10 new tests (headless GL  mock)
+- **Complexity:** 中
+
+### Phase 13: 谱分解进阶 (可选)
+**Goal:** 多窗口 STFT、连续小波变换 (CWT)、时频谱 RGB 融合。
+- **Complexity:** 高 — 算法密集，需充分调研
+
+### Phase 14: 连井剖面自动化 (可选)
+**Goal:** 基于地理距离/构造走向自动生成连井剖面线。
+- **Complexity:** 低-中 — 主要是几何计算 + UI 交互
 
 ## Key Decisions (Historical)
 | Decision | Rationale |
@@ -65,6 +87,7 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 | VERSION 保持 0.7.0 | 用户选择不随 CHANGELOG 同步版本号 |
 
 ## Notes
-- 601 tests 全绿
+- 617 tests passed, 3 skipped — full suite green
 - cross-well 现依赖 well-tie（纯 NumPy，零 Qt）
 - VERSION (0.7.0) 与 CHANGELOG (0.10.0) 不同步 — 用户有意为之
+- Phase 10 shipped: `8ca37621` — 13 facies patterns + vector SVG export + professional figure export

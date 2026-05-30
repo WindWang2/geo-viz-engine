@@ -53,10 +53,10 @@
 | Question | Answer |
 |----------|--------|
 | Where am I? | Phase 10 COMPLETE — 13 facies pattern SVGs, PatternEngine extension, vector SVG export, professional figure export all shipped |
-| Where am I going? | Await user direction for next phase (Tier 3: Curvature or 3D attribute body rendering) |
-| What's the goal? | Maintain 617 green tests; respond to user priority |
-| What have I learned? | PatternEngine composite brush pipeline; QSvgGenerator limitations (raster patterns); spec has 16 facies types (not 24); CMYK mapping viable for small palettes; PaintScheduler needs RuntimeError guard on deleted widgets |
-| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 10 full implementation — 617 green, all pushed |
+| Where am I going? | Phase 11 (Curvature) or Phase 12 (3D dual-volume rendering) — await user priority |
+| What's the goal? | Maintain 617 green tests; plan and execute next phase on user direction |
+| What have I learned? | PatternEngine composite brush pipeline; QSvgGenerator limitations (raster patterns); spec has 16 facies types (not 24); CMYK mapping viable for small palettes; PaintScheduler needs RuntimeError guard on deleted widgets; GPU coherence offload pattern (CuPy per-chunk) |
+| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 9b GPU + Phase 10 PaleoMap — 617 green, all pushed |
 
 #### Phase 9: Coherence (C3 eigenstructure) (DONE ✅)
 - `compute_coherence_c3` — C3 eigenstructure coherence via power iteration
@@ -117,6 +117,7 @@
 
 ## Pending Items
 - Awaiting user direction for next phase
+- Phase 11 (Curvature) or Phase 12 (3D dual-volume rendering) ready to plan on user request
 
 ## Errors Encountered
 | Error | Resolution |
