@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPageLayout
 from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtPrintSupport import QPrinter
 
@@ -81,9 +81,9 @@ def export_professional_figure(
             getattr(_QPageSize.PageSizeId, page_size)
         ))
         if orientation == "landscape":
-            device.setPageOrientation(Qt.Orientation.Horizontal)
+            device.setPageOrientation(QPageLayout.Orientation.Landscape)
         else:
-            device.setPageOrientation(Qt.Orientation.Vertical)
+            device.setPageOrientation(QPageLayout.Orientation.Portrait)
     else:  # png
         from PySide6.QtGui import QPixmap
         device = QPixmap(page_w, page_h)
@@ -154,7 +154,10 @@ def export_professional_figure(
     painter.save()
     painter.setClipRect(map_rect)
     painter.translate(map_x, map_y)
+    from geoviz_paleo_map.layers.legend import LegendLayer
     for layer in canvas._layers:
+        if not include_legend and isinstance(layer, LegendLayer):
+            continue
         layer.paint(painter, vp)
     painter.restore()
 

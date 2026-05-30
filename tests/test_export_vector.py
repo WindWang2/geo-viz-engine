@@ -49,3 +49,27 @@ def test_export_vector_svg_creates_file_with_path_elements(qtbot):
         assert len(paths) > 0, "SVG should contain <path> elements"
     finally:
         path.unlink(missing_ok=True)
+
+
+def test_export_vector_svg_contains_text_elements(qtbot):
+    """Vector SVG should contain <text> elements from title layer."""
+    from PySide6.QtCore import QRectF
+    canvas = PaleoMapCanvas()
+    canvas.load_features(SAMPLE["features"], period_name="测试")
+    qtbot.addWidget(canvas)
+    canvas.resize(400, 300)
+    canvas.show()
+    qtbot.waitExposed(canvas)
+
+    with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
+        path = Path(f.name)
+
+    try:
+        export_vector_svg(canvas, str(path), QRectF(0, 0, 400, 300))
+        tree = ET.parse(path)
+        root = tree.getroot()
+        ns = {"svg": "http://www.w3.org/2000/svg"}
+        texts = root.findall(".//svg:text", ns)
+        assert len(texts) > 0, "SVG should contain <text> elements"
+    finally:
+        path.unlink(missing_ok=True)

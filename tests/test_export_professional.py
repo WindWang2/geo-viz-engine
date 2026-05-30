@@ -51,3 +51,101 @@ def test_professional_svg_creates_file_with_title(qtbot):
         assert "测试古地理图" in text
     finally:
         path.unlink(missing_ok=True)
+
+
+def test_professional_pdf_creates_file(qtbot):
+    canvas = PaleoMapCanvas()
+    canvas.load_features(SAMPLE["features"], period_name="测试")
+    qtbot.addWidget(canvas)
+    canvas.resize(400, 300)
+    canvas.show()
+    qtbot.waitExposed(canvas)
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        path = Path(f.name)
+
+    try:
+        export_professional_figure(
+            canvas, str(path), format="pdf",
+            title="测试PDF",
+            page_size="A4", orientation="landscape",
+        )
+        assert path.exists()
+        assert path.stat().st_size > 1000
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_professional_png_creates_file(qtbot):
+    from PIL import Image
+    canvas = PaleoMapCanvas()
+    canvas.load_features(SAMPLE["features"], period_name="测试")
+    qtbot.addWidget(canvas)
+    canvas.resize(400, 300)
+    canvas.show()
+    qtbot.waitExposed(canvas)
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        path = Path(f.name)
+
+    try:
+        export_professional_figure(
+            canvas, str(path), format="png",
+            title="测试PNG",
+            dpi=150,
+        )
+        assert path.exists()
+        img = Image.open(path)
+        assert img.size[0] > 1000  # A4 landscape at 150dpi is wide
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_professional_svg_has_legend_when_enabled(qtbot):
+    canvas = PaleoMapCanvas()
+    canvas.load_features(SAMPLE["features"], period_name="测试")
+    qtbot.addWidget(canvas)
+    canvas.resize(400, 300)
+    canvas.show()
+    qtbot.waitExposed(canvas)
+
+    with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
+        path = Path(f.name)
+
+    try:
+        export_professional_figure(
+            canvas, str(path), format="svg",
+            title="测试",
+            include_legend=True,
+        )
+        tree = ET.parse(path)
+        root = tree.getroot()
+        text = ET.tostring(root, encoding="unicode")
+        assert "图例" in text
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_professional_svg_no_legend_when_disabled(qtbot):
+    canvas = PaleoMapCanvas()
+    canvas.load_features(SAMPLE["features"], period_name="测试")
+    qtbot.addWidget(canvas)
+    canvas.resize(400, 300)
+    canvas.show()
+    qtbot.waitExposed(canvas)
+
+    with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
+        path = Path(f.name)
+
+    try:
+        export_professional_figure(
+            canvas, str(path), format="svg",
+            title="测试",
+            include_legend=False,
+        )
+        tree = ET.parse(path)
+        root = tree.getroot()
+        text = ET.tostring(root, encoding="unicode")
+        assert "图例" not in text
+    finally:
+        path.unlink(missing_ok=True)
