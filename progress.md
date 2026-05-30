@@ -1,6 +1,6 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–10 COMPLETE, Refactor COMPLETE, Awaiting next phase
+## Project Status: Phase 1–10 COMPLETE, Refactor COMPLETE, Phase 11 IN PROGRESS
 
 ### Session: 2026-05-30 (Phase 8 + Legacy)
 
@@ -53,11 +53,24 @@
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 10 COMPLETE — 13 facies pattern SVGs, PatternEngine extension, vector SVG export, professional figure export all shipped |
-| Where am I going? | Phase 11 (Curvature) or Phase 12 (3D dual-volume rendering) — await user priority |
-| What's the goal? | Maintain 617 green tests; plan and execute next phase on user direction |
+| Where am I? | Phase 11 IN PROGRESS — Curvature (dip/azimuth + 6 curvature types) design approved, implementation starting |
+| Where am I going? | Implement `compute_dip`, `compute_azimuth`, `compute_curvature` in attributes.py; integrate into SeismicView toolbar; ~15 new tests |
+| What's the goal? | Maintain 617 green tests; add curvature attribute family with GPU support |
 | What have I learned? | PatternEngine composite brush pipeline; QSvgGenerator limitations (raster patterns); spec has 16 facies types (not 24); CMYK mapping viable for small palettes; PaintScheduler needs RuntimeError guard on deleted widgets; GPU coherence offload pattern (CuPy per-chunk) |
-| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 9b GPU + Phase 10 PaleoMap — 617 green, all pushed |
+| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 9b GPU + Phase 10 PaleoMap + Refactor — 617 green, all pushed |
+
+### Session: 2026-05-31 (Phase 11 — Curvature)
+
+#### Design Approved
+- **Algorithm:** Direct second-derivative method (Sobel gradient → dip → curvature)
+- **API:** `compute_dip`, `compute_azimuth`, `compute_curvature` in `attributes.py`
+- **Curvature types:** Gaussian, Mean, Maximum, Minimum, Dip, Strike
+- **GPU support:** CuPy per-chunk offload (reuse Phase 9b pattern)
+- **UI integration:** `_attr_combo` 新增 6 项 (倾角/方位角/4种曲率)
+- **Tests:** ~15 new tests target
+
+#### Commits
+- TBD
 
 ### Session: 2026-05-31 (Refactor — seismic_view.py split)
 
@@ -72,6 +85,7 @@
 
 #### Commits
 - `3e3b5ce6` — refactor: split seismic_view.py into focused modules
+- `de3f09c1` — docs: sync planning files after seismic_view.py refactor
 
 #### Phase 9: Coherence (C3 eigenstructure) (DONE ✅)
 - `compute_coherence_c3` — C3 eigenstructure coherence via power iteration
