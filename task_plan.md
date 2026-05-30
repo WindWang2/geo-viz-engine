@@ -4,9 +4,9 @@
 GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Phase 1–8 已全部完成并推送到 main。当前处理遗留工程项。
 
 ## Current State
-- **Branch:** main (ahead of origin, pending A7 dedup commit)
+- **Branch:** main (synced with origin)
 - **Tests:** 589 passed, 3 skipped
-- **Latest commit:** `5af8ec15 docs: update project documentation for Phase 8`
+- **Latest commit:** `743ead59 feat: add DTW ghost pick left-click accept and TWT dual-axis display`
 
 ## Completed Phases (Summary)
 
@@ -33,16 +33,21 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 | geoviz-cross-well | 连井对比 (DTW、层位拾取、地震校深) → 依赖 well-tie | ~6 modules |
 | geoviz-well-tie | 井震结合 (合成地震记录、标定) — 纯 NumPy | ~4 modules |
 
-## Pending Legacy Items
+## Completed Legacy Items
 
-- **Phase 2 遗留: DTW ghost picks UX** — DTW 自动对比建议以虚线展示，缺少点击接受/右键拒绝交互
-- **Phase 2 遗留: SeismicTie 双轴显示** — 连井对比中 TWT/MD 双轴显示待完善
+- **Phase 2 遗留: DTW ghost picks UX** ✅ — 左键点击 DTW 幽灵拾取调用 `accept_dtw_pick()`，右键拒绝
+- **Phase 2 遗留: SeismicTie 双轴显示** ✅ — `PickingOverlay._paint_twt_axis()` 在 TWT 域渲染 TWT 刻度标签
 
-## Unimplemented Features
+## Completed Features (Latest)
+
+| Phase | Feature | Status |
+|-------|---------|--------|
+| Phase 9 | Coherence (C3 eigenstructure) 相干属性 | ✅ — `compute_coherence_c3` + 11 tests |
+
+## Unimplemented Features (Future)
 
 | Priority | Feature | Complexity |
 |----------|---------|------------|
-| Tier 2 | Coherence (C3 eigenstructure) 相干属性 | 高 — 3D 邻域 eigenvalue 分解 |
 | Tier 3 | Curvature 曲率属性 | 中 — 需先实现 dip/azimuth |
 | Tier 3 | 3D 属性体渲染 | 中 — Renderer3D 双体支持 |
 

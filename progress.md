@@ -45,18 +45,36 @@
 | 2026-05-30 (Phase 8.1) | 572 passed | ✅ |
 | 2026-05-30 (Phase 8.2) | 589 passed | ✅ |
 | 2026-05-30 (A7 dedup) | 589 passed | ✅ |
+| 2026-05-30 (Phase 9) | 600 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | A7 dedup DONE, Phase 2 legacy items remaining |
-| Where am I going? | Commit A7 dedup, then Phase 2 legacy (DTW ghost picks UX, SeismicTie dual-axis) |
-| What's the goal? | Clear all deferred engineering review items |
-| What have I learned? | CheckshotTable can delegate to WellTieCalibration via dataclass `__post_init__` |
-| What have I done? | A7 dedup — 1 file changed, 9 new tests, 589 green |
+| Where am I? | Phase 9 (Coherence C3) DONE, 600 tests green |
+| Where am I going? | No pending items — ready for next feature or project |
+| What's the goal? | All deferred engineering review items cleared |
+| What have I learned? | CheckshotTable delegates to WellTieCalibration; DTW ghost picks click-to-accept; TWT axis via batch array conversion; C3 coherence via power iteration with adaptive chunking |
+| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence — 600 green, all pushed |
+
+#### Phase 9: Coherence (C3 eigenstructure) (DONE ✅)
+- `compute_coherence_c3` — C3 eigenstructure coherence via power iteration
+- 11 tests (shape, value range, window params, edge handling), all green
+- Adaptive chunking for memory efficiency (~100 MB target per chunk)
+- 600 total tests passed
+
+#### Phase 9b: GPU Acceleration for Coherence (DONE ✅)
+- Added `use_gpu` parameter to `compute_coherence_c3`
+- CuPy power-iteration offload per-chunk with automatic fallback to CPU
+- GPU path numerically identical to CPU (max diff ~1.2e-06, float32)
+- Benchmark speedup: ~1.5-1.9x on RTX 4090 (15 GB)
+  - (50, 50, 200): 4.0s → 2.1s (1.9x)
+  - (100, 100, 300): 25.9s → 16.8s (1.5x)
+  - (200, 200, 400): 136.3s → 87.3s (1.6x)
+- 12 coherence tests (including new `TestCoherenceC3GpuConsistency`)
+- Full suite: 601 passed
 
 ## Pending Items
-- Commit Phase 2 legacy work
+- None — all clear
 
 ## Errors Encountered
 | Error | Resolution |
