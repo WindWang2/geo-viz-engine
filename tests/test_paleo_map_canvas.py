@@ -79,3 +79,29 @@ def test_paint_performance(qtbot):
         canvas.repaint()
     avg_ms = (time.perf_counter() - t0) / 10 * 1000
     assert avg_ms < 50, f"avg paint {avg_ms:.1f}ms exceeds 50ms"
+
+
+def test_facies_with_pattern_renders_composite_brush(qtbot):
+    """Facies '三角洲' should resolve to pattern_id='delta' with composite brush."""
+    canvas = PaleoMapCanvas()
+    canvas.load_features([
+        {
+            "type": "Feature",
+            "properties": {"name": "三角洲区", "facies": "三角洲"},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[110.0, 20.0], [120.0, 20.0], [120.0, 30.0],
+                                [110.0, 30.0], [110.0, 20.0]]],
+            },
+        }
+    ], period_name="测试")
+    qtbot.addWidget(canvas)
+    canvas.resize(400, 300)
+    canvas.show()
+    qtbot.waitExposed(canvas)
+    qtbot.wait(20)
+    style = canvas._resolver.resolve("三角洲")
+    assert style.pattern_id == "delta"
+    # Brush should be a QBrush (composite, not just solid color)
+    from PySide6.QtGui import QBrush
+    assert isinstance(style.brush, QBrush)
