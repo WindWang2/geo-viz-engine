@@ -96,6 +96,22 @@
 | `SeismicCache` | ⚠️ 需扩展 | cache key 不含属性类型 |
 | `SeismicView` 工具栏 | ✅ 好 | 8 属性选项 + RGB融合 + 交叉图 + 井震标定面板 |
 
+## A7 Dedup: CheckshotTable → WellTieCalibration
+
+### Problem
+`geoviz-cross-well/seismic_tie.py` 的 `CheckshotTable` 和 `geoviz-well-tie/calibration.py` 的 `WellTieCalibration` 有重复的 T-D 插值逻辑（`np.interp`）。
+
+### Solution
+- `CheckshotTable` (dataclass) 通过 `__post_init__` 构建 `WellTieCalibration` 实例
+- `interpolate_twt` / `interpolate_depth` 委托给 `calibration.depth_to_twt` / `twt_to_depth`
+- 副作用：自动获得 array 输入支持（之前只支持 scalar）
+- `calibration` property 暴露底层 `WellTieCalibration`，cross-well 用户可访问 `resample_to_twt` 等高级功能
+
+### Dependency Direction
+```
+geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
+```
+
 ## Resources
 - SEG Wiki 瞬时属性：https://wiki.seg.org/wiki/Instantaneous_attributes_-_book
 - SEG Wiki 甜点属性：https://wiki.seg.org/wiki/Sweetness

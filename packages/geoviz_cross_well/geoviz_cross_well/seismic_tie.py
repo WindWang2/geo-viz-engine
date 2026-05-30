@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
+
+from geoviz_well_tie.calibration import WellTieCalibration
 
 
 @dataclass
@@ -11,12 +13,20 @@ class CheckshotTable:
     well_name: str
     depths_m: np.ndarray
     twt_ms: np.ndarray
+    _calibration: WellTieCalibration = field(init=False, repr=False)
 
-    def interpolate_twt(self, depth: float) -> float:
-        return float(np.interp(depth, self.depths_m, self.twt_ms))
+    def __post_init__(self):
+        self._calibration = WellTieCalibration(self.depths_m, self.twt_ms)
 
-    def interpolate_depth(self, twt: float) -> float:
-        return float(np.interp(twt, self.twt_ms, self.depths_m))
+    @property
+    def calibration(self) -> WellTieCalibration:
+        return self._calibration
+
+    def interpolate_twt(self, depth: float | np.ndarray) -> float | np.ndarray:
+        return self._calibration.depth_to_twt(depth)
+
+    def interpolate_depth(self, twt: float | np.ndarray) -> float | np.ndarray:
+        return self._calibration.twt_to_depth(twt)
 
 
 class SeismicTie:

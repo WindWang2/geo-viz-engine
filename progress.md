@@ -1,8 +1,8 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–7 COMPLETE, Phase 8 IN PROGRESS
+## Project Status: Phase 1–8 COMPLETE, Legacy cleanup IN PROGRESS
 
-### Session: 2026-05-30 (Phase 8)
+### Session: 2026-05-30 (Phase 8 + Legacy)
 
 #### Reviews Completed
 - CEO Review: CLEAN — 6/6 proposals accepted, Well-Seismic Tie Visualization selected (SELECTIVE EXPANSION mode)
@@ -17,9 +17,18 @@
 - `well_tie_panel.py` — WellTiePanel widget with wavelet controls, auto-tie, export
 - `seismic_view.py` — toolbar toggle button + lazy panel creation
 - 17 new tests, all green → 589 total
-- WellTiePanel API: set_calibration(), set_well_logs(), generate_synthetic(), auto_tie()
-- SeismicView integration: _well_tie_btn checkable toggle, _well_tie_panel persistent panel
-- Panel persists on toggle off/on (same object, not recreated)
+
+#### Phase 8 Shipped (DONE ✅)
+- Committed: `75988c04` + `5af8ec15` (docs)
+- Pushed to origin/main
+
+#### A7: CheckshotTable / WellTieCalibration Dedup (DONE ✅)
+- `CheckshotTable` refactored: delegates to `WellTieCalibration` instead of own `np.interp`
+- New: `CheckshotTable.calibration` property exposes underlying `WellTieCalibration`
+- Side benefit: `interpolate_twt` / `interpolate_depth` now support array inputs
+- TDD: 4 red → all green + 5 regression = 9 new tests
+- Dependency: cross-well now depends on well-tie (pure NumPy, zero Qt)
+- 589 passed, 0 failed
 
 ## Test Results History
 | Date | Tests | Status |
@@ -30,20 +39,20 @@
 | 2026-05-30 (Phase 7) | 528 passed | ✅ |
 | 2026-05-30 (Phase 8.1) | 572 passed | ✅ |
 | 2026-05-30 (Phase 8.2) | 589 passed | ✅ |
+| 2026-05-30 (A7 dedup) | 589 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 8 Sub-phase 2 COMPLETE — WellTiePanel + SeismicView integration done, 589 tests green |
-| Where am I going? | Commit Phase 8 work, then address remaining eng review items (A7 dedup, Phase 2 legacy items) |
-| What's the goal? | Complete Well-Seismic Tie Visualization feature with persistent panel, auto-tie, and overlay |
-| What have I learned? | Midpoint calibration for reflectivity, QPainter overlay patterns, BinGridGeometry azimuth convention |
-| What have I done? | Sub-phase 1 (44 tests) → Sub-phase 2 (17 tests) → 589 total green |
+| Where am I? | A7 dedup DONE, Phase 2 legacy items remaining |
+| Where am I going? | Commit A7 dedup, then Phase 2 legacy (DTW ghost picks UX, SeismicTie dual-axis) |
+| What's the goal? | Clear all deferred engineering review items |
+| What have I learned? | CheckshotTable can delegate to WellTieCalibration via dataclass `__post_init__` |
+| What have I done? | A7 dedup — 1 file changed, 9 new tests, 589 green |
 
 ## Pending Items
-- Phase 8: Consider committing all work (572 existing + 17 new = 589 tests)
-- A7: Code deduplication between cross-well SeismicTie and geoviz-well-tie (deferred)
-- Phase 2 遗留项：cross-well 功能确认、DTW ghost picks UX、SeismicTie 双轴显示
+- Commit A7 dedup work
+- Phase 2 遗留项：DTW ghost picks UX、SeismicTie 双轴显示
 
 ## Errors Encountered
 | Error | Resolution |
