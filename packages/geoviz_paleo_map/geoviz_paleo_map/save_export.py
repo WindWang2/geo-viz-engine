@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRectF, QSize
 from PySide6.QtGui import QPainter, QPixmap
 
 from geoviz_paleo_map.topology import TopologyModel
@@ -87,3 +87,37 @@ def export_svg(widget, file_path: str | Path) -> None:
     )
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(svg)
+
+
+def export_vector_svg(canvas, file_path: str | Path, target_rect: QRectF | None = None) -> None:
+    """Export the canvas as a true vector SVG using QSvgGenerator.
+
+    All layer paint() methods render through QSvgGenerator's QPainter,
+    producing SVG <path>, <text>, and <image> elements.
+
+    Args:
+        canvas: The PaleoMapCanvas to export.
+        file_path: Output SVG file path.
+        target_rect: Target rectangle in canvas coordinates. If None, uses the
+            full canvas size.
+    """
+    from PySide6.QtSvg import QSvgGenerator
+
+    file_path = Path(file_path)
+    rect = target_rect or QRectF(0, 0, canvas.width(), canvas.height())
+
+    generator = QSvgGenerator()
+    generator.setFileName(str(file_path))
+    generator.setSize(QSize(int(rect.width()), int(rect.height())))
+    generator.setViewBox(rect)
+
+    painter = QPainter(generator)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+    # Paint each layer directly through the generator's painter
+    for layer in canvas._layers:
+        painter.save()
+        layer.paint(painter, canvas._viewport)
+        painter.restore()
+
+    painter.end()
