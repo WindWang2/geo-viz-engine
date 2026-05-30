@@ -46,15 +46,16 @@
 | 2026-05-30 (Phase 8.2) | 589 passed | ✅ |
 | 2026-05-30 (A7 dedup) | 589 passed | ✅ |
 | 2026-05-30 (Phase 9) | 600 passed | ✅ |
+| 2026-05-30 (Phase 9b) | 601 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 9 (Coherence C3) DONE, 600 tests green |
-| Where am I going? | No pending items — ready for next feature or project |
-| What's the goal? | All deferred engineering review items cleared |
-| What have I learned? | CheckshotTable delegates to WellTieCalibration; DTW ghost picks click-to-accept; TWT axis via batch array conversion; C3 coherence via power iteration with adaptive chunking |
-| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence — 600 green, all pushed |
+| Where am I? | Phase 10 design DONE, spec committed; awaiting implementation approval |
+| Where am I going? | Implement facies texture rendering + professional figure export per approved spec |
+| What's the goal? | PaleoMap with sedimentary facies fills (Q/HS 1011-2016 Appendix O) + true vector SVG + publishing-grade figure export |
+| What have I learned? | PatternEngine composite brush pipeline; QSvgGenerator limitations (raster patterns); spec has 16 facies types (not 24); CMYK mapping viable for small palettes |
+| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 10 design — 601 green, all pushed |
 
 #### Phase 9: Coherence (C3 eigenstructure) (DONE ✅)
 - `compute_coherence_c3` — C3 eigenstructure coherence via power iteration
@@ -73,8 +74,25 @@
 - 12 coherence tests (including new `TestCoherenceC3GpuConsistency`)
 - Full suite: 601 passed
 
+### Session: 2026-05-30 (Phase 10 — PaleoMap Texture + Export Design)
+
+#### Design Completed
+- Reviewed Q/HS 1011-2016 spec (Appendix O 沉积相图式, Appendix M 岩石图式)
+- Explored existing PatternEngine, FaciesStyleResolver, FaciesPolygonsLayer, save_export.py
+- Presented 2-3 approaches for both subsystems; user approved
+- Design spec written: `docs/superpowers/specs/2026-05-30-paleo-map-texture-export-design.md`
+- Spec self-reviewed and fixed (pattern count 24→16, existing patterns not moved)
+- Committed: `fee0051d`
+
+#### Design Decisions
+- Extend PatternEngine with `get_facies_brush()` + new `facies/` SVG subdir
+- QSvgGenerator for true vector SVG export
+- Professional figure wrapper with standardized frame (title, scale bar, north arrow, legend, grid)
+- CMYK via lookup table (small known palette)
+- Directional patterns (物源方向) deferred to Phase 2
+
 ## Pending Items
-- None — all clear
+- Phase 10 implementation pending user approval of design spec
 
 ## Errors Encountered
 | Error | Resolution |
