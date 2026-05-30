@@ -55,7 +55,7 @@
 | Where am I going? | Implement facies texture rendering + professional figure export per approved spec |
 | What's the goal? | PaleoMap with sedimentary facies fills (Q/HS 1011-2016 Appendix O) + true vector SVG + publishing-grade figure export |
 | What have I learned? | PatternEngine composite brush pipeline; QSvgGenerator limitations (raster patterns); spec has 16 facies types (not 24); CMYK mapping viable for small palettes |
-| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 10 design — 601 green, all pushed |
+| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 10 design + implementation plan — 601 green, all pushed |
 
 #### Phase 9: Coherence (C3 eigenstructure) (DONE ✅)
 - `compute_coherence_c3` — C3 eigenstructure coherence via power iteration
@@ -91,8 +91,14 @@
 - CMYK via lookup table (small known palette)
 - Directional patterns (物源方向) deferred to Phase 2
 
+#### Implementation Plan Completed
+- Plan written: `docs/superpowers/plans/2026-05-30-paleo-map-texture-export.md`
+- 10 tasks, 50+ steps covering: pattern SVGs (13 files), PatternEngine extension, style resolver, vector SVG export, professional figure export, comprehensive tests (target 620+)
+- Plan self-reviewed: spec coverage complete, no placeholders, types consistent
+- Committed: `24d5710e`
+
 ## Pending Items
-- Phase 10 implementation pending user approval of design spec
+- Phase 10 implementation ready — awaiting user trigger
 
 ## Errors Encountered
 | Error | Resolution |
