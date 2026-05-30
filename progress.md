@@ -55,11 +55,11 @@
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 6-7 complete (Sub-phase 1-3 done) |
-| Where am I going? | Phase 7 (Sub-phase 4: 高级可视化) or commit & create PR |
-| What's the goal? | Phase 6: 地震属性分析 + 井震结合 |
+| Where am I? | Phase 6 COMPLETE, PR #19 merged to main |
+| Where am I going? | Phase 7 (Sub-phase 4: 高级可视化) or new task |
+| What's the goal? | Phase 6 done. Next: RGB fusion, crossplot, STFT |
 | What have I learned? | 沿层位提取用 np.take_along_axis 向量化; 井震结合纯 NumPy 即可实现 |
-| What have I done? | Sub-phase 1: 5 attrs + 2 colormaps; Sub-phase 2: extract_along_horizon; Sub-phase 3: geoviz-well-tie package |
+| What have I done? | Sub-phase 1-3: 5 attrs + 2 colormaps + extract_along_horizon + geoviz-well-tie package |
 
 ## Session: 2026-05-29 (continued)
 

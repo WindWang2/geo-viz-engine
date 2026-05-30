@@ -4,7 +4,7 @@
 在 geoviz-seismic 包中扩展地震属性分析功能（Tier 1 瞬时属性族），并新建 geoviz-well-tie 包实现井震结合工作流（合成地震记录、井震标定）。
 
 ## Current Phase
-Phase 6 (Sub-phase 3 — 新建 geoviz-well-tie 包)
+Phase 6 ✅ COMPLETE — PR #19 merged to main
 
 ## Phases
 
