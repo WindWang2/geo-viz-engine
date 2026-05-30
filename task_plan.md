@@ -5,8 +5,8 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 
 ## Current State
 - **Branch:** main (synced with origin)
-- **Tests:** 601 passed, 3 skipped
-- **Latest commit:** `24d5710e docs: add Phase 10 implementation plan`
+- **Tests:** 617 passed, 3 skipped
+- **Latest commit:** `8ca37621 feat: export new public APIs (export_vector_svg, export_professional_figure)`
 - **Active phase:** Phase 10 — PaleoMap 纹理填充渲染 + 专业图件导出
 - **Design spec:** `docs/superpowers/specs/2026-05-30-paleo-map-texture-export-design.md`
 - **Implementation plan:** `docs/superpowers/plans/2026-05-30-paleo-map-texture-export.md`
@@ -46,7 +46,7 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 | Phase | Feature | Status |
 |-------|---------|--------|
 | Phase 9 | Coherence (C3 eigenstructure) 相干属性 | ✅ — `compute_coherence_c3` + GPU加速 + 12 tests |
-| Phase 10 | PaleoMap 纹理填充渲染 + 专业图件导出 | 📝 计划就绪 — 13 图案 SVG + PatternEngine 扩展 + 矢量 SVG 导出 + 出版级图框 |
+| Phase 10 | PaleoMap 纹理填充渲染 + 专业图件导出 | ✅ — 13 图案 SVG + PatternEngine 扩展 + 矢量 SVG 导出 + 出版级图框 (617 tests) |
 
 ## Unimplemented Features (Future)
 

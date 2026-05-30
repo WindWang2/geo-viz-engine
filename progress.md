@@ -47,15 +47,16 @@
 | 2026-05-30 (A7 dedup) | 589 passed | ✅ |
 | 2026-05-30 (Phase 9) | 600 passed | ✅ |
 | 2026-05-30 (Phase 9b) | 601 passed | ✅ |
+| 2026-05-31 (Phase 10) | 617 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 10 design DONE, spec committed; awaiting implementation approval |
-| Where am I going? | Implement facies texture rendering + professional figure export per approved spec |
-| What's the goal? | PaleoMap with sedimentary facies fills (Q/HS 1011-2016 Appendix O) + true vector SVG + publishing-grade figure export |
-| What have I learned? | PatternEngine composite brush pipeline; QSvgGenerator limitations (raster patterns); spec has 16 facies types (not 24); CMYK mapping viable for small palettes |
-| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 10 design + implementation plan — 601 green, all pushed |
+| Where am I? | Phase 10 COMPLETE — 13 facies pattern SVGs, PatternEngine extension, vector SVG export, professional figure export all shipped |
+| Where am I going? | Await user direction for next phase (Tier 3: Curvature or 3D attribute body rendering) |
+| What's the goal? | Maintain 617 green tests; respond to user priority |
+| What have I learned? | PatternEngine composite brush pipeline; QSvgGenerator limitations (raster patterns); spec has 16 facies types (not 24); CMYK mapping viable for small palettes; PaintScheduler needs RuntimeError guard on deleted widgets |
+| What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 10 full implementation — 617 green, all pushed |
 
 #### Phase 9: Coherence (C3 eigenstructure) (DONE ✅)
 - `compute_coherence_c3` — C3 eigenstructure coherence via power iteration
@@ -97,8 +98,25 @@
 - Plan self-reviewed: spec coverage complete, no placeholders, types consistent
 - Committed: `24d5710e`
 
+### Session: 2026-05-31 (Phase 10 — Implementation Complete)
+
+#### Implementation Completed
+- 13 facies pattern SVGs created (`packages/geoviz_well_log/assets/patterns/facies/`)
+- `PatternEngine.get_facies_brush()` + `get_composite_brush()` extensions
+- `FaciesStyleResolver` updated with `FACIES_PATTERNS` mapping (16 facies → pattern_id)
+- `export_vector_svg()` — true vector SVG via `QSvgGenerator`
+- `export_professional_figure()` — publishing-grade figure with standardized frame
+- 16 new tests (`test_export_vector.py`, `test_export_professional.py`, `test_facies_patterns.py`)
+- Full suite: **617 passed, 3 skipped**
+
+#### Bugfix
+- `PaintScheduler._do_update()` now catches `RuntimeError` when widget is destroyed (test teardown safety)
+
+#### Commits
+- `8ca37621` — feat: export new public APIs (export_vector_svg, export_professional_figure)
+
 ## Pending Items
-- Phase 10 implementation ready — awaiting user trigger
+- Awaiting user direction for next phase
 
 ## Errors Encountered
 | Error | Resolution |
