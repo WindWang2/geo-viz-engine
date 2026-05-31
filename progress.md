@@ -470,3 +470,31 @@ chrome 是 canvas 内嵌 layer，由 `PaleoMapCanvas` 在 4 个 `_layers` 构建
 
 **11.7 状态**：A + B + C 完成，全部 ship
 
+---
+
+### Session 2026-05-31 (Phase 11.7-C2) — chrome overlay 视觉返工
+
+#### 用户反馈
+"不要把指南针，图例和显示地理图的区域区分开。" → AskUserQuestion 锁定：**对比模式：chrome 应该叠在画布上，不要占独立区域**。
+
+#### 根因
+11.7-C 把 `SharedChromePanel` 作为 `canvas_A | panel | canvas_B` 三件套塞进 QHBoxLayout → panel 占独立 200px 列，两个 canvas 被一条灰白竖条切开。QHBoxLayout 是 layout-managed sibling，panel 必然占自己几何区 → 物理上不可能"叠"在 canvas 上。
+
+#### 修复
+1. `SharedChromePanel.__init__` 新增 `overlay: bool = False`：overlay=True 时设 `WA_TranslucentBackground + WA_TransparentForMouseEvents`
+2. `_start_compare` 不再把 panel 加 QHBoxLayout，直接 `parent=self.map_view` 挂到左 canvas；QHBoxLayout 只放两个 canvas 各占 50%
+3. 新增 `_install_chrome_overlay_positioning()` 包装 `canvas.resizeEvent`，每次 resize 把 panel 移到 canvas 右上角（width-panel_w-8, 8）并 `raise_()`
+4. 新增测试 `test_overlay_mode_is_translucent_child` 锁定 overlay parent + 透明属性
+
+#### 测试结果
+| Date | Suite | Result |
+|------|-------|--------|
+| 2026-05-31 (Phase 11.7-C2) | 7/7 test_paleo_shared_chrome 通过；全套 691 passed, 4 skipped | ✅ |
+
+#### 教训
+- **"X 不要占独立区域"≠"X 不存在"**：用户要的是视觉融合，不是删除。先确认"位置/层叠"再考虑"存在性"
+- **Qt overlay = parent 关系 + 手动 move/raise_，不靠 layout**：layout-managed 必然占区；overlay 必须脱离 layout
+- **overlay 必须配 `WA_TransparentForMouseEvents`**：否则虽然背景透明，但 panel 矩形仍然吃事件 → canvas 拖动/缩放在 panel 覆盖区域里会失效
+
+**11.7 状态**：A + B + C + C2 完成，全部 ship
+

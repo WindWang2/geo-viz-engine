@@ -430,4 +430,25 @@ self._zoom_center[zoom_key] = center
 - **leaf 暴露 signal + 状态查询接口比让 root 直接读私有字段更安全**：`facies_changed` + `facies_names()` 让 SharedChromePanel 不耦合 LegendLayer 内部；后续如果换 chrome 实现也不会破壳
 
 ---
+
+## 11.7-C2 根因分析：chrome 占独立列让画布割裂
+
+**症状**：11.7-C 把 SharedChromePanel 作为 `canvas_A | panel | canvas_B` 三件套塞进 QHBoxLayout，panel 占独立 200px 列 → 用户反馈"不要把指南针、图例和显示地理图的区域区分开"。两个 canvas 中间被一条灰白竖条切开，破坏了"一张地图"的整体观感。
+
+**根因**：上一轮把 chrome 从 leaf 抽出来时，只解决了"双份"问题，但没解决"chrome 应该浮在画布上还是占独立区域"。QHBoxLayout 是 layout-managed sibling 关系，panel 必然占据自己的几何区域 → 物理上不可能"叠"在 canvas 上。
+
+**修复**：让 panel 变成 overlay child，而不是 sibling。
+
+1. **`SharedChromePanel` 新增 `overlay: bool = False` 构造参数**：overlay=True 时设 `WA_TranslucentBackground`（背景透明）+ `WA_TransparentForMouseEvents`（不拦截鼠标，让 canvas 的拖动/缩放穿透）。非 overlay 模式保持原行为，兼容现有 6 个测试。
+
+2. **`_start_compare` 不再把 panel 加进 QHBoxLayout**：直接 `parent=self.map_view` 挂到左 canvas 上，QHBoxLayout 只有两个 canvas 各占 50%。新增 `_install_chrome_overlay_positioning()` 包装 `canvas.resizeEvent`，每次 resize 把 panel 移到 canvas 右上角（`width-panel_w-8, 8`）并 `raise_()`。
+
+3. **回归测试** `test_overlay_mode_is_translucent_child`：断言 overlay 模式下 `panel.parent() is canvas_a` + 两个透明属性都已设置。691 passed, 4 skipped。
+
+**教训**：
+- **"X 不要占独立区域"≠"X 不存在"**：用户要的是视觉融合，不是删除。先确认"位置/层叠"再考虑"存在性"
+- **Qt overlay = parent 关系 + 手动 move/raise_，不靠 layout**：layout-managed 必然占区；overlay 必须脱离 layout
+- **overlay 必须配 `WA_TransparentForMouseEvents`**：否则虽然背景透明、视觉上看不见，但 panel 矩形仍然吃事件 → 用户在 panel 覆盖区域里拖动/缩放会失效。是 PySide6 overlay 的常见坑
+
+---
 *Update after every 2 view/browser/search operations*

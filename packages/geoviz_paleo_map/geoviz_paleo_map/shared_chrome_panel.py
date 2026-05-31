@@ -35,14 +35,19 @@ class SharedChromePanel(QWidget):
     """Vertical strip: north arrow at top, merged legend, scale bar at bottom."""
 
     def __init__(self, canvas_a: PaleoMapCanvas, canvas_b: PaleoMapCanvas,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None, *, overlay: bool = False):
         super().__init__(parent)
         self._canvas_a = canvas_a
         self._canvas_b = canvas_b
+        self._overlay = overlay
         # Share resolver from canvas_a (both canvases share the same engine in practice).
         self._resolver: FaciesStyleResolver = canvas_a._resolver
         self.setFixedWidth(PANEL_WIDTH)
-        self.setStyleSheet("background: #f8fafc;")
+        if overlay:
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        else:
+            self.setStyleSheet("background: #f8fafc;")
 
         # Refresh on any facies / zoom change on either canvas.
         canvas_a.facies_changed.connect(self.update)

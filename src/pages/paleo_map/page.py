@@ -226,15 +226,36 @@ class PaleoMapPage(QWidget):
         h_layout.setSpacing(0)
         self.map_view = PaleoMapCanvas(parent=self, show_chrome=False)
         self.map_view_b = PaleoMapCanvas(parent=self, show_chrome=False)
-        self._shared_chrome = SharedChromePanel(self.map_view, self.map_view_b,
-                                                parent=compare_host)
         h_layout.addWidget(self.map_view, 1)
-        h_layout.addWidget(self._shared_chrome)
         h_layout.addWidget(self.map_view_b, 1)
+        self._shared_chrome = SharedChromePanel(self.map_view, self.map_view_b,
+                                                parent=self.map_view,
+                                                overlay=True)
+        self._shared_chrome.show()
+        self._install_chrome_overlay_positioning()
         self._compare_host = compare_host
         self._map_layout.addWidget(compare_host)
         old_view.deleteLater()
         self._on_period_changed(self._current_period)
+
+    def _install_chrome_overlay_positioning(self) -> None:
+        canvas = self.map_view
+        panel = self._shared_chrome
+        margin = 8
+
+        def reposition():
+            panel.resize(panel.width(), max(canvas.height() - 2 * margin, 200))
+            panel.move(canvas.width() - panel.width() - margin, margin)
+            panel.raise_()
+
+        original_resize = canvas.resizeEvent
+
+        def patched_resize(event):
+            original_resize(event)
+            reposition()
+
+        canvas.resizeEvent = patched_resize
+        reposition()
 
     def _stop_compare(self):
         if hasattr(self, 'map_view_b'):

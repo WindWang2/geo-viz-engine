@@ -132,3 +132,23 @@ class TestSharedChromePanel:
         pixmap = panel.grab()
         assert isinstance(pixmap, QPixmap)
         assert pixmap.width() > 0
+
+    def test_overlay_mode_is_translucent_child(self, qtbot, simple_features,
+                                                other_features):
+        from PySide6.QtCore import Qt
+
+        from geoviz_paleo_map import PaleoMapCanvas
+        from geoviz_paleo_map.shared_chrome_panel import SharedChromePanel
+
+        canvas_a = PaleoMapCanvas(show_chrome=False)
+        canvas_b = PaleoMapCanvas(show_chrome=False)
+        qtbot.addWidget(canvas_a)
+        qtbot.addWidget(canvas_b)
+        canvas_a.load_features(simple_features, period_name="震旦纪")
+        canvas_b.load_features(other_features, period_name="寒武纪")
+
+        panel = SharedChromePanel(canvas_a, canvas_b,
+                                  parent=canvas_a, overlay=True)
+        assert panel.parent() is canvas_a
+        assert panel.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        assert panel.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
