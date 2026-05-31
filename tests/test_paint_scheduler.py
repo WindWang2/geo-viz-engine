@@ -346,6 +346,33 @@ class TestScreenPathCache:
         p2 = cache.get_or_build("f1", world_path, vp2)
         assert p1 is not p2
 
+    def test_pan_invalidates_screen_path(self, qtbot):
+        """11.7-B: panning (center change at same zoom) must rebuild the
+        cached screen path. Otherwise FaciesPolygons paint at the previous
+        center while RegionLabels (which transform live each frame) paint
+        at the new center — visible as labels drifting off their polygons."""
+        from geoviz_paleo_map.screen_path_cache import ScreenPathCache
+        from geoviz_paleo_map.viewport import PaleoMapViewport
+
+        cache = ScreenPathCache()
+        world_path = QPainterPath()
+        world_path.moveTo(0, 0)
+        world_path.lineTo(10, 0)
+        world_path.lineTo(10, 10)
+        world_path.lineTo(0, 10)
+        world_path.closeSubpath()
+
+        vp1 = PaleoMapViewport(center_lng=5.0, center_lat=5.0,
+                               zoom=2.0, width=400, height=300)
+        vp2 = PaleoMapViewport(center_lng=8.0, center_lat=5.0,
+                               zoom=2.0, width=400, height=300)
+        p1 = cache.get_or_build("f1", world_path, vp1)
+        p2 = cache.get_or_build("f1", world_path, vp2)
+
+        # Different center → screen positions must differ
+        assert p1.boundingRect().center().x() != pytest.approx(
+            p2.boundingRect().center().x())
+
     def test_eviction_limits_zoom_levels(self, qtbot):
         from geoviz_paleo_map.screen_path_cache import ScreenPathCache
         from geoviz_paleo_map.viewport import PaleoMapViewport

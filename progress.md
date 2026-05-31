@@ -384,3 +384,37 @@ Chrome layers 因 11.6-B `is_chrome=True` 已 bypass cache 直绘 → 每帧用�
 
 **11.7 状态**：A 完成，无其余子任务计划
 
+---
+
+### Session 2026-05-31 (Phase 11.7-B) — 古地理图缩放/平移时标签与多边形分离
+
+#### 任务
+用户报"古地理图标注和显示分离"，澄清后定位为：**缩放/平移过程中 RegionLabelsLayer 文字与 FaciesPolygonsLayer 几何对象错位**——多边形停在旧位置，label 漂到新位置。chrome（指南针/比例尺/图例）正常。
+
+#### 根因
+`packages/geoviz_paleo_map/geoviz_paleo_map/screen_path_cache.py` 的 `ScreenPathCache.get_or_build` 缓存键仅含 `(zoom_key, feature_id)`，但 `_transform_path` 把 `vp.center_world` 烤进 screen path。平移（center 改变、zoom 不变）时 cache_key 命中旧 entry → FaciesPolygonsLayer 拿到用旧 center 烤好的 path 画在旧屏幕坐标；而 RegionLabelsLayer 每帧实时 world_to_screen → 标签漂到新位置。
+
+11.7-A 修了 LayerPixmapCache 的 viewport 增长失效，但 ScreenPathCache 的 center 失效是独立路径：两层 cache 的失效粒度不一致 → 一层"不 rerender"但另一层早 stale → layer 拿到 stale screen path 再画进新 buffer。
+
+#### Fix
+`packages/geoviz_paleo_map/geoviz_paleo_map/screen_path_cache.py`：
+- `__init__` 增 `self._zoom_center: dict[float, tuple[float, float]] = {}`
+- `get_or_build` 进入时先查 `_zoom_center.get(zoom_key)`，若与当前 `viewport.center_world` 不一致 → 清掉该 zoom 的所有 entry
+- 构建完毕后 `self._zoom_center[zoom_key] = center`
+- `_evict` 同步收缩 `_zoom_center` 防止内存泄漏
+
+#### 新增回归测试
+`tests/test_paint_scheduler.py::TestScreenPathCache::test_pan_invalidates_screen_path` — 同 zoom 下 vp1(center_lng=5)→vp2(center_lng=8)，断言两次 get_or_build 返回 path 的 boundingRect.center().x() 不同。修复前 FAIL（两边都是 200.0），修复后 PASS。
+
+#### 测试结果
+| Date | Suite | Result |
+|------|-------|--------|
+| 2026-05-31 (Phase 11.7-B) | 15/15 test_paint_scheduler 通过；全套 684 passed, 4 skipped | ✅ |
+
+#### 教训
+- **多层 cache 的失效条件必须对齐**：LayerPixmapCache（50% margin pan tolerance）与 ScreenPathCache（按 zoom）失效粒度不一致 → 上层 layer 拿到 stale path 再画进新 buffer。Cache 链应保证"上游命中 ⊆ 下游命中"
+- **transform 中烤进的参数都属于 cache key 的一部分**：`_transform_path` 烤了 scale + center + viewport_size，但 cache key 只反映 scale → 任何烤进 transform 的参数变化都必须能让 key miss。这是一条可查的 code-review invariant
+- **"X 与 Y 错位"通常意味着 X / Y 走了不同更新通道**：label live transform vs polygon cached transform — 先列两边数据流再查缓存
+
+**11.7 状态**：A + B 完成，无其余子任务计划
+

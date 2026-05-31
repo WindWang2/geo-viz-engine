@@ -86,9 +86,11 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | ID | Task | Files | Priority | Status |
 |----|------|-------|----------|--------|
 | 11.7-A | **古地理图：数据层挤压到左上角** — 根因：`LayerPixmapCache._needs_rerender` 不检测 viewport 尺寸变化。Canvas 默认 640×480 时缓存 buffer 按 (1280, 960) 渲染，`show()`/`resize()` 后真实 viewport 变 1400×900 但缓存没失效；`_blit` 从旧 pixmap 读取 (vp.width, vp.height) 矩形 → 数据全部被压缩在画布左上角。Chrome layers（title/north_arrow/scale_bar/legend）因 11.6-B 已 bypass cache 不受影响，所以视觉上是"标注居中、数据偏移"。修复：在 `__init__` 记 `_vp_width/_vp_height=0`，`_needs_rerender` 增 `if vp.width > self._vp_width or vp.height > self._vp_height` 分支，`_rerender` 末尾存 `vp.width/vp.height`。回归测试 `test_viewport_grow_triggers_rerender` 锁定该路径。 | `packages/geoviz_paleo_map/geoviz_paleo_map/paint_scheduler.py`, `tests/test_paint_scheduler.py` | 🔴 P0 | ✅ DONE |
+| 11.7-B | **古地理图：缩放/平移时标签与多边形分离** — 根因：`ScreenPathCache.get_or_build` 缓存键仅含 `(zoom_key, feature_id)`，但 `_transform_path` 把 `vp.center_world` 烤进 screen path。平移（center 改变，zoom 不变）时返回旧 center 烤好的 path，而 `RegionLabelsLayer.paint` 每帧用新 center 实时 `world_to_screen`，结果 facies polygons 留在旧位置、label 浮到新位置。修复：`ScreenPathCache` 维护 `_zoom_center: dict[zoom, (lng, lat)]`，每次 `get_or_build` 时若该 zoom 上记录的 center 与当前 viewport center 不一致，先清掉该 zoom 的所有条目再重建；`_evict` 同步收缩 `_zoom_center`。回归测试 `test_pan_invalidates_screen_path` 锁定该路径。 | `packages/geoviz_paleo_map/geoviz_paleo_map/screen_path_cache.py`, `tests/test_paint_scheduler.py` | 🔴 P0 | ✅ DONE |
 
 **Acceptance criteria:**
 - 11.7-A 完成后：截图 `/tmp/paleo_shot.png` 显示 facies polygons / wells / region labels 横跨全画布宽度，不再压缩到左上角；test_viewport_grow_triggers_rerender 通过
+- 11.7-B 完成后：平移/缩放过程中，facies polygons 与 region labels 始终重合；test_pan_invalidates_screen_path 通过
 
 ---
 

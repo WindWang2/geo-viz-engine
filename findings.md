@@ -368,4 +368,41 @@ class LayerPixmapCache:
 - **测试要锁住 invariant 而非"已知 case"**：原 cache 测试只测了 dirty/zoom/dpr 各自触发 rerender，没测 viewport 维度。补 `test_viewport_grow_triggers_rerender` 是把"任何影响 buffer 几何的输入都必须 invalidate"这条 invariant 显性化
 
 ---
+
+## 11.7-B 根因分析：缩放/平移时标签与多边形分离
+
+**症状**：用户报"古地理图标注和显示分离"。澄清后：缩放/平移过程中，`RegionLabelsLayer` 的文字与对应 `FaciesPolygonsLayer` 的几何对象错位 — 多边形停在旧位置，label 漂到新位置。
+
+**根因**：`packages/geoviz_paleo_map/geoviz_paleo_map/screen_path_cache.py` 的 `ScreenPathCache.get_or_build` 缓存键只含 `(zoom_key, feature_id)`，但 `_transform_path` 把 `vp.center_world` 烤进 screen path：
+
+```python
+def _transform_path(self, world_path, vp):
+    s = vp.scale
+    cx, cy = vp.center_world   # 烤进 transform
+    ...
+    t.translate(ox, oy); t.scale(s, -s); t.translate(-cx, -cy)
+    return world_path * t
+```
+
+平移（center 改变、zoom 不变）时 `cache_key` 命中旧 entry → `FaciesPolygonsLayer` 拿到用旧 center 烤好的 path，画在旧屏幕坐标；而 `RegionLabelsLayer.paint` 每帧 `viewport.world_to_screen(*item.centroid_world)` 实时算 → label 浮到新 center 对应的位置。二者错位 = "标注和显示分离"。
+
+**修复**：让 `ScreenPathCache` 把 center 纳入失效判定。维护 `_zoom_center: dict[zoom_key, (lng, lat)]`，`get_or_build` 检测到该 zoom 的记录 center ≠ 当前 viewport center 时，丢掉该 zoom 的所有条目再重建。`_evict` 同步收缩 `_zoom_center` 防止内存泄漏。
+
+```python
+cached_center = self._zoom_center.get(zoom_key)
+center = viewport.center_world
+if cached_center is not None and cached_center != center:
+    self._cache = {k: v for k, v in self._cache.items() if k[0] != zoom_key}
+...
+self._zoom_center[zoom_key] = center
+```
+
+**回归测试**：`tests/test_paint_scheduler.py::TestScreenPathCache::test_pan_invalidates_screen_path` — 同 zoom 下 vp1(center_lng=5)→vp2(center_lng=8)，断言两次 `get_or_build` 返回 path 的 boundingRect.center().x() 不同。修复前 FAIL（两边都是 200.0），修复后 PASS；全套 684 passed。
+
+**教训**：
+- **多层 cache 的失效条件必须对齐**：`LayerPixmapCache`（带 50% margin pan tolerance）和 `ScreenPathCache`（按 zoom）的失效粒度不一致 → 一层"不 rerender" 但另一层早 stale → 上层 layer 拿到 stale 数据再画进新 buffer。Cache 链应保证"上游命中 ⊆ 下游命中"
+- **transform 中烤进的参数都属于 cache key 的一部分**：`_transform_path` 烤了 scale + center + viewport_size，但 cache key 只反映 scale → 任何烤进 transform 的参数变化都必须能让 key miss。是一条 code-review invariant
+- **"X 与 Y 错位"通常意味着 X / Y 走了不同更新通道**：label live transform vs polygon cached transform — 先列两边数据流再查缓存
+
+---
 *Update after every 2 view/browser/search operations*
