@@ -1,16 +1,17 @@
 # Task Plan: GeoViz Engine — 项目总览与下一步规划
 
 > **更新于 2026-05-31**：基于 CEO + Eng 双重 review 重写。明确区分"已完成 / 待修复 / 下一步"。
+> **同步于 2026-05-31**：Goal/Current State 同步至 Phase 11.7-C 完成后的真实状态。
 
 ## Goal
-GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Phase 1–11 已完成，636 tests passed。**核心市场定位**：科研院所 + 中小油田 + 教学（差异化于 Petrel 的轻量、可二次开发、出版级出图）。
+GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Phase 1–11.7 已完成，690 tests passed。**核心市场定位**：科研院所 + 中小油田 + 教学（差异化于 Petrel 的轻量、可二次开发、出版级出图）。
 
 ## Current State
 - **Branch:** main (synced with origin)
-- **Tests:** 636 passed, 3 skipped (3 skipped 待整改为 xfail+断言)
-- **Latest commit:** `86da1b14 feat(seismic): add Phase 11 curvature attributes`
-- **Active phase:** Phase 11 COMPLETE（有 1 个诚信缺陷待修复，见 Phase 11.5）
-- **Health rating (Eng review):** B+（健康可生产，少量明确债务）
+- **Tests:** 690 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
+- **Latest commit:** `c7d7db2a feat(paleo-map): shared chrome panel in compare mode (Phase 11.7-C)`
+- **Active phase:** Phase 11.7 COMPLETE（A+B+C 全部 ship；Phase 11.5 债务全部清零）
+- **Health rating:** A-（Phase 11 + 11.5 + 11.6 + 11.7 全清，无未结债务）
 
 ## Completed Phases
 
@@ -29,7 +30,10 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 9b | GPU Acceleration for Coherence | ✅ | 1.5-1.9x speedup |
 | 10 | PaleoMap 纹理填充 + 专业图件导出 | ✅ | 13 facies patterns |
 | Refactor | seismic_view.py 拆分 | ✅ | 1471 → 1283 行 |
-| 11 | Curvature (Dip/Azimuth + 6 kinds) | ⚠️ | GPU 路径未实现（见 11.5） |
+| 11 | Curvature (Dip/Azimuth + 6 kinds) | ✅ | GPU 路径已补，见 11.5-A |
+| 11.5 | Phase 11 债务清理（GPU/dispatch/CHANGELOG/版本号/集成测试） | ✅ | A/B/D/E/F DONE；C WON'T FIX |
+| 11.6 | PaleoMap 性能 + chrome 重构（A=texture cache, B=chrome bypass, C=Z-order, D=DPR, E=DTW vectorize） | ✅ | 5 子任务全 ship |
+| 11.7 | PaleoMap 缓存失效 + 共享 chrome（A=viewport-size, B=pan-center, C=SharedChromePanel） | ✅ | A+B+C 全 ship |
 
 ## 🔴 Phase 11.5: 收尾与债务清理（最高优先级，必须先于 Phase 12）
 
