@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 
 from geoviz_paleo_map import PaleoMapCanvas
 from geoviz_paleo_map.hierarchy import FaciesHierarchy
+from geoviz_paleo_map.shared_chrome_panel import SharedChromePanel
 
 from src.pages.paleo_map.loader import PaleoDataLoader
 from src.utils.paths import get_data_dir
@@ -219,12 +220,19 @@ class PaleoMapPage(QWidget):
 
     def _start_compare(self):
         old_view = self.map_view
-        self._splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.map_view = PaleoMapCanvas(parent=self)
-        self.map_view_b = PaleoMapCanvas(parent=self)
-        self._splitter.addWidget(self.map_view)
-        self._splitter.addWidget(self.map_view_b)
-        self._map_layout.addWidget(self._splitter)
+        compare_host = QWidget()
+        h_layout = QHBoxLayout(compare_host)
+        h_layout.setContentsMargins(0, 0, 0, 0)
+        h_layout.setSpacing(0)
+        self.map_view = PaleoMapCanvas(parent=self, show_chrome=False)
+        self.map_view_b = PaleoMapCanvas(parent=self, show_chrome=False)
+        self._shared_chrome = SharedChromePanel(self.map_view, self.map_view_b,
+                                                parent=compare_host)
+        h_layout.addWidget(self.map_view, 1)
+        h_layout.addWidget(self._shared_chrome)
+        h_layout.addWidget(self.map_view_b, 1)
+        self._compare_host = compare_host
+        self._map_layout.addWidget(compare_host)
         old_view.deleteLater()
         self._on_period_changed(self._current_period)
 
@@ -235,6 +243,11 @@ class PaleoMapPage(QWidget):
             except RuntimeError:
                 pass
             del self.map_view_b
+        if hasattr(self, '_shared_chrome'):
+            del self._shared_chrome
+        if hasattr(self, '_compare_host'):
+            self._compare_host.setParent(None)
+            del self._compare_host
         if hasattr(self, '_splitter'):
             self._splitter.setParent(None)
             del self._splitter

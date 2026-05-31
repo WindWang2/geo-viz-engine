@@ -418,3 +418,55 @@ Chrome layers 因 11.6-B `is_chrome=True` 已 bypass cache 直绘 → 每帧用�
 
 **11.7 状态**：A + B 完成，无其余子任务计划
 
+---
+
+### Session 2026-05-31 (Phase 11.7-C) — 对比模式下两边各画一套 chrome
+
+#### 任务
+用户报"不要区分区域，古地理图的图例指南针和比例尺都在一个画布上"。澄清后定位为：对比模式（点"对比"按钮并排显示两个时期）下，左右两个 PaleoMapCanvas 各画自己一套 Title / NorthArrow / ScaleBar / Legend → 屏幕上有两套 chrome 各只反映自己一侧的 facies，无法统一阅读。
+
+#### 决策（AskUserQuestion 锁定）
+- Bug 确认：对比模式下两边各有一套 chrome
+- 修复方案：独立共享面板（中间分割）
+- 图例内容：合并 A+B 的 facies
+
+#### 根因
+chrome 是 canvas 内嵌 layer，由 `PaleoMapCanvas` 在 4 个 `_layers` 构建点固定追加。canvas 不知道自己"是否独立呈现"——把两个 canvas 并排，chrome 就被双份渲染。Compare 模式只在 page 层把两个 canvas 塞进 QSplitter，无法 retroactively 抽出 chrome。
+
+#### Fix
+1. **`packages/geoviz_paleo_map/geoviz_paleo_map/canvas.py`**：
+   - `__init__` 增 `show_chrome: bool = True` 参数
+   - 在 4 个 `_layers.extend([...])` 调用点统一 `if self._show_chrome:` 包裹 chrome 4 件套
+   - 增 `facies_names() -> set[str]` 返回 LegendLayer 已收集的 facies
+   - 增类信号 `facies_changed = Signal()`，在 `load_features` / `load_hierarchy` 末尾 emit
+2. **新建 `packages/geoviz_paleo_map/geoviz_paleo_map/shared_chrome_panel.py`**：
+   - 固定宽 200px QWidget，自上而下：north arrow / 合并 legend (A∪B facies) / scale bar
+   - 连接 canvas_a + canvas_b 的 `facies_changed` + `zoom_changed` → `self.update()`
+   - scale bar 用 canvas_a._viewport.world_bbox() 计算 km
+3. **`src/pages/paleo_map/page.py::_start_compare`**：
+   - 弃用 QSplitter，改用 QHBoxLayout host
+   - `[canvas_a (stretch=1)] [SharedChromePanel 200px] [canvas_b (stretch=1)]`
+   - 两 canvas 都构造 `show_chrome=False`
+   - `_stop_compare` 拆除 host + 共享面板 + 第二 canvas，重建带默认 chrome 的单 canvas
+
+#### 新增回归测试
+`tests/test_paleo_shared_chrome.py` 6 项：
+- `test_default_includes_chrome_layers` — 默认 chrome 4 件套都在
+- `test_show_chrome_false_omits_chrome` — `show_chrome=False` chrome 全去掉
+- `test_facies_names_exposed` — `facies_names()` 返回当前 facies 集合
+- `test_merges_facies_from_both_canvases` — SharedChromePanel 合并 A∪B
+- `test_refreshes_when_canvas_reloads` — canvas reload 后 panel.merged_facies() 跟随
+- `test_panel_paints_without_error` — `panel.grab()` 不抛异常
+
+#### 测试结果
+| Date | Suite | Result |
+|------|-------|--------|
+| 2026-05-31 (Phase 11.7-C) | 6/6 test_paleo_shared_chrome 通过；全套 690 passed, 4 skipped | ✅ |
+
+#### 教训
+- **chrome 归 composition root，不归 leaf widget**：canvas 应该是"可被多次实例化的内容画板"，副标题/图例/指北针/比例尺属于宿主页面。一旦可能并排两个实例，chrome 必属容器
+- **多实例场景前先问"哪些 layer 是 per-instance、哪些是 per-composition"**：在加 11.7-C 之前这条 invariant 隐藏在"只有一个 canvas"的假设里。任何加 compare / split-screen / PiP 功能时，必须先把 layer 按"内容 vs chrome"分一次
+- **leaf 暴露 signal + 状态查询接口比让 root 直接读私有字段更安全**：`facies_changed` + `facies_names()` 让 SharedChromePanel 不耦合 LegendLayer 内部；后续换 chrome 实现也不破壳
+
+**11.7 状态**：A + B + C 完成，全部 ship
+

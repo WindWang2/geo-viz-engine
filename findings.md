@@ -405,4 +405,29 @@ self._zoom_center[zoom_key] = center
 - **"X 与 Y 错位"通常意味着 X / Y 走了不同更新通道**：label live transform vs polygon cached transform — 先列两边数据流再查缓存
 
 ---
+
+## 11.7-C 根因分析：对比模式下两边各画一套 chrome
+
+**症状**：用户报"不要区分区域，古地理图的图例指南针和比例尺都在一个画布上"。澄清：对比模式（点"对比"按钮并排显示两个时期）下，左右两个 `PaleoMapCanvas` 各自独立绘制 Title / NorthArrow / ScaleBar / Legend → 屏幕上有两个图例、两个指南针、两个比例尺，且每个只反映自己一侧的 facies，无法统一阅读。
+
+**根因**：chrome 是 canvas 的内嵌 layer，由 `PaleoMapCanvas` 在 4 个 `_layers` 构建点（`__init__` / `load_features` / `load_hierarchy` / `_update_active_layers`）固定追加进去。canvas 不知道自己"是否独立呈现"——所以一旦把两个 canvas 并排，chrome 就被双份渲染。Compare 模式逻辑在 `src/pages/paleo_map/page.py::_start_compare`，那里只是把两个 canvas 塞进 QSplitter，没法 retroactively 把 chrome 从 leaf 抽出来。
+
+**修复**：让 chrome 的归属从 leaf 移到 composition root。
+
+1. **canvas 增 `show_chrome: bool = True` 开关**（`packages/geoviz_paleo_map/geoviz_paleo_map/canvas.py`）：在 4 个 `_layers.extend([...])` 调用点统一 `if self._show_chrome:` 包裹 chrome 4 件套。默认 True 保持单画布行为不变；compare 模式构造两个 canvas 都传 `show_chrome=False`。
+
+2. **canvas 暴露内部状态供共享面板订阅**：新增 `facies_names() -> set[str]` 返回当前 LegendLayer 已收集的 facies；新增类信号 `facies_changed = Signal()`，在 `load_features` / `load_hierarchy` 末尾 emit，让外部刷新触发。
+
+3. **新建 `SharedChromePanel`**（`packages/geoviz_paleo_map/geoviz_paleo_map/shared_chrome_panel.py`）：固定宽 200px 的 QWidget，自上而下绘制 north arrow / 合并 legend（A∪B facies）/ scale bar；连接两个 canvas 的 `facies_changed` + `zoom_changed` → `self.update()`。scale bar 用 `canvas_a._viewport.world_bbox()` 计算 km。
+
+4. **page 接入**（`src/pages/paleo_map/page.py::_start_compare`）：弃用 QSplitter，改用 QHBoxLayout host 把 `canvas_a` (stretch=1) / `SharedChromePanel` / `canvas_b` (stretch=1) 三件套塞进 `_compare_host`。`_stop_compare` 拆除 host + 共享面板 + 第二 canvas，重建带默认 chrome 的单 canvas。
+
+**回归测试**：`tests/test_paleo_shared_chrome.py` 6 项 — 默认 chrome 在 / `show_chrome=False` 关 chrome / `facies_names()` 暴露 / SharedChromePanel 合并两侧 facies / canvas 重新 load 后 panel 刷新 / panel.grab() 无错。全部通过；全套 690 passed, 4 skipped。
+
+**教训**：
+- **chrome 归 composition root，不归 leaf widget**：第一直觉是"chrome 是图的一部分"→ 放到 canvas 里；但只要可能并排两个实例，chrome 就属于"承载它们的容器"。canvas 应该是"可被多次实例化的内容画板"，副标题/图例/指北针属于宿主页面
+- **多实例场景前必先问"哪些 layer 是 per-instance、哪些是 per-composition"**：在加 11.7-C 之前，这条 invariant 隐藏在"只有一个 canvas"的假设里。任何加 compare/split-screen/PiP 类功能时，先把 layer 按"内容 vs chrome"分一次
+- **leaf 暴露 signal + 状态查询接口比让 root 直接读私有字段更安全**：`facies_changed` + `facies_names()` 让 SharedChromePanel 不耦合 LegendLayer 内部；后续如果换 chrome 实现也不会破壳
+
+---
 *Update after every 2 view/browser/search operations*

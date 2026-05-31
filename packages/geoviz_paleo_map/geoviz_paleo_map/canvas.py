@@ -36,15 +36,18 @@ class PaleoMapCanvas(QWidget):
     zoom_changed = Signal(float)   # current zoom level
     edit_mode_changed = Signal(bool)
     selection_changed = Signal(str)  # feature_id or ""
+    facies_changed = Signal()  # facies set or title changed
 
     def __init__(self, pattern_engine: PatternEngine | None = None,
-                 parent: QWidget | None = None):
+                 parent: QWidget | None = None,
+                 show_chrome: bool = True):
         super().__init__(parent)
         self.setMouseTracking(True)
         self._press_pos: QPointF | None = None
 
         self._engine = pattern_engine or PatternEngine()
         self._resolver = FaciesStyleResolver(self._engine)
+        self._show_chrome = show_chrome
 
         self._viewport = PaleoMapViewport(
             center_lng=115.0, center_lat=30.0, zoom=2.0,
@@ -63,11 +66,14 @@ class PaleoMapCanvas(QWidget):
             self._facies_layer,
             self._labels_layer,
             self._wells_layer,
-            self._title_layer,
-            NorthArrowLayer(),
-            ScaleBarLayer(),
-            self._legend_layer,
         ]
+        if self._show_chrome:
+            self._layers.extend([
+                self._title_layer,
+                NorthArrowLayer(),
+                ScaleBarLayer(),
+                self._legend_layer,
+            ])
         self._rebuild_layer_caches()
         self._current_hover: str | None = None
         self._hierarchy: FaciesHierarchy | None = None
@@ -145,6 +151,14 @@ class PaleoMapCanvas(QWidget):
     def edit_engine(self) -> EditEngine:
         return self._edit_engine
 
+    @property
+    def show_chrome(self) -> bool:
+        return self._show_chrome
+
+    def facies_names(self) -> set[str]:
+        """Return the set of facies currently shown in the legend."""
+        return set(self._legend_layer.facies_names)
+
     def load_features(self, features: list[dict],
                       period_name: str = "",
                       wells: list[dict] | None = None) -> None:
@@ -172,11 +186,14 @@ class PaleoMapCanvas(QWidget):
             self._facies_layer,
             self._labels_layer,
             self._wells_layer,
-            self._title_layer,
-            NorthArrowLayer(),
-            ScaleBarLayer(),
-            self._legend_layer,
         ]
+        if self._show_chrome:
+            self._layers.extend([
+                self._title_layer,
+                NorthArrowLayer(),
+                ScaleBarLayer(),
+                self._legend_layer,
+            ])
         self._period_name = period_name
         self._wells_data = wells or []
         self._locked_ids = {}
@@ -187,6 +204,7 @@ class PaleoMapCanvas(QWidget):
         self._rebuild_layer_caches()
         self._scheduler.schedule()
         self._update_slider_params()
+        self.facies_changed.emit()
 
     def load_hierarchy(self, hierarchy: FaciesHierarchy,
                        period_name: str = "",
@@ -206,6 +224,7 @@ class PaleoMapCanvas(QWidget):
 
         title = f"{period_name}岩相古地理图" if period_name else ""
         self._level_groups = {}
+        all_seen: set[str] = set()
 
         for level in ["facies", "sub_facies", "micro_facies"]:
             feats = [
@@ -222,31 +241,36 @@ class PaleoMapCanvas(QWidget):
                 continue
 
             seen = {(f.get("properties") or {}).get("facies") for f in feats if (f.get("properties") or {}).get("facies")}
+            all_seen.update(seen)
             poly = FaciesPolygonsLayer(feats, self._resolver, default_pen=pens[level], hierarchy=hierarchy, active_level=level, locked_ids=self._locked_ids)
 
             group: list[PaleoLayer] = [BackgroundLayer(), poly]
             group.append(RegionLabelsLayer(feats, self._resolver,
                                            font_size=font_sizes[level],
                                            locked_ids=set(self._locked_ids.keys())))
-            group.extend([
-                WellsScatterLayer(wells or []),
-                TitleLayer(title),
-                NorthArrowLayer(),
-                ScaleBarLayer(),
-                LegendLayer(seen, self._resolver),
-            ])
+            group.append(WellsScatterLayer(wells or []))
+            if self._show_chrome:
+                group.extend([
+                    TitleLayer(title),
+                    NorthArrowLayer(),
+                    ScaleBarLayer(),
+                    LegendLayer(seen, self._resolver),
+                ])
             self._level_groups[level] = group
 
         self._cached_level = ""
         self._cached_zoom = -1.0
         level = self._resolve_level()
         self._layers = self._level_groups.get(level, [])
+        self._legend_layer.set_facies(all_seen)
+        self._title_layer.set_text(title)
         # Build topology model for editing
         self._topology_model = TopologyBuilder.from_hierarchy(hierarchy)
         self._edit_engine.set_model(self._topology_model)
         self._rebuild_layer_caches()
         self._scheduler.schedule()
         self._update_slider_params()
+        self.facies_changed.emit()
 
     # (outgoing_level, incoming_level, blend) — blend ∈ [0,1]
     _LEVEL_ORDER = ["facies", "sub_facies", "micro_facies"]
@@ -396,17 +420,22 @@ class PaleoMapCanvas(QWidget):
         
         seen = {ff.facies_name for ff in visible_features if ff.facies_name}
         title = f"{self._period_name}岩相古地理图" if self._period_name else ""
+        self._legend_layer.set_facies(seen)
+        self._title_layer.set_text(title)
 
         self._layers = [
             BackgroundLayer(),
             poly,
             labels,
             WellsScatterLayer(self._wells_data),
-            TitleLayer(title),
-            NorthArrowLayer(),
-            ScaleBarLayer(),
-            LegendLayer(seen, self._resolver),
         ]
+        if self._show_chrome:
+            self._layers.extend([
+                TitleLayer(title),
+                NorthArrowLayer(),
+                ScaleBarLayer(),
+                LegendLayer(seen, self._resolver),
+            ])
         self._rebuild_layer_caches()
 
     def _update_locked_panel(self) -> None:
