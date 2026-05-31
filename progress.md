@@ -52,6 +52,8 @@
 | 2026-05-31 (Phase 11) | 636 passed | ✅ |
 | 2026-05-31 (Phase 11.5-A) | 636 passed | ✅ |
 | 2026-05-31 (Phase 11.5-B + D) | 668 passed | ✅ |
+| 2026-05-31 (Phase 11.6-A + C partial) | 668 passed | ✅ |
+| 2026-05-31 (Phase 11.6-B chrome bypass) | 669 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
@@ -162,26 +164,37 @@
 
 ### Session: 2026-05-31 (Phase 11.6 — 用户回归测试)
 
-#### 用户测试发现 7 项问题（已记入 task_plan Phase 11.6）
+#### 用户测试发现 8 项问题（已记入 task_plan Phase 11.6）
 1. 11.6-A **地图：点井无响应** — ✅ FIXED
-2. 11.6-B 古地理图：图例/指南针/比例尺消失 — TODO
-3. 11.6-C 古地理图：PDF 导出空白 — ⚠️ 修了崩溃 bug（QSizeF→QSize），缺 publishing frame 还要做
+2. 11.6-B **古地理图：图例/指南针/比例尺消失** — ✅ FIXED
+3. 11.6-C 古地理图：PDF 导出空白 — 🚧 IN PROGRESS（修了崩溃 bug；缺 publishing frame 还要做）
 4. 11.6-D 古地理图：缩放后文字模糊 — TODO
 5. 11.6-E 连井：自动连井太慢 — TODO
 6. 11.6-F 连井：自动连井位置不对 — TODO
 7. 11.6-G 连井：手动拾取交互体验差 — TODO
 8. 11.6-H 地震：toolbar 显示不完整 — TODO
 
-#### 11.6-A Fix（commit pending）
+#### 11.6-A Fix (commit 12a60273)
 - **根因**：`WellsLayer._screen_positions` 存的是 LayerPixmapCache 2× buffer 的内部坐标，不是实际屏幕坐标；`hit_test` 复用它 → 永远 miss
 - **修复**：`packages/geoviz_map/geoviz_map/layers/wells.py` `hit_test` 始终用 live viewport 重投影
 - **教训**：pixmap cache 只能存像素，命中检测必须现算坐标
 - 125 map+wells 相关测试 green
-- progress.md/findings.md 同步更新
 
-#### 11.6-C Partial Fix（commit pending）
+#### 11.6-C Partial Fix (commit 12a60273)
 - `src/pages/paleo_map/page.py:424` `printer.pageRect(QPrinter.DevicePixel).toRect()` 修复 QSizeF → QSize 类型错误
 - 仍待补 publishing-grade frame（图名/比例尺/指南针/图例）
+
+#### 11.6-B Fix（commit pending）
+- **根因**：与 11.6-A 同源 — `LayerPixmapCache._rerender` 用 `buf_w = vp.width * 2`、`buf_h = vp.height * 2` 创建一个 2× 的 `buf_vp` 给 layer 绘制；chrome layer（北针/比例尺/图例/标题）锚定到 `viewport.width` / `viewport.height` 时，锚点（如 `viewport.width - 46`）实际落在 `2 * vp.width - 46`，blit 回真实 viewport 时早已偏离屏幕外
+- **修复**：
+  - `PaleoLayer` 基类加 `is_chrome: bool = False`
+  - `TitleLayer` / `NorthArrowLayer` / `ScaleBarLayer` / `LegendLayer` 标记 `is_chrome = True`
+  - `PaleoMapCanvas._rebuild_layer_caches`：chrome layer 对应位置存 `None`，跳过 LayerPixmapCache
+  - `paintEvent`：`cache is None` 时直接 `layer.paint(painter, self._viewport)`
+  - `_rebuild_topology_paths` mark_dirty 跳过 `None` cache
+- **回归测试**：`test_chrome_layers_bypass_pixmap_cache` 断言 chrome 类对应 cache 为 None，数据层（FaciesPolygonsLayer）仍有 cache
+- **教训**：LayerPixmapCache 的 2× buffer 模式只适合 world-coord 内容；任何锚定到 viewport edge 的 chrome 必须直绘 — 这是与 11.6-A "pixmap cache 只能存像素" 同根的第二个表现
+- 669 tests passed（+1），3 skipped
 
 ### Session: 2026-05-31 (Phase 11.5-C/E/F — debt closeout)
 

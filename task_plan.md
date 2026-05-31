@@ -56,9 +56,9 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 
 | ID | Task | Files | Priority | Status |
 |----|------|-------|----------|--------|
-| 11.6-A | **地图：点击井无响应** — 井位地图上点具体井位无反应（既不切到测井页也无提示） | `src/pages/map/`, `packages/geoviz_map/canvas.py` | 🔴 P0 | TODO |
-| 11.6-B | **古地理图：图例/指南针/比例尺消失** — 8 个 chrome layer 中有 3-4 个不可见，可能 layer enable 默认值或绘制顺序问题 | `packages/geoviz_paleo_map/canvas.py`, `layers/legend.py` `north_arrow.py` `scale_bar.py` | 🔴 P0 | TODO |
-| 11.6-C | **古地理图：PDF 导出空白** — 已修 QPixmap.scaled QSizeF→QSize 类型错误（DevicePixel rect 需 toRect），但还需补充图名/页眉/比例尺等 publishing-grade frame；当前只把 grab 的 pixmap 居中铺到 A4 | `src/pages/paleo_map/page.py:410-429` | 🔴 P0 | TODO |
+| 11.6-A | **地图：点击井无响应** — 井位地图上点具体井位无反应（既不切到测井页也无提示） | `src/pages/map/`, `packages/geoviz_map/canvas.py` | 🔴 P0 | ✅ DONE |
+| 11.6-B | **古地理图：图例/指南针/比例尺消失** — 根因：LayerPixmapCache 2× buffer 与 chrome layer 锚定 viewport 边界冲突，buf_vp 尺寸是真实 viewport 的 2 倍导致锚点 (viewport.width-46) 落在缓冲区外。修复：base 增 `is_chrome` 标志，chrome 类（title/north_arrow/scale_bar/legend）跳过 LayerPixmapCache 直绘 | `packages/geoviz_paleo_map/canvas.py`, `layers/base.py`, `legend.py`, `north_arrow.py`, `scale_bar.py`, `title.py` | 🔴 P0 | ✅ DONE |
+| 11.6-C | **古地理图：PDF 导出空白** — 已修 QPixmap.scaled QSizeF→QSize 类型错误（DevicePixel rect 需 toRect），但还需补充图名/页眉/比例尺等 publishing-grade frame；当前只把 grab 的 pixmap 居中铺到 A4 | `src/pages/paleo_map/page.py:410-429` | 🔴 P0 | 🚧 IN PROGRESS |
 | 11.6-D | **古地理图：缩放后文字模糊** — 标签/title 文字在高 zoom 时尺寸不变且渲染失真，应当随 zoom 自适应大小并启用高 DPI 抗锯齿 | `packages/geoviz_paleo_map/layers/region_labels.py`, `title.py` | 🟡 P1 | TODO |
 | 11.6-E | **连井：自动连井太慢** — 当前自动连井（DTW + auto-tie）耗时不可接受，需 profile 找瓶颈：DTW 全矩阵？trace 重采样？候选优化：Numba/Cython/限带 + 进度条 | `packages/geoviz_cross_well/dtw_engine.py`, `canvas.py` | 🟡 P1 | TODO |
 | 11.6-F | **连井：自动连井位置不对** — DTW 自动拾取产出的位置肉眼可见错位（横向偏移或井间映射错误），需对照已知 marker 验证算法正确性 | `packages/geoviz_cross_well/dtw_engine.py` | 🔴 P0 | TODO |

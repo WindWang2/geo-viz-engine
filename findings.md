@@ -151,12 +151,27 @@ geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
 - `QPainter.drawPolyline(QPointF, QPointF, ...)` → 只接受 `QPolygonF` 单参数
 - 这类问题需要在 PR 时主动 grep 检查重载签名
 
-### 4. 待调查（pending）
-- 11.6-B 古地理图 legend/north_arrow/scale_bar 不显示：suspect canvas.py 默认 `enabled=False` 或 `paintEvent` 顺序问题
+### 4. paleo_map chrome layers 消失（11.6-B 已修）
+- **根因（与 11.6-A 同源）**：`LayerPixmapCache._rerender()` 用 **2× buffer viewport** 渲染 layer (`buf_w = vp.width*2`, `buf_h = vp.height*2`)，blit 时只取中心一块回真实 viewport
+- chrome layer（北针/比例尺/图例/标题）锚定 `viewport.width - 46`、`viewport.height - 24` 等边缘坐标 → 在 buf_vp 下变成 `2*vp.width - 46`，blit 后落在屏幕外 → 完全不可见
+- **修复**：
+  - `PaleoLayer.is_chrome: bool = False` 基类标志
+  - 4 个 chrome 类（TitleLayer / NorthArrowLayer / ScaleBarLayer / LegendLayer）`is_chrome = True`
+  - `PaleoMapCanvas._rebuild_layer_caches` 为 chrome layer 存 `None`
+  - `paintEvent` 中 `cache is None` 直接调 `layer.paint(painter, self._viewport)`
+- **回归测试**：`test_chrome_layers_bypass_pixmap_cache` 锁定 chrome → None / 数据层 → cache 的映射
+- **教训（与 11.6-A 互补）**：
+  - 11.6-A 教训："命中检测不能信缓存坐标"
+  - 11.6-B 教训："viewport-anchored 渲染不能走缓存"
+  - 通用结论：**LayerPixmapCache 的 2× buffer 模式只适合 world-coord 内容；任何与 viewport 几何强耦合的逻辑都必须 bypass cache**
+
+### 5. 待调查（pending）
+- 11.6-C 续：补 publishing-grade frame（图名/比例尺/指南针/图例），复用 Phase 10 `export_professional_figure`
 - 11.6-D 缩放后文字模糊：缓存 pixmap 在 zoom 时被放大插值，labels layer 也需在 zoom 改变时 invalidate
 - 11.6-E 连井慢：DTW 是 O(N²) 全矩阵；先 profile 找瓶颈
 - 11.6-F DTW 位置不对：检查 trace 重采样后的 sample-rate 对齐
 - 11.6-G 拾取 UX：缺操作提示
+- 11.6-H 地震 toolbar 不全：拆 2 行 / QToolBar setOrientation
 
 ---
 *Update after every 2 view/browser/search operations*

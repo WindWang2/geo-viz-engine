@@ -10,6 +10,12 @@ from geoviz_paleo_map.viewport import PaleoMapViewport
 class PaleoLayer(ABC):
     """One rendering pass over the viewport."""
 
+    # Chrome layers (title/north arrow/scale bar/legend) anchor to viewport
+    # edges via viewport.width/height. They must paint directly against the
+    # real widget viewport — never go through LayerPixmapCache, which uses an
+    # oversized 2x buffer that shifts their anchor points off-screen.
+    is_chrome: bool = False
+
     @abstractmethod
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None: ...
 

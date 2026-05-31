@@ -101,8 +101,16 @@ class PaleoMapCanvas(QWidget):
         self._layer_caches: list[LayerPixmapCache] = []
 
     def _rebuild_layer_caches(self) -> None:
-        """Rebuild LayerPixmapCache wrappers for current layer list."""
-        self._layer_caches = [LayerPixmapCache(layer) for layer in self._layers]
+        """Rebuild LayerPixmapCache wrappers for current layer list.
+
+        Chrome layers (title/north-arrow/scale-bar/legend) anchor to viewport
+        edges and must paint against the real viewport size; we paint them
+        directly each frame instead of caching them.
+        """
+        self._layer_caches = [
+            None if getattr(layer, "is_chrome", False) else LayerPixmapCache(layer)
+            for layer in self._layers
+        ]
 
     # --- Edit mode properties ---
 
@@ -279,8 +287,11 @@ class PaleoMapCanvas(QWidget):
                     self._current_active_level = current_level
                     self._update_active_layers()
 
-            for cache in self._layer_caches:
-                cache.paint(painter, self._viewport)
+            for layer, cache in zip(self._layers, self._layer_caches):
+                if cache is None:
+                    layer.paint(painter, self._viewport)
+                else:
+                    cache.paint(painter, self._viewport)
         finally:
             painter.end()
 
@@ -566,7 +577,9 @@ class PaleoMapCanvas(QWidget):
         # Mark affected layer caches dirty
         for i, layer in enumerate(self._layers):
             if isinstance(layer, FaciesPolygonsLayer) and i < len(self._layer_caches):
-                self._layer_caches[i].mark_dirty()
+                cache = self._layer_caches[i]
+                if cache is not None:
+                    cache.mark_dirty()
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         pos = QPointF(event.pos())

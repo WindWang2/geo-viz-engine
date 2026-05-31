@@ -11,6 +11,8 @@ TITLE_BG = QColor(255, 255, 255, 217)  # rgba(255,255,255,0.85)
 
 
 class TitleLayer(PaleoLayer):
+    is_chrome = True
+
     def __init__(self, text: str):
         self.text = text
 

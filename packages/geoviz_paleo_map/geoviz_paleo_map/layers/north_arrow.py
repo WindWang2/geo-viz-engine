@@ -10,6 +10,8 @@ ARROW_COLOR = QColor("#334155")
 
 
 class NorthArrowLayer(PaleoLayer):
+    is_chrome = True
+
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         # 30x40 SVG offset 16px from right, ~50px from top

@@ -21,6 +21,8 @@ PADDING = 10
 
 
 class LegendLayer(PaleoLayer):
+    is_chrome = True
+
     def __init__(self, facies_names: set[str],
                  style_resolver: FaciesStyleResolver):
         self.facies_names = set(facies_names)

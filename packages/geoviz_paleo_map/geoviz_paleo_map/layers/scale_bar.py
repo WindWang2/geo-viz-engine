@@ -27,6 +27,8 @@ def _smooth_scale_km(extent_km: float) -> float:
 
 
 class ScaleBarLayer(PaleoLayer):
+    is_chrome = True
+
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)

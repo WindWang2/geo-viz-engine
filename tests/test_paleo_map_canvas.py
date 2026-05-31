@@ -105,3 +105,22 @@ def test_facies_with_pattern_renders_composite_brush(qtbot):
     # Brush should be a QBrush (composite, not just solid color)
     from PySide6.QtGui import QBrush
     assert isinstance(style.brush, QBrush)
+
+
+def test_chrome_layers_bypass_pixmap_cache(qtbot):
+    """Title/NorthArrow/ScaleBar/Legend anchor to viewport edges and must
+    paint directly. If routed through LayerPixmapCache (2x buffer), their
+    anchor coords land off-screen and the chrome disappears (11.6-B)."""
+    from geoviz_paleo_map.layers.title import TitleLayer
+    from geoviz_paleo_map.layers.north_arrow import NorthArrowLayer
+    from geoviz_paleo_map.layers.scale_bar import ScaleBarLayer
+    from geoviz_paleo_map.layers.legend import LegendLayer
+    from geoviz_paleo_map.layers.facies_polygons import FaciesPolygonsLayer
+
+    canvas = _make_canvas(qtbot)
+    chrome_types = (TitleLayer, NorthArrowLayer, ScaleBarLayer, LegendLayer)
+    for layer, cache in zip(canvas._layers, canvas._layer_caches):
+        if isinstance(layer, chrome_types):
+            assert cache is None, f"{type(layer).__name__} must bypass cache"
+        elif isinstance(layer, FaciesPolygonsLayer):
+            assert cache is not None, "Data layers should still be cached"
