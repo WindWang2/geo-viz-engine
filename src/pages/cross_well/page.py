@@ -544,17 +544,37 @@ class CrossWellPage(QWidget):
             )
             return
 
+        # Estimate total work = picks × other-well count for a single linear bar.
+        other_wells = max(0, self._cross_well.canvas_count - 1)
+        total_steps = len(manual_picks) * other_wells
+        self._progress.show_progress("DTW 传播中...", maximum=max(1, total_steps))
+
+        completed = [0]  # box for closure mutability
+
+        def _on_well_done(well_step: int, well_total: int) -> None:
+            completed[0] += 1
+            self._progress.update_progress(
+                completed[0],
+                f"DTW 传播中... ({completed[0]}/{total_steps})",
+            )
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
+
         created_total = 0
-        for pick in manual_picks:
-            for well in pick.connected_wells():
-                depth = pick.depth_for_well(well)
-                if depth is None:
-                    continue
-                created = self._canvas.propagate_pick_via_dtw(
-                    well, depth, pick.formation_name,
-                )
-                created_total += len(created)
-                break  # one anchor per pick is enough
+        try:
+            for pick in manual_picks:
+                for well in pick.connected_wells():
+                    depth = pick.depth_for_well(well)
+                    if depth is None:
+                        continue
+                    created = self._canvas.propagate_pick_via_dtw(
+                        well, depth, pick.formation_name,
+                        progress_callback=_on_well_done,
+                    )
+                    created_total += len(created)
+                    break  # one anchor per pick is enough
+        finally:
+            self._progress.hide_progress()
 
         QMessageBox.information(
             self, "DTW 传播完成",

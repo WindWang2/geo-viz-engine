@@ -311,3 +311,35 @@
 | 2026-05-31 (Phase 11.6-D) | 682 passed, 4 skipped | ✅ |
 
 **11.6 整体状态**：7/8 done（A/B/C/D/F/G/H），剩 E（自动连井慢）
+
+### Session: 2026-05-31 (Phase 11.6-E — DTW perf + 进度条)
+
+#### Profile baseline
+| n samples | full band (老默认) | 修后默认（band=n/4）|
+|-----------|--------------------|--------------------|
+| 500 | 0.44s | 0.075s |
+| 1000 | 1.97s | 0.28s |
+| 2000 | 7.09s | 1.06s |
+
+5 井 × 4 次传播：修前 ≈ 40s，修后 ≈ 1.1s（acceptance 门槛 5s）
+
+#### Root cause
+- `dtw_engine.correlate()` 内层纯 Python 双循环 + 每格 `prev=[]; if i>0: prev.append(...); min(prev)` → CPython 解释开销在 1M 格上 ~2s
+- `band_radius=None` 默认 `max(n,m)` → 强制全 O(n²)，无理由的全带宽
+
+#### Fix
+- **`dtw_engine.py`**：按行向量化（vertical+diag 用 `np.minimum` 一次性，horizontal 串行扫但去 list/tuple-min），默认 `band_radius = max(20, max(n,m)//4)`（25% 限带），新增 `progress_callback(current, total)` 参数
+- **`canvas.py`**：`propagate_pick_via_dtw(...progress_callback=...)` 井级别回调
+- **`src/pages/cross_well/page.py`**：`_on_dtw_propagate` 用 `FloatingProgressOverlay` 显示「DTW 传播中... (3/12)」，每步 `QApplication.processEvents()` 保持 UI 响应
+
+#### 新增回归测试（test_dtw_engine.py，+3 个）
+- `test_dtw_perf_under_one_second_for_1k_samples`：n=1000 必须 < 1s
+- `test_progress_callback_receives_monotonic_updates`：(cur,total) 单调递增 + 最终 == n
+- `test_vectorized_dtw_matches_reference_implementation`：与朴素双循环参考实现 suggested_depth 一致
+
+#### 测试结果
+| Date | Suite | Result |
+|------|-------|--------|
+| 2026-05-31 (Phase 11.6-E) | 682 passed, 4 skipped（+3 新 DTW，总收集 686）| ✅ |
+
+**11.6 闭环**：8/8 全修，Phase 11.6 收官

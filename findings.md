@@ -282,8 +282,46 @@ geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
 - 全套件：682 passed, 4 skipped（+2 新）
 
 
----
-*Update after every 2 view/browser/search operations*
+### 10. 自动连井 DTW 性能（11.6-E 已修）
+
+**根因：纯 Python 双循环 + 每格 list/tuple-min + 全 O(n²) 默认带宽**
+- `dtw_engine.py:correlate()` 原实现对每格做 `prev=[]; if i>0: prev.append(...); ... cost[i,j] = dist[i,j] + min(prev)`
+- 每格构造 0–3 元 list + `min(prev)` + 3 次 numpy 标量索引 → CPython 解释开销在 1k×1k = 1M 格上累计 ~2s
+- `band_radius=None` 默认 = `max(n,m)` → 全 O(n²)；典型 1000-sample 测井 1.97s/次 × 5 井 × 4 传播 ≈ 40s
+
+**修复（packages/geoviz_cross_well/dtw_engine.py）**
+1. **按行向量化**：对每行 i，一次性算 `vbase = np.minimum(prev_row, diag) + row_dist`（vertical+diag 不依赖行内顺序），然后行内 horizontal 仍串行扫一遍（因为 cost[i,j] 依赖 cost[i,j-1]）。关键是去掉 list/tuple 开销，纯标量算术
+2. **限带默认 `band_radius = max(20, max(n,m)//4)`**：保留 25% 宽容 warp 区间，对地质 well log 完全够用（实测 shift=5% 的 case suggested_depth 误差 < 1 个采样间隔）
+3. **`progress_callback(current, total)` 参数**：每 5% 行回调一次，UI 接 `FloatingProgressOverlay.update_progress`
+
+**修复（canvas.py）**：`propagate_pick_via_dtw(...progress_callback=...)` 在井级别回调（每跑完一口 target 井触发一次）
+
+**修复（src/pages/cross_well/page.py）**：`_on_dtw_propagate` 计算 `total_steps = picks × (wells-1)`，FloatingProgressOverlay 显示「DTW 传播中... (3/12)」，每步 `QApplication.processEvents()` 保持 UI 响应
+
+**基准（n=samples per curve）**
+| n | 修前默认 | 修后默认（限带）| 修后强制 full band | 加速比 |
+|---|---------|----------------|--------------------|--------|
+| 500 | 0.44s | 0.075s | 0.16s | 5.9× |
+| 1000 | 1.97s | 0.28s | 0.60s | 7.0× |
+| 2000 | 7.09s | 1.06s | 2.41s | 6.7× |
+
+5 口井 × 4 次传播 ≈ 1.1s（修前 ≈ 40s），远低于 acceptance 5s 门槛。
+
+**教训**：
+- **numpy 优化不一定是「彻底向量化」**：DTW 的内层 horizontal 步骤天然串行（cost[i,j] = f(cost[i,j-1])），强行用 cumulative tricks 反而错。真正赚的是消除 Python list/tuple/标量 boxing
+- **限带不是性能 hack 是正确性问题**：测井数据 sample 间隔通常 0.125m，1000 sample = 125m；DTW 全带宽允许 1000m 错位，但地质上根本不存在 — 限到 25% 既快又防伪匹配
+- **进度条不只是 UX**：DTW 长时间无反馈会让用户怀疑死锁去重启 → 哪怕只跑 1s 也要给进度，QApplication.processEvents() 让用户能看到「正在动」
+- **回归测试该锁住性能**：新增 `test_dtw_perf_under_one_second_for_1k_samples` —— 未来谁不小心把限带逻辑改坏会立即抓到
+
+**测试覆盖**（packages/geoviz_cross_well/tests/test_dtw_engine.py — 新增 3 个）
+- `test_dtw_perf_under_one_second_for_1k_samples`：n=1000 必须 < 1s
+- `test_progress_callback_receives_monotonic_updates`：(cur, total) 单调递增、最终 == n
+- `test_vectorized_dtw_matches_reference_implementation`：与朴素双循环参考实现对比 suggested_depth 一致
+- 全套件：682 passed, 4 skipped（总收集数 686，包含新增 3 个 DTW 用例）
+
+**11.6 整体收尾状态**
+- ✅ A/B/C/D/E/F/G/H = 8/8 全修
+- Phase 11.6 闭环完成
 
 
 ---

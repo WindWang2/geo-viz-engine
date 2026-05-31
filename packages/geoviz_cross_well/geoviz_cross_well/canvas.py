@@ -328,10 +328,14 @@ class CrossWellCanvas(QWidget):
         ref_depth: float,
         formation: str,
         band_radius: int | None = None,
+        progress_callback=None,
     ) -> list[str]:
         """Propagate a pick from `ref_well` at `ref_depth` to every other well via DTW.
 
         Returns the list of newly created DTW ghost pick IDs.
+
+        ``progress_callback`` receives ``(well_index, well_total)`` after each
+        target well finishes, so callers can drive a progress bar.
         """
         names = self._widget._well_names
         canvases = self._widget._canvases
@@ -343,12 +347,14 @@ class CrossWellCanvas(QWidget):
             return []
         ref_depths, ref_values = ref_data
 
+        targets = [(i, c, n) for i, (c, n) in enumerate(zip(canvases, names)) if i != ref_idx]
+        total = len(targets)
         created: list[str] = []
-        for i, (canvas, name) in enumerate(zip(canvases, names)):
-            if i == ref_idx:
-                continue
+        for step, (i, canvas, name) in enumerate(targets, start=1):
             tgt_data = self._extract_curve(canvas)
             if tgt_data is None:
+                if progress_callback is not None:
+                    progress_callback(step, total)
                 continue
             tgt_depths, tgt_values = tgt_data
             result = self._dtw_engine.correlate(
@@ -361,5 +367,7 @@ class CrossWellCanvas(QWidget):
                 formation, name, result.suggested_depth, source="dtw",
             )
             created.append(pick_id)
+            if progress_callback is not None:
+                progress_callback(step, total)
         return created
 
