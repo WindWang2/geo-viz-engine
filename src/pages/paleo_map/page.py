@@ -394,18 +394,14 @@ class PaleoMapPage(QWidget):
             return
         if not path.lower().endswith(".svg"):
             path += ".svg"
-
-        pixmap = self.map_view.grab()
-        import io
-        buffer = io.BytesIO()
-        pixmap.save(buffer, "PNG")
-        import base64
-        b64 = base64.b64encode(buffer.getvalue()).decode()
-        svg_content = f'<svg xmlns="http://www.w3.org/2000/svg" width="{pixmap.width()}" height="{pixmap.height()}">'
-        svg_content += f'<image href="data:image/png;base64,{b64}" width="{pixmap.width()}" height="{pixmap.height()}"/>'
-        svg_content += '</svg>'
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(svg_content)
+        from geoviz_paleo_map.export_professional import export_professional_figure
+        try:
+            export_professional_figure(
+                self.map_view, path, "svg",
+                title=self._figure_title(),
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "导出失败", f"SVG 导出失败:\n{e}")
 
     def _export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "导出 PDF", "paleomap.pdf", "PDF (*.pdf)")
@@ -413,20 +409,14 @@ class PaleoMapPage(QWidget):
             return
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
-        from PySide6.QtGui import QPageSize, QPageLayout, QPainter
-        from PySide6.QtPrintSupport import QPrinter
-        pixmap = self.map_view.grab()
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        printer.setOutputFileName(path)
-        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
-        printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
-        painter = QPainter(printer)
-        page_rect = printer.pageRect(QPrinter.DevicePixel).toRect()
-        scaled = pixmap.scaled(page_rect.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        x = (page_rect.width() - scaled.width()) // 2
-        y = (page_rect.height() - scaled.height()) // 2
-        painter.drawPixmap(x, y, scaled)
-        painter.end()
+        from geoviz_paleo_map.export_professional import export_professional_figure
+        try:
+            export_professional_figure(
+                self.map_view, path, "pdf",
+                title=self._figure_title(),
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "导出失败", f"PDF 导出失败:\n{e}")
 
     def _export_png(self):
         path, _ = QFileDialog.getSaveFileName(self, "导出 PNG", "paleomap.png", "PNG (*.png)")
@@ -434,5 +424,15 @@ class PaleoMapPage(QWidget):
             return
         if not path.lower().endswith(".png"):
             path += ".png"
-        pixmap = self.map_view.grab()
-        pixmap.save(path, "PNG")
+        from geoviz_paleo_map.export_professional import export_professional_figure
+        try:
+            export_professional_figure(
+                self.map_view, path, "png",
+                title=self._figure_title(),
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "导出失败", f"PNG 导出失败:\n{e}")
+
+    def _figure_title(self) -> str:
+        period = self._current_period or "古地理图"
+        return f"{period} 古地理相图"

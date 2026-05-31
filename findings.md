@@ -165,8 +165,13 @@ geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
   - 11.6-B 教训："viewport-anchored 渲染不能走缓存"
   - 通用结论：**LayerPixmapCache 的 2× buffer 模式只适合 world-coord 内容；任何与 viewport 几何强耦合的逻辑都必须 bypass cache**
 
-### 5. 待调查（pending）
-- 11.6-C 续：补 publishing-grade frame（图名/比例尺/指南针/图例），复用 Phase 10 `export_professional_figure`
+### 5. paleo_map 导出 PDF 缺出版要素（11.6-C 已修）
+- **根因**：page 层 `_export_pdf` 自己 grab pixmap + 居中铺 A4，不带 title / 比例尺 / 指南针 / 图例 / 边框 — 出来的 PDF 在用户眼里就是"空白"或"残缺"
+- **修复**：`src/pages/paleo_map/page.py` 的 `_export_pdf` / `_export_svg` / `_export_png` 全部委托给 `geoviz_paleo_map.export_professional.export_professional_figure`（Phase 10 产出）
+- title 由 `_figure_title()` 生成：`{current_period} 古地理相图`
+- **教训**：独立 package 已经把 publishing 能力做好了；page 层重复实现导出 = 引入 bug + 缺失 frame；scan 项目中其他 page 是否有类似低质量 export
+
+### 6. 待调查（pending）
 - 11.6-D 缩放后文字模糊：缓存 pixmap 在 zoom 时被放大插值，labels layer 也需在 zoom 改变时 invalidate
 - 11.6-E 连井慢：DTW 是 O(N²) 全矩阵；先 profile 找瓶颈
 - 11.6-F DTW 位置不对：检查 trace 重采样后的 sample-rate 对齐

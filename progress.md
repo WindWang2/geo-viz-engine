@@ -54,6 +54,7 @@
 | 2026-05-31 (Phase 11.5-B + D) | 668 passed | ✅ |
 | 2026-05-31 (Phase 11.6-A + C partial) | 668 passed | ✅ |
 | 2026-05-31 (Phase 11.6-B chrome bypass) | 669 passed | ✅ |
+| 2026-05-31 (Phase 11.6-C publishing export) | 674 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
@@ -167,7 +168,7 @@
 #### 用户测试发现 8 项问题（已记入 task_plan Phase 11.6）
 1. 11.6-A **地图：点井无响应** — ✅ FIXED
 2. 11.6-B **古地理图：图例/指南针/比例尺消失** — ✅ FIXED
-3. 11.6-C 古地理图：PDF 导出空白 — 🚧 IN PROGRESS（修了崩溃 bug；缺 publishing frame 还要做）
+3. 11.6-C **古地理图：PDF 导出空白** — ✅ FIXED（委托 export_professional_figure）
 4. 11.6-D 古地理图：缩放后文字模糊 — TODO
 5. 11.6-E 连井：自动连井太慢 — TODO
 6. 11.6-F 连井：自动连井位置不对 — TODO
@@ -195,6 +196,14 @@
 - **回归测试**：`test_chrome_layers_bypass_pixmap_cache` 断言 chrome 类对应 cache 为 None，数据层（FaciesPolygonsLayer）仍有 cache
 - **教训**：LayerPixmapCache 的 2× buffer 模式只适合 world-coord 内容；任何锚定到 viewport edge 的 chrome 必须直绘 — 这是与 11.6-A "pixmap cache 只能存像素" 同根的第二个表现
 - 669 tests passed（+1），3 skipped
+
+#### 11.6-C Full Fix（commit pending）
+- **修复**：`src/pages/paleo_map/page.py` 的 `_export_pdf` / `_export_svg` / `_export_png` 全部改为委托 `geoviz_paleo_map.export_professional.export_professional_figure`
+- 自动获得 title（用 current period）/ 网格边框 / 刻度 / 比例尺 / 指南针 / 图例 — publishing-grade
+- 新增 `_figure_title()` helper：`{period} 古地理相图`，period 为空时退到 "古地理图"
+- 5 个新测试 `test_paleo_map_page_export.py`：3 个 mock 化路径调用断言，1 个 fallback title，1 个真实 export 出 >1KB PDF
+- 674 tests passed（+5），3 skipped
+- **教训**：图层级独立 package 已经把 publishing 能力做好了；page 层不该自己撸 QPainter on QPrinter — 这是 11.6-C "导出 PDF 空白" 看起来像 crash 实则是 missing frame 的根本原因
 
 ### Session: 2026-05-31 (Phase 11.5-C/E/F — debt closeout)
 
