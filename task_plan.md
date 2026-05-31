@@ -34,6 +34,8 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 11.5 | Phase 11 债务清理（GPU/dispatch/CHANGELOG/版本号/集成测试） | ✅ | A/B/D/E/F DONE；C WON'T FIX |
 | 11.6 | PaleoMap 性能 + chrome 重构（A=texture cache, B=chrome bypass, C=Z-order, D=DPR, E=DTW vectorize） | ✅ | 5 子任务全 ship |
 | 11.7 | PaleoMap 缓存失效 + 共享 chrome（A=viewport-size, B=pan-center, D=删除 compare 模式回归单画布） | ✅ | A+B+D ship；C/C2 回滚 |
+| 11.8 | 层级锁定与图例/比例尺文字重叠修复（三子任务全 ship） | ✅ | 684 tests passed |
+
 
 ## 🔴 Phase 11.5: 收尾与债务清理（最高优先级，必须先于 Phase 12）
 
@@ -107,6 +109,26 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 - 全程保持 636+ tests 绿
 
 ---
+
+## 🔴 Phase 11.8: 层级锁定与重叠修复（2026-06-01 用户测试反馈）
+
+**目的：** 实现用户要求的全局层级锁定，解决图例与首行元素的垂直重叠，以及比例尺滑动条刻度文本的水平重叠。
+
+### Tasks
+
+| ID | Task | Files | Priority | Status |
+|----|------|-------|----------|--------|
+| 11.8-A | **增加层级锁定**：在 `page.py` 工具栏增加 `层级锁定` combobox，在 `canvas.py` 实现 `_locked_level` 支持，根据锁定的层级在所有显示比例尺都显示锁定的层级。 | `src/pages/paleo_map/page.py`, `packages/geoviz_paleo_map/geoviz_paleo_map/canvas.py` | 🔴 P0 | ✅ DONE |
+| 11.8-B | **图例重叠修复**：调整 `legend.py` 中 `y` 起始坐标偏移，增加 "图例" 标题与首行元素之间的垂直间距，避免二者重叠。 | `packages/geoviz_paleo_map/geoviz_paleo_map/layers/legend.py` | 🔴 P0 | ✅ DONE |
+| 11.8-C | **比例尺文字重叠修复**：移除滑动条上杂乱的 `相→亚相` 转换文字，改为平铺在各自区域内；并在 `_make_ticks()` 中实现 `tx - last_x >= 45.0` 刻度水平间距防重叠保护。 | `packages/geoviz_paleo_map/geoviz_paleo_map/floating_slider.py` | 🔴 P0 | ✅ DONE |
+
+**Acceptance criteria:**
+- 11.8-A：用户在顶部下拉框中选择 "相/亚相/微相" 后，无论怎么缩放地图，都只显示锁定的图层级别。
+- 11.8-B：图例的 "图例" 标题与下方 "三角洲" 等首行色块元素之间有足够留白，不再紧贴重叠。
+- 11.8-C：比例尺滑动条下方的 tick labels（如 1:1000万 等）在拉动缩放时不再密集成一团重叠，最少保持 45px 间距，且 `相→亚相` 这类重合文本已彻底移除。
+
+---
+
 
 ## 📋 重写后的 Roadmap（基于 CEO + Eng review 综合判断）
 

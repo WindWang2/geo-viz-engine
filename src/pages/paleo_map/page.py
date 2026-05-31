@@ -101,6 +101,15 @@ class PaleoMapPage(QWidget):
         tb_layout.addWidget(QLabel("时期:"))
         tb_layout.addWidget(self._period_combo)
 
+        # Add a Level Lock dropdown
+        tb_layout.addWidget(QLabel("层级锁定:"))
+        self._level_lock_combo = QComboBox()
+        self._level_lock_combo.setToolTip("锁定地图图层级别（自动表示根据比例尺切换）")
+        self._level_lock_combo.setStyleSheet("QComboBox{padding:4px 8px;border:1px solid #cbd5e1;border-radius:4px;}")
+        self._level_lock_combo.addItems(["自动", "相", "亚相", "微相"])
+        self._level_lock_combo.currentTextChanged.connect(self._on_level_lock_changed)
+        tb_layout.addWidget(self._level_lock_combo)
+
         self._edit_btn = QPushButton("编辑模式")
         self._edit_btn.setCheckable(True)
         self._edit_btn.setToolTip("切换编辑模式 (E)")
@@ -179,6 +188,15 @@ class PaleoMapPage(QWidget):
                                             period_name=period_name,
                                             wells=_load_well_markers())
 
+    def _on_level_lock_changed(self, text: str):
+        level_map = {
+            "自动": "",
+            "相": "facies",
+            "亚相": "sub_facies",
+            "微相": "micro_facies"
+        }
+        level = level_map.get(text, "")
+        self.map_view.set_locked_level(level)
 
     # --- Edit Mode ---
 

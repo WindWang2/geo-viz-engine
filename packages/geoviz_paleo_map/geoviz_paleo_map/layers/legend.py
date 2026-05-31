@@ -43,6 +43,7 @@ class LegendLayer(PaleoLayer):
         fixed_rows = 4  # confirmed, inferred, fault, well
         box_w = 140
         box_h = PADDING * 2 + ROW_H * (1 + facies_count) + 6 + ROW_H * fixed_rows
+        
         x0 = viewport.width - box_w - 12
         y0 = viewport.height - box_h - 12
 
@@ -59,7 +60,7 @@ class LegendLayer(PaleoLayer):
         painter.drawText(QPointF(x0 + PADDING, y0 + PADDING + 12), "图例")
         painter.setFont(font)
 
-        y = y0 + PADDING + ROW_H + 4
+        y = y0 + PADDING + ROW_H + 12
 
         # 4. Facies swatches
         painter.setPen(QPen(TEXT_COLOR, 0))

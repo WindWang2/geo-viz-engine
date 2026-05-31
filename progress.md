@@ -1,6 +1,14 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE
+## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE, Phase 11.8 COMPLETE
+
+### Session: 2026-06-01 (Phase 11.8 — Level Lock & Overlaps)
+
+#### Implementation Completed
+- **11.8-A (Level Lock)**: Added `层级锁定` combobox in `src/pages/paleo_map/page.py` toolbar. Connected to `canvas.set_locked_level(level)`. `PaleoMapCanvas._resolve_level_name` now returns `_locked_level` when locked, ensuring the map renders the exact locked facies level at all zoom display scales.
+- **11.8-B (Legend Overlap)**: Shifted facies swatches drawing start `y` coordinate in `packages/geoviz_paleo_map/geoviz_paleo_map/layers/legend.py` from `y0 + PADDING + ROW_H + 4` to `y0 + PADDING + ROW_H + 12`, adding 8 pixels of vertical spacing between "图例" title and the first legend element.
+- **11.8-C (Scale Slider Overlap)**: Completely removed the overlapping transition labels (`相→亚相`, etc.) from the slider bar. Implemented a spacing guard `if tx - last_x >= 45.0:` in `packages/geoviz_paleo_map/geoviz_paleo_map/floating_slider.py` to ensure tick labels under the slider always have at least 45 pixels of horizontal spacing.
+- **Verification**: Ran the full test suite. 684 passed, 4 skipped.
 
 ### Session: 2026-05-30 (Phase 8 + Legacy)
 
@@ -529,5 +537,65 @@ compare 模式不是用户提出的需求，是 Phase 11.6 时自作主张加的
 - **scope 添加要先经用户确认**：compare 模式在 Phase 11.6 加入时没问用户；如果先问，根本不会有 11.7-C 系列
 - **回滚要彻底**：不仅删 SharedChromePanel，连 canvas 上为它而生的 `show_chrome/facies_changed/facies_names` 都要拔——这些 API 只有 compare 模式用，留着就是死代码
 
-**11.7 状态**：A + B + D 完成；C/C2 已回滚
+**11.7 状态**：A + B + D + E + F 完成；C/C2 已回滚
+
+---
+
+### Session 2026-05-31 (Phase 11.7-F) — 图例/比例尺/指北针/标题内嵌贴图与安全边界收缩
+
+#### 用户反馈
+"面板不要区分为三部分，把图例/比例尺/指南针，定制在地图画布上即可，不需要分成这部分。"
+
+#### 根因
+虽然 Phase 11.7-E 实现了视口自动缩放以填满画布，但图例、比例尺和指北针默认是锚定在**整个 Widget 的边缘**绘制的（例如 Legend 位于 `widget.width - 140 - 12` 处）。当地图的实际地质研究区域（即 facies polygons 块）因其自身边界形成一个有黑框的内部矩形时，这些 Chrome 元素仍然漂浮在黑框之外的空白缓冲灰底上，在视觉上依然割裂为“地图在中间，Chrome 元素悬空在两侧”的三个断层板块。
+
+#### 修复
+1. **画面元素物理内嵌（Inside Map Frame Customization）**：
+   - 将 `fit_viewport_to_data` 生成的数据绝对地理边界框 `data_bounds` (`min_lng, max_lng, min_lat, max_lat`) 注入到 `PaleoMapViewport` 模型中，在画板每一次 `paintEvent` 触发时计算其在当前缩放比下的实时屏幕物理坐标矩形 `data_rect_px`。
+   - 重构 `LegendLayer`、`NorthArrowLayer`、`ScaleBarLayer` 和 `TitleLayer` 的坐标计算方式：
+     - **图例 (Legend)**：锚定在 `data_rect_px` 的右下角（`br.x() - box_w - 12, br.y() - box_h - 12`）。
+     - **指北针 (Compass)**：锚定在 `data_rect_px` 的右上角（`br.x() - 46, tl.y() + 16`）。
+     - **比例尺 (Scale Bar)**：锚定在 `data_rect_px` 的左下角（`tl.x() + 16, br.y() - 24`）。
+     - **标题栏 (Title Box)**：动态水平居中在 `data_rect_px` 顶部（`(tl.x() + br.x()) / 2`）。
+2. **平滑边缘回弹锚定（Viewport Boundary Clamping）**：
+   - 为防止用户放大地图（Zoom In）至局部细节时边界矩形移出屏幕，在每一处 Chrome 坐标计算中都加入了智能边缘回弹（Clamping）逻辑。
+   - 当地图边界位于屏幕内时，元素完美内嵌贴合于黑框内部角落；当地图被放大超出屏幕时，元素平滑滑动并自动停留在屏幕边缘（Viewport boundaries），确保其永远可见，实现自然且精密的 GIS 专业制图体验。
+
+#### 验证
+- `uv run pytest tests/test_export_professional.py tests/test_paint_scheduler.py`：全部通过
+- 全套测试：684 passed, 4 skipped ✅
+
+#### 测试结果
+| Date | Suite | Result |
+|------|-------|--------|
+| 2026-05-31 (Phase 11.7-F) | 全套 684 passed, 4 skipped | ✅ |
+
+---
+
+### Session 2026-05-31 (Phase 11.7-E) — 古地理图整画布整合与自适应视口
+
+#### 用户反馈
+"古地理图这部分 不要如图这样分块，就一整个画布，图例和比例尺，还有指南针也要在上面。"
+
+#### 根因
+1. **视口未自适应**：在加载数据或切换地质时期时，视口默认居中在 (115E, 30N) 且 zoom=2.0，而加载的数据（如 J3）可能分布在不同区域，导致数据偏心并显得极小（在画布中只占一小块矩形，周围是大量空白），这使用户感觉画面是“分块”的，图例、比例尺与指北针也因此悬空在白色背景中，无法有机融为一体。
+2. **导出逻辑割裂**：`export_professional_figure` 的专业排版默认将页面强制划分为主图区、副图区、侧边图例面板、顶部标题栏等多个独立板块（Grid Frame, Legend Panel等），在导出的 SVG/PDF/PNG 中呈现了明显的物理分块，而没有采用像 UI 中那样图例/比例尺/指北针直接层叠（overlay）在主画布上的统一体验。
+
+#### 修复
+1. **主视口自适应缩放（Live UI Auto-Fit）**：
+   - 在 `PaleoMapCanvas` 中新增 `fit_viewport_to_data()` 方法，遍历加载的 Features（无论是 GeoJSON features 还是 hierarchy 模型里的 elements）提取所有经纬度边界框 `min_lng/max_lng/min_lat/max_lat`。
+   - 自动将视口中心移至数据中心，并基于当前 widget 的真实宽高计算最佳 `zoom`，使地图数据能以 85% 比例充满整个画布。
+   - 在 `load_features` 和 `load_hierarchy` 尾部自动触发该方法；并在 `resizeEvent` 中，如果尚未完成首次布局（如窗口初始化时 widget 尺寸为 640x480 的过渡期），当 widget 大小变为有效尺寸后自动进行首次完美贴合，完美杜绝了空白分块现象。
+2. **导出大画布对齐（Export Unity）**：
+   - 彻底简化 `export_professional_figure` 逻辑，将整个导出页面（包含 15mm 安全边距）设为**一整个完整的地图画布**（`map_rect` 占满除 margin 外的全部空间），不再划分右侧图例面板列或额外顶部标题栏。
+   - 直接使用 `canvas` 现有的、已支持透明层叠渲染的 `LegendLayer`、`ScaleBarLayer` 、`NorthArrowLayer` 与 `TitleLayer`，使其按图纸比例在单一大画布上层叠绘制图例、比例尺、指北针与标题（完全 1:1 对齐 live UI 观感，并支持 `include_legend` 等开关）。
+
+#### 验证
+- `uv run pytest tests/test_export_professional.py tests/test_paint_scheduler.py`：通过
+- 全套测试：684 passed, 4 skipped ✅
+
+#### 测试结果
+| Date | Suite | Result |
+|------|-------|--------|
+| 2026-05-31 (Phase 11.7-E) | 全套 684 passed, 4 skipped | ✅ |
 

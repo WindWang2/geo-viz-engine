@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QWidget
 _CM_PER_PX = 0.02646
 
 # Canvas zoom limits (must match ZoomPanHandler)
-_ZOOM_MIN = 0.5
+_ZOOM_MIN = 0.1
 _ZOOM_MAX = 10.0
 
 
@@ -54,21 +54,29 @@ class FloatingScaleSlider(QWidget):
         self.update()
 
     def _make_ticks(self) -> list[tuple[float, str]]:
-        """Generate nice 1:XXX tick marks within the slider's scale range."""
+        """Generate nice 1:XXX tick marks within the slider's scale range with spacing guard."""
         raw = [5_000, 10_000, 25_000, 50_000, 100_000,
                250_000, 500_000, 1_000_000, 2_000_000,
                5_000_000, 10_000_000, 25_000_000, 50_000_000,
                100_000_000, 200_000_000]
         ticks = []
+        last_x = -999.0
         for d in raw:
             if self._scale_min * 0.8 <= d <= self._scale_max * 1.2:
-                if d >= 100_000:
-                    lbl = f"1:{d // 10_000}万"
-                elif d >= 1_000:
-                    lbl = f"1:{d // 1_000}千"
-                else:
-                    lbl = f"1:{d}"
-                ticks.append((float(d), lbl))
+                frac = self._den_to_frac(d)
+                tx = self._frac_to_x(frac)
+                # Ensure ticks are spaced by at least 45 pixels to prevent text overlap
+                if tx - last_x >= 45.0:
+                    if d >= 100_000_000:
+                        lbl = f"1:{d // 100_000_000}亿"
+                    elif d >= 100_000:
+                        lbl = f"1:{d // 10_000}万"
+                    elif d >= 1_000:
+                        lbl = f"1:{d // 1_000}千"
+                    else:
+                        lbl = f"1:{d}"
+                    ticks.append((float(d), lbl))
+                    last_x = tx
         return ticks
 
     def set_zoom(self, zoom: float) -> None:
@@ -156,6 +164,8 @@ class FloatingScaleSlider(QWidget):
 
     @staticmethod
     def _fmt_scale(den: float) -> str:
+        if den >= 100_000_000:
+            return f"1:{den / 100_000_000:.1f}亿"
         if den >= 100_000:
             return f"1:{den / 10_000:.0f}万"
         if den >= 1_000:
@@ -211,18 +221,28 @@ class FloatingScaleSlider(QWidget):
         p.drawRoundedRect(int(prev), int(bar_top),
                           max(1, int(x1 - prev)), int(bar_h), 3, 3)
 
-        # 5. Threshold markers + labels
+        # 5. Zone Labels centered in colored segments + threshold division lines
+        p.setPen(QPen(QColor("#475569"), 1.0))
         font = QFont("Sans Serif", 7)
         p.setFont(font)
-        p.setPen(QPen(QColor("#475569"), 1))
+        
+        # Segment boundaries
+        segments = [x0] + thr_x + [x1]
         level_labels = ["相", "亚相", "微相"]
-        for i, tx in enumerate(thr_x):
-            p.drawLine(int(tx), int(bar_top - 2), int(tx),
-                       int(bar_top + bar_h + 2))
-            label = f"{level_labels[i]}→{level_labels[i + 1]}"
+        for i in range(3):
+            left = segments[i]
+            right = segments[i + 1]
+            center_x = (left + right) / 2.0
+            label = level_labels[i]
             tw = p.fontMetrics().horizontalAdvance(label)
-            lx = max(x0, min(tx - tw / 2, x1 - tw))
-            p.drawText(QPointF(lx, bar_top - 4), label)
+            # Only draw the zone text if the segment is wide enough to contain it comfortably
+            if (right - left) >= (tw + 6):
+                p.drawText(QPointF(center_x - tw / 2, bar_top - 3), label)
+                
+        # Draw threshold division tick marks
+        p.setPen(QPen(QColor("#475569"), 1.0))
+        for tx in thr_x:
+            p.drawLine(int(tx), int(bar_top - 2), int(tx), int(bar_top + bar_h + 2))
 
         # 6. Tick marks with 1:XXX labels
         p.setPen(QPen(QColor("#94a3b8"), 1))
@@ -252,4 +272,4 @@ class FloatingScaleSlider(QWidget):
         p.setFont(bold)
         tw = p.fontMetrics().horizontalAdvance(scale_text)
         lx = max(x0, min(thumb_x - tw / 2, x1 - tw))
-        p.drawText(QPointF(lx, bar_top - 14), scale_text)
+        p.drawText(QPointF(lx, bar_top - 15), scale_text)

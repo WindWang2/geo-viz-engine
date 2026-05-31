@@ -77,6 +77,9 @@ class PaleoMapCanvas(QWidget):
 
         # State fields for dynamic layers and locking
         self._period_name = ""
+        self._loaded_features: list[dict] = []
+        self._viewport_fitted = False
+        self._user_has_interacted = False
         self._wells_data: list[dict] = []
         self._locked_ids: dict[str, str] = {}
         self._current_active_level = ""
@@ -99,6 +102,7 @@ class PaleoMapCanvas(QWidget):
 
         self._scheduler = PaintScheduler(self)
         self._layer_caches: list[LayerPixmapCache] = []
+        self._locked_level: str = ""
 
     def _rebuild_layer_caches(self) -> None:
         """Rebuild LayerPixmapCache wrappers for current layer list.
@@ -185,6 +189,12 @@ class PaleoMapCanvas(QWidget):
         self._edit_engine.set_model(self._topology_model)
         self._update_locked_panel()
         self._rebuild_layer_caches()
+
+        self._loaded_features = features
+        self._viewport_fitted = False
+        self._user_has_interacted = False
+        self.fit_viewport_to_data()
+
         self._scheduler.schedule()
         self._update_slider_params()
 
@@ -249,31 +259,46 @@ class PaleoMapCanvas(QWidget):
         self._topology_model = TopologyBuilder.from_hierarchy(hierarchy)
         self._edit_engine.set_model(self._topology_model)
         self._rebuild_layer_caches()
+
+        self._loaded_features = []
+        for level in ["facies", "sub_facies", "micro_facies"]:
+            self._loaded_features.extend([
+                {"geometry": ff.geometry}
+                for ff in hierarchy.get_features_at_level(level)
+            ])
+        self._viewport_fitted = False
+        self._user_has_interacted = False
+        self.fit_viewport_to_data()
+
         self._scheduler.schedule()
         self._update_slider_params()
 
     # (outgoing_level, incoming_level, blend) — blend ∈ [0,1]
     _LEVEL_ORDER = ["facies", "sub_facies", "micro_facies"]
-    _KM_THRESHOLDS = [1000.0, 500.0]  # 相→亚相 at 1000km, 亚相→微相 at 500km
+    _SCALE_THRESHOLDS = [8_000_000.0, 4_000_000.0]  # 相→亚相 at 1:800万, 亚相→微相 at 1:400万
 
     def _km_per_degree(self) -> float:
         lat = self._viewport.center_world[1]
         return 111.32 * math.cos(math.radians(lat))
 
-    def _zoom_for_km(self, km: float) -> float:
+    def _zoom_for_scale_den(self, den: float) -> float:
+        km_per_px = (den * 0.02646) / 1e5
         kpd = self._km_per_degree()
-        return math.log2(self._viewport.width * kpd / km) + 1.0
+        return math.log2(kpd / km_per_px) + 1.0
 
     def get_threshold_zooms(self) -> list[float]:
         """Return the zoom levels at which hierarchy transitions occur."""
-        return [self._zoom_for_km(km) for km in self._KM_THRESHOLDS]
+        return [self._zoom_for_scale_den(den) for den in self._SCALE_THRESHOLDS]
 
     def _resolve_level(self) -> str:
+        if self._locked_level:
+            return self._locked_level
         z = self._viewport.zoom
         if abs(z - self._cached_zoom) < 0.05 and self._cached_level:
             return self._cached_level
-        for i, thr_km in enumerate(self._KM_THRESHOLDS):
-            if z < self._zoom_for_km(thr_km):
+        thresholds = self.get_threshold_zooms()
+        for i, thr_zoom in enumerate(thresholds):
+            if z < thr_zoom:
                 self._cached_level = self._LEVEL_ORDER[i]
                 self._cached_zoom = z
                 return self._cached_level
@@ -301,6 +326,7 @@ class PaleoMapCanvas(QWidget):
 
     def set_zoom(self, zoom: float) -> None:
         """Set zoom level programmatically (e.g. from slider)."""
+        self._user_has_interacted = True
         self._viewport.zoom = max(self._zoom_pan.min_zoom,
                                   min(self._zoom_pan.max_zoom, zoom))
         self._cached_level = ""
@@ -308,10 +334,23 @@ class PaleoMapCanvas(QWidget):
         self.zoom_changed.emit(self._viewport.zoom)
         self._scheduler.schedule()
 
+    def set_locked_level(self, level: str) -> None:
+        """Set the global locked level ('', 'facies', 'sub_facies', 'micro_facies')."""
+        if level == self._locked_level:
+            return
+        self._locked_level = level
+        self._cached_level = ""
+        self._cached_zoom = -1.0
+        self._update_active_layers()
+        self._scheduler.schedule()
+
     def _resolve_level_name(self) -> str:
+        if self._locked_level:
+            return self._locked_level
         z = self._viewport.zoom
-        for i, thr_km in enumerate(self._KM_THRESHOLDS):
-            if z < self._zoom_for_km(thr_km):
+        thresholds = self.get_threshold_zooms()
+        for i, thr_zoom in enumerate(thresholds):
+            if z < thr_zoom:
                 return self._LEVEL_ORDER[i]
         return self._LEVEL_ORDER[-1]
 
@@ -463,6 +502,80 @@ class PaleoMapCanvas(QWidget):
             self._scale_slider.set_params(vp.width, kpd, self.get_threshold_zooms())
             self._scale_slider.set_zoom(vp.zoom)
 
+    def fit_viewport_to_data(self) -> None:
+        """Fit the viewport center and zoom to the bounding box of the loaded data."""
+        if not hasattr(self, "_loaded_features") or not self._loaded_features:
+            return
+
+        w = self._viewport.width
+        h = self._viewport.height
+        if w <= 100 or h <= 100:
+            return  # Wait for a proper resize event
+
+        lngs = []
+        lats = []
+        from geoviz_paleo_map.projection import lnglat_to_world
+
+        for feat in self._loaded_features:
+            geom = feat.get("geometry") or {}
+            gtype = geom.get("type")
+            coords = geom.get("coordinates")
+            if not coords:
+                continue
+            if gtype == "Polygon":
+                for ring in coords:
+                    for pt in ring:
+                        if len(pt) >= 2:
+                            lngs.append(pt[0])
+                            lats.append(pt[1])
+            elif gtype == "MultiPolygon":
+                for poly in coords:
+                    for ring in poly:
+                        for pt in ring:
+                            if len(pt) >= 2:
+                                lngs.append(pt[0])
+                                lats.append(pt[1])
+
+        if not lngs or not lats:
+            return
+
+        min_lng = min(lngs)
+        max_lng = max(lngs)
+        min_lat = min(lats)
+        max_lat = max(lats)
+
+        # Add a tiny margin if range is zero
+        if max_lng - min_lng < 0.01:
+            max_lng += 0.005
+            min_lng -= 0.005
+        if max_lat - min_lat < 0.01:
+            max_lat += 0.005
+            min_lat -= 0.005
+
+        center_lng = (min_lng + max_lng) / 2
+        center_lat = (min_lat + max_lat) / 2
+
+        # We want the map to completely fill the panel with no blank spaces on any side
+        scale_x = w / (max_lng - min_lng)
+        scale_y = h / (max_lat - min_lat)
+        scale = max(scale_x, scale_y)
+
+        # scale = 2.0 ** (zoom - 1.0)
+        # zoom = log2(scale) + 1.0
+        zoom = math.log2(scale) + 1.0
+        
+        # Clamp zoom to the slider/viewport limits
+        zoom = max(0.1, min(10.0, zoom))
+
+        self._viewport.center_world = lnglat_to_world(center_lng, center_lat)
+        self._viewport.zoom = zoom
+        self._viewport.data_bounds = (min_lng, max_lng, min_lat, max_lat)
+        self._viewport_fitted = True
+
+        self.zoom_changed.emit(zoom)
+        self._update_slider_params()
+        self._scheduler.schedule()
+
     def resizeEvent(self, event: QResizeEvent) -> None:
         self._viewport.resize(max(1, event.size().width()),
                               max(1, event.size().height()))
@@ -471,10 +584,14 @@ class PaleoMapCanvas(QWidget):
             self._update_slider_params()
         if hasattr(self, "_locked_panel"):
             self._locked_panel.setGeometry(16, 16, 240, 180)
+            
+        self.fit_viewport_to_data()
+            
         super().resizeEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            self._user_has_interacted = True
             if self._edit_mode:
                 consumed = self._edit_engine.handle_mouse_press(
                     QPointF(event.position()), self._viewport, event.button())
@@ -531,6 +648,7 @@ class PaleoMapCanvas(QWidget):
                 self._scheduler.schedule()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
+        self._user_has_interacted = True
         delta = event.angleDelta().y() / 120.0
         if delta == 0:
             return
