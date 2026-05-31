@@ -75,6 +75,23 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 - 11.6-G 完成后：状态栏/工具栏显式说明拾取/撤销/切层操作；新手 30 秒内能完成一次拾取
 - 11.6-H 完成后：1280px 窗宽下所有 toolbar 按钮可见，功能分组清晰（视图/属性/标定/导出）
 
+---
+
+## 🔴 Phase 11.7: 古地理图数据层错位修复（2026-05-31 自检截图发现）
+
+**目的：** 修复用户报告"古地理图标注和对象完全偏离"的渲染错位 bug。
+
+### Tasks
+
+| ID | Task | Files | Priority | Status |
+|----|------|-------|----------|--------|
+| 11.7-A | **古地理图：数据层挤压到左上角** — 根因：`LayerPixmapCache._needs_rerender` 不检测 viewport 尺寸变化。Canvas 默认 640×480 时缓存 buffer 按 (1280, 960) 渲染，`show()`/`resize()` 后真实 viewport 变 1400×900 但缓存没失效；`_blit` 从旧 pixmap 读取 (vp.width, vp.height) 矩形 → 数据全部被压缩在画布左上角。Chrome layers（title/north_arrow/scale_bar/legend）因 11.6-B 已 bypass cache 不受影响，所以视觉上是"标注居中、数据偏移"。修复：在 `__init__` 记 `_vp_width/_vp_height=0`，`_needs_rerender` 增 `if vp.width > self._vp_width or vp.height > self._vp_height` 分支，`_rerender` 末尾存 `vp.width/vp.height`。回归测试 `test_viewport_grow_triggers_rerender` 锁定该路径。 | `packages/geoviz_paleo_map/geoviz_paleo_map/paint_scheduler.py`, `tests/test_paint_scheduler.py` | 🔴 P0 | ✅ DONE |
+
+**Acceptance criteria:**
+- 11.7-A 完成后：截图 `/tmp/paleo_shot.png` 显示 facies polygons / wells / region labels 横跨全画布宽度，不再压缩到左上角；test_viewport_grow_triggers_rerender 通过
+
+---
+
 **Acceptance criteria:**
 - 11.5-A 完成后：`pytest tests/test_curvature.py::TestCurvatureGpuConsistency` 在有 CuPy 环境真正测试 GPU vs CPU 数值一致性（不再是空 skip）
 - 11.5-B 完成后：新增第 15 个属性只需改 1 处（dispatch 表）

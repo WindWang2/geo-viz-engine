@@ -324,5 +324,48 @@ geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
 - Phase 11.6 闭环完成
 
 
+## 11.7-A — LayerPixmapCache 不感知 viewport 尺寸变化（2026-05-31）
+
+**用户报告**："古地理图标注和对象完全偏离"。自检截图后发现：title / north arrow / scale bar / legend 在画布上分布正常，但 facies polygons / wells / region labels 全部挤压在画布左上角，与 chrome 完全错位。
+
+**根因**：`LayerPixmapCache._needs_rerender` 只检查 `dirty` / `dpr` / `scale` / pan 距离，**没检查 viewport 宽高变化**。`PaleoMapCanvas` 默认 widget 大小是 640×480，构造时执行的首次 paint 让 cache 按 buf=(1280, 960) 渲染并写入 `_vp_scale`。随后 `resize(1400, 900)` + `show()` 把 viewport 改成 1400×900，但 cache 视参数无变化（scale 同 zoom）→ 直接走 `_blit` 路径。`_blit` 从老 pixmap 读取 `(vp.width, vp.height) = (1400, 900)` 矩形，但 pixmap 逻辑尺寸只有 (1280, 960)，超出部分透明 → 画布左上角看到一小块数据，右下大片空白。
+
+为什么 chrome 没事：11.6-B 改造后 title / north_arrow / scale_bar / legend 都设 `is_chrome=True`，直接 `paint(painter, viewport)` 不走 cache → 每帧用真实 viewport 重画 → 正常分布。这就是"标注居中、数据偏移"的视觉效果。
+
+**修复**（`packages/geoviz_paleo_map/geoviz_paleo_map/paint_scheduler.py`）：
+
+```python
+class LayerPixmapCache:
+    def __init__(self, layer):
+        ...
+        self._vp_width: int = 0
+        self._vp_height: int = 0
+
+    def _needs_rerender(self, vp, dpr):
+        ...
+        # Viewport resize invalidates the cached pixmap: the cache was rendered
+        # for a (buf_w, buf_h) sized buffer matched to the old vp dimensions,
+        # and _blit reads a (vp.width, vp.height) rect from it. If the live
+        # viewport grew, the rect runs off the cached pixmap and content
+        # collapses into the upper-left of the canvas.
+        if vp.width > self._vp_width or vp.height > self._vp_height:
+            return True
+        ...
+
+    def _rerender(self, vp, dpr):
+        ...
+        self._vp_width = vp.width
+        self._vp_height = vp.height
+```
+
+**回归测试**：`tests/test_paint_scheduler.py::TestLayerPixmapCache::test_viewport_grow_triggers_rerender` — paint vp_small(400×300) 后再 paint vp_large(1200×800)，断言 render_count == 2。stash-test-pop 验证：移除修复 → 测试失败 `assert 1 == 2`，恢复 → 通过。
+
+**视觉验证**：`/tmp/paleo_shot.png` 重生成确认 facies polygons / wells / region labels / chrome 全部正确分布于 1400×900 画布上。
+
+**教训**：
+- **复合缓存层必须把所有维度都纳入失效判定**：dirty/dpr/scale 都查了，唯独漏了 width/height，因为窗口 resize 不改 scale → 假设"只有 dirty/zoom 会动"是错的
+- **chrome bypass 既是优点也是 trap**：它让 chrome 不受 cache bug 影响 → 视觉错位只表现在数据层 → 第一直觉是"投影/坐标算错了"而非"缓存没失效"。下次类似 bug，先检查 cache invalidation 再查 transform
+- **测试要锁住 invariant 而非"已知 case"**：原 cache 测试只测了 dirty/zoom/dpr 各自触发 rerender，没测 viewport 维度。补 `test_viewport_grow_triggers_rerender` 是把"任何影响 buffer 几何的输入都必须 invalidate"这条 invariant 显性化
+
 ---
 *Update after every 2 view/browser/search operations*

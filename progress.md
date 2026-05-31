@@ -343,3 +343,44 @@
 | 2026-05-31 (Phase 11.6-E) | 682 passed, 4 skipped（+3 新 DTW，总收集 686）| ✅ |
 
 **11.6 闭环**：8/8 全修，Phase 11.6 收官
+
+---
+
+## Session: 2026-05-31 Phase 11.7-A — 古地理图数据层错位修复
+
+### Phase 11.7-A: LayerPixmapCache viewport 尺寸失效
+
+#### 起因
+用户 driving prompt："自行截图分析吧，古地理图标注和对象完全偏离了。"
+
+自检截图（headless QT_QPA_PLATFORM=offscreen + canvas.grab()）发现：title / north arrow / scale bar / legend 横跨画布分布正常，但 facies polygons / wells / region labels 全部被压缩在左上角。视觉上是"标注居中、数据偏离"。
+
+#### Root cause
+`LayerPixmapCache._needs_rerender` 不检测 viewport 宽高变化。canvas 构造时默认 widget 大小 640×480，首次 paint 让 cache 按 buf=(1280, 960) 渲染并固化。`resize(1400, 900)` 后 viewport 变 1400×900，但 cache 视参数无变化（zoom/scale 没动）→ 走 `_blit` 路径。`_blit` 从老 pixmap 读取 (vp.width, vp.height) = (1400, 900) 矩形，但 pixmap 逻辑尺寸只有 (1280, 960)，超出部分透明 → 数据被压在左上角小块区域。
+
+Chrome layers 因 11.6-B `is_chrome=True` 已 bypass cache 直绘 → 每帧用真实 viewport 渲染 → 正常分布。这造成"数据错位、标注正常"的诡异视觉。
+
+#### Fix
+`packages/geoviz_paleo_map/geoviz_paleo_map/paint_scheduler.py`：
+- `__init__` 增 `self._vp_width: int = 0` / `self._vp_height: int = 0`
+- `_needs_rerender` 增 `if vp.width > self._vp_width or vp.height > self._vp_height: return True`
+- `_rerender` 末尾存 `self._vp_width = vp.width` / `self._vp_height = vp.height`
+
+#### 新增回归测试
+`tests/test_paint_scheduler.py::TestLayerPixmapCache::test_viewport_grow_triggers_rerender` — paint vp_small (400×300) 后再 paint vp_large (1200×800)，断言 render_count == 2。stash-test-pop 验证：剥离修复 → 测试 fail (`assert 1 == 2`)，恢复 → pass。
+
+#### 视觉验证
+重生成 `/tmp/paleo_shot.png`：facies polygons / wells (Well B, Well C) / region labels / title (古地理图 - 测试) / north arrow / scale bar / legend 全部正确分布于 1400×900 画布上，无左上角压缩。
+
+#### 测试结果
+| Date | Suite | Result |
+|------|-------|--------|
+| 2026-05-31 (Phase 11.7-A) | 14/14 test_paint_scheduler 通过；全套 681 passed, 4 skipped, 2 visual-parity 失败（pre-existing DPR 环境问题，与本修复无关，已 stash-test-pop 验证）| ✅ |
+
+#### 教训
+- 复合缓存层必须把所有影响 buffer 几何的输入都纳入失效判定。原 cache 查了 dirty/dpr/scale/pan，漏了 width/height——因为窗口 resize 不改 zoom，假设"只有 dirty/zoom 会动"是错的
+- chrome bypass 既是优点也是 trap：它让 chrome 不受 cache bug 影响 → 视觉错位只表现在数据层 → 第一直觉是"投影算错了"而非"缓存没失效"。下次类似 bug，先查 cache invalidation 再查 transform
+- 测试要锁住 invariant（"任何影响 buffer 几何的维度变化都必须 invalidate"）而非"已知 case"。补 `test_viewport_grow_triggers_rerender` 把这条 invariant 显性化
+
+**11.7 状态**：A 完成，无其余子任务计划
+

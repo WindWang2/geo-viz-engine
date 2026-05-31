@@ -53,6 +53,8 @@ class LayerPixmapCache:
         self._pixmap: QPixmap | None = None
         self._vp_center: tuple[float, float] = (0.0, 0.0)
         self._vp_scale: float = 0.0
+        self._vp_width: int = 0
+        self._vp_height: int = 0
         self._dpr: float = 1.0
         self._dirty: bool = True
 
@@ -73,6 +75,13 @@ class LayerPixmapCache:
         if abs(dpr - self._dpr) > 1e-3:
             return True
         if abs(vp.scale - self._vp_scale) > 1e-6:
+            return True
+        # Viewport resize invalidates the cached pixmap: the cache was rendered
+        # for a (buf_w, buf_h) sized buffer matched to the old vp dimensions,
+        # and _blit reads a (vp.width, vp.height) rect from it. If the live
+        # viewport grew, the rect runs off the cached pixmap and content
+        # collapses into the upper-left of the canvas.
+        if vp.width > self._vp_width or vp.height > self._vp_height:
             return True
         dx = abs(vp.center_world[0] - self._vp_center[0]) * vp.scale
         dy = abs(vp.center_world[1] - self._vp_center[1]) * vp.scale
@@ -100,6 +109,8 @@ class LayerPixmapCache:
             p.end()
         self._vp_center = vp.center_world
         self._vp_scale = vp.scale
+        self._vp_width = vp.width
+        self._vp_height = vp.height
         self._dpr = dpr
         self._dirty = False
 

@@ -142,6 +142,39 @@ class TestLayerPixmapCache:
         painter.end()
         assert render_count == 2
 
+    def test_viewport_grow_triggers_rerender(self, qtbot):
+        """11.7-A: cache rendered for a small viewport must rebuild when the
+        live viewport grows. Without this, _blit reads a small rect from the
+        cached pixmap into the new larger canvas, compressing all data into
+        the upper-left."""
+        from geoviz_paleo_map.paint_scheduler import LayerPixmapCache
+        from geoviz_paleo_map.viewport import PaleoMapViewport
+
+        render_count = 0
+
+        class StubLayer:
+            def paint(self, painter, viewport):
+                nonlocal render_count
+                render_count += 1
+
+        cache = LayerPixmapCache(StubLayer())
+        widget = QWidget()
+        qtbot.addWidget(widget)
+        vp_small = PaleoMapViewport(center_lng=115.0, center_lat=30.0,
+                                    zoom=2.0, width=400, height=300)
+        vp_large = PaleoMapViewport(center_lng=115.0, center_lat=30.0,
+                                    zoom=2.0, width=1200, height=800)
+
+        painter = QPainter(widget)
+        cache.paint(painter, vp_small)
+        painter.end()
+        assert render_count == 1
+
+        painter = QPainter(widget)
+        cache.paint(painter, vp_large)
+        painter.end()
+        assert render_count == 2
+
     def test_mark_dirty_triggers_rerender(self, qtbot):
         from geoviz_paleo_map.paint_scheduler import LayerPixmapCache
         from geoviz_paleo_map.viewport import PaleoMapViewport
