@@ -51,6 +51,7 @@
 | 2026-05-31 (Refactor) | 617 passed | ✅ |
 | 2026-05-31 (Phase 11) | 636 passed | ✅ |
 | 2026-05-31 (Phase 11.5-A) | 636 passed | ✅ |
+| 2026-05-31 (Phase 11.5-B + D) | 668 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
@@ -157,8 +158,18 @@
 - `8ca37621` — feat: export new public APIs (export_vector_svg, export_professional_figure)
 
 ## Pending Items
-- Phase 11.5-B: Abstract AttributePipeline in seismic_view.py (next)
-- 11.5-C/D/E/F remaining
+- Phase 11.5-C: Convert 3 skipped well_tie tests to xfail+assert (next)
+- 11.5-E/F remaining
+
+### Session: 2026-05-31 (Phase 11.5-B + 11.5-D — AttributePipeline)
+
+#### Implementation Completed
+- New `attribute_pipeline.py` — `AttributeSpec` dataclass + `ATTRIBUTES` tuple (14 entries) + `labels()`/`rgb_index()`/`rgb_channel_indices()`/`apply()` API
+- `seismic_view.py` `_apply_attr` collapsed from ~40 lines to 5 lines (delegates to pipeline)
+- All `idx == 7` and `idx >= 8` magic numbers replaced with `_ap.rgb_index()` lookups
+- Adding a new attribute now = 1 line in `ATTRIBUTES` tuple
+- 32 new tests in `test_attribute_pipeline.py` (registry sanity, dispatch coverage for every idx 0-13, curvature range checks)
+- Full suite: 668 passed, 3 skipped
 
 ### Session: 2026-05-31 (Phase 11.5-A — Curvature GPU path)
 

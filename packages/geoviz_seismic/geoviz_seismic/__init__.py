@@ -17,6 +17,7 @@ from .profile_widget import ProfileWidget
 from .renderer_3d import Renderer3D
 from .seismic_view import SeismicView
 from . import attributes
+from . import attribute_pipeline
 
 __version__ = "0.1.2"
 
@@ -36,5 +37,6 @@ __all__ = [
     "SliceInfo",
     "HorizonData",
     "attributes",
+    "attribute_pipeline",
     "extract_along_horizon",
 ]

@@ -40,9 +40,9 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | ID | Task | Files | Priority | Status |
 |----|------|-------|----------|--------|
 | 11.5-A | **实现 `compute_curvature` 的 CuPy GPU 路径**（或删除 `use_gpu` 参数并更新 docstring/task_plan） | `packages/geoviz_seismic/geoviz_seismic/attributes.py:404-483` | 🔴 P0 | ✅ DONE |
-| 11.5-B | **抽象 `AttributePipeline` 类**：把 `seismic_view.py:831-867` 的 hardcoded `_FN` 列表 + `if idx>=8` 魔数收敛到一个 dispatch 表（dict[idx → (name, fn, kwargs_resolver, axis)]） | `packages/geoviz_seismic/geoviz_seismic/seismic_view.py` | 🟡 P1 | TODO |
+| 11.5-B | **抽象 `AttributePipeline` 类**：把 `seismic_view.py:831-867` 的 hardcoded `_FN` 列表 + `if idx>=8` 魔数收敛到一个 dispatch 表（dict[idx → (name, fn, kwargs_resolver, axis)]） | `packages/geoviz_seismic/geoviz_seismic/seismic_view.py` | 🟡 P1 | ✅ DONE |
 | 11.5-C | **整改 3 个 skipped 测试**：`test_well_tie_pipeline.py` 的空反射率/单样本/dict 序列化测试改为 xfail + 真实断言，而非 skip | `tests/test_well_tie_pipeline.py` | 🟢 P2 | TODO |
-| 11.5-D | **新增 `_apply_attr` idx=8-13 集成测试**：当前曲率/dip/azimuth 的 UI 分支路径无测试覆盖 | `tests/test_seismic_view.py` | 🟢 P2 | TODO |
+| 11.5-D | **新增 `_apply_attr` idx=8-13 集成测试**：当前曲率/dip/azimuth 的 UI 分支路径无测试覆盖 | `tests/test_seismic_view.py` | 🟢 P2 | ✅ DONE |
 | 11.5-E | **同步子包 CHANGELOG**：`geoviz_seismic/CHANGELOG.md` 停留在 0.1.2（5月11日），与根 CHANGELOG 脱钩 | `packages/*/CHANGELOG.md` | 🟢 P2 | TODO |
 | 11.5-F | **版本号策略文档化**：在根 README 加注 `VERSION (0.7.0)` vs `CHANGELOG (0.10.0)` 是有意为之 | `README.md` | 🟢 P3 | TODO |
 

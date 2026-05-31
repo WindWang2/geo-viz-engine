@@ -507,8 +507,9 @@ class SeismicView(QWidget):
         bar.addWidget(self._mode_combo)
         bar.addWidget(QLabel(" 色标:"))
         bar.addWidget(self._cmap_combo)
+        from . import attribute_pipeline as _ap
         self._attr_combo = QComboBox()
-        self._attr_combo.addItems(["振幅", "包络", "瞬时相位", "瞬时频率", "RMS振幅", "甜点", "相对阻抗", "RGB融合", "Dip_IL", "Dip_XL", "方位角", "平均曲率", "高斯曲率", "最大曲率"])
+        self._attr_combo.addItems(_ap.labels())
         self._attr_combo.currentIndexChanged.connect(self._on_attr_changed)
 
         # RGB fusion channel selectors (hidden until RGB mode selected)
@@ -830,40 +831,10 @@ class SeismicView(QWidget):
 
     def _apply_attr(self, data: np.ndarray) -> np.ndarray:
         """Apply the current attribute mode to slice data."""
+        from . import attribute_pipeline as _ap
         idx = self._attr_combo.currentIndex()
-        if idx == 0:
-            return data
-        if idx == 7:  # RGB fusion — handled separately in _apply_rgb_fusion
-            return data
-        from . import attributes as _attr
-        # Curvature/dip/azimuth — return a single 2-D field
-        if idx >= 8:
-            dip_il, dip_xl = _attr.compute_dip(data)
-            if idx == 8:
-                return dip_il
-            if idx == 9:
-                return dip_xl
-            if idx == 10:
-                return _attr.compute_azimuth(dip_il, dip_xl)
-            kind = {11: "mean", 12: "gaussian", 13: "max"}[idx]
-            return _attr.compute_curvature(data, kind=kind)
-        _FN = [
-            None,                          # 0: amplitude (raw)
-            _attr.compute_envelope,        # 1
-            _attr.compute_instantaneous_phase,  # 2
-            _attr.compute_instantaneous_frequency,  # 3
-            _attr.compute_rms_amplitude,   # 4
-            _attr.compute_sweetness,       # 5
-            _attr.compute_relative_impedance,  # 6
-        ]
-        fn = _FN[idx] if idx < len(_FN) else None
-        if fn is None:
-            return data
-        kwargs = {}
-        if fn in (_attr.compute_instantaneous_frequency, _attr.compute_sweetness):
-            si = self._meta.sample_interval if self._meta else 1.0
-            kwargs["sample_interval"] = si / 1000.0  # ms → s
-        return fn(data, axis=0, **kwargs)
+        si = self._meta.sample_interval if self._meta else 1.0
+        return _ap.apply(idx, data, sample_interval_s=si / 1000.0)
 
     def _get_attr_fn(self, combo_idx: int):
         """Return the attribute function for a given RGB channel combo index."""
@@ -1049,14 +1020,16 @@ class SeismicView(QWidget):
 
     def _on_attr_changed(self, index: int):
         # Toggle RGB channel selectors visibility
-        is_rgb = (index == 7)
+        from . import attribute_pipeline as _ap
+        is_rgb = (index == _ap.rgb_index())
         for w in (self._rgb_r_combo, self._rgb_g_combo, self._rgb_b_combo,
                   self._rgb_r_label, self._rgb_g_label, self._rgb_b_label):
             w.setVisible(is_rgb)
         self._apply_current_attr()
 
     def _on_rgb_channels_changed(self):
-        if self._attr_combo.currentIndex() == 7:
+        from . import attribute_pipeline as _ap
+        if self._attr_combo.currentIndex() == _ap.rgb_index():
             self._apply_current_attr()
 
     def _on_crossplot(self):
@@ -1074,7 +1047,9 @@ class SeismicView(QWidget):
 
     def _apply_current_attr(self):
         """Re-render all cached slice data with the current attribute mode."""
+        from . import attribute_pipeline as _ap
         attr_mode = self._attr_combo.currentIndex()
+        rgb_idx = _ap.rgb_index()
         for st in ("inline", "crossline", "time"):
             raw = self._slice_data.get(st)
             if raw is None:
@@ -1091,7 +1066,7 @@ class SeismicView(QWidget):
             if existing_info:
                 info = existing_info
 
-            if attr_mode == 7:  # RGB fusion
+            if attr_mode == rgb_idx:  # RGB fusion
                 rgba = self._apply_rgb_fusion(raw)
                 if rgba is not None:
                     pw._vd.render_rgba(rgba, slice_info=info)
