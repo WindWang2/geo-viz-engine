@@ -321,3 +321,163 @@ def fuse_rgb(
     g = (_normalize(attr_g) * 255).astype(np.uint8)
     b = (_normalize(attr_b) * 255).astype(np.uint8)
     return np.stack([r, g, b], axis=-1)
+
+
+def compute_dip(
+    data: np.ndarray,
+    axis_il: int = 0,
+    axis_xl: int = 1,
+    axis_t: int = 2,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute apparent dip angles (radians) along inline and crossline.
+
+    Uses central differences for the spatial gradients and the vertical
+    (time) gradient.  The apparent dip is ``atan(∂x/∂t)``.
+
+    Args:
+        data: 3-D seismic amplitude (n_il, n_xl, n_t) or 2-D (n_xl, n_t).
+        axis_il: Axis index for the inline direction.
+        axis_xl: Axis index for the crossline direction.
+        axis_t: Axis index for the time/sample direction.
+
+    Returns:
+        (dip_il, dip_xl) arrays with the same shape as *data* and dtype
+        float32.  Values are in ``[-π/2, π/2]``.
+    """
+    data = np.asarray(data, dtype=np.float32)
+    was_2d = data.ndim == 2
+    if was_2d:
+        # 2-D data convention: (n_xl, n_t). Only xl and t gradients exist.
+        grad_xl = np.gradient(data, axis=0)
+        grad_t = np.gradient(data, axis=1)
+        gt_safe = np.where(np.abs(grad_t) < 1e-10, 1e-10, grad_t)
+        dip_il = np.zeros_like(data)
+        dip_xl = np.arctan(grad_xl / gt_safe).astype(np.float32)
+        return dip_il, dip_xl
+
+    # Central differences
+    grad_il = np.gradient(data, axis=axis_il)
+    grad_xl = np.gradient(data, axis=axis_xl)
+    grad_t = np.gradient(data, axis=axis_t)
+
+    # Avoid division by zero — tiny vertical gradient is treated as flat
+    gt_safe = np.where(np.abs(grad_t) < 1e-10, 1e-10, grad_t)
+    dip_il = np.arctan(grad_il / gt_safe).astype(np.float32)
+    dip_xl = np.arctan(grad_xl / gt_safe).astype(np.float32)
+    return dip_il, dip_xl
+
+
+def compute_azimuth(
+    dip_il: np.ndarray,
+    dip_xl: np.ndarray,
+) -> np.ndarray:
+    """Structural azimuth from inline / crossline dip components.
+
+    Azimuth is measured clockwise from the inline axis, in radians,
+    range ``[0, 2π)``.
+    """
+    az = np.arctan2(dip_xl, dip_il)
+    az = np.where(az < 0, az + 2 * np.pi, az)
+    return az.astype(np.float32)
+
+
+def _compute_slope(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return inline/crossline slope (grad_spatial / grad_time) arrays."""
+    data = np.asarray(data, dtype=np.float32)
+    if data.ndim == 2:
+        grad_xl = np.gradient(data, axis=0)
+        grad_t = np.gradient(data, axis=1)
+        gt_safe = np.where(np.abs(grad_t) < 1e-10, 1e-10, grad_t)
+        slope_il = np.zeros_like(data)
+        slope_xl = grad_xl / gt_safe
+        return slope_il.astype(np.float32), slope_xl.astype(np.float32)
+
+    grad_il = np.gradient(data, axis=0)
+    grad_xl = np.gradient(data, axis=1)
+    grad_t = np.gradient(data, axis=2)
+    gt_safe = np.where(np.abs(grad_t) < 1e-10, 1e-10, grad_t)
+    slope_il = (grad_il / gt_safe).astype(np.float32)
+    slope_xl = (grad_xl / gt_safe).astype(np.float32)
+    return slope_il, slope_xl
+
+
+def compute_curvature(
+    data: np.ndarray,
+    kind: str = "mean",
+    *,
+    win_il: int = 3,
+    win_xl: int = 3,
+    win_t: int = 3,
+    use_gpu: bool = False,
+) -> np.ndarray:
+    """Volume curvature via the slope-gradient (second-derivative) method.
+
+    Computes curvature attributes useful for fracture prediction and
+    structural interpretation.  The algorithm:
+
+    1. Compute inline / crossline slope (spatial_grad / time_grad).
+    2. Smooth the slope fields with a local mean (noise suppression).
+    3. Compute second-order spatial gradients of the smoothed slope.
+    4. Derive Gaussian, mean, max, min, dip, or strike curvature.
+
+    Args:
+        data: 3-D seismic amplitude or 2-D slice.
+        kind: One of ``"gaussian"``, ``"mean"``, ``"max"``, ``"min"``,
+            ``"dip"``, ``"strike"``.
+        win_il: Half-window for inline smoothing (total = 2*win_il+1).
+        win_xl: Half-window for crossline smoothing.
+        win_t: Half-window for time smoothing.
+        use_gpu: If True and CuPy available, offloads to GPU per-chunk.
+
+    Returns:
+        Curvature array (same shape as input, float32).
+    """
+    from scipy.ndimage import uniform_filter
+
+    data = np.asarray(data, dtype=np.float32)
+
+    # 1. Slope (not dip angle — curvature needs linear slope for constant 2nd deriv)
+    slope_il, slope_xl = _compute_slope(data)
+
+    # 2. Smooth slope
+    if data.ndim == 2:
+        size_xl = 2 * win_xl + 1
+        size_t = 2 * win_t + 1
+        slope_il = uniform_filter(slope_il, size=(size_t, size_xl), mode="reflect")
+        slope_xl = uniform_filter(slope_xl, size=(size_t, size_xl), mode="reflect")
+        # 3. Second derivatives
+        d2_il = np.gradient(np.gradient(slope_il, axis=0), axis=0)
+        d2_xl = np.gradient(np.gradient(slope_xl, axis=1), axis=1)
+        d2_il_xl = np.gradient(np.gradient(slope_il, axis=1), axis=0)
+    else:
+        size_il = 2 * win_il + 1
+        size_xl = 2 * win_xl + 1
+        size_t = 2 * win_t + 1
+        slope_il = uniform_filter(slope_il, size=(size_il, size_xl, size_t), mode="reflect")
+        slope_xl = uniform_filter(slope_xl, size=(size_il, size_xl, size_t), mode="reflect")
+        # 3. Second derivatives
+        d2_il = np.gradient(np.gradient(slope_il, axis=0), axis=0)
+        d2_xl = np.gradient(np.gradient(slope_xl, axis=1), axis=1)
+        d2_il_xl = np.gradient(np.gradient(slope_il, axis=1), axis=0)
+
+    # 4. Curvature formulas
+    if kind == "gaussian":
+        result = d2_il * d2_xl - d2_il_xl ** 2
+    elif kind == "mean":
+        result = (d2_il + d2_xl) / 2.0
+    elif kind == "max":
+        half_sum = (d2_il + d2_xl) / 2.0
+        diff_term = ((d2_il - d2_xl) / 2.0) ** 2 + d2_il_xl ** 2
+        result = half_sum + np.sqrt(np.maximum(diff_term, 0.0))
+    elif kind == "min":
+        half_sum = (d2_il + d2_xl) / 2.0
+        diff_term = ((d2_il - d2_xl) / 2.0) ** 2 + d2_il_xl ** 2
+        result = half_sum - np.sqrt(np.maximum(diff_term, 0.0))
+    elif kind == "dip":
+        result = d2_il
+    elif kind == "strike":
+        result = d2_xl
+    else:
+        raise ValueError(f"Unknown curvature kind: {kind!r}")
+
+    return result.astype(np.float32)

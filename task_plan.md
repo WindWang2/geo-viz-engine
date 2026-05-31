@@ -5,9 +5,9 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 
 ## Current State
 - **Branch:** main (synced with origin)
-- **Tests:** 617 passed, 3 skipped
+- **Tests:** 636 passed, 3 skipped
 - **Latest commit:** `3e3b5ce6 refactor: split seismic_view.py into focused modules`
-- **Active phase:** Phase 11 — Curvature (Dip/Azimuth + Curvature attributes) — IN PROGRESS
+- **Active phase:** Phase 11 — Curvature COMPLETE; awaiting user direction for next phase
 - **Design spec:** `docs/superpowers/specs/2026-05-30-paleo-map-texture-export-design.md`
 - **Implementation plan:** `docs/superpowers/plans/2026-05-30-paleo-map-texture-export.md`
 
@@ -49,7 +49,7 @@ GeoViz Engine 是一款基于 PySide6 的地质数据可视化桌面引擎。Pha
 | Phase 9b | GPU Acceleration for Coherence | ✅ — CuPy offload, 1.5-1.9x speedup, numerically identical |
 | Phase 10 | PaleoMap 纹理填充渲染 + 专业图件导出 | ✅ — 13 图案 SVG + PatternEngine 扩展 + 矢量 SVG 导出 + 出版级图框 (617 tests) |
 | Refactor | seismic_view.py 拆分 | ✅ — workers/colorbar/dialogs 提取，1471→1283 行，617 tests |
-| Refactor | seismic_view.py 拆分 | ✅ — workers/colorbar/dialogs 提取，1471→1283 行，617 tests |
+| Phase 11 | Curvature 曲率属性 (dip/azimuth + 6 kinds) | ✅ — `compute_dip`/`compute_azimuth`/`compute_curvature` + UI 集成 + 19 tests (636 total) |
 
 ## Roadmap: Future Phases
 

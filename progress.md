@@ -1,6 +1,6 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–10 COMPLETE, Refactor COMPLETE, Phase 11 IN PROGRESS
+## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE
 
 ### Session: 2026-05-30 (Phase 8 + Legacy)
 
@@ -49,13 +49,14 @@
 | 2026-05-30 (Phase 9b) | 601 passed | ✅ |
 | 2026-05-31 (Phase 10) | 617 passed | ✅ |
 | 2026-05-31 (Refactor) | 617 passed | ✅ |
+| 2026-05-31 (Phase 11) | 636 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 11 IN PROGRESS — Curvature (dip/azimuth + 6 curvature types) design approved, implementation starting |
-| Where am I going? | Implement `compute_dip`, `compute_azimuth`, `compute_curvature` in attributes.py; integrate into SeismicView toolbar; ~15 new tests |
-| What's the goal? | Maintain 617 green tests; add curvature attribute family with GPU support |
+| Where am I? | Phase 11 COMPLETE — Curvature (dip/azimuth + 6 kinds) shipped, 636 tests green |
+| Where am I going? | Awaiting user direction — Phase 12 (3D dual-volume rendering) candidate |
+| What's the goal? | Maintain 636 green tests; pick next phase |
 | What have I learned? | PatternEngine composite brush pipeline; QSvgGenerator limitations (raster patterns); spec has 16 facies types (not 24); CMYK mapping viable for small palettes; PaintScheduler needs RuntimeError guard on deleted widgets; GPU coherence offload pattern (CuPy per-chunk) |
 | What have I done? | A7 dedup + Phase 2 legacy + Phase 9 Coherence + Phase 9b GPU + Phase 10 PaleoMap + Refactor — 617 green, all pushed |
 
@@ -70,7 +71,17 @@
 - **Tests:** ~15 new tests target
 
 #### Commits
-- TBD
+- TBD (Phase 11 implementation pending commit)
+
+#### Implementation Completed
+- `compute_dip(data)` — central differences of seismic amplitude → atan(grad_spatial/grad_t); supports 2D and 3D
+- `compute_azimuth(dip_il, dip_xl)` — atan2 → [0, 2π) radians
+- `compute_curvature(data, kind=...)` — 6 kinds (gaussian/mean/max/min/dip/strike); slope-gradient method with uniform-filter smoothing
+- `_compute_slope` helper — returns linear slope (no atan) for correct second-derivative behavior
+- UI: `_attr_combo` extended to 14 items (6 new curvature/dip/azimuth entries at idx 8-13)
+- `_apply_attr` dispatches curvature for idx ≥ 8
+- 19 new tests (`tests/test_curvature.py`): shape, value range, synthetic dome/syncline sign-flip, edge handling, GPU consistency
+- Full suite: **636 passed, 3 skipped**
 
 ### Session: 2026-05-31 (Refactor — seismic_view.py split)
 

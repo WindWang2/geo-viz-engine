@@ -508,7 +508,7 @@ class SeismicView(QWidget):
         bar.addWidget(QLabel(" 色标:"))
         bar.addWidget(self._cmap_combo)
         self._attr_combo = QComboBox()
-        self._attr_combo.addItems(["振幅", "包络", "瞬时相位", "瞬时频率", "RMS振幅", "甜点", "相对阻抗", "RGB融合"])
+        self._attr_combo.addItems(["振幅", "包络", "瞬时相位", "瞬时频率", "RMS振幅", "甜点", "相对阻抗", "RGB融合", "Dip_IL", "Dip_XL", "方位角", "平均曲率", "高斯曲率", "最大曲率"])
         self._attr_combo.currentIndexChanged.connect(self._on_attr_changed)
 
         # RGB fusion channel selectors (hidden until RGB mode selected)
@@ -836,6 +836,17 @@ class SeismicView(QWidget):
         if idx == 7:  # RGB fusion — handled separately in _apply_rgb_fusion
             return data
         from . import attributes as _attr
+        # Curvature/dip/azimuth — return a single 2-D field
+        if idx >= 8:
+            dip_il, dip_xl = _attr.compute_dip(data)
+            if idx == 8:
+                return dip_il
+            if idx == 9:
+                return dip_xl
+            if idx == 10:
+                return _attr.compute_azimuth(dip_il, dip_xl)
+            kind = {11: "mean", 12: "gaussian", 13: "max"}[idx]
+            return _attr.compute_curvature(data, kind=kind)
         _FN = [
             None,                          # 0: amplitude (raw)
             _attr.compute_envelope,        # 1
