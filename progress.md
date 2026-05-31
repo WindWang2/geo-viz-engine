@@ -158,8 +158,15 @@
 - `8ca37621` — feat: export new public APIs (export_vector_svg, export_professional_figure)
 
 ## Pending Items
-- Phase 11.5-C: Convert 3 skipped well_tie tests to xfail+assert (next)
-- 11.5-E/F remaining
+- Phase 11.5 COMPLETE — awaiting user direction on Phase 12a / 14 / 15
+
+### Session: 2026-05-31 (Phase 11.5-C/E/F — debt closeout)
+
+- 11.5-C: investigated — **WON'T FIX**. The 3 skipped tests live in `test_seismic_view.py` and are legitimate `pyvistaqt.QtInteractor` headless environment gates, not the well_tie tests originally documented in task_plan
+- 11.5-E: `packages/geoviz_seismic/CHANGELOG.md` synced — added 0.2.0 (Phases 6/7/8), 0.3.0 (Phases 9/9b/10/11/refactor), 0.4.0 (Phase 11.5-A/B); `__version__` bumped 0.1.2 → 0.4.0
+- 11.5-F: README documents `VERSION` (0.7.0) vs `CHANGELOG.md` (0.10.0) intentional desync
+- Full suite: **668 passed, 3 skipped**
+- Phase 11.5 closeout: 5/6 sub-tasks DONE (A/B/D/E/F), 1 reclassified WON'T FIX (C)
 
 ### Session: 2026-05-31 (Phase 11.5-B + 11.5-D — AttributePipeline)
 

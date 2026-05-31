@@ -10,6 +10,8 @@
 
 > **v0.1-web** (Tauri + React + FastAPI 架构) 已归档于 git tag `v0.1-web`。
 
+> **Version 说明**：根目录 `VERSION` 文件追踪发布版本号（用于打包/发布），与 `CHANGELOG.md` 中的版本号是**有意脱钩**的——`CHANGELOG.md` 按 Phase 推进记录功能演进；`VERSION` 仅在执行正式发布时更新。当前 `VERSION=0.7.0`、`CHANGELOG=0.10.0` 是预期状态，不是 bug。
+
 ---
 
 ## About / 项目简介

@@ -19,7 +19,7 @@ from .seismic_view import SeismicView
 from . import attributes
 from . import attribute_pipeline
 
-__version__ = "0.1.2"
+__version__ = "0.4.0"
 
 __all__ = [
     "ColormapManager",

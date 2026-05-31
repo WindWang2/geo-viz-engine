@@ -2,6 +2,28 @@
 
 All notable changes to this package will be documented in this file.
 
+## [0.4.0] - 2026-05-31
+
+### Added
+- **Phase 11.5-B — `AttributePipeline` dispatch table**: `attribute_pipeline.py` consolidates the 14 attribute combo entries into a single dataclass-driven registry. `seismic_view._apply_attr` collapses to 5 lines and adding a new attribute requires changing one tuple. Magic indices (`idx == 7`, `idx >= 8`) replaced with `rgb_index()` lookups.
+- **Phase 11.5-A — real CuPy GPU path for `compute_curvature`**: `_compute_slope` now accepts an `xp` (numpy or cupy) module, and `compute_curvature` dispatches `cp.gradient` + `cupyx.scipy.ndimage.uniform_filter` when `use_gpu=True` and CuPy is importable. Previously `use_gpu` was silently ignored.
+
+## [0.3.0] - 2026-05-31
+
+### Added
+- **Phase 11 — Curvature attributes**: `compute_dip`, `compute_azimuth`, `compute_curvature` (Gaussian/Mean/Max/Min/Dip/Strike) via slope-gradient second-derivative method. Six new combo entries (Dip_IL, Dip_XL, Azimuth, Mean/Gaussian/Max Curvature).
+- **Phase 10 — Professional figure export**: `export_vector_svg` (true vector via `QSvgGenerator`) and `export_professional_figure` (publishing-grade frame). 13 new facies pattern SVGs.
+- **Phase 9b — GPU acceleration for coherence**: `compute_coherence_c3(..., use_gpu=True)` per-chunk CuPy power-iteration offload (~1.5-1.9× on RTX 4090).
+- **Phase 9 — Coherence (C3 eigenstructure)**: `compute_coherence_c3` via power iteration; adaptive chunking targets ~100 MB working set.
+- **Refactor**: `seismic_view.py` split into `workers.py`, `colorbar_widget.py`, `dialogs/crossplot.py`, `dialogs/horizon_manager.py` (1471 → 1283 lines).
+
+## [0.2.0] - 2026-05-30
+
+### Added
+- **Phase 8 — Well-seismic tie integration**: `WellTiePanel` (wavelet controls, auto-tie, T-D calibration export), toolbar toggle, `ProfileVD.set_synthetic_overlay()` for synthetic wiggle overlay. `BinGridGeometry` Pydantic model + `SeismicVolumeMeta.xy_to_il_xl()` for well-XY → IL/XL mapping. `SeismicLoader.read_trace(iline, xline)`.
+- **Phase 7 — STFT spectral decomposition + RGB fusion + crossplot**: `compute_spectral_decomposition`, `fuse_rgb`, `CrossplotDialog`.
+- **Phase 6 — Seismic attributes**: `compute_envelope`, `compute_instantaneous_phase`, `compute_instantaneous_frequency`, `compute_rms_amplitude`, `compute_sweetness`, `compute_relative_impedance` + horizon-following slice extraction `extract_along_horizon`.
+
 ## [0.1.0] - 2026-05-11
 
 ### Added
