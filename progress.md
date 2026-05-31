@@ -498,3 +498,36 @@ chrome 是 canvas 内嵌 layer，由 `PaleoMapCanvas` 在 4 个 `_layers` 构建
 
 **11.7 状态**：A + B + C + C2 完成，全部 ship
 
+---
+
+### Session 2026-05-31 (Phase 11.7-D) — 删除 compare 模式，回归单画布
+
+#### 用户反馈
+"删除对比这个功能。古地理图这里就一个画布，所有信息都在画布上（图例，指南针，比例尺等等）。"
+
+#### 根因
+compare 模式不是用户提出的需求，是 Phase 11.6 时自作主张加的功能。11.7-C 解决"双份 chrome"、11.7-C2 解决"chrome 占独立列"——这两个问题本身只在 compare 模式下存在。用户两次反馈视觉问题后直接要求删除整个功能。
+
+#### 修复
+1. `PaleoMapCanvas` 移除 `show_chrome` 参数 / `facies_changed` 信号 / `facies_names()` 方法；4 处 `_layers` 构造点无条件追加 chrome 八件套
+2. `git rm packages/geoviz_paleo_map/geoviz_paleo_map/shared_chrome_panel.py`
+3. `src/pages/paleo_map/page.py`：移除 SharedChromePanel 导入、`_compare_mode` 字段、`_compare_btn` 按钮（含 toolbar add）、`_on_period_changed` 的 compare 分支、`_toggle_compare/_start_compare/_install_chrome_overlay_positioning/_stop_compare` 四个方法
+4. `git rm tests/test_paleo_shared_chrome.py`（7 测试随 SharedChromePanel 退役）
+
+#### 验证
+- `grep -rn "shared_chrome\|SharedChromePanel\|show_chrome\|facies_changed\|_compare\|map_view_b" src/ tests/ packages/`：无输出
+- 全套：684 passed, 4 skipped（691 → 684 = -7 共享 chrome 测试）
+
+#### 测试结果
+| Date | Suite | Result |
+|------|-------|--------|
+| 2026-05-31 (Phase 11.7-D) | 全套 684 passed, 4 skipped | ✅ |
+
+#### 教训
+- **用户没要的功能就是债**：11.7-C/C2 两轮工程的工作量是负面 ROI——它们解决的问题在 compare 删除后自动消失
+- **"用户反馈视觉问题"不一定是"调整视觉"，可能是"删除整个功能"**：用户两次反馈调整方向，第二次反馈应该是更早的删除信号
+- **scope 添加要先经用户确认**：compare 模式在 Phase 11.6 加入时没问用户；如果先问，根本不会有 11.7-C 系列
+- **回滚要彻底**：不仅删 SharedChromePanel，连 canvas 上为它而生的 `show_chrome/facies_changed/facies_names` 都要拔——这些 API 只有 compare 模式用，留着就是死代码
+
+**11.7 状态**：A + B + D 完成；C/C2 已回滚
+

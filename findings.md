@@ -451,4 +451,28 @@ self._zoom_center[zoom_key] = center
 - **overlay 必须配 `WA_TransparentForMouseEvents`**：否则虽然背景透明、视觉上看不见，但 panel 矩形仍然吃事件 → 用户在 panel 覆盖区域里拖动/缩放会失效。是 PySide6 overlay 的常见坑
 
 ---
+
+## 11.7-D 根因分析：compare 模式从一开始就是过度设计
+
+**症状**：经过 11.7-C（兄弟列）和 11.7-C2（overlay）两轮迭代后，用户直接说："删除对比这个功能。古地理图这里就一个画布，所有信息都在画布上（图例，指南针，比例尺等等）。"
+
+**根因**：compare 模式不是用户提出的需求。它是我们在 Phase 11.6 时观察到"两个时期可以对比"自作主张加的功能。每一轮反馈都在调整 chrome 的位置——但用户真正想要的是单画布。我们花了 11.7-C + 11.7-C2 两轮工程在改造一个用户从未要的功能。
+
+**修复**：把 compare 模式从代码与测试中整段移除，回归单画布默认。
+
+1. **`PaleoMapCanvas` 退化为单形态**（`packages/geoviz_paleo_map/geoviz_paleo_map/canvas.py`）：移除 `show_chrome` 参数、`facies_changed` 信号、`facies_names()` 方法；4 个 `_layers` 构造点（`__init__` / `load_features` / `load_hierarchy` per-level group / `_update_active_layers`）无条件追加 chrome 八件套（Background + 3 数据层 + 4 chrome 层）。
+
+2. **`shared_chrome_panel.py` 整文件 `git rm`**：上一轮一起补的 `tests/test_paleo_shared_chrome.py`（7 测试）同步 `git rm`。
+
+3. **`src/pages/paleo_map/page.py` 清理 compare 残骸**：移除 `from geoviz_paleo_map.shared_chrome_panel import SharedChromePanel`、`self._compare_mode = False`、`self._compare_btn` 工具栏按钮（含 `tb_layout.addWidget`）、`_on_period_changed` 中的 `if self._compare_mode...` 分支、四个方法 `_toggle_compare/_start_compare/_install_chrome_overlay_positioning/_stop_compare`。
+
+**回归测试**：684 passed, 4 skipped（从 691 → 684 = -7 = 删掉的 shared chrome 测试数）。`grep -rn "shared_chrome\|SharedChromePanel\|show_chrome\|facies_changed\|_compare\|map_view_b"` 在 `src/ tests/ packages/` 全为空。
+
+**教训**：
+- **用户没要的功能就是债**：11.7-C/C2 解决的问题（双份 chrome、chrome 占列）本身只在 compare 模式存在；删掉 compare 后这些问题不复存在。两轮工程的工作量是负面 ROI
+- **"用户反馈视觉问题"不一定是"调整视觉"，可能是"删除整个功能"**：用户两次反馈调整方向（先 C→C2，再 C2→删除）。第二次反馈应该是更早的信号
+- **scope 添加要先经用户确认，不要"我觉得这功能很自然就顺手加上"**：compare 模式在 Phase 11.6 加进来时没问用户；如果先问，根本不会有 11.7-C 系列
+- **回滚要彻底**：不仅删 SharedChromePanel，连 canvas 上的 `show_chrome/facies_changed/facies_names` 都要拔——这些 API 只有 compare 模式用，留着就是死代码
+
+---
 *Update after every 2 view/browser/search operations*

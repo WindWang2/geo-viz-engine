@@ -36,18 +36,15 @@ class PaleoMapCanvas(QWidget):
     zoom_changed = Signal(float)   # current zoom level
     edit_mode_changed = Signal(bool)
     selection_changed = Signal(str)  # feature_id or ""
-    facies_changed = Signal()  # facies set or title changed
 
     def __init__(self, pattern_engine: PatternEngine | None = None,
-                 parent: QWidget | None = None,
-                 show_chrome: bool = True):
+                 parent: QWidget | None = None):
         super().__init__(parent)
         self.setMouseTracking(True)
         self._press_pos: QPointF | None = None
 
         self._engine = pattern_engine or PatternEngine()
         self._resolver = FaciesStyleResolver(self._engine)
-        self._show_chrome = show_chrome
 
         self._viewport = PaleoMapViewport(
             center_lng=115.0, center_lat=30.0, zoom=2.0,
@@ -66,14 +63,11 @@ class PaleoMapCanvas(QWidget):
             self._facies_layer,
             self._labels_layer,
             self._wells_layer,
+            self._title_layer,
+            NorthArrowLayer(),
+            ScaleBarLayer(),
+            self._legend_layer,
         ]
-        if self._show_chrome:
-            self._layers.extend([
-                self._title_layer,
-                NorthArrowLayer(),
-                ScaleBarLayer(),
-                self._legend_layer,
-            ])
         self._rebuild_layer_caches()
         self._current_hover: str | None = None
         self._hierarchy: FaciesHierarchy | None = None
@@ -151,14 +145,6 @@ class PaleoMapCanvas(QWidget):
     def edit_engine(self) -> EditEngine:
         return self._edit_engine
 
-    @property
-    def show_chrome(self) -> bool:
-        return self._show_chrome
-
-    def facies_names(self) -> set[str]:
-        """Return the set of facies currently shown in the legend."""
-        return set(self._legend_layer.facies_names)
-
     def load_features(self, features: list[dict],
                       period_name: str = "",
                       wells: list[dict] | None = None) -> None:
@@ -186,14 +172,11 @@ class PaleoMapCanvas(QWidget):
             self._facies_layer,
             self._labels_layer,
             self._wells_layer,
+            self._title_layer,
+            NorthArrowLayer(),
+            ScaleBarLayer(),
+            self._legend_layer,
         ]
-        if self._show_chrome:
-            self._layers.extend([
-                self._title_layer,
-                NorthArrowLayer(),
-                ScaleBarLayer(),
-                self._legend_layer,
-            ])
         self._period_name = period_name
         self._wells_data = wells or []
         self._locked_ids = {}
@@ -204,7 +187,6 @@ class PaleoMapCanvas(QWidget):
         self._rebuild_layer_caches()
         self._scheduler.schedule()
         self._update_slider_params()
-        self.facies_changed.emit()
 
     def load_hierarchy(self, hierarchy: FaciesHierarchy,
                        period_name: str = "",
@@ -249,13 +231,12 @@ class PaleoMapCanvas(QWidget):
                                            font_size=font_sizes[level],
                                            locked_ids=set(self._locked_ids.keys())))
             group.append(WellsScatterLayer(wells or []))
-            if self._show_chrome:
-                group.extend([
-                    TitleLayer(title),
-                    NorthArrowLayer(),
-                    ScaleBarLayer(),
-                    LegendLayer(seen, self._resolver),
-                ])
+            group.extend([
+                TitleLayer(title),
+                NorthArrowLayer(),
+                ScaleBarLayer(),
+                LegendLayer(seen, self._resolver),
+            ])
             self._level_groups[level] = group
 
         self._cached_level = ""
@@ -270,7 +251,6 @@ class PaleoMapCanvas(QWidget):
         self._rebuild_layer_caches()
         self._scheduler.schedule()
         self._update_slider_params()
-        self.facies_changed.emit()
 
     # (outgoing_level, incoming_level, blend) — blend ∈ [0,1]
     _LEVEL_ORDER = ["facies", "sub_facies", "micro_facies"]
@@ -428,14 +408,11 @@ class PaleoMapCanvas(QWidget):
             poly,
             labels,
             WellsScatterLayer(self._wells_data),
+            TitleLayer(title),
+            NorthArrowLayer(),
+            ScaleBarLayer(),
+            LegendLayer(seen, self._resolver),
         ]
-        if self._show_chrome:
-            self._layers.extend([
-                TitleLayer(title),
-                NorthArrowLayer(),
-                ScaleBarLayer(),
-                LegendLayer(seen, self._resolver),
-            ])
         self._rebuild_layer_caches()
 
     def _update_locked_panel(self) -> None:

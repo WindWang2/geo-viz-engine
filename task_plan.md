@@ -1,16 +1,16 @@
 # Task Plan: GeoViz Engine — 项目总览与下一步规划
 
 > **更新于 2026-05-31**：基于 CEO + Eng 双重 review 重写。明确区分"已完成 / 待修复 / 下一步"。
-> **同步于 2026-05-31**：Goal/Current State 同步至 Phase 11.7-C 完成后的真实状态。
+> **同步于 2026-05-31**：Goal/Current State 同步至 Phase 11.7-D 完成后的真实状态。
 
 ## Goal
-GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Phase 1–11.7 已完成，690 tests passed。**核心市场定位**：科研院所 + 中小油田 + 教学（差异化于 Petrel 的轻量、可二次开发、出版级出图）。
+GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Phase 1–11.7 已完成，684 tests passed。**核心市场定位**：科研院所 + 中小油田 + 教学（差异化于 Petrel 的轻量、可二次开发、出版级出图）。
 
 ## Current State
 - **Branch:** main (synced with origin)
-- **Tests:** 690 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
-- **Latest commit:** `c7d7db2a feat(paleo-map): shared chrome panel in compare mode (Phase 11.7-C)`
-- **Active phase:** Phase 11.7 COMPLETE（A+B+C 全部 ship；Phase 11.5 债务全部清零）
+- **Tests:** 684 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
+- **Latest commit:** `c7d7db2a feat(paleo-map): shared chrome panel in compare mode (Phase 11.7-C)`（D 待 commit）
+- **Active phase:** Phase 11.7 COMPLETE（A+B+D 全部 ship；C/C2 已于 D 中回滚 — 单画布自带 chrome）
 - **Health rating:** A-（Phase 11 + 11.5 + 11.6 + 11.7 全清，无未结债务）
 
 ## Completed Phases
@@ -33,7 +33,7 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 11 | Curvature (Dip/Azimuth + 6 kinds) | ✅ | GPU 路径已补，见 11.5-A |
 | 11.5 | Phase 11 债务清理（GPU/dispatch/CHANGELOG/版本号/集成测试） | ✅ | A/B/D/E/F DONE；C WON'T FIX |
 | 11.6 | PaleoMap 性能 + chrome 重构（A=texture cache, B=chrome bypass, C=Z-order, D=DPR, E=DTW vectorize） | ✅ | 5 子任务全 ship |
-| 11.7 | PaleoMap 缓存失效 + 共享 chrome（A=viewport-size, B=pan-center, C=SharedChromePanel） | ✅ | A+B+C 全 ship |
+| 11.7 | PaleoMap 缓存失效 + 共享 chrome（A=viewport-size, B=pan-center, D=删除 compare 模式回归单画布） | ✅ | A+B+D ship；C/C2 回滚 |
 
 ## 🔴 Phase 11.5: 收尾与债务清理（最高优先级，必须先于 Phase 12）
 
@@ -92,7 +92,8 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 11.7-A | **古地理图：数据层挤压到左上角** — 根因：`LayerPixmapCache._needs_rerender` 不检测 viewport 尺寸变化。Canvas 默认 640×480 时缓存 buffer 按 (1280, 960) 渲染，`show()`/`resize()` 后真实 viewport 变 1400×900 但缓存没失效；`_blit` 从旧 pixmap 读取 (vp.width, vp.height) 矩形 → 数据全部被压缩在画布左上角。Chrome layers（title/north_arrow/scale_bar/legend）因 11.6-B 已 bypass cache 不受影响，所以视觉上是"标注居中、数据偏移"。修复：在 `__init__` 记 `_vp_width/_vp_height=0`，`_needs_rerender` 增 `if vp.width > self._vp_width or vp.height > self._vp_height` 分支，`_rerender` 末尾存 `vp.width/vp.height`。回归测试 `test_viewport_grow_triggers_rerender` 锁定该路径。 | `packages/geoviz_paleo_map/geoviz_paleo_map/paint_scheduler.py`, `tests/test_paint_scheduler.py` | 🔴 P0 | ✅ DONE |
 | 11.7-B | **古地理图：缩放/平移时标签与多边形分离** — 根因：`ScreenPathCache.get_or_build` 缓存键仅含 `(zoom_key, feature_id)`，但 `_transform_path` 把 `vp.center_world` 烤进 screen path。平移（center 改变，zoom 不变）时返回旧 center 烤好的 path，而 `RegionLabelsLayer.paint` 每帧用新 center 实时 `world_to_screen`，结果 facies polygons 留在旧位置、label 浮到新位置。修复：`ScreenPathCache` 维护 `_zoom_center: dict[zoom, (lng, lat)]`，每次 `get_or_build` 时若该 zoom 上记录的 center 与当前 viewport center 不一致，先清掉该 zoom 的所有条目再重建；`_evict` 同步收缩 `_zoom_center`。回归测试 `test_pan_invalidates_screen_path` 锁定该路径。 | `packages/geoviz_paleo_map/geoviz_paleo_map/screen_path_cache.py`, `tests/test_paint_scheduler.py` | 🔴 P0 | ✅ DONE |
 | 11.7-C | **古地理图：对比模式两边各画一套 chrome** — 根因：`_start_compare` 用 QSplitter 装两个 `PaleoMapCanvas`，每个 canvas 都自带 `TitleLayer/NorthArrowLayer/ScaleBarLayer/LegendLayer`，所以对比时画布两边各浮一套标注。修复：(1) `PaleoMapCanvas.__init__` 新增 `show_chrome: bool = True` 参数，所有四处 `_layers` 构建点（`__init__`、`load_features`、`load_hierarchy` per-level group、`_update_active_layers`）都按 `self._show_chrome` 决定是否追加 chrome。(2) 新增 `packages/geoviz_paleo_map/shared_chrome_panel.py` — `SharedChromePanel(QWidget)`：固定宽 200px，从上到下绘制 north arrow / 合并图例 (A∪B facies) / 比例尺（以 canvas_a viewport 为基准）。(3) `_start_compare` 改用 QHBoxLayout 装 `canvas_A | SharedChromePanel | canvas_B`，两边 canvas 设 `show_chrome=False`；`canvas.facies_changed` 信号驱动 panel 自动刷新。(4) `_stop_compare` 拆除 panel 和 host 后重建带 chrome 的单画布。回归测试 `tests/test_paleo_shared_chrome.py` 锁定 6 个场景。 | `packages/geoviz_paleo_map/geoviz_paleo_map/canvas.py`, `packages/geoviz_paleo_map/geoviz_paleo_map/shared_chrome_panel.py`（新增）, `src/pages/paleo_map/page.py`, `tests/test_paleo_shared_chrome.py`（新增） | 🟡 P1 | ✅ DONE |
-| 11.7-C2 | **古地理图：对比模式 chrome 应叠在画布上而非占独立列** — 用户反馈：11.7-C 把 SharedChromePanel 作为兄弟 widget 塞在 canvas_A 和 canvas_B 之间，视觉上把"指南针/图例/比例尺"与"地理图"区分成两栏，违和。修复：(1) `SharedChromePanel.__init__` 新增 `overlay: bool = False` 参数，overlay=True 时设 `WA_TranslucentBackground + WA_TransparentForMouseEvents`（透明背景 + 不拦截鼠标，让 canvas 的拖动/缩放穿透）。(2) `_start_compare` 不再把 panel 加入 QHBoxLayout，而是 `parent=self.map_view` 直接挂在左 canvas 上；新增 `_install_chrome_overlay_positioning()` 包装 canvas.resizeEvent，每次 resize 把 panel 移到右上角（width-panelW-8, 8）并 raise_。两个 canvas 各占 50%，chrome 浮在 canvas_A 右上角。(3) 新增测试 `test_overlay_mode_is_translucent_child` 锁定 overlay 模式下 panel 为 canvas_a 子控件 + 翻译/穿透属性。 | `packages/geoviz_paleo_map/geoviz_paleo_map/shared_chrome_panel.py`, `src/pages/paleo_map/page.py`, `tests/test_paleo_shared_chrome.py` | 🟡 P1 | ✅ DONE |
+| 11.7-C2 | **古地理图：对比模式 chrome 应叠在画布上而非占独立列** — 用户反馈：11.7-C 把 SharedChromePanel 作为兄弟 widget 塞在 canvas_A 和 canvas_B 之间，视觉上把"指南针/图例/比例尺"与"地理图"区分成两栏，违和。修复：(1) `SharedChromePanel.__init__` 新增 `overlay: bool = False` 参数，overlay=True 时设 `WA_TranslucentBackground + WA_TransparentForMouseEvents`（透明背景 + 不拦截鼠标，让 canvas 的拖动/缩放穿透）。(2) `_start_compare` 不再把 panel 加入 QHBoxLayout，而是 `parent=self.map_view` 直接挂在左 canvas 上；新增 `_install_chrome_overlay_positioning()` 包装 canvas.resizeEvent，每次 resize 把 panel 移到右上角（width-panelW-8, 8）并 raise_。两个 canvas 各占 50%，chrome 浮在 canvas_A 右上角。(3) 新增测试 `test_overlay_mode_is_translucent_child` 锁定 overlay 模式下 panel 为 canvas_a 子控件 + 翻译/穿透属性。 | `packages/geoviz_paleo_map/geoviz_paleo_map/shared_chrome_panel.py`, `src/pages/paleo_map/page.py`, `tests/test_paleo_shared_chrome.py` | 🟡 P1 | ✅ DONE (回滚于 11.7-D) |
+| 11.7-D | **古地理图：删除对比模式，回归单画布** — 用户直接要求："删除对比这个功能。古地理图这里就一个画布，所有信息都在画布上（图例，指南针，比例尺等等）。"教训：11.7-C/C2 是过度设计——用户从未要求 compare 模式，是我们自作主张加的。修复：(1) `PaleoMapCanvas` 移除 `show_chrome` 参数、`facies_changed` 信号、`facies_names()` 方法；所有 4 处 `_layers` 构造点（`__init__`/`load_features`/`load_hierarchy`/`_update_active_layers`）无条件追加 chrome 八件套。(2) `git rm` 删除 `packages/geoviz_paleo_map/geoviz_paleo_map/shared_chrome_panel.py`。(3) `src/pages/paleo_map/page.py` 移除 `SharedChromePanel` 导入、`_compare_mode` 字段、`_compare_btn` 工具栏按钮、`_on_period_changed` 中的 compare 分支、以及 `_toggle_compare/_start_compare/_install_chrome_overlay_positioning/_stop_compare` 四个方法。(4) `git rm` 删除 `tests/test_paleo_shared_chrome.py`（7 测试随 SharedChromePanel 退役）。全量测试 684 passed（691→684 = -7 共享 chrome 测试）。 | `packages/geoviz_paleo_map/geoviz_paleo_map/canvas.py`, `packages/geoviz_paleo_map/geoviz_paleo_map/shared_chrome_panel.py`（删除）, `src/pages/paleo_map/page.py`, `tests/test_paleo_shared_chrome.py`（删除） | 🔴 P0 | ✅ DONE |
 
 **Acceptance criteria:**
 - 11.7-A 完成后：截图 `/tmp/paleo_shot.png` 显示 facies polygons / wells / region labels 横跨全画布宽度，不再压缩到左上角；test_viewport_grow_triggers_rerender 通过

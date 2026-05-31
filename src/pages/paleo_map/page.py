@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
 
 from geoviz_paleo_map import PaleoMapCanvas
 from geoviz_paleo_map.hierarchy import FaciesHierarchy
-from geoviz_paleo_map.shared_chrome_panel import SharedChromePanel
 
 from src.pages.paleo_map.loader import PaleoDataLoader
 from src.utils.paths import get_data_dir
@@ -43,7 +42,6 @@ class PaleoMapPage(QWidget):
         self._hierarchies: dict[str, FaciesHierarchy] = {}
         self._multi_file_periods: dict[str, list[str]] = {}  # period -> [file_paths] for sibling discovery
         self._current_period = ""
-        self._compare_mode = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -94,12 +92,6 @@ class PaleoMapPage(QWidget):
         self._period_combo.setStyleSheet("QComboBox{padding:4px 8px;border:1px solid #cbd5e1;border-radius:4px;}")
         self._period_combo.currentTextChanged.connect(self._on_period_changed)
 
-        self._compare_btn = QPushButton("对比")
-        self._compare_btn.setToolTip("并排对比两个时期（需至少2个时期数据）")
-        self._compare_btn.setCheckable(True)
-        self._compare_btn.setStyleSheet("QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:4px;padding:6px 12px;}QPushButton:hover{background:#e2e8f0;}QPushButton:checked{background:#dbeafe;color:#1d4ed8;}QPushButton:pressed{background:#cbd5e1;}")
-        self._compare_btn.clicked.connect(self._toggle_compare)
-
         export_btn = QPushButton("导出")
         export_btn.setToolTip("导出为 SVG / PDF / PNG")
         export_btn.setStyleSheet("QPushButton{background:#2563eb;color:#fff;border:none;border-radius:4px;padding:6px 14px;font-weight:600;}QPushButton:hover{background:#1d4ed8;}QPushButton:pressed{background:#1e40af;}")
@@ -108,7 +100,6 @@ class PaleoMapPage(QWidget):
         tb_layout.addWidget(load_btn)
         tb_layout.addWidget(QLabel("时期:"))
         tb_layout.addWidget(self._period_combo)
-        tb_layout.addWidget(self._compare_btn)
 
         self._edit_btn = QPushButton("编辑模式")
         self._edit_btn.setCheckable(True)
@@ -188,93 +179,6 @@ class PaleoMapPage(QWidget):
                                             period_name=period_name,
                                             wells=_load_well_markers())
 
-
-        if self._compare_mode and hasattr(self, 'map_view_b'):
-            other_periods = [p for p in self._periods if p != period_name]
-            if other_periods:
-                other = other_periods[0]
-                features_b = self._periods.get(other)
-                if features_b is not None:
-                    hierarchy_b = self._hierarchies.get(other)
-                    if hierarchy_b is not None:
-                        self.map_view_b.load_hierarchy(hierarchy_b,
-                                                       period_name=other,
-                                                       wells=_load_well_markers())
-                    else:
-                        self.map_view_b.load_features(features_b,
-                                                      period_name=other,
-                                                      wells=_load_well_markers())
-
-    # --- Compare Mode ---
-
-    def _toggle_compare(self, checked: bool):
-        if checked and len(self._periods) < 2:
-            self._compare_btn.setChecked(False)
-            QMessageBox.information(self, "提示", "对比模式需要至少加载2个时期的数据。")
-            return
-        self._compare_mode = checked
-        if checked:
-            self._start_compare()
-        else:
-            self._stop_compare()
-
-    def _start_compare(self):
-        old_view = self.map_view
-        compare_host = QWidget()
-        h_layout = QHBoxLayout(compare_host)
-        h_layout.setContentsMargins(0, 0, 0, 0)
-        h_layout.setSpacing(0)
-        self.map_view = PaleoMapCanvas(parent=self, show_chrome=False)
-        self.map_view_b = PaleoMapCanvas(parent=self, show_chrome=False)
-        h_layout.addWidget(self.map_view, 1)
-        h_layout.addWidget(self.map_view_b, 1)
-        self._shared_chrome = SharedChromePanel(self.map_view, self.map_view_b,
-                                                parent=self.map_view,
-                                                overlay=True)
-        self._shared_chrome.show()
-        self._install_chrome_overlay_positioning()
-        self._compare_host = compare_host
-        self._map_layout.addWidget(compare_host)
-        old_view.deleteLater()
-        self._on_period_changed(self._current_period)
-
-    def _install_chrome_overlay_positioning(self) -> None:
-        canvas = self.map_view
-        panel = self._shared_chrome
-        margin = 8
-
-        def reposition():
-            panel.resize(panel.width(), max(canvas.height() - 2 * margin, 200))
-            panel.move(canvas.width() - panel.width() - margin, margin)
-            panel.raise_()
-
-        original_resize = canvas.resizeEvent
-
-        def patched_resize(event):
-            original_resize(event)
-            reposition()
-
-        canvas.resizeEvent = patched_resize
-        reposition()
-
-    def _stop_compare(self):
-        if hasattr(self, 'map_view_b'):
-            try:
-                self.map_view_b.deleteLater()
-            except RuntimeError:
-                pass
-            del self.map_view_b
-        if hasattr(self, '_shared_chrome'):
-            del self._shared_chrome
-        if hasattr(self, '_compare_host'):
-            self._compare_host.setParent(None)
-            del self._compare_host
-        if hasattr(self, '_splitter'):
-            self._splitter.setParent(None)
-            del self._splitter
-        self.map_view = PaleoMapCanvas(parent=self)
-        self._map_layout.addWidget(self.map_view)
-        self._on_period_changed(self._current_period)
 
     # --- Edit Mode ---
 
