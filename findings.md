@@ -176,7 +176,16 @@ geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
 - 11.6-E 连井慢：DTW 是 O(N²) 全矩阵；先 profile 找瓶颈
 - 11.6-F DTW 位置不对：检查 trace 重采样后的 sample-rate 对齐
 - 11.6-G 拾取 UX：缺操作提示
-- 11.6-H 地震 toolbar 不全：拆 2 行 / QToolBar setOrientation
+
+### 7. 地震 toolbar 拆成 2 行（11.6-H 已修）
+- **根因**：`_build_toolbar` 把 ~30 个控件全塞进一个 `QToolBar`，1280px 窗宽下末端 IL/XL/T 滑块和井震标定按钮被裁
+- **修复**：`_build_toolbar` 返回 `QWidget` 容器（`QVBoxLayout` spacing=0），内含 `_toolbar_row1` 和 `_toolbar_row2` 两个 `QToolBar`
+  - Row 1（主操作）：加载/Demo/层位/层位管理 ‖ 拾取/清除/导出/标注 ‖ 切片信息+读出 ‖ 井震标定
+  - Row 2（视图与属性）：3D模式/透明度/剖面/显示/色标 ‖ 裁剪/属性/RGB/交叉图 ‖ IL/XL/T 滑块
+- **教训**：
+  - `QToolBar` 自带 separator/spacing 行为，多行 toolbar 用多个 `QToolBar` 实例堆 `QVBoxLayout` 比手撸 `QHBoxLayout` 更原生
+  - 控件创建必须在 `bar.addWidget` 之前完成（之前 `_attr_combo` / `crossplot_btn` / RGB 控件创建被嵌在 add 中间，refactor 时容易漏掉 — 这次差点 NameError）
+
 
 ---
 *Update after every 2 view/browser/search operations*

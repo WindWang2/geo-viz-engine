@@ -63,7 +63,7 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 11.6-E | **连井：自动连井太慢** — 当前自动连井（DTW + auto-tie）耗时不可接受，需 profile 找瓶颈：DTW 全矩阵？trace 重采样？候选优化：Numba/Cython/限带 + 进度条 | `packages/geoviz_cross_well/dtw_engine.py`, `canvas.py` | 🟡 P1 | TODO |
 | 11.6-F | **连井：自动连井位置不对** — DTW 自动拾取产出的位置肉眼可见错位（横向偏移或井间映射错误），需对照已知 marker 验证算法正确性 | `packages/geoviz_cross_well/dtw_engine.py` | 🔴 P0 | TODO |
 | 11.6-G | **连井：手动拾取交互体验差** — 用户无法直观了解"如何点"、"如何撤销"、"如何切换层位"；需提示文字/状态栏/快捷键说明 | `src/pages/cross_well/`, `packages/geoviz_cross_well/canvas.py` (PickingOverlay) | 🟡 P1 | TODO |
-| 11.6-H | **地震：toolbar 显示不完整** — 当前单行 toolbar 控件过多导致末端被裁；按功能分组（视图/属性/标定/导出）拆为 2 行（QToolBar 多行或 2× horizontal layout） | `packages/geoviz_seismic/geoviz_seismic/seismic_view.py` (toolbar 构造段) | 🟡 P1 | TODO |
+| 11.6-H | **地震：toolbar 显示不完整** — 当前单行 toolbar 控件过多导致末端被裁；按功能分组（视图/属性/标定/导出）拆为 2 行（QToolBar 多行或 2× horizontal layout） | `packages/geoviz_seismic/geoviz_seismic/seismic_view.py` (toolbar 构造段) | 🟡 P1 | ✅ DONE |
 
 **Acceptance criteria:**
 - 11.6-A 完成后：点井位 → 弹出该井 popover（井名/坐标/打开测井页按钮）或直接切到测井页并选中该井

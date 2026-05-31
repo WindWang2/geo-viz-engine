@@ -55,6 +55,7 @@
 | 2026-05-31 (Phase 11.6-A + C partial) | 668 passed | ✅ |
 | 2026-05-31 (Phase 11.6-B chrome bypass) | 669 passed | ✅ |
 | 2026-05-31 (Phase 11.6-C publishing export) | 674 passed | ✅ |
+| 2026-05-31 (Phase 11.6-H toolbar 2 rows) | 674 passed, 4 skipped | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
@@ -204,6 +205,15 @@
 - 5 个新测试 `test_paleo_map_page_export.py`：3 个 mock 化路径调用断言，1 个 fallback title，1 个真实 export 出 >1KB PDF
 - 674 tests passed（+5），3 skipped
 - **教训**：图层级独立 package 已经把 publishing 能力做好了；page 层不该自己撸 QPainter on QPrinter — 这是 11.6-C "导出 PDF 空白" 看起来像 crash 实则是 missing frame 的根本原因
+
+#### 11.6-H Fix（commit pending）
+- **修复**：`packages/geoviz_seismic/geoviz_seismic/seismic_view.py` `_build_toolbar` 现返回一个 `QWidget` 容器，内含两个 `QToolBar` 垂直堆叠
+- **Row 1（主操作）**：加载/Demo/层位/层位管理 ‖ 拾取/清除/导出/标注 ‖ 切片信息+读出 ‖ 井震标定
+- **Row 2（视图与属性）**：3D模式/透明度/剖面/显示/色标 ‖ 裁剪/属性/RGB(R/G/B)/交叉图 ‖ IL/XL/T 滑块
+- 新增 `_toolbar_row1` / `_toolbar_row2` 字段供测试和外部布局调整
+- **回归测试**：`test_seismic_view_toolbar_split_into_two_rows` 断言两个 QToolBar 都存在且关键控件分布正确（pick_btn/well_tie_btn → row1；3d_mode/attr/sliders/clip → row2）
+- 674 passed (+1)，4 skipped（新增测试随 pyvistaqt 同步跳过）
+- **教训**：toolbar 拆行不要简单加 horizontal layout — `QToolBar.addWidget` 有 separator/spacing 行为，复用两个 QToolBar 实例比手撸 QHBoxLayout 更原生
 
 ### Session: 2026-05-31 (Phase 11.5-C/E/F — debt closeout)
 

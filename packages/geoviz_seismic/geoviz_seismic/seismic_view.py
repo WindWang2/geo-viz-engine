@@ -351,7 +351,10 @@ class SeismicView(QWidget):
     # ------------------------------------------------------------------
 
     def _build_toolbar(self) -> QWidget:
-        bar = QToolBar()
+        # Two-row toolbar: 主操作 (row 1) | 视图与属性 (row 2)
+        self._toolbar_row1 = QToolBar()
+        self._toolbar_row2 = QToolBar()
+        bar = self._toolbar_row1  # row 1 is primary actions (load/pick/tie)
 
         load_btn = QPushButton("加载 SEGY")
         load_btn.clicked.connect(self._load_segy)
@@ -488,6 +491,36 @@ class SeismicView(QWidget):
         )
         self._annotation_btn.toggled.connect(self._on_annotation_toggled)
 
+        # Attribute combo + RGB fusion channel selectors
+        from . import attribute_pipeline as _ap
+        self._attr_combo = QComboBox()
+        self._attr_combo.addItems(_ap.labels())
+        self._attr_combo.currentIndexChanged.connect(self._on_attr_changed)
+
+        self._rgb_r_combo = QComboBox()
+        self._rgb_g_combo = QComboBox()
+        self._rgb_b_combo = QComboBox()
+        _attr_names = ["包络", "瞬时频率", "RMS振幅", "甜点", "相对阻抗"]
+        for combo in (self._rgb_r_combo, self._rgb_g_combo, self._rgb_b_combo):
+            combo.addItems(_attr_names)
+            combo.setVisible(False)
+            combo.currentIndexChanged.connect(self._on_rgb_channels_changed)
+        self._rgb_r_combo.setCurrentIndex(0)
+        self._rgb_g_combo.setCurrentIndex(1)
+        self._rgb_b_combo.setCurrentIndex(2)
+        self._rgb_r_label = QLabel(" R:")
+        self._rgb_g_label = QLabel(" G:")
+        self._rgb_b_label = QLabel(" B:")
+        for lbl in (self._rgb_r_label, self._rgb_g_label, self._rgb_b_label):
+            lbl.setVisible(False)
+
+        crossplot_btn = QPushButton("交叉图")
+        crossplot_btn.setStyleSheet(
+            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
+            "border-radius: 4px; padding: 0 10px; font-size: 13px; }"
+        )
+        crossplot_btn.clicked.connect(self._on_crossplot)
+
         bar.addWidget(load_btn)
         bar.addWidget(demo_btn)
         bar.addWidget(horizon_btn)
@@ -498,73 +531,10 @@ class SeismicView(QWidget):
         bar.addWidget(export_pick_btn)
         bar.addWidget(self._annotation_btn)
         bar.addSeparator()
-        bar.addWidget(QLabel(" 3D模式:"))
-        bar.addWidget(self._3d_mode_combo)
-        bar.addWidget(self._opacity_combo)
-        bar.addWidget(QLabel(" 剖面:"))
-        bar.addWidget(self._slice_type_combo)
-        bar.addWidget(QLabel(" 显示:"))
-        bar.addWidget(self._mode_combo)
-        bar.addWidget(QLabel(" 色标:"))
-        bar.addWidget(self._cmap_combo)
-        from . import attribute_pipeline as _ap
-        self._attr_combo = QComboBox()
-        self._attr_combo.addItems(_ap.labels())
-        self._attr_combo.currentIndexChanged.connect(self._on_attr_changed)
-
-        # RGB fusion channel selectors (hidden until RGB mode selected)
-        self._rgb_r_combo = QComboBox()
-        self._rgb_g_combo = QComboBox()
-        self._rgb_b_combo = QComboBox()
-        _attr_names = ["包络", "瞬时频率", "RMS振幅", "甜点", "相对阻抗"]
-        for combo in (self._rgb_r_combo, self._rgb_g_combo, self._rgb_b_combo):
-            combo.addItems(_attr_names)
-            combo.setVisible(False)
-            combo.currentIndexChanged.connect(self._on_rgb_channels_changed)
-        # Default: envelope=R, frequency=G, RMS=B
-        self._rgb_r_combo.setCurrentIndex(0)
-        self._rgb_g_combo.setCurrentIndex(1)
-        self._rgb_b_combo.setCurrentIndex(2)
-        self._rgb_r_label = QLabel(" R:")
-        self._rgb_g_label = QLabel(" G:")
-        self._rgb_b_label = QLabel(" B:")
-        for lbl in (self._rgb_r_label, self._rgb_g_label, self._rgb_b_label):
-            lbl.setVisible(False)
-
-        # Crossplot button
-        crossplot_btn = QPushButton("交叉图")
-        crossplot_btn.setStyleSheet(
-            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
-            "border-radius: 4px; padding: 0 10px; font-size: 13px; }"
-        )
-        crossplot_btn.clicked.connect(self._on_crossplot)
-
-        bar.addWidget(QLabel(" 裁剪:"))
-        bar.addWidget(self._clip_spin)
-        bar.addWidget(QLabel(" 属性:"))
-        bar.addWidget(self._attr_combo)
-        bar.addWidget(self._rgb_r_label)
-        bar.addWidget(self._rgb_r_combo)
-        bar.addWidget(self._rgb_g_label)
-        bar.addWidget(self._rgb_g_combo)
-        bar.addWidget(self._rgb_b_label)
-        bar.addWidget(self._rgb_b_combo)
-        bar.addWidget(crossplot_btn)
         bar.addWidget(self._slice_label)
-        bar.addSeparator()
-        bar.addWidget(QLabel(" IL:"))
-        bar.addWidget(self._tb_il_label)
-        bar.addWidget(self._tb_il_slider)
-        bar.addWidget(QLabel(" XL:"))
-        bar.addWidget(self._tb_xl_label)
-        bar.addWidget(self._tb_xl_slider)
-        bar.addWidget(QLabel(" T:"))
-        bar.addWidget(self._tb_t_label)
-        bar.addWidget(self._tb_t_slider)
-        bar.addSeparator()
         bar.addWidget(self._readout_label)
 
-        # Well-tie toggle button
+        # Well-tie toggle button on row 1 (right-aligned via stretch later)
         self._well_tie_btn = QPushButton("井震标定")
         self._well_tie_btn.setCheckable(True)
         self._well_tie_btn.setStyleSheet(
@@ -576,7 +546,48 @@ class SeismicView(QWidget):
         bar.addSeparator()
         bar.addWidget(self._well_tie_btn)
 
-        return bar
+        # ----- Row 2: 视图 | 属性 | 切片 -----
+        bar2 = self._toolbar_row2
+        bar2.addWidget(QLabel(" 3D模式:"))
+        bar2.addWidget(self._3d_mode_combo)
+        bar2.addWidget(self._opacity_combo)
+        bar2.addWidget(QLabel(" 剖面:"))
+        bar2.addWidget(self._slice_type_combo)
+        bar2.addWidget(QLabel(" 显示:"))
+        bar2.addWidget(self._mode_combo)
+        bar2.addWidget(QLabel(" 色标:"))
+        bar2.addWidget(self._cmap_combo)
+        bar2.addSeparator()
+        bar2.addWidget(QLabel(" 裁剪:"))
+        bar2.addWidget(self._clip_spin)
+        bar2.addWidget(QLabel(" 属性:"))
+        bar2.addWidget(self._attr_combo)
+        bar2.addWidget(self._rgb_r_label)
+        bar2.addWidget(self._rgb_r_combo)
+        bar2.addWidget(self._rgb_g_label)
+        bar2.addWidget(self._rgb_g_combo)
+        bar2.addWidget(self._rgb_b_label)
+        bar2.addWidget(self._rgb_b_combo)
+        bar2.addWidget(crossplot_btn)
+        bar2.addSeparator()
+        bar2.addWidget(QLabel(" IL:"))
+        bar2.addWidget(self._tb_il_label)
+        bar2.addWidget(self._tb_il_slider)
+        bar2.addWidget(QLabel(" XL:"))
+        bar2.addWidget(self._tb_xl_label)
+        bar2.addWidget(self._tb_xl_slider)
+        bar2.addWidget(QLabel(" T:"))
+        bar2.addWidget(self._tb_t_label)
+        bar2.addWidget(self._tb_t_slider)
+
+        # Container holding both rows
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        container_layout.addWidget(self._toolbar_row1)
+        container_layout.addWidget(self._toolbar_row2)
+        return container
 
     def _build_slice_info(self, slice_type: str, position: int,
                           data_shape: tuple) -> SliceInfo:
