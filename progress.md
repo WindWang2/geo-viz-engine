@@ -57,6 +57,7 @@
 | 2026-05-31 (Phase 11.6-C publishing export) | 674 passed | ✅ |
 | 2026-05-31 (Phase 11.6-H toolbar 2 rows) | 674 passed, 4 skipped | ✅ |
 | 2026-05-31 (Phase 11.6-F DTW wire-up + ref_idx fix) | 674 passed, 4 skipped (global) + 46 passed (cross-well pkg, +3) | ✅ |
+| 2026-05-31 (Phase 11.6-G manual pick UX) | 680 passed, 4 skipped | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
@@ -272,3 +273,17 @@
 
 ---
 *Update after completing each phase or encountering errors*
+
+### Session: 2026-05-31 (Phase 11.6-G — Manual pick UX)
+
+#### Implementation Completed
+- 全工具栏添加 Chinese tooltip — 加井/清除/井道/域/拾取/自动连接/导入层位/导出
+- 新增「DTW 传播」按钮：把 11.6-F 添加的 `propagate_pick_via_dtw` producer 接入 UI
+  - 行为：用户在任一口井手动拾取一个层位点，点按钮 → 自动以此点为锚把层位传播到所有其他井，生成灰色 ghost
+  - 三分支防御：无井 / 无 manual pick / 成功传播，全部走 QMessageBox.information 给用户清晰反馈
+- 状态栏在 pick mode 下显示完整快捷键提示：「拾取模式: 左键添加 · Shift+左键连接 · 右键删除 · Ctrl+Z 撤销 · Esc 退出」
+- `picks_changed` 信号 → `_update_status` 实现拾取/撤销实时刷新井位计数
+- 新增 `tests/test_cross_well_page_dtw.py` — 6 个 UX 回归测试覆盖：按钮存在/tooltip/三分支 message box/pick 模式提示/picks_changed 联动
+- 全套件：680 passed, 4 skipped（+6 新）
+
+**Bug fix during implementation**: 初版用了 `HorizonPick.depths_by_well` 不存在的属性 → 改为 `pick.connected_wells()` + `pick.depth_for_well(well)`。教训：写 page 层代码前要先读 dataclass 定义。

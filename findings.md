@@ -220,5 +220,42 @@ geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
   - 控件创建必须在 `bar.addWidget` 之前完成（之前 `_attr_combo` / `crossplot_btn` / RGB 控件创建被嵌在 add 中间，refactor 时容易漏掉 — 这次差点 NameError）
 
 
+### 8. 连井手动拾取 UX 改造（11.6-G 已修）
+
+**问题清单（用户测试反馈）**
+- 工具栏 7 个按钮无 tooltip — 用户不知道每个按钮做什么
+- 拾取模式开启后状态栏只显示「3 口井」无操作提示 — 新手 30 秒内完不成一次拾取
+- 11.6-F 的 `propagate_pick_via_dtw` producer 没有 UI 入口 — 用户即便手动拾了点也没法触发 DTW
+- 手动拾取/撤销后状态栏不刷新 — 用户不知道是否操作生效
+
+**修复（src/pages/cross_well/page.py）**
+1. 全工具栏添加 tooltip — 7 个按钮全部说清楚做什么 + 怎么用
+2. 新增「DTW 传播」按钮：把 11.6-F 留的 producer 接入 UI
+   - 收集所有 `source == "manual"` 的 pick
+   - 每个 pick 拿一个 `connected_wells()` 的井作 anchor，调 `propagate_pick_via_dtw`
+   - 三分支 QMessageBox.information：无井 / 无 manual pick / 成功传播 → 用户始终拿到清晰反馈
+3. `_update_status` 在 pick mode 下渲染完整快捷键 hint：
+   `「拾取模式: 左键添加 · Shift+左键连接 · 右键删除 · Ctrl+Z 撤销 · Esc 退出」`
+4. `self._canvas.picks_model.picks_changed.connect(self._update_status)` — 拾取/撤销自动刷新
+
+**陷阱：HorizonPick API 误用**
+- 初版写 `for well in pick.depths_by_well:` — 属性不存在
+- `HorizonPick` 实际是 `well_depths: list[tuple[str, float|None]]` + 方法 `connected_wells()` / `depth_for_well(well)` / `set_depth(well, depth)`
+- **教训**：跨包消费 dataclass 前先读源码 — 别凭直觉写 `.something_by_X` / `.something_dict`
+
+**测试覆盖（tests/test_cross_well_page_dtw.py — 新建）**
+- 按钮 + tooltip / 三分支 message box / 端到端 DTW 产生 ghost / pick 模式 hint / picks_changed 联动 = 6 个用例
+- 全套件：680 passed, 4 skipped（+6 新）
+
+**双 page 模块情况确认**
+- `src/pages/cross_well/page.py` ← `__init__.py` ← `src/app.py` 真实用的就是这个
+- `src/pages/cross_well/scene_page.py` 是早期实验代码 — 只被 `tests/test_cross_well_page.py` 引用，**未被 app 加载**
+- **教训**：双 page 模块共存是历史包袱 — 未来 cleanup 时考虑删 `scene_page.py`
+
+**11.6 整体收尾状态**
+- ✅ A/B/C/F/G/H = 6/8 已修
+- ⏳ D（缩放后文字模糊）+ E（自动连井慢）= 2/8 剩余 P1
+
+
 ---
 *Update after every 2 view/browser/search operations*

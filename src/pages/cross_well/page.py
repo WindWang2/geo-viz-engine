@@ -182,11 +182,13 @@ class CrossWellPage(QWidget):
 
         # Data group
         self._add_btn = self._make_btn("添加井")
+        self._add_btn.setToolTip("打开井选择对话框，加载多口井并显示在画布上")
         self._add_btn.clicked.connect(self._on_add_wells)
         tb.addWidget(self._add_btn)
 
         self._clear_btn = QPushButton("清除")
         self._clear_btn.setFixedHeight(28)
+        self._clear_btn.setToolTip("清除所有井和拾取数据，回到初始状态")
         self._clear_btn.setStyleSheet("""
             QPushButton {
                 background: #fed7d7; color: #9b2c2c;
@@ -202,11 +204,13 @@ class CrossWellPage(QWidget):
 
         # View group
         self._track_btn = self._make_btn("选择井道")
+        self._track_btn.setToolTip("勾选要显示的井道（深度/岩性固定，最多再选3个）")
         self._track_btn.clicked.connect(self._on_select_tracks)
         tb.addWidget(self._track_btn)
 
         self._domain_btn = self._make_btn("域: MD")
         self._domain_btn.setCheckable(True)
+        self._domain_btn.setToolTip("切换深度域：MD（测量深度）↔ TWT（双程旅行时，需先导入井震标定）")
         self._domain_btn.clicked.connect(self._on_toggle_domain)
         tb.addWidget(self._domain_btn)
 
@@ -216,15 +220,27 @@ class CrossWellPage(QWidget):
         self._pick_btn = QPushButton("手动拾取")
         self._pick_btn.setFixedHeight(28)
         self._pick_btn.setCheckable(True)
+        self._pick_btn.setToolTip(
+            "进入拾取模式：左键添加层位点，Shift+左键连接到其他井，右键删除，Esc 退出"
+        )
         self._pick_btn.setStyleSheet(self._btn_style())
         self._pick_btn.clicked.connect(self._on_toggle_pick)
         tb.addWidget(self._pick_btn)
 
         self._auto_btn = self._make_btn("自动连井")
+        self._auto_btn.setToolTip("按层位名匹配相邻井（如「万山组」），无名时不会连接")
         self._auto_btn.clicked.connect(self._on_auto_link)
         tb.addWidget(self._auto_btn)
 
+        self._dtw_btn = self._make_btn("DTW 传播")
+        self._dtw_btn.setToolTip(
+            "用 DTW 把当前已有的层位点从一口井传播到所有其他井（产生灰色 ghost 点，左键确认 / 右键拒绝）"
+        )
+        self._dtw_btn.clicked.connect(self._on_dtw_propagate)
+        tb.addWidget(self._dtw_btn)
+
         self._tops_btn = self._make_btn("导入层位")
+        self._tops_btn.setToolTip("从 CSV 文件导入层位顶界数据（well, formation, depth_m）")
         self._tops_btn.clicked.connect(self._on_load_tops)
         tb.addWidget(self._tops_btn)
 
@@ -263,6 +279,7 @@ class CrossWellPage(QWidget):
         # --- CrossWellCanvas ---
         self._canvas = CrossWellCanvas()
         self._cross_well = self._canvas.widget  # underlying CrossWellWidget
+        self._canvas.picks_model.picks_changed.connect(self._update_status)
         outer.addWidget(self._canvas, 1)
         self._scroll = None
 
@@ -384,9 +401,15 @@ class CrossWellPage(QWidget):
     def _update_status(self):
         parts = []
         n = self._cross_well.canvas_count if hasattr(self, '_cross_well') else 0
-        parts.append(f"{n} wells" if n else "no wells")
-        if hasattr(self, '_canvas') and self._canvas.pick_mode:
-            parts.append("PICK MODE")
+        parts.append(f"{n} 口井" if n else "无井数据")
+        if hasattr(self, '_canvas'):
+            picks_n = len(self._canvas.picks_model.all_picks())
+            if picks_n:
+                parts.append(f"{picks_n} 个层位点")
+            if self._canvas.pick_mode:
+                parts.append(
+                    "拾取模式: 左键添加 · Shift+左键连接 · 右键删除 · Ctrl+Z 撤销 · Esc 退出"
+                )
         self._status.setText("  |  ".join(parts) if parts else "")
 
     # --- Actions ---
@@ -502,6 +525,43 @@ class CrossWellPage(QWidget):
 
     def _on_auto_link(self):
         self._cross_well.auto_link()
+
+    def _on_dtw_propagate(self):
+        """Propagate every existing manual pick to all other wells via DTW."""
+        if self._cross_well.canvas_count < 2:
+            QMessageBox.information(
+                self, "DTW 传播",
+                "至少需要 2 口井才能进行 DTW 传播。",
+            )
+            return
+        manual_picks = [
+            p for p in self._canvas.picks_model.all_picks() if p.source == "manual"
+        ]
+        if not manual_picks:
+            QMessageBox.information(
+                self, "DTW 传播",
+                "请先在某口井上手动拾取一个层位点，然后再用 DTW 传播到其他井。",
+            )
+            return
+
+        created_total = 0
+        for pick in manual_picks:
+            for well in pick.connected_wells():
+                depth = pick.depth_for_well(well)
+                if depth is None:
+                    continue
+                created = self._canvas.propagate_pick_via_dtw(
+                    well, depth, pick.formation_name,
+                )
+                created_total += len(created)
+                break  # one anchor per pick is enough
+
+        QMessageBox.information(
+            self, "DTW 传播完成",
+            f"已生成 {created_total} 个 DTW 候选点（灰色 ghost）。"
+            f"\n左键点击确认为正式拾取，右键点击拒绝。",
+        )
+        self._update_status()
 
     def _on_toggle_pick(self):
         active = self._pick_btn.isChecked()

@@ -62,7 +62,7 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 11.6-D | **古地理图：缩放后文字模糊** — 标签/title 文字在高 zoom 时尺寸不变且渲染失真，应当随 zoom 自适应大小并启用高 DPI 抗锯齿 | `packages/geoviz_paleo_map/layers/region_labels.py`, `title.py` | 🟡 P1 | TODO |
 | 11.6-E | **连井：自动连井太慢** — 当前自动连井（DTW + auto-tie）耗时不可接受，需 profile 找瓶颈：DTW 全矩阵？trace 重采样？候选优化：Numba/Cython/限带 + 进度条 | `packages/geoviz_cross_well/dtw_engine.py`, `canvas.py` | 🟡 P1 | TODO |
 | 11.6-F | **连井：自动连井位置不对** — 根因双重：(1) `dtw_engine.py:74` `ref_idx = n//2` 硬编码无视用户拾取深度；(2) "自动连井"按钮仅做 formation name match，DTW 引擎从未被生产代码调用。修复：`correlate()` 新增 `ref_depth` 参数 + `CrossWellCanvas.propagate_pick_via_dtw()` 真正调用 DTW 产生 ghost picks | `packages/geoviz_cross_well/dtw_engine.py`, `canvas.py` | 🔴 P0 | ✅ DONE |
-| 11.6-G | **连井：手动拾取交互体验差** — 用户无法直观了解"如何点"、"如何撤销"、"如何切换层位"；需提示文字/状态栏/快捷键说明 | `src/pages/cross_well/`, `packages/geoviz_cross_well/canvas.py` (PickingOverlay) | 🟡 P1 | TODO |
+| 11.6-G | **连井：手动拾取交互体验差** — 全工具栏添加 tooltip；状态栏在拾取模式下显示快捷键提示（左键/Shift+左键/右键/Ctrl+Z/Esc）；新增「DTW 传播」按钮把 11.6-F 的 producer 接入 UI（用户在某口井手动拾取一个点后，一键传播到所有其他井产生灰色 ghost）；`picks_changed` 信号连接到 `_update_status` 实现实时刷新 | `src/pages/cross_well/page.py`, `tests/test_cross_well_page_dtw.py` | 🟡 P1 | ✅ DONE |
 | 11.6-H | **地震：toolbar 显示不完整** — 当前单行 toolbar 控件过多导致末端被裁；按功能分组（视图/属性/标定/导出）拆为 2 行（QToolBar 多行或 2× horizontal layout） | `packages/geoviz_seismic/geoviz_seismic/seismic_view.py` (toolbar 构造段) | 🟡 P1 | ✅ DONE |
 
 **Acceptance criteria:**
