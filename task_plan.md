@@ -46,6 +46,35 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 11.5-E | **同步子包 CHANGELOG**：`geoviz_seismic/CHANGELOG.md` 停留在 0.1.2（5月11日），与根 CHANGELOG 脱钩 | `packages/*/CHANGELOG.md` | 🟢 P2 | ✅ DONE |
 | 11.5-F | **版本号策略文档化**：在根 README 加注 `VERSION (0.7.0)` vs `CHANGELOG (0.10.0)` 是有意为之 | `README.md` | 🟢 P3 | ✅ DONE |
 
+---
+
+## 🔴 Phase 11.6: 用户测试发现的 UX/功能缺陷（2026-05-31 用户回归测试）
+
+**目的：** 修复用户实测发现的页面级 bug 和体验问题；以"用户可用"为标准而非"测试通过"。
+
+### Tasks
+
+| ID | Task | Files | Priority | Status |
+|----|------|-------|----------|--------|
+| 11.6-A | **地图：点击井无响应** — 井位地图上点具体井位无反应（既不切到测井页也无提示） | `src/pages/map/`, `packages/geoviz_map/canvas.py` | 🔴 P0 | TODO |
+| 11.6-B | **古地理图：图例/指南针/比例尺消失** — 8 个 chrome layer 中有 3-4 个不可见，可能 layer enable 默认值或绘制顺序问题 | `packages/geoviz_paleo_map/canvas.py`, `layers/legend.py` `north_arrow.py` `scale_bar.py` | 🔴 P0 | TODO |
+| 11.6-C | **古地理图：PDF 导出空白** — 已修 QPixmap.scaled QSizeF→QSize 类型错误（DevicePixel rect 需 toRect），但还需补充图名/页眉/比例尺等 publishing-grade frame；当前只把 grab 的 pixmap 居中铺到 A4 | `src/pages/paleo_map/page.py:410-429` | 🔴 P0 | TODO |
+| 11.6-D | **古地理图：缩放后文字模糊** — 标签/title 文字在高 zoom 时尺寸不变且渲染失真，应当随 zoom 自适应大小并启用高 DPI 抗锯齿 | `packages/geoviz_paleo_map/layers/region_labels.py`, `title.py` | 🟡 P1 | TODO |
+| 11.6-E | **连井：自动连井太慢** — 当前自动连井（DTW + auto-tie）耗时不可接受，需 profile 找瓶颈：DTW 全矩阵？trace 重采样？候选优化：Numba/Cython/限带 + 进度条 | `packages/geoviz_cross_well/dtw_engine.py`, `canvas.py` | 🟡 P1 | TODO |
+| 11.6-F | **连井：自动连井位置不对** — DTW 自动拾取产出的位置肉眼可见错位（横向偏移或井间映射错误），需对照已知 marker 验证算法正确性 | `packages/geoviz_cross_well/dtw_engine.py` | 🔴 P0 | TODO |
+| 11.6-G | **连井：手动拾取交互体验差** — 用户无法直观了解"如何点"、"如何撤销"、"如何切换层位"；需提示文字/状态栏/快捷键说明 | `src/pages/cross_well/`, `packages/geoviz_cross_well/canvas.py` (PickingOverlay) | 🟡 P1 | TODO |
+| 11.6-H | **地震：toolbar 显示不完整** — 当前单行 toolbar 控件过多导致末端被裁；按功能分组（视图/属性/标定/导出）拆为 2 行（QToolBar 多行或 2× horizontal layout） | `packages/geoviz_seismic/geoviz_seismic/seismic_view.py` (toolbar 构造段) | 🟡 P1 | TODO |
+
+**Acceptance criteria:**
+- 11.6-A 完成后：点井位 → 弹出该井 popover（井名/坐标/打开测井页按钮）或直接切到测井页并选中该井
+- 11.6-B 完成后：默认打开古地理图三件套全部可见，颜色与背景对比足够
+- 11.6-C 完成后：导出 PDF 含标题/比例尺/指南针/图例，能直接用于出版（复用 Phase 10 `export_professional_figure`）
+- 11.6-D 完成后：标签和 title 在 1×–4× zoom 范围内清晰可读
+- 11.6-E 完成后：典型 5 井数据自动连井 < 5 秒，有进度条
+- 11.6-F 完成后：DTW 路径与已知 marker 对齐误差 < 5%
+- 11.6-G 完成后：状态栏/工具栏显式说明拾取/撤销/切层操作；新手 30 秒内能完成一次拾取
+- 11.6-H 完成后：1280px 窗宽下所有 toolbar 按钮可见，功能分组清晰（视图/属性/标定/导出）
+
 **Acceptance criteria:**
 - 11.5-A 完成后：`pytest tests/test_curvature.py::TestCurvatureGpuConsistency` 在有 CuPy 环境真正测试 GPU vs CPU 数值一致性（不再是空 skip）
 - 11.5-B 完成后：新增第 15 个属性只需改 1 处（dispatch 表）

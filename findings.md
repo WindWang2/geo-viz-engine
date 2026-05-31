@@ -132,5 +132,31 @@ geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
 - SEG Wiki 甜点属性：https://wiki.seg.org/wiki/Sweetness
 - SEG Wiki 相干属性：https://wiki.seg.org/wiki/Coherence
 
+## Phase 11.6 — 用户测试发现的缺陷（2026-05-31）
+
+### 1. MapCanvas 点击井无响应（11.6-A 已修）
+- **根因**：`WellsLayer.paint()` 把屏幕坐标写入 `_screen_positions`，但 `LayerPixmapCache._rerender()` 使用 **2× 大小的 buffer viewport**（`buf_w/buf_h = vp.width*2`）来绘制 layer
+- `hit_test` 优先复用 `_screen_positions` → 坐标系错位 → 命中永远失败
+- 修复：`hit_test` 始终用 live viewport 重新投影，忽略 `_screen_positions`
+- 教训：**画布缓存（pixmap cache）只能存像素，不能存坐标**；命中检测必须用当前视口现算
+
+### 2. paleo_map 导出 PDF 崩溃（已修 part 1）
+- `printer.pageRect(QPrinter.DevicePixel)` 在 PySide6 返回 `QRectF` → `.size()` 是 `QSizeF`
+- `QPixmap.scaled()` 不接受 `QSizeF`（PyQt5 时代接受，PySide6 严格类型）
+- 修复：`page_rect.toRect()` 强转为 `QRect`
+- 仍待办（11.6-C）：导出还缺图名/比例尺/指南针/图例，需复用 Phase 10 `export_professional_figure`
+
+### 3. PySide6 严格类型对照 PyQt5
+- `QRectF.size()` → `QSizeF`（不可隐式转 `QSize`）
+- `QPainter.drawPolyline(QPointF, QPointF, ...)` → 只接受 `QPolygonF` 单参数
+- 这类问题需要在 PR 时主动 grep 检查重载签名
+
+### 4. 待调查（pending）
+- 11.6-B 古地理图 legend/north_arrow/scale_bar 不显示：suspect canvas.py 默认 `enabled=False` 或 `paintEvent` 顺序问题
+- 11.6-D 缩放后文字模糊：缓存 pixmap 在 zoom 时被放大插值，labels layer 也需在 zoom 改变时 invalidate
+- 11.6-E 连井慢：DTW 是 O(N²) 全矩阵；先 profile 找瓶颈
+- 11.6-F DTW 位置不对：检查 trace 重采样后的 sample-rate 对齐
+- 11.6-G 拾取 UX：缺操作提示
+
 ---
 *Update after every 2 view/browser/search operations*

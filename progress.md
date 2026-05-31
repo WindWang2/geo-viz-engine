@@ -158,7 +158,30 @@
 - `8ca37621` — feat: export new public APIs (export_vector_svg, export_professional_figure)
 
 ## Pending Items
-- Phase 11.5 COMPLETE — awaiting user direction on Phase 12a / 14 / 15
+- Phase 11.6 (用户回归测试): 6 项剩余 (B/C/D/E/F/G)
+
+### Session: 2026-05-31 (Phase 11.6 — 用户回归测试)
+
+#### 用户测试发现 7 项问题（已记入 task_plan Phase 11.6）
+1. 11.6-A **地图：点井无响应** — ✅ FIXED
+2. 11.6-B 古地理图：图例/指南针/比例尺消失 — TODO
+3. 11.6-C 古地理图：PDF 导出空白 — ⚠️ 修了崩溃 bug（QSizeF→QSize），缺 publishing frame 还要做
+4. 11.6-D 古地理图：缩放后文字模糊 — TODO
+5. 11.6-E 连井：自动连井太慢 — TODO
+6. 11.6-F 连井：自动连井位置不对 — TODO
+7. 11.6-G 连井：手动拾取交互体验差 — TODO
+8. 11.6-H 地震：toolbar 显示不完整 — TODO
+
+#### 11.6-A Fix（commit pending）
+- **根因**：`WellsLayer._screen_positions` 存的是 LayerPixmapCache 2× buffer 的内部坐标，不是实际屏幕坐标；`hit_test` 复用它 → 永远 miss
+- **修复**：`packages/geoviz_map/geoviz_map/layers/wells.py` `hit_test` 始终用 live viewport 重投影
+- **教训**：pixmap cache 只能存像素，命中检测必须现算坐标
+- 125 map+wells 相关测试 green
+- progress.md/findings.md 同步更新
+
+#### 11.6-C Partial Fix（commit pending）
+- `src/pages/paleo_map/page.py:424` `printer.pageRect(QPrinter.DevicePixel).toRect()` 修复 QSizeF → QSize 类型错误
+- 仍待补 publishing-grade frame（图名/比例尺/指南针/图例）
 
 ### Session: 2026-05-31 (Phase 11.5-C/E/F — debt closeout)
 

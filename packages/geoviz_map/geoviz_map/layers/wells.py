@@ -54,11 +54,12 @@ class WellsLayer(MapLayer):
 
     def hit_test(self, screen_pt: QPointF,
                  viewport: MapViewport) -> str | None:
-        # If paint hasn't run yet, fall back to projecting now
-        positions = self._screen_positions
-        if not positions:
-            positions = [(w.name, viewport.lnglat_to_screen(w.lng, w.lat))
-                         for w in self.wells]
+        # Always re-project from the live viewport. The cached
+        # `_screen_positions` was computed inside the oversized buffer used by
+        # LayerPixmapCache, so its pixel coordinates do not match the
+        # user-visible viewport.
+        positions = [(w.name, viewport.lnglat_to_screen(w.lng, w.lat))
+                     for w in self.wells]
         r2 = HIT_RADIUS * HIT_RADIUS
         for name, pt in positions:
             dx = pt.x() - screen_pt.x()

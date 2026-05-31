@@ -421,7 +421,7 @@ class PaleoMapPage(QWidget):
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
         printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
         painter = QPainter(printer)
-        page_rect = printer.pageRect(QPrinter.DevicePixel)
+        page_rect = printer.pageRect(QPrinter.DevicePixel).toRect()
         scaled = pixmap.scaled(page_rect.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         x = (page_rect.width() - scaled.width()) // 2
         y = (page_rect.height() - scaled.height()) // 2
