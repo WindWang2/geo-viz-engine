@@ -21,6 +21,7 @@ class DTWEngine:
         target_curve: np.ndarray,
         target_depths: np.ndarray,
         band_radius: int | None = None,
+        ref_depth: float | None = None,
     ) -> DTWResult:
         if len(ref_curve) < 2 or len(target_curve) < 2:
             return DTWResult(suggested_depth=0.0, cost=1.0, confidence=0.0)
@@ -71,8 +72,16 @@ class DTWEngine:
         total_cost = sum(dist[pi, pj] for pi, pj in path)
         normalized_cost = total_cost / len(path)
 
-        ref_idx = n // 2
-        matched_target_idx = path[min(ref_idx, len(path) - 1)][1]
+        if ref_depth is None:
+            ref_idx = n // 2
+        else:
+            ref_idx = int(np.argmin(np.abs(ref_depths - ref_depth)))
+
+        target_indices = [pj for pi, pj in path if pi == ref_idx]
+        if target_indices:
+            matched_target_idx = int(np.median(target_indices))
+        else:
+            matched_target_idx = path[min(ref_idx, len(path) - 1)][1]
         suggested_depth = float(target_depths[matched_target_idx])
 
         max_possible = float(np.max(dist)) if dist.size > 0 else 1.0

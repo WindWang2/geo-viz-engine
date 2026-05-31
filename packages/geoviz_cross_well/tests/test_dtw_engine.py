@@ -63,3 +63,46 @@ def test_empty_curves():
     tgt = np.array([])
     result = engine.correlate(ref, np.array([]), tgt, np.array([]))
     assert result.confidence == 0.0
+
+
+def test_ref_depth_propagates_correctly():
+    """11.6-F regression: suggested_depth must follow ref_depth, not n//2."""
+    engine = DTWEngine()
+    n = 200
+    rng = np.random.default_rng(0)
+    ref_curve = rng.standard_normal(n).cumsum()
+    ref_depths = np.linspace(1000.0, 3000.0, n)
+
+    shift = 25
+    target_curve = np.roll(ref_curve, shift)
+    target_depths = ref_depths.copy()
+    depth_per_sample = (ref_depths[-1] - ref_depths[0]) / (n - 1)
+    expected_offset = shift * depth_per_sample
+
+    # Three different ref_depths should yield three different suggested depths
+    for ref_depth in (1300.0, 2000.0, 2700.0):
+        result = engine.correlate(
+            ref_curve, ref_depths, target_curve, target_depths,
+            ref_depth=ref_depth,
+        )
+        # DTW on shifted curves should suggest a depth offset by ~shift samples
+        err = abs((result.suggested_depth - ref_depth) - expected_offset)
+        assert err < depth_per_sample * 3, (
+            f"ref_depth={ref_depth} suggested={result.suggested_depth} "
+            f"expected_offset={expected_offset} err={err}"
+        )
+
+
+def test_ref_depth_default_is_midpoint():
+    """Backward compat: omitting ref_depth keeps legacy n//2 behavior."""
+    engine = DTWEngine()
+    n = 100
+    rng = np.random.default_rng(1)
+    curve = rng.standard_normal(n).cumsum()
+    depths = np.linspace(0, 1000, n)
+
+    res_default = engine.correlate(curve, depths, curve.copy(), depths)
+    res_midpoint = engine.correlate(
+        curve, depths, curve.copy(), depths, ref_depth=float(depths[n // 2]),
+    )
+    assert abs(res_default.suggested_depth - res_midpoint.suggested_depth) < 1e-6

@@ -56,6 +56,7 @@
 | 2026-05-31 (Phase 11.6-B chrome bypass) | 669 passed | ✅ |
 | 2026-05-31 (Phase 11.6-C publishing export) | 674 passed | ✅ |
 | 2026-05-31 (Phase 11.6-H toolbar 2 rows) | 674 passed, 4 skipped | ✅ |
+| 2026-05-31 (Phase 11.6-F DTW wire-up + ref_idx fix) | 674 passed, 4 skipped (global) + 46 passed (cross-well pkg, +3) | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
@@ -172,7 +173,7 @@
 3. 11.6-C **古地理图：PDF 导出空白** — ✅ FIXED（委托 export_professional_figure）
 4. 11.6-D 古地理图：缩放后文字模糊 — TODO
 5. 11.6-E 连井：自动连井太慢 — TODO
-6. 11.6-F 连井：自动连井位置不对 — TODO
+6. 11.6-F 连井：自动连井位置不对 — ✅ FIXED（DTW 引擎 ref_depth 修复 + 接入 producer，UI 接线 pending）
 7. 11.6-G 连井：手动拾取交互体验差 — TODO
 8. 11.6-H 地震：toolbar 显示不完整 — TODO
 
@@ -214,6 +215,24 @@
 - **回归测试**：`test_seismic_view_toolbar_split_into_two_rows` 断言两个 QToolBar 都存在且关键控件分布正确（pick_btn/well_tie_btn → row1；3d_mode/attr/sliders/clip → row2）
 - 674 passed (+1)，4 skipped（新增测试随 pyvistaqt 同步跳过）
 - **教训**：toolbar 拆行不要简单加 horizontal layout — `QToolBar.addWidget` 有 separator/spacing 行为，复用两个 QToolBar 实例比手撸 QHBoxLayout 更原生
+
+#### 11.6-F Fix（commit pending）
+- **双重根因**：
+  1. `dtw_engine.py:74` `ref_idx = n // 2` 硬编码 — 无论用户在哪个深度拾取，DTW 永远从参考曲线中点找匹配
+  2. 生产代码层面 DTWEngine 实际**从未被调用** — `CrossWellWidget.auto_link()` 仅做 formation-name 字符串匹配，DTW 引擎是孤儿
+- **修复**：
+  - `dtw_engine.correlate()` 新增 `ref_depth: float | None = None` 参数；`ref_idx = argmin(abs(ref_depths - ref_depth))`；用 `np.median(target_indices)` 收敛多对一映射
+  - `CrossWellCanvas` 新增 `_extract_curve()` 提取曲线（优先 GR/SP/RT）+ `propagate_pick_via_dtw(ref_well, ref_depth, formation, band_radius=None)` 产生 ghost picks
+  - 副作用 fix：`canvas.py` 补 `import numpy as np`（_paint_twt_axis 一直在用却没导入，latent bug）
+- **回归测试**（3 个，全在 cross-well 包内）：
+  - `test_ref_depth_propagates_correctly`：3 个不同 ref_depth（1300/2000/2700）必须得到 3 个不同结果，误差 < 3 sample
+  - `test_ref_depth_default_is_midpoint`：backward-compat — 不传 ref_depth ≡ 传 midpoint depth
+  - `test_propagate_pick_via_dtw`：end-to-end 集成测试，200-sample 曲线 + 20-sample shift，REF 拾取 1800m 在 TGT 应得到偏移 ~200m，误差 < 3 sample
+- **测试覆盖讨论**：3 新测试位于 `packages/geoviz_cross_well/tests/`，而 `pyproject.toml` `testpaths = ["tests"]` 仅扫根目录 — 全局 `pytest` 仍是 674 passed 不变；包级 `pytest packages/geoviz_cross_well/tests/` 46 passed（+3）。本次保持现状不扩 testpaths，避免一次性引入未审计的包级测试到 headline 数字
+- **未完成**：`propagate_pick_via_dtw` 已存在但**尚未接入 UI** — 用户在地震/连井页面点"自动连井"按钮仍走 name-match。需要在 `src/pages/cross_well/` 层添加：name-match 未命中时回退调用 `propagate_pick_via_dtw`。该 UI 接线留给 11.6-G 或单独 follow-up
+- **教训**：
+  - 测试覆盖率 ≠ 生产被调用 — DTW 引擎有 7 个单元测试全绿，但被 0 个生产路径调用；测试金字塔必须有"集成层"才能 catch 这种 orphan engine
+  - "把 X 接入 Y" 在产品语境下是双向工作：fix engine + wire producer，缺一不可
 
 ### Session: 2026-05-31 (Phase 11.5-C/E/F — debt closeout)
 

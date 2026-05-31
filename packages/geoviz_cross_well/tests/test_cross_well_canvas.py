@@ -58,3 +58,49 @@ def test_dtw_engine_basic():
     result = engine.correlate(curve, depths, curve.copy(), depths)
     assert result.cost < 0.01
     assert result.confidence > 0.99
+
+
+def test_propagate_pick_via_dtw(qtbot):
+    """11.6-F regression: DTW producer creates ghost picks at correct depths."""
+    from geoviz_cross_well.canvas import CrossWellCanvas
+    from geoviz_well_log.renderer.canvas import WellLogCanvas
+    from geoviz_well_log.renderer.curve_track import CurveTrack
+    from geoviz_well_log.models import CurveData
+
+    n = 200
+    rng = np.random.default_rng(42)
+    base_curve = rng.standard_normal(n).cumsum()
+    ref_depths = np.linspace(1000.0, 3000.0, n)
+    shift_samples = 20
+    depth_per_sample = (ref_depths[-1] - ref_depths[0]) / (n - 1)
+    expected_offset = shift_samples * depth_per_sample
+    target_curve = np.roll(base_curve, shift_samples)
+
+    canvas = CrossWellCanvas()
+    qtbot.addWidget(canvas)
+
+    for name, values in (("REF", base_curve), ("TGT", target_curve)):
+        sub = WellLogCanvas()
+        sub.set_tracks([
+            CurveTrack(
+                curves=[CurveData(name="GR", depth=list(ref_depths), values=list(values), display_range=(0.0, 200.0))],
+                label="GR",
+            ),
+        ])
+        canvas._widget.add_canvas(sub, name)
+
+    ref_depth = 1800.0
+    created = canvas.propagate_pick_via_dtw("REF", ref_depth, "H1", band_radius=40)
+
+    assert len(created) == 1
+    tgt_picks = canvas._picks_model.picks_for_well("TGT")
+    assert len(tgt_picks) == 1
+    pick = tgt_picks[0]
+    assert pick.source == "dtw"
+    suggested = pick.depth_for_well("TGT")
+    assert suggested is not None
+    err = abs((suggested - ref_depth) - expected_offset)
+    assert err < depth_per_sample * 3, (
+        f"suggested={suggested} ref={ref_depth} expected_offset={expected_offset} err={err}"
+    )
+

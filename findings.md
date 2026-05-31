@@ -174,8 +174,41 @@ geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
 ### 6. 待调查（pending）
 - 11.6-D 缩放后文字模糊：缓存 pixmap 在 zoom 时被放大插值，labels layer 也需在 zoom 改变时 invalidate
 - 11.6-E 连井慢：DTW 是 O(N²) 全矩阵；先 profile 找瓶颈
-- 11.6-F DTW 位置不对：检查 trace 重采样后的 sample-rate 对齐
+- ~~11.6-F DTW 位置不对~~：✅ 已修，见下方 11.6-F 章节
 - 11.6-G 拾取 UX：缺操作提示
+
+### 11.6-F DTW 位置错位 — 双重根因（已修）
+
+**根因 1：引擎参考点硬编码**
+- `dtw_engine.py:74` `ref_idx = n // 2` — 无论用户拾取在哪个深度，DTW 永远从参考曲线中点找匹配
+- 这是 5 月初 Phase 5 写 DTW 时的占位逻辑，从未被替换
+- 修复：`correlate()` 新增 `ref_depth: float | None = None`；`ref_idx = argmin(abs(ref_depths - ref_depth))`；多对一映射用 `np.median(target_indices)` 收敛
+
+**根因 2：引擎是孤儿（更严重）**
+- `CrossWellWidget.auto_link()`（在 geoviz-well-log 包内）只做 formation-name 字符串匹配 — DTW 引擎从未被任何生产代码调用
+- 7 个 DTW 单元测试全绿，但实际用户点"自动连井"按钮 → name match 失败 → 静默无结果，DTW 完全没机会跑
+- 修复：`CrossWellCanvas.propagate_pick_via_dtw(ref_well, ref_depth, formation, band_radius=None)` 真正调 DTW 产生 ghost picks
+- `_extract_curve()` 辅助方法：优先取 GR/SP/RT，否则取首条可用曲线
+- **副作用 fix**：`canvas.py` 一直在 `_paint_twt_axis` 里用 `np.linspace` 但没 import numpy — latent bug 一起修
+
+**测试覆盖陷阱**
+- 3 个新测试位于 `packages/geoviz_cross_well/tests/`，但 `pyproject.toml` `testpaths = ["tests"]` 只扫根目录
+- `pytest` 全局：674 passed 不变（DTW 包级新测试没纳入 headline）
+- `pytest packages/geoviz_cross_well/tests/` 包级：46 passed（+3）
+- **本次决策**：保持现状，不扩 testpaths 一次性引入全部包级测试 — 那会让 headline 数字突涨且未审计；留作 11.6 收尾的独立讨论项
+
+**未完成（已记 task #29 备忘）**
+- `propagate_pick_via_dtw` 是 producer，**尚未接入 UI** — 用户点连井按钮仍走 name-match
+- 需要 `src/pages/cross_well/` 层在 name-match 失败时回退调用 producer
+- 留给 11.6-G（手动拾取 UX 改造）一起做，或单开 follow-up
+
+**教训**
+- **测试覆盖率 ≠ 生产被调用**：DTW 有 7 个单测全绿但生产路径调用数=0；金字塔必须有"集成层"才能 catch orphan engine
+- **"接入"是双向工作**：fix engine（引擎正确）+ wire producer（生产路径调用）+ wire UI（用户能触发）— 缺一不可
+- **占位逻辑要标注**：`n//2` 这种"先跑通"的逻辑必须留 TODO 或 raise NotImplementedError，否则 5 个月后没人记得它是占位
+
+---
+*Update after every 2 view/browser/search operations*
 
 ### 7. 地震 toolbar 拆成 2 行（11.6-H 已修）
 - **根因**：`_build_toolbar` 把 ~30 个控件全塞进一个 `QToolBar`，1280px 窗宽下末端 IL/XL/T 滑块和井震标定按钮被裁

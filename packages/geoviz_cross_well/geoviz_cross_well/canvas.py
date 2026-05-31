@@ -4,8 +4,11 @@ from PySide6.QtCore import Qt, QRectF, QPointF, QEvent, QObject
 from PySide6.QtGui import QPainter, QColor, QPen, QPolygonF, QFont
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 
+import numpy as np
+
 from geoviz_well_log.cross_well_widget import CrossWellWidget
 from geoviz_well_log.renderer.canvas import WellLogCanvas
+from geoviz_well_log.renderer.curve_track import CurveTrack
 
 from .tops_model import FormationTopsModel, FormationTop, _FORMATION_PALETTE
 from .picks_model import HorizonPicksModel, HorizonPick, AddPickCmd, ConnectPickCmd
@@ -298,3 +301,65 @@ class CrossWellCanvas(QWidget):
                 if pick_depth is not None and abs(pick_depth - depth) < 5.0:
                     return pick
         return None
+
+    def _extract_curve(self, canvas: WellLogCanvas, preferred: tuple[str, ...] = ("GR", "SP", "RT")) -> tuple[np.ndarray, np.ndarray] | None:
+        """Return (depths, values) from the first CurveTrack matching `preferred` curve names, else first available curve."""
+        first_curve = None
+        for track in canvas.tracks:
+            if isinstance(track, CurveTrack):
+                for curve in track._curves:
+                    if first_curve is None:
+                        first_curve = curve
+                    if curve.name.upper() in preferred:
+                        depths = np.asarray(track._sorted_depths.get(curve.name, curve.depth), dtype=float)
+                        values = np.asarray(track._sorted_values.get(curve.name, curve.values), dtype=float)
+                        return depths, values
+        if first_curve is not None:
+            for track in canvas.tracks:
+                if isinstance(track, CurveTrack):
+                    depths = np.asarray(track._sorted_depths.get(first_curve.name, first_curve.depth), dtype=float)
+                    values = np.asarray(track._sorted_values.get(first_curve.name, first_curve.values), dtype=float)
+                    return depths, values
+        return None
+
+    def propagate_pick_via_dtw(
+        self,
+        ref_well: str,
+        ref_depth: float,
+        formation: str,
+        band_radius: int | None = None,
+    ) -> list[str]:
+        """Propagate a pick from `ref_well` at `ref_depth` to every other well via DTW.
+
+        Returns the list of newly created DTW ghost pick IDs.
+        """
+        names = self._widget._well_names
+        canvases = self._widget._canvases
+        if ref_well not in names:
+            return []
+        ref_idx = names.index(ref_well)
+        ref_data = self._extract_curve(canvases[ref_idx])
+        if ref_data is None:
+            return []
+        ref_depths, ref_values = ref_data
+
+        created: list[str] = []
+        for i, (canvas, name) in enumerate(zip(canvases, names)):
+            if i == ref_idx:
+                continue
+            tgt_data = self._extract_curve(canvas)
+            if tgt_data is None:
+                continue
+            tgt_depths, tgt_values = tgt_data
+            result = self._dtw_engine.correlate(
+                ref_values, ref_depths,
+                tgt_values, tgt_depths,
+                band_radius=band_radius,
+                ref_depth=ref_depth,
+            )
+            pick_id = self._picks_model.add_pick(
+                formation, name, result.suggested_depth, source="dtw",
+            )
+            created.append(pick_id)
+        return created
+
