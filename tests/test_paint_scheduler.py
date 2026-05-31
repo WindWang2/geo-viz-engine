@@ -172,6 +172,65 @@ class TestLayerPixmapCache:
         painter.end()
         assert render_count == 2
 
+    def test_pixmap_dpr_matches_painter_device(self, qtbot):
+        """11.6-D: cached pixmap must carry the painter's devicePixelRatio
+        so text/lines render at native HiDPI density instead of being
+        upscaled (blurred) at blit time."""
+        from geoviz_paleo_map.paint_scheduler import LayerPixmapCache
+        from geoviz_paleo_map.viewport import PaleoMapViewport
+
+        class StubLayer:
+            def paint(self, painter, viewport):
+                pass
+
+        cache = LayerPixmapCache(StubLayer())
+        widget = QWidget()
+        qtbot.addWidget(widget)
+
+        painter = QPainter(widget)
+        dpr = painter.device().devicePixelRatioF()
+        vp = PaleoMapViewport(center_lng=115.0, center_lat=30.0,
+                              zoom=2.0, width=400, height=300)
+        cache.paint(painter, vp)
+        painter.end()
+
+        assert cache._pixmap is not None
+        assert cache._pixmap.devicePixelRatio() == pytest.approx(dpr)
+        # Physical pixel dimensions = logical * dpr
+        assert cache._pixmap.width() == int(round(400 * 2 * dpr))
+        assert cache._pixmap.height() == int(round(300 * 2 * dpr))
+
+    def test_dpr_change_triggers_rerender(self, qtbot):
+        """If the painter device's DPR changes (e.g. window moves to a
+        different monitor), the cache must rebuild to keep text sharp."""
+        from geoviz_paleo_map.paint_scheduler import LayerPixmapCache
+        from geoviz_paleo_map.viewport import PaleoMapViewport
+
+        render_count = 0
+
+        class StubLayer:
+            def paint(self, painter, viewport):
+                nonlocal render_count
+                render_count += 1
+
+        cache = LayerPixmapCache(StubLayer())
+        widget = QWidget()
+        qtbot.addWidget(widget)
+        vp = PaleoMapViewport(center_lng=115.0, center_lat=30.0,
+                              zoom=2.0, width=400, height=300)
+
+        painter = QPainter(widget)
+        cache.paint(painter, vp)
+        painter.end()
+        assert render_count == 1
+
+        # Simulate DPR change by mutating the recorded value
+        cache._dpr = cache._dpr + 1.0
+        painter = QPainter(widget)
+        cache.paint(painter, vp)
+        painter.end()
+        assert render_count == 2
+
 
 class TestScreenPathCache:
     def test_returns_screen_space_path(self, qtbot):

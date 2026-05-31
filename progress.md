@@ -287,3 +287,27 @@
 - 全套件：680 passed, 4 skipped（+6 新）
 
 **Bug fix during implementation**: 初版用了 `HorizonPick.depths_by_well` 不存在的属性 → 改为 `pick.connected_wells()` + `pick.depth_for_well(well)`。教训：写 page 层代码前要先读 dataclass 定义。
+
+### Session: 2026-05-31 (Phase 11.6-D — paleo map HiDPI zoom blur)
+
+#### Root cause: LayerPixmapCache 不感知 devicePixelRatio
+- `paint_scheduler.py:_rerender` 创建 `QPixmap(buf_w, buf_h)` 时从未调 `setDevicePixelRatio` — pixmap 物理像素 = 逻辑像素
+- HiDPI 屏（DPR=2/2.5/3）上文本/线在 cache 内以低密度渲染，blit 时被 Qt 默认双线性拉伸 → 模糊
+- chrome layers（title/north_arrow/scale_bar/legend）经 11.6-B 已 bypass cache 所以没事 — 模糊只出现在 facies polygons 边界 + region labels
+
+#### Fix（commit pending）
+- `paint()` 从 `painter.device().devicePixelRatioF()` 取 DPR
+- `_rerender(vp, dpr)` 分配 `QPixmap(int(buf_w*dpr), int(buf_h*dpr))` + `setDevicePixelRatio(dpr)` — layer 仍用逻辑坐标绘制，Qt 内部按物理像素渲染
+- `_needs_rerender(vp, dpr)` 新增 DPR 变化检测（窗口拖到不同 DPI 显示器触发 rerender）
+- `_blit` 不动 — `drawPixmap` 已自动处理 setDevicePixelRatio 后的源/目标缩放
+
+#### 新增回归测试（test_paint_scheduler.py）
+- `test_pixmap_dpr_matches_painter_device`：pixmap.devicePixelRatio() == painter 的 DPR；物理像素 = 逻辑像素 × dpr
+- `test_dpr_change_triggers_rerender`：DPR 从 1.0 变到 2.0 → 强制 rerender
+
+#### 测试结果
+| Date | Suite | Result |
+|------|-------|--------|
+| 2026-05-31 (Phase 11.6-D) | 682 passed, 4 skipped | ✅ |
+
+**11.6 整体状态**：7/8 done（A/B/C/D/F/G/H），剩 E（自动连井慢）

@@ -253,8 +253,37 @@ geoviz-cross-well → geoviz-well-tie (pure NumPy, zero Qt) ✅ 合理
 - **教训**：双 page 模块共存是历史包袱 — 未来 cleanup 时考虑删 `scene_page.py`
 
 **11.6 整体收尾状态**
-- ✅ A/B/C/F/G/H = 6/8 已修
-- ⏳ D（缩放后文字模糊）+ E（自动连井慢）= 2/8 剩余 P1
+- ✅ A/B/C/D/F/G/H = 7/8 已修
+- ⏳ E（自动连井慢）= 1/8 剩余 P1
+
+
+### 9. 古地理图缩放后文字模糊（11.6-D 已修）
+
+**根因：LayerPixmapCache 不感知 devicePixelRatio**
+- `paint_scheduler.py:_rerender()` 用 `QPixmap(buf_w, buf_h)` 分配 pixmap，从未调 `setDevicePixelRatio`
+- HiDPI 屏（DPR=2/2.5/3）上，cache pixmap 物理像素 = 逻辑像素 → 文本/线在 cache 内以低像素密度渲染
+- blit 时 painter 把 cache pixmap 当作 1× 资源拉伸到屏幕，叠加 Qt 默认双线性插值 → 文字模糊
+- chrome layers（title/north_arrow/scale_bar/legend）经 11.6-B 的 `is_chrome=True` 已 bypass cache，所以它们没事 — 模糊只发生在 facies polygons 边界 + region labels 上
+
+**修复**：`packages/geoviz_paleo_map/paint_scheduler.py`
+1. `paint(painter, viewport)` 改为从 `painter.device().devicePixelRatioF()` 取 DPR
+2. `_rerender(vp, dpr)` 分配 `QPixmap(int(buf_w*dpr), int(buf_h*dpr))` 然后 `setDevicePixelRatio(dpr)` — 这样 layer 绘制时仍用逻辑坐标，Qt 内部按物理像素渲染
+3. `_needs_rerender(vp, dpr)` 新增 DPR 变化检测（窗口拖到不同 DPI 显示器时触发 rerender）
+4. `_blit` 不动 — `drawPixmap` 已自动按 `setDevicePixelRatio` 处理源/目标缩放
+
+**教训**：
+- **PySide6 HiDPI 自动缩放 ≠ 自动管 QPixmap**：QPainter 直接画窗口时 Qt 帮你做 DPR；但你自己创建的 offscreen QPixmap 必须手动 `setDevicePixelRatio` 否则就是 1×
+- **chrome bypass 与 DPR 修复互补**：11.6-B 把 viewport-anchored 内容拿出 cache（解决位置），11.6-D 把 cache 本身打通 DPR（解决清晰度）— LayerPixmapCache 现在对 world-coord 数据 + HiDPI 都正确
+- **测试覆盖盲点**：测试默认在 DPR=1 环境跑，HiDPI 缺陷只在真机能复现 — 新增 `test_pixmap_dpr_matches_painter_device` 锁定 pixmap.devicePixelRatio() == painter.device DPR，未来回归会立即抓到
+
+**测试覆盖**（tests/test_paint_scheduler.py — 新增 2 个）
+- `test_pixmap_dpr_matches_painter_device`：pixmap.devicePixelRatio() == painter 的 DPR；物理像素 = 逻辑像素 × dpr
+- `test_dpr_change_triggers_rerender`：DPR 从 1.0 变到 2.0 → `_needs_rerender` 返回 True
+- 全套件：682 passed, 4 skipped（+2 新）
+
+
+---
+*Update after every 2 view/browser/search operations*
 
 
 ---
