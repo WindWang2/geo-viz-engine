@@ -50,6 +50,7 @@
 | 2026-05-31 (Phase 10) | 617 passed | ✅ |
 | 2026-05-31 (Refactor) | 617 passed | ✅ |
 | 2026-05-31 (Phase 11) | 636 passed | ✅ |
+| 2026-05-31 (Phase 11.5-A) | 636 passed | ✅ |
 
 ## 5-Question Reboot Check
 | Question | Answer |
@@ -156,8 +157,16 @@
 - `8ca37621` — feat: export new public APIs (export_vector_svg, export_professional_figure)
 
 ## Pending Items
-- Awaiting user direction for next phase
-- Phase 11 (Curvature) or Phase 12 (3D dual-volume rendering) ready to plan on user request
+- Phase 11.5-B: Abstract AttributePipeline in seismic_view.py (next)
+- 11.5-C/D/E/F remaining
+
+### Session: 2026-05-31 (Phase 11.5-A — Curvature GPU path)
+
+#### Implementation Completed
+- `_compute_slope(data, xp=np)` — array-module-agnostic (numpy or cupy)
+- `compute_curvature(..., use_gpu=True)` — real CuPy path via `cupyx.scipy.ndimage.uniform_filter` + `cp.gradient` + `cp.asarray`/`cp.asnumpy`
+- `TestCurvatureGpuConsistency` now runs real GPU vs CPU comparison (max diff ~1.5e-3 float32, tolerance 5e-3 atol / 1e-3 rtol)
+- 19 curvature tests + 636 full suite green
 
 ## Errors Encountered
 | Error | Resolution |

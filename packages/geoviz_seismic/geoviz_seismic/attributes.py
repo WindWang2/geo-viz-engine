@@ -381,23 +381,26 @@ def compute_azimuth(
     return az.astype(np.float32)
 
 
-def _compute_slope(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Return inline/crossline slope (grad_spatial / grad_time) arrays."""
-    data = np.asarray(data, dtype=np.float32)
-    if data.ndim == 2:
-        grad_xl = np.gradient(data, axis=0)
-        grad_t = np.gradient(data, axis=1)
-        gt_safe = np.where(np.abs(grad_t) < 1e-10, 1e-10, grad_t)
-        slope_il = np.zeros_like(data)
-        slope_xl = grad_xl / gt_safe
-        return slope_il.astype(np.float32), slope_xl.astype(np.float32)
+def _compute_slope(data, xp=np):
+    """Return inline/crossline slope (grad_spatial / grad_time) arrays.
 
-    grad_il = np.gradient(data, axis=0)
-    grad_xl = np.gradient(data, axis=1)
-    grad_t = np.gradient(data, axis=2)
-    gt_safe = np.where(np.abs(grad_t) < 1e-10, 1e-10, grad_t)
-    slope_il = (grad_il / gt_safe).astype(np.float32)
-    slope_xl = (grad_xl / gt_safe).astype(np.float32)
+    Operates with the array module ``xp`` (numpy or cupy) — the caller is
+    responsible for placing *data* on the matching device.
+    """
+    if data.ndim == 2:
+        grad_xl = xp.gradient(data, axis=0)
+        grad_t = xp.gradient(data, axis=1)
+        gt_safe = xp.where(xp.abs(grad_t) < 1e-10, 1e-10, grad_t)
+        slope_il = xp.zeros_like(data)
+        slope_xl = grad_xl / gt_safe
+        return slope_il.astype(xp.float32), slope_xl.astype(xp.float32)
+
+    grad_il = xp.gradient(data, axis=0)
+    grad_xl = xp.gradient(data, axis=1)
+    grad_t = xp.gradient(data, axis=2)
+    gt_safe = xp.where(xp.abs(grad_t) < 1e-10, 1e-10, grad_t)
+    slope_il = (grad_il / gt_safe).astype(xp.float32)
+    slope_xl = (grad_xl / gt_safe).astype(xp.float32)
     return slope_il, slope_xl
 
 
@@ -432,23 +435,40 @@ def compute_curvature(
     Returns:
         Curvature array (same shape as input, float32).
     """
-    from scipy.ndimage import uniform_filter
+    try:
+        import cupy as cp
+        from cupyx.scipy.ndimage import uniform_filter as cp_uniform_filter
 
-    data = np.asarray(data, dtype=np.float32)
+        _has_cupy = True
+    except Exception:
+        _has_cupy = False
+
+    gpu_active = use_gpu and _has_cupy
+
+    if gpu_active:
+        xp = cp
+        uniform_filter = cp_uniform_filter
+        data_x = cp.asarray(data, dtype=cp.float32)
+    else:
+        from scipy.ndimage import uniform_filter as np_uniform_filter
+
+        xp = np
+        uniform_filter = np_uniform_filter
+        data_x = np.asarray(data, dtype=np.float32)
 
     # 1. Slope (not dip angle — curvature needs linear slope for constant 2nd deriv)
-    slope_il, slope_xl = _compute_slope(data)
+    slope_il, slope_xl = _compute_slope(data_x, xp=xp)
 
     # 2. Smooth slope
-    if data.ndim == 2:
+    if data_x.ndim == 2:
         size_xl = 2 * win_xl + 1
         size_t = 2 * win_t + 1
         slope_il = uniform_filter(slope_il, size=(size_t, size_xl), mode="reflect")
         slope_xl = uniform_filter(slope_xl, size=(size_t, size_xl), mode="reflect")
         # 3. Second derivatives
-        d2_il = np.gradient(np.gradient(slope_il, axis=0), axis=0)
-        d2_xl = np.gradient(np.gradient(slope_xl, axis=1), axis=1)
-        d2_il_xl = np.gradient(np.gradient(slope_il, axis=1), axis=0)
+        d2_il = xp.gradient(xp.gradient(slope_il, axis=0), axis=0)
+        d2_xl = xp.gradient(xp.gradient(slope_xl, axis=1), axis=1)
+        d2_il_xl = xp.gradient(xp.gradient(slope_il, axis=1), axis=0)
     else:
         size_il = 2 * win_il + 1
         size_xl = 2 * win_xl + 1
@@ -456,9 +476,9 @@ def compute_curvature(
         slope_il = uniform_filter(slope_il, size=(size_il, size_xl, size_t), mode="reflect")
         slope_xl = uniform_filter(slope_xl, size=(size_il, size_xl, size_t), mode="reflect")
         # 3. Second derivatives
-        d2_il = np.gradient(np.gradient(slope_il, axis=0), axis=0)
-        d2_xl = np.gradient(np.gradient(slope_xl, axis=1), axis=1)
-        d2_il_xl = np.gradient(np.gradient(slope_il, axis=1), axis=0)
+        d2_il = xp.gradient(xp.gradient(slope_il, axis=0), axis=0)
+        d2_xl = xp.gradient(xp.gradient(slope_xl, axis=1), axis=1)
+        d2_il_xl = xp.gradient(xp.gradient(slope_il, axis=1), axis=0)
 
     # 4. Curvature formulas
     if kind == "gaussian":
@@ -468,11 +488,11 @@ def compute_curvature(
     elif kind == "max":
         half_sum = (d2_il + d2_xl) / 2.0
         diff_term = ((d2_il - d2_xl) / 2.0) ** 2 + d2_il_xl ** 2
-        result = half_sum + np.sqrt(np.maximum(diff_term, 0.0))
+        result = half_sum + xp.sqrt(xp.maximum(diff_term, 0.0))
     elif kind == "min":
         half_sum = (d2_il + d2_xl) / 2.0
         diff_term = ((d2_il - d2_xl) / 2.0) ** 2 + d2_il_xl ** 2
-        result = half_sum - np.sqrt(np.maximum(diff_term, 0.0))
+        result = half_sum - xp.sqrt(xp.maximum(diff_term, 0.0))
     elif kind == "dip":
         result = d2_il
     elif kind == "strike":
@@ -480,4 +500,6 @@ def compute_curvature(
     else:
         raise ValueError(f"Unknown curvature kind: {kind!r}")
 
+    if gpu_active:
+        return cp.asnumpy(result).astype(np.float32)
     return result.astype(np.float32)
