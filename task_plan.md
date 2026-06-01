@@ -247,7 +247,13 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 ---
 
 ## Notes
-- 687 tests passed, 4 skipped — full suite green
+- 710 tests passed, 4 skipped — full suite green
 - cross-well 依赖 well-tie（纯 NumPy，零 Qt）
 - Phase 11.9 shipped — microfacies CNPC colors and evaporite SVG added
-- 下一步动作：启动 Phase 14 连井剖面自适应选井及 PDF 报告导出工作流开发
+- 下一步动作：开发 Phase 14 连井可视化 PDF 报告生成核心
+
+## Errors Encountered
+| Error | Phase | Attempt | Resolution |
+|-------|-------|---------|------------|
+| ValueError: Missing coordinate keys | 14 | 1 | 修复了 dict 和 object 属性中 `0.0` 坐标值被 Python `or` 隐式转换为 Falsy 并触发错误 fallback 的 bug，改用显式 `is not None` 进行过滤。 |
+
