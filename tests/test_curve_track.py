@@ -88,3 +88,44 @@ def test_curve_track_export_render(qtbot):
     painter = QPainter(pm)
     track.export_render(painter, QRectF(0, 0, 150, 832))
     painter.end()
+
+
+def test_curve_track_path_caching(qtbot):
+    from geoviz_well_log.renderer.curve_track import CurveTrack
+    curve = _make_curve(n=200)
+    track = CurveTrack(curves=[curve], label="GR", width=150)
+    qtbot.addWidget(track)
+    track.set_depth_range(0, 1000)
+    
+    # Render 1st time
+    pm1 = QPixmap(150, 800)
+    painter1 = QPainter(pm1)
+    track.paint_content(painter1, QRectF(0, 0, 150, 800))
+    painter1.end()
+    
+    # Assert cache is populated
+    assert hasattr(track, "_path_cache")
+    assert curve.name in track._path_cache
+    cache_key, path1 = track._path_cache[curve.name]
+    
+    # Render 2nd time with exact same geometry
+    pm2 = QPixmap(150, 800)
+    painter2 = QPainter(pm2)
+    track.paint_content(painter2, QRectF(0, 0, 150, 800))
+    painter2.end()
+    
+    # Assert cached path object was reused (identical memory ID)
+    _, path2 = track._path_cache[curve.name]
+    assert path1 is path2
+    
+    # Alter depth range to invalidate cache
+    track.set_depth_range(100, 900)
+    pm3 = QPixmap(150, 800)
+    painter3 = QPainter(pm3)
+    track.paint_content(painter3, QRectF(0, 0, 150, 800))
+    painter3.end()
+    
+    # Assert cache key changed and path was re-generated (new path object)
+    _, path3 = track._path_cache[curve.name]
+    assert path1 is not path3
+

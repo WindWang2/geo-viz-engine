@@ -176,6 +176,9 @@ class CrossWellCanvas(QWidget):
 
         self._overlay.set_models(self._tops_model, self._picks_model, self._widget)
         self._overlay.set_seismic_tie(self._seismic_tie)
+        
+        # Repaint PickingOverlay when any underlying well canvas zooms or pans
+        self._widget.canvas_depth_changed.connect(self._overlay.update)
 
         self._pick_mode = False
         self._active_formation: str | None = None

@@ -11,6 +11,22 @@ from src.data.models import (
 
 _SENTINEL_VALUES = {-9999, -999.25, -9999.0}
 
+class LazySheetDict:
+    """Wrapper to lazily load Excel sheets on demand using pd.read_excel."""
+    def __init__(self, excel_file):
+        self.excel_file = excel_file
+        self._cache = {}
+
+    def get(self, name):
+        if name not in self._cache:
+            import pandas as pd
+            try:
+                self._cache[name] = pd.read_excel(self.excel_file, sheet_name=name)
+            except Exception:
+                self._cache[name] = None
+        return self._cache[name]
+
+
 def load_well_coordinates(path: Path) -> list[WellCoordinates]:
     if not path.exists(): return []
     with open(path, encoding="utf-8") as f: raw = json.load(f)
@@ -59,7 +75,7 @@ def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogD
     
     excel_file = pd.ExcelFile(path, engine="calamine")
     sheet_names = excel_file.sheet_names
-    all_sheets = pd.read_excel(excel_file, sheet_name=None)  # dict[str, DataFrame]
+    all_sheets = LazySheetDict(excel_file)
 
     def read_interval_sheet(df):
         items = []
@@ -259,7 +275,7 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
 
     excel_file = pd.ExcelFile(path, engine="calamine")
     sheet_names = excel_file.sheet_names
-    all_sheets = pd.read_excel(excel_file, sheet_name=None)  # dict[str, DataFrame]
+    all_sheets = LazySheetDict(excel_file)
 
     curves = []
     series = []
@@ -538,16 +554,17 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
 
     file_hash = hashlib.md5(f"{path.name}_{mtime}_{xml_mtime}_{well_name}_{PARSER_VERSION}".encode()).hexdigest()
     safe_well_name = "".join([c if c.isalnum() else "_" for c in (well_name or "unknown")])
-    cache_file = cache_dir / f"{safe_well_name}_{file_hash}.json"
+    cache_file = cache_dir / f"{safe_well_name}_{file_hash}.pkl"
     
     if cache_file.exists():
         try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            # Fix None→NaN in curve values (JSON null from float('nan') serialization)
-            for curve in raw.get("curves", []):
-                curve["values"] = [v if v is not None else float("nan") for v in curve["values"]]
-            return WellLogData.model_validate(raw)
+            import pickle
+            with open(cache_file, "rb") as f:
+                data = pickle.load(f)
+            if isinstance(data, WellLogData):
+                return data
+            elif isinstance(data, dict):
+                return WellLogData.model_validate(data)
         except Exception as e:
             print(f"Failed to load cache for {well_name}: {e}")
             
@@ -570,13 +587,11 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
     else:
         data = load_well_log_laolong1(path, well_name)
         
-    # Save cache (NaN-safe: model_dump_json converts float('nan')→null which breaks deserialization)
+    # Save cache using high performance binary Pickle format
     try:
-        cache_dict = data.model_dump()
-        for curve in cache_dict.get("curves", []):
-            curve["values"] = [None if v != v else v for v in curve["values"]]
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump(cache_dict, f, ensure_ascii=False)
+        import pickle
+        with open(cache_file, "wb") as f:
+            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
     except Exception as e:
         print(f"Failed to save cache for {well_name}: {e}")
         

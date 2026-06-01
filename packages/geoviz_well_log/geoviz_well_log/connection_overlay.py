@@ -63,7 +63,12 @@ class ConnectionOverlay(QWidget):
         if span <= 0:
             return header_h
         ratio = (depth - track.depth_top) / span
-        return header_h + ratio * content_h
+        local_y = header_h + ratio * content_h
+        
+        parent = self.parent()
+        if parent is not None:
+            return canvas.mapTo(parent, QPointF(0, local_y)).y()
+        return canvas.mapTo(self, QPointF(0, local_y)).y()
 
     def _canvas_left(self, canvas: WellLogCanvas) -> float:
         parent = self.parent()

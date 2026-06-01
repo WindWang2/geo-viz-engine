@@ -24,7 +24,7 @@ PAGES = [
     ("well_log",  _get_icon_path("well_log.svg"),  "井剖面"),
     ("cross_well",_get_icon_path("cross_well.svg"),"连井对比"),
     ("seismic",   _get_icon_path("seismic.svg"),   "地震3D"),
-    ("plots",     _get_icon_path("map.svg"),       "平面图件"),
+    ("plots",     _get_icon_path("curve.svg"),     "平面图件"),
     ("data",      _get_icon_path("data.svg"),       "数据管理"),
     ("tools",     _get_icon_path("tools.svg"),      "工具箱"),
 ]

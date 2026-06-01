@@ -513,6 +513,26 @@ self._zoom_center[zoom_key] = center
 - **单元测试**：新建了 `tests/test_evaporite_pattern.py`，使用 `qtbot` 驱动 `QApplication` 上下文，彻底验证了 `PatternEngine` 在加载新 SVG 时能得到非空 `QBrush` 与 `QColor`，并且 `FaciesStyleResolver` 能准确将 `"蒸发盐"` 转换成 `"evaporite"` 并输出正确色值。
 - **回归测试**：运行全量 687 个测试，100% 绿通，完美保障系统零缺陷。
 
+
 ---
 *Update after every 2 view/browser/search operations*
 
+## Performance Audit: Excel Data I/O & QPainter Rendering (2026-06-01)
+
+A systematic performance audit was conducted across the data loading (Excel I/O) and QPainter rendering pipelines. Key findings and optimization decisions are documented below:
+
+### 1. Data I/O Pipeline Bottlenecks & Optimization Paths
+- **Sheet Loading Overhead**: Current pandas Excel parsing uses `pd.read_excel(excel_file, sheet_name=None)` which loads all sheets upfront even if only 2-3 are needed.
+  - *Decision*: Transition to lazy, on-demand sheet reading based on needed facies/markers keywords to reduce initialization overhead by 30-50%.
+- **JSON Serialization Limits**: Well curve data points (10K-100K float arrays) are serialized to JSON list-of-floats format. This is extremely slow during JSON parsing/validation and incurs high GC overhead.
+  - *Decision*: Introduce binary caching (MsgPack/Pickle) for numeric arrays. This is projected to speed up cache-hit paths by 3-5x (reducing latency from 200-500ms down to 40-70ms).
+- **Serial Loading in Cross-Well**: Multi-well datasets are loaded sequentially.
+  - *Decision*: Parallelize well loading using `concurrent.futures.ThreadPoolExecutor` or `QThreadPool` for 3x throughput speedups under multi-well views.
+
+### 2. QPainter Rendering Pipeline Bottlenecks & Optimization Paths
+- **Lack of Frame Caching (Primary Lag Source)**: `WellLogCanvas` inherits `QOpenGLWidget` but lacks any frame caching. Moving the cursor or hovering triggers continuous `paintEvent` repaints of all tracks (e.g. 8-12 tracks per well, up to 80+ tracks in a 10-well view).
+  - *Decision (🔴 OPT-1, High ROI)*: Implement `QPixmap` static layer caching. Render static tracks once into a buffered pixmap, and only blit the cached pixmap and draw the dynamic crosshair overlay on cursor movement. Projected to reduce cursor hover paint latency from 50ms to <0.5ms (boosting FPS from 20 to 200+).
+- **QPainterPath Reconstruction**: Curve tracks rebuild the entire `QPainterPath` from scratch every frame, executing costly Python `lineTo` loops.
+  - *Decision*: Cache the computed `QPainterPath` when the depth range and widget dimensions remain unchanged, and utilize NumPy matrix multiplication for vectorized data-to-screen coordinate mappings.
+- **Event Throttling**: Sync signals trigger immediate global updates.
+  - *Decision*: Coalesce cross-well overlays and canvas synchronizations to a 60 FPS maximum threshold (16ms throttling).

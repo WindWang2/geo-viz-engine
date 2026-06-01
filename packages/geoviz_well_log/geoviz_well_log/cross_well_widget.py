@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QRectF, QSizeF, QSize, QPointF
-from PySide6.QtGui import QPainter, QColor, QPen, QPolygonF, QImage, QPageSize
+from PySide6.QtCore import Qt, QRectF, QSizeF, QSize, QPointF, Signal, QEvent
+from PySide6.QtGui import QPainter, QColor, QPen, QPolygonF, QImage, QPageSize, QMouseEvent
 from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
@@ -20,6 +20,8 @@ from .painter_sync_manager import QPainterSyncManager
 
 class CrossWellWidget(QWidget):
     """Multi-well cross-section view using QPainter-rendered WellLogCanvas widgets."""
+
+    canvas_depth_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -87,6 +89,14 @@ class CrossWellWidget(QWidget):
             zh = ZoomPanHandler(canvas, self)
             zh.set_full_range(canvas.tracks[0].depth_top, canvas.tracks[0].depth_bottom)
             self._depth_ruler.set_depth_range(canvas.tracks[0].depth_top, canvas.tracks[0].depth_bottom)
+        
+        # Wire reactive signal connections to update overlays on zoom/pan depth scaling
+        canvas.depth_range_changed.connect(self.canvas_depth_changed)
+        canvas.depth_range_changed.connect(self._overlay.update)
+        
+        # Intercept child mouse events when manual well correlation is active
+        canvas.installEventFilter(self)
+
         self._overlay.set_canvases(self._canvases, self._well_names)
         self._overlay.raise_()
         self._update_minimum_width()
@@ -96,6 +106,14 @@ class CrossWellWidget(QWidget):
         if canvas in self._canvases:
             idx = self._canvases.index(canvas)
             self._sync_manager.remove_canvas(canvas)
+            
+            try:
+                canvas.depth_range_changed.disconnect(self.canvas_depth_changed)
+                canvas.depth_range_changed.disconnect(self._overlay.update)
+            except RuntimeError:
+                pass
+            canvas.removeEventFilter(self)
+
             wrapper = self._wrappers[idx]
             self._container_layout.removeWidget(wrapper)
             wrapper.setParent(None)
@@ -161,6 +179,23 @@ class CrossWellWidget(QWidget):
             total += c.minimumWidth()
         total += spacing * max(0, len(self._canvases) - 1)
         self.setMinimumWidth(total)
+
+    def eventFilter(self, watched, event) -> bool:
+        """Intercept child canvas clicks when manual linking is active."""
+        if self._manual_link_active and watched in self._canvases:
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                pos = watched.mapTo(self, event.position().toPoint())
+                synthetic = QMouseEvent(
+                    event.type(),
+                    pos,
+                    event.globalPosition(),
+                    event.button(),
+                    event.buttons(),
+                    event.modifiers(),
+                )
+                self.mousePressEvent(synthetic)
+                return True
+        return super().eventFilter(watched, event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

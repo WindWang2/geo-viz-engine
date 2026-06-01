@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QRectF, Signal, QObject, QEvent
-from PySide6.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent
+from PySide6.QtCore import Qt, QRectF, Signal, QObject, QEvent, QSize
+from PySide6.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent, QPixmap
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from .track_base import BaseTrack, ECHARTS_HEADER_BG, ECHARTS_BORDER, ECHARTS_TEXT, ECHARTS_GROUP_HEADER_HEIGHT
 from .coordinator import LayoutCoordinator
@@ -59,6 +59,8 @@ class WellLogCanvas(QOpenGLWidget):
         self._track_filter = _TrackMouseFilter(self)
         self._crosshair: CrosshairOverlay | None = None
         self._depth_span: float = 100.0
+        self._static_cache: QPixmap | None = None
+        self._cache_dirty: bool = True
         self.setMinimumSize(200, 400)
 
     @property
@@ -88,16 +90,19 @@ class WellLogCanvas(QOpenGLWidget):
         track.setParent(self)
         track.setMouseTracking(True)
         track.installEventFilter(self._track_filter)
+        self._cache_dirty = True
         self.setMinimumWidth(self.total_width)
 
     def remove_track(self, track: BaseTrack):
         track.removeEventFilter(self._track_filter)
         self._coordinator.remove_track(track)
+        self._cache_dirty = True
         self.setMinimumWidth(self.total_width)
 
     def set_depth_range(self, top: float, bottom: float):
         self._depth_span = bottom - top
         self._coordinator.set_depth_range(top, bottom)
+        self._cache_dirty = True
         self.depth_range_changed.emit(top, bottom)
         self.update()
 
@@ -106,6 +111,7 @@ class WellLogCanvas(QOpenGLWidget):
             self.remove_track(t)
         for t in tracks:
             self.add_track(t)
+        self._cache_dirty = True
         self.setMinimumWidth(self.total_width)
 
     def paint_all(self, painter: QPainter):
@@ -166,10 +172,26 @@ class WellLogCanvas(QOpenGLWidget):
             full_rect = QRectF(x_off, 0, sw, h)
             track.export_render(painter, full_rect, canvas_header_height=max_header)
 
+    def resizeEvent(self, event):
+        self._cache_dirty = True
+        super().resizeEvent(event)
+
     def paintEvent(self, event):
+        dpr = self.devicePixelRatioF()
+        w = int(self.width() * dpr)
+        h = int(self.height() * dpr)
+
+        if self._cache_dirty or self._static_cache is None or self._static_cache.size() != QSize(w, h):
+            self._static_cache = QPixmap(w, h)
+            self._static_cache.setDevicePixelRatio(dpr)
+            self._static_cache.fill(QColor("#ffffff"))
+            cache_painter = QPainter(self._static_cache)
+            self.paint_all(cache_painter)
+            cache_painter.end()
+            self._cache_dirty = False
+
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#ffffff"))
-        self.paint_all(painter)
+        painter.drawPixmap(0, 0, self._static_cache)
         if self._crosshair and self._crosshair.visible and self.tracks:
             self._crosshair.paint_overlay(painter, QRectF(self.rect()))
         painter.end()

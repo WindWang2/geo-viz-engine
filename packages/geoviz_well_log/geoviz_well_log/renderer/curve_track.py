@@ -142,22 +142,60 @@ class CurveTrack(BaseTrack):
 
         pixel_height = max(1, int(rect.height()))
 
-        for curve in self._curves:
-            depths, values = self._visible_data(curve)
-            depths, values = self._downsample(depths, values, pixel_height)
-            if len(depths) < 2:
-                continue
+        if not hasattr(self, "_path_cache"):
+            self._path_cache = {}
 
-            path = QPainterPath()
-            first = True
-            for d, v in zip(depths, values):
-                x = self._value_to_x(v, curve.display_range, rect)
-                y = self._depth_to_y(d, rect)
-                if first:
-                    path.moveTo(x, y)
-                    first = False
+        for curve in self._curves:
+            cache_key = (
+                self.depth_top,
+                self.depth_bottom,
+                rect.left(),
+                rect.top(),
+                rect.width(),
+                rect.height(),
+                self._log_scale,
+            )
+            
+            cached = self._path_cache.get(curve.name)
+            if cached is not None and cached[0] == cache_key:
+                path = cached[1]
+            else:
+                depths, values = self._visible_data(curve)
+                depths, values = self._downsample(depths, values, pixel_height)
+                if len(depths) < 2:
+                    continue
+
+                # Vectorize coordinate mapping using numpy
+                depths_arr = np.array(depths)
+                values_arr = np.array(values)
+
+                # y coordinate calculation
+                ys = rect.top() + (depths_arr - self.depth_top) / (self.depth_bottom - self.depth_top) * rect.height()
+
+                # x coordinate calculation based on display scale mode
+                lo, hi = curve.display_range
+                if self._log_scale:
+                    clipped_vals = np.clip(values_arr, max(lo, 1e-10), None)
+                    log_lo = log10(max(lo, 1e-10))
+                    log_hi = log10(max(hi, 1e-10))
+                    if log_lo == log_hi:
+                        xs = np.full_like(values_arr, rect.left() + 0.5 * rect.width())
+                    else:
+                        t_arr = (np.log10(clipped_vals) - log_lo) / (log_hi - log_lo)
+                        xs = rect.left() + t_arr * rect.width()
                 else:
-                    path.lineTo(x, y)
+                    if hi == lo:
+                        xs = np.full_like(values_arr, rect.left() + 0.5 * rect.width())
+                    else:
+                        t_arr = (values_arr - lo) / (hi - lo)
+                        xs = rect.left() + t_arr * rect.width()
+
+                path = QPainterPath()
+                path.moveTo(float(xs[0]), float(ys[0]))
+                for x, y in zip(xs[1:], ys[1:]):
+                    path.lineTo(float(x), float(y))
+
+                self._path_cache[curve.name] = (cache_key, path)
 
             painter.setPen(self._make_pen(curve))
             painter.setBrush(Qt.BrushStyle.NoBrush)

@@ -41,6 +41,7 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 12b | 共享纹理与 GLSL 着色器深度优化 | ✅ | 单 3D 纹理多通道打包，GLSL 在线色彩映射与混合，VRAM 减半，O(1) 调参 |
 | 14 | 连井剖面自动化与专业报告导出 | ✅ | 井位地图 Shift+Drag 框选，PCA 自动走向排井，高保真 PDF 报告导出 |
 | 15 | Project 工程文件序列化 (.gvz) | ✅ | 基于 Pydantic 的 Git 友好 schema，相对路径转换，DataPage UI 整合 |
+| Audit | 连井专题深度审计与修复（2026-06-01 用户回归发现） | ✅ | 修复连井带 28px 标签偏移错位，解决点击穿透和 Canvas 消费导致手动连井不起作用，实现连井带与拾取点对齐、跟随 Zoom/Pan 实时平移缩放渲染 |
 
 
 ## 🔴 Phase 11.5: 收尾与债务清理（最高优先级，必须先于 Phase 12）
@@ -76,6 +77,9 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 11.6-F | **连井：自动连井位置不对** — 根因双重：(1) `dtw_engine.py:74` `ref_idx = n//2` 硬编码无视用户拾取深度；(2) "自动连井"按钮仅做 formation name match，DTW 引擎从未被生产代码调用。修复：`correlate()` 新增 `ref_depth` 参数 + `CrossWellCanvas.propagate_pick_via_dtw()` 真正调用 DTW 产生 ghost picks | `packages/geoviz_cross_well/dtw_engine.py`, `canvas.py` | 🔴 P0 | ✅ DONE |
 | 11.6-G | **连井：手动拾取交互体验差** — 全工具栏添加 tooltip；状态栏在拾取模式下显示快捷键提示（左键/Shift+左键/右键/Ctrl+Z/Esc）；新增「DTW 传播」按钮把 11.6-F 的 producer 接入 UI（用户在某口井手动拾取一个点后，一键传播到所有其他井产生灰色 ghost）；`picks_changed` 信号连接到 `_update_status` 实现实时刷新 | `src/pages/cross_well/page.py`, `tests/test_cross_well_page_dtw.py` | 🟡 P1 | ✅ DONE |
 | 11.6-H | **地震：toolbar 显示不完整** — 当前单行 toolbar 控件过多导致末端被裁；按功能分组（视图/属性/标定/导出）拆为 2 行（QToolBar 多行或 2× horizontal layout） | `packages/geoviz_seismic/geoviz_seismic/seismic_view.py` (toolbar 构造段) | 🟡 P1 | ✅ DONE |
+| 11.6-I | **连井：连井带显示错位** — 根因：`ConnectionOverlay.depth_to_y` 未累加 well log canvas 顶部的 28px 标签高度，导致绘制的所有连线和色斑多边形整体向上偏移 28 像素。修复：在 `depth_to_y` 中使用 `canvas.mapTo(parent, ...)` 动态且通用地转换 Y 轴物理偏移坐标。 | `packages/geoviz_well_log/geoviz_well_log/connection_overlay.py` | 🔴 P0 | ✅ DONE |
+| 11.6-J | **连井：手动连井不起效果** — 根因：(1) 新版 UI 遗漏了手动连井按钮；(2) 即使开启，各 well canvas 内部重写了鼠标捕获并默认 `accept()` 吞掉点击，导致事件无法向传递给 `CrossWellWidget.mousePressEvent`。修复：(1) 工具栏补回「手动连井」按钮并做互斥同步；(2) 利用 Qt 事件过滤器 `eventFilter()` 机制，在 `CrossWellWidget` 侧拦截 child canvas 的左键点击并转译为合成点击事件分发，成功触发连线。 | `packages/geoviz_well_log/geoviz_well_log/cross_well_widget.py`, `src/pages/cross_well/page.py` | 🔴 P0 | ✅ DONE |
+| 11.6-K | **连井：连井带不跟随视口缩放** — 根因：`ConnectionOverlay` 和 `PickingOverlay` 均属于浮动透明遮罩，在 well log canvas 触发缩放（Zoom）和滚动（Pan）改变 depth 范围时，没有连接任何信号来通知遮罩重绘，导致连线和色斑图死板地“漂浮”在旧物理位置上。修复：在 `CrossWellWidget` 的 `add_canvas` 内将 `depth_range_changed` 信号级联连接到 `_overlay.update` 及自定义的 `canvas_depth_changed` 信号，使得缩放滚动时两个 Overlay 能够实时随之自适应联动重绘。 | `packages/geoviz_well_log/geoviz_well_log/cross_well_widget.py`, `packages/geoviz_cross_well/geoviz_cross_well/canvas.py` | 🔴 P0 | ✅ DONE |
 
 **Acceptance criteria:**
 - 11.6-A 完成后：点井位 → 弹出该井 popover（井名/坐标/打开测井页按钮）或直接切到测井页并选中该井
@@ -201,6 +205,21 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
   - **[CEO 建议]** 集成 **中石油 (CNPC) 地质制图标准色标模板库**，提供一键规范化渲染。
   - 支持高品质无损 PDF/SVG 矢量导出，与油田出图和学术出版完全接轨。
 - **Risk:** 低 — 纯矢量数学逻辑，无第三方闭源授权陷阱（彻底规避 QtCharts 的 GPLv3 开源传染协议风险）。
+
+### 🆕 Phase 18: 测井与连井深度性能优化 (Excel 加载与 QPainter 渲染)
+> **Goal**: 解决读取 Excel 慢和多井道渲染卡顿的问题，实现秒级加载与极速重绘。
+
+- **Tasks & Roadmap**:
+  - **OPT-1 (🔴 P0) - WellLogCanvas QPixmap 静态层缓存**: 将静态渲染轨道内容缓存至 `QPixmap`，鼠标移动和十字丝悬浮时仅重绘 Overlay/Crosshair，避免每帧全量重绘 8-12 个 Track Widget。 (✅ DONE)
+  - **OPT-2 (🔴 P0) - Excel 延迟/按需 Sheet 读取**: 优化 `loaders.py` 中的 `pd.read_excel`，仅解析所需的 Sheet（如 `测井曲线`、`地层系统` 等），避免一次性加载全部 10+ Sheet，大幅缩短首次解析耗时。 (✅ DONE)
+  - **OPT-3 (🟡 P1) - 二进制缓存机制（Pickle/MsgPack）**: 将大容量 `CurveData` 从 JSON 格式（浮点数文本反序列化慢）改为二进制序列化缓存（MsgPack 或 Python Pickle），使缓存命中路径的读取速度提升 3-5 倍。 (✅ DONE)
+  - **OPT-4 (🟡 P1) - 多线程/进程异步并行加载**: 将连井页面中的多口井顺序串行加载修改为基于 `QThreadPool` 或 `concurrent.futures` 的并行读取，缩短首次无缓存情况下的总等待时间。 (✅ DONE)
+  - **OPT-5 (🟡 P1) - CurveTrack QPainterPath 缓存与 NumPy 向量化坐标转换**: 在视口/尺寸未改变时，复用已生成的 `QPainterPath`；在重绘时利用 NumPy 进行大批量的深度/测井值与屏幕物理坐标的矩阵式映射转换，完全消除 Python 逐点 `lineTo` 的循环开销。 (✅ DONE)
+  - **OPT-7 (🟢 P2) - 连井事件节流与重绘微内核合并**: 对 `CrossWellWidget` 里的 `depth_range_changed` 缩放/滚动重绘信号进行 coalescing（16ms 节流合并），平滑多井联动时的瞬间计算压力。
+
+- **Acceptance Criteria**:
+  - 10 口井连井场景下，鼠标移动帧率稳定在 60+ FPS (鼠标移动重绘时间由 ~50ms 降至 <2ms)。
+  - 首次无缓存加载单井耗时控制在 1.0s 内，缓存命中路径读取耗时控制在 100ms 内。
 
 ---
 

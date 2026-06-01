@@ -138,18 +138,40 @@ class _WellLoadWorker(QObject):
         self._well_names = well_names
 
     def run(self):
-        result = []
-        for i, name in enumerate(self._well_names):
+        from concurrent.futures import ThreadPoolExecutor
+        
+        def load_one(name):
             try:
                 entry = get_well_data(name)
                 if entry is None:
-                    continue
+                    return name, None
                 loader_fn, xls_path, config = entry
                 data = loader_fn(xls_path, well_name=name)
-                result.append((name, data))
-                self.progress.emit(i, name)
+                return name, data
             except Exception as e:
                 print(f"[CrossWell] Failed to load {name}: {e}")
+                return name, None
+
+        # Load well data in parallel using a ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(4, len(self._well_names))) as executor:
+            # Map futures back to names to preserve ordering
+            future_to_name = {executor.submit(load_one, name): name for name in self._well_names}
+            data_map = {}
+            for future in future_to_name:
+                name = future_to_name[future]
+                try:
+                    _, data = future.result()
+                    if data is not None:
+                        data_map[name] = data
+                except Exception as e:
+                    print(f"[CrossWell] Failed to retrieve result for {name}: {e}")
+
+        # Preserve the original selection order of the wells
+        result = []
+        for name in self._well_names:
+            if name in data_map:
+                result.append((name, data_map[name]))
+                
         self.finished.emit(result)
 
 
@@ -226,6 +248,16 @@ class CrossWellPage(QWidget):
         self._pick_btn.setStyleSheet(self._btn_style())
         self._pick_btn.clicked.connect(self._on_toggle_pick)
         tb.addWidget(self._pick_btn)
+
+        self._manual_link_btn = QPushButton("手动连井")
+        self._manual_link_btn.setFixedHeight(28)
+        self._manual_link_btn.setCheckable(True)
+        self._manual_link_btn.setToolTip(
+            "进入手动连井模式：依次左键点击相邻两口井中的砂体或小层进行对比连线，再次点击退出"
+        )
+        self._manual_link_btn.setStyleSheet(self._btn_style())
+        self._manual_link_btn.clicked.connect(self._on_toggle_manual_link)
+        tb.addWidget(self._manual_link_btn)
 
         self._auto_btn = self._make_btn("自动连井")
         self._auto_btn.setToolTip("按层位名匹配相邻井（如「万山组」），无名时不会连接")
@@ -409,6 +441,10 @@ class CrossWellPage(QWidget):
             if self._canvas.pick_mode:
                 parts.append(
                     "拾取模式: 左键添加 · Shift+左键连接 · 右键删除 · Ctrl+Z 撤销 · Esc 退出"
+                )
+            elif hasattr(self, '_cross_well') and self._cross_well._manual_link_active:
+                parts.append(
+                    "连井模式: 请依次左键点击相邻两口井中的砂体或小层进行对比连线"
                 )
         self._status.setText("  |  ".join(parts) if parts else "")
 
@@ -612,11 +648,28 @@ class CrossWellPage(QWidget):
         active = self._pick_btn.isChecked()
         self._canvas.pick_mode = active
         if active:
+            if self._manual_link_btn.isChecked():
+                self._manual_link_btn.setChecked(False)
+                self._on_toggle_manual_link()
             self._pick_btn.setStyleSheet(
                 self._btn_style() + "QPushButton { background: #fef3c7; border-color: #f59e0b; }"
             )
         else:
             self._pick_btn.setStyleSheet(self._btn_style())
+        self._update_status()
+
+    def _on_toggle_manual_link(self):
+        active = self._manual_link_btn.isChecked()
+        self._cross_well.toggle_manual_link()
+        if active:
+            if self._pick_btn.isChecked():
+                self._pick_btn.setChecked(False)
+                self._on_toggle_pick()
+            self._manual_link_btn.setStyleSheet(
+                self._btn_style() + "QPushButton { background: #fee2e2; border-color: #f87171; }"
+            )
+        else:
+            self._manual_link_btn.setStyleSheet(self._btn_style())
         self._update_status()
 
     def _on_toggle_domain(self):
@@ -644,6 +697,8 @@ class CrossWellPage(QWidget):
         self._placeholder.setVisible(True)
         self._pick_btn.setChecked(False)
         self._pick_btn.setStyleSheet(self._btn_style())
+        self._manual_link_btn.setChecked(False)
+        self._manual_link_btn.setStyleSheet(self._btn_style())
         self._update_status()
 
     def _on_export(self):

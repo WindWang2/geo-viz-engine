@@ -146,7 +146,7 @@ wheels = [
 
 [[package]]
 name = "geo-viz-engine"
-version = "0.9.0"
+version = "0.13.0"
 source = { editable = "." }
 dependencies = [
     { name = "geoviz-cross-well", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },

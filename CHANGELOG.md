@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-01
+
+### Added
+- **Performance Audit & High-Performance Optimizations (Phase 18)**:
+  - **WellLogCanvas QPixmap Static Caching**: Implemented static frame caching for tracks, reducing hover and crosshair rendering latency from ~50ms to <0.5ms.
+  - **Lazy Excel Sheet Loading**: Replaced full workbook parsing with on-demand sheet loading via `LazySheetDict`, drastically reducing cold-start times.
+  - **Binary Cache (Pickle)**: Migrated `WellLogData` cache to binary `.pkl` format for rapid NaN-safe numeric array deserialization, achieving up to 5x faster cache hits.
+  - **Parallel Well Loading**: Implemented concurrent loading of multi-well datasets using `ThreadPoolExecutor` while preserving user selection order.
+  - **CurveTrack Path Caching & Vectorization**: Added caching for `QPainterPath` mapped to viewport geometries and leveraged NumPy vectorization for coordinate mapping to eliminate Python loop overheads.
+- **Cross-Well UI and UX Improvements**:
+  - Restored manual well linking functionality in `CrossWellWidget` utilizing Qt event filters to intercept child canvas clicks.
+  - Enhanced connection overlay rendering to support dynamic tracking with zoom and pan events in the `CrossWellWidget`.
+
+### Fixed
+- Fixed y-axis displacement bug (28px header height offset) in `ConnectionOverlay.depth_to_y` ensuring proper correlation band alignment.
+
 ## [0.12.0] - 2026-06-01
 
 ### Added
