@@ -68,6 +68,7 @@ class MainWindow(QWidget):
         self.setWindowTitle("GeoViz Engine")
         self.resize(1280, 800)
         self.cache = DataCache()
+        self.current_project = None
         self._build_ui()
 
     def _build_ui(self):
@@ -173,3 +174,36 @@ class MainWindow(QWidget):
     def _on_section_selected(self, well_names: list[str]):
         self.cross_well_page.load_planned_section(well_names)
         self._switch_page(3)
+
+    def sync_from_project(self, project_data):
+        """Apply project state to the main window and all pages."""
+        self.current_project = project_data
+        
+        # Restore active page
+        if project_data.view_state:
+            active_page = project_data.view_state.active_page
+            self._switch_page(active_page)
+
+    def sync_to_project(self):
+        """Gather current application state from all pages and return a ProjectSchema."""
+        from src.data.project import ProjectSchema, ProjectMeta, ProjectViewState
+        from datetime import datetime
+
+        # Create defaults if no project is active
+        if self.current_project is None:
+            now_str = datetime.now().isoformat()
+            meta = ProjectMeta(
+                name="New Project",
+                version="0.8.0",
+                created_at=now_str,
+                updated_at=now_str
+            )
+            self.current_project = ProjectSchema(meta=meta)
+
+        # Update metadata timestamp
+        self.current_project.meta.updated_at = datetime.now().isoformat()
+
+        # Gather view state
+        self.current_project.view_state.active_page = self.stack.currentIndex()
+
+        return self.current_project
