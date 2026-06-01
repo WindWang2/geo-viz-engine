@@ -215,7 +215,7 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
   - **OPT-3 (🟡 P1) - 二进制缓存机制（Pickle/MsgPack）**: 将大容量 `CurveData` 从 JSON 格式（浮点数文本反序列化慢）改为二进制序列化缓存（MsgPack 或 Python Pickle），使缓存命中路径的读取速度提升 3-5 倍。 (✅ DONE)
   - **OPT-4 (🟡 P1) - 多线程/进程异步并行加载**: 将连井页面中的多口井顺序串行加载修改为基于 `QThreadPool` 或 `concurrent.futures` 的并行读取，缩短首次无缓存情况下的总等待时间。 (✅ DONE)
   - **OPT-5 (🟡 P1) - CurveTrack QPainterPath 缓存与 NumPy 向量化坐标转换**: 在视口/尺寸未改变时，复用已生成的 `QPainterPath`；在重绘时利用 NumPy 进行大批量的深度/测井值与屏幕物理坐标的矩阵式映射转换，完全消除 Python 逐点 `lineTo` 的循环开销。 (✅ DONE)
-  - **OPT-7 (🟢 P2) - 连井事件节流与重绘微内核合并**: 对 `CrossWellWidget` 里的 `depth_range_changed` 缩放/滚动重绘信号进行 coalescing（16ms 节流合并），平滑多井联动时的瞬间计算压力。
+  - **OPT-7 (🟢 P2) - 连井事件节流与重绘微内核合并**: 对 `CrossWellWidget` 里的 `depth_range_changed` 缩放/滚动重绘信号进行 coalescing（16ms 节流合并），平滑多井联动时的瞬间计算压力。 (✅ DONE)
 
 - **Acceptance Criteria**:
   - 10 口井连井场景下，鼠标移动帧率稳定在 60+ FPS (鼠标移动重绘时间由 ~50ms 降至 <2ms)。
