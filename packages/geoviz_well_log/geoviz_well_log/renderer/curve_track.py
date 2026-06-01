@@ -22,6 +22,7 @@ class CurveTrack(BaseTrack):
                          width=width, header_height=header_height, parent=parent)
         self._curves = curves
         self._log_scale = log_scale
+        self._path_cache = {}
         # Store sorted copies — never mutate the original Pydantic models
         self._sorted_depths: dict[str, list[float]] = {}
         self._sorted_values: dict[str, list[float]] = {}
@@ -141,9 +142,6 @@ class CurveTrack(BaseTrack):
         self.paint_grid(painter, rect)
 
         pixel_height = max(1, int(rect.height()))
-
-        if not hasattr(self, "_path_cache"):
-            self._path_cache = {}
 
         for curve in self._curves:
             cache_key = (

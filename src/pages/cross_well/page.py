@@ -157,7 +157,10 @@ class _WellLoadWorker(QObject):
             # Map futures back to names to preserve ordering
             future_to_name = {executor.submit(load_one, name): name for name in self._well_names}
             data_map = {}
-            for future in future_to_name:
+            completed = 0
+            
+            import concurrent.futures
+            for future in concurrent.futures.as_completed(future_to_name):
                 name = future_to_name[future]
                 try:
                     _, data = future.result()
@@ -165,6 +168,9 @@ class _WellLoadWorker(QObject):
                         data_map[name] = data
                 except Exception as e:
                     print(f"[CrossWell] Failed to retrieve result for {name}: {e}")
+                finally:
+                    completed += 1
+                    self.progress.emit(completed, name)
 
         # Preserve the original selection order of the wells
         result = []
