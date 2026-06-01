@@ -536,3 +536,38 @@ A systematic performance audit was conducted across the data loading (Excel I/O)
   - *Decision*: Cache the computed `QPainterPath` when the depth range and widget dimensions remain unchanged, and utilize NumPy matrix multiplication for vectorized data-to-screen coordinate mappings.
 - **Event Throttling**: Sync signals trigger immediate global updates.
   - *Decision*: Coalesce cross-well overlays and canvas synchronizations to a 60 FPS maximum threshold (16ms throttling).
+
+## UI Redesign: Azurite Design System (2026-06-01)
+
+A complete UI overhaul has been initiated based on the "Azurite" (蓝铜) design system.
+
+### 1. Visual Identity & Palette
+- **Primary Color**: `#1f66d4` (Azurite Blue) — used for primary actions, active navigation states, and highlights.
+- **Stroke Color**: `#586878` — used for consistent component outlines and secondary text.
+- **Background Color**: `#faf9f5` (Light Cream) — provides a warmer, more professional look compared to pure white or standard gray.
+- **Component Style**: 1.6px stroke-based linear design, 8px border-radius, and consistent spacing (8px grid).
+
+### 2. Iconography (Linear 24x24)
+- A new custom icon pack has been introduced, replacing generic system icons.
+- **Mapping**:
+  - `map.svg` → Global Map
+  - `paleo.svg` → Paleo-geographic Map
+  - `well.svg` → Well Log View
+  - `cross.svg` → Cross-well Section
+  - `seismic.svg` → 3D Seismic
+  - `plots.svg` → Plane Plots/Charts
+  - `data.svg` → Data Management
+  - `tools.svg` → Toolkit
+
+### 3. Layout Strategy
+- **Sidebar**: Fixed width 160px. Consistent hover and active states using Azurite Blue. Integrated brand logo at the top.
+- **Toolbars**: Standardization of toolbars across all pages using the 1.6px stroke style and unified action icons. Standard heights (30-40px).
+- **Control Panels**: Consistent QGroupBox styling (8px radius, 1.6px stroke) with internal padding (8px) and bold titles.
+- **Typography**: Shift towards bold, high-contrast headers with softer body text using the Azurite palette. Primary font: "Microsoft YaHei", "Segoe UI".
+- **Component Palette**: 
+  - Backgrounds: `#faf9f5` (Warm Cream)
+  - Primary: `#1f66d4` (Azurite Blue)
+  - Secondary/Stroke: `#586878` (Neutral Slate)
+  - Selected states: `#e9effa` (Light Blue)
+
+

@@ -668,3 +668,28 @@ compare 模式不是用户提出的需求，是 Phase 11.6 时自作主张加的
 |------|-------|--------|
 | 2026-05-31 (Phase 11.7-E) | 全套 684 passed, 4 skipped | ✅ |
 
+### Phase 20: UI Redesign (Azurite Design System) (2026-06-01)
+
+#### 目标
+基于 "Azurite" (蓝铜) 设计系统，对整个 GeoViz Engine 进行 UI 全量升级。
+
+#### 分析
+1. **设计规范**：引入核心色 `#1f66d4`、描边色 `#586878` 与背景色 `#faf9f5`；采用 1.6px 描边线型风格。
+2. **图标系统**：将所有导航和 UI 动作图标替换为全新的线性 24x24 矢量图标。
+3. **组件标准化**：统一个页面的 Toolbar、Button、ComboBox 和 Table 样式。
+
+#### 进度
+- [x] 图标迁移：将 `UI-REF/icons` 迁移至 `src/resources/icons` (✅ DONE)
+- [x] 全局样式：在 `main.py` 和 `app.py` 中应用 Azurite 全局 QSS (✅ DONE)
+- [x] 页面重构：所有功能页面（Seismic, Map, WellLog, CrossWell, Plots, Data, Tools）同步 Azurite 风格 (✅ DONE)
+- [x] 品牌集成：集成 GeoViz 品牌 Logo (✅ DONE)
+
+#### 验证
+- [x] `tests/test_ui_assets.py`：通过
+- [x] `tests/test_ui_styling.py`：通过
+- [x] `tests/test_ui_qss.py`：通过
+- [x] `tests/test_seismic_ui.py` / `test_well_log_ui.py` / `test_plots_ui.py` / `test_tools_ui.py`：全部通过 ✅
+- 全套测试：723 passed ✅
+
+
+
