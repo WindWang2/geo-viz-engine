@@ -42,6 +42,29 @@ def test_cross_well_widget_clear_all(app):
     assert widget.canvas_count == 0
 
 
+def test_cross_well_widget_event_coalescing(app, qtbot):
+    widget = CrossWellWidget()
+    c1 = WellLogCanvas()
+    widget.add_canvas(c1, "well1")
+
+    emissions = 0
+    def on_changed():
+        nonlocal emissions
+        emissions += 1
+
+    widget.canvas_depth_changed.connect(on_changed)
+
+    # Rapidly emit depth_range_changed 100 times to simulate fast mouse scroll/pan
+    for i in range(100):
+        c1.depth_range_changed.emit(0, 100 + i)
+
+    # Give the 16ms timer time to fire
+    qtbot.wait(50)
+
+    # Assert that it fired exactly once (coalesced)
+    assert emissions == 1
+
+
 # --- Task 4: auto-link and manual link ---
 
 from geoviz_well_log.renderer.depth_track import DepthTrack

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QRectF, QSizeF, QSize, QPointF, Signal, QEvent
+from PySide6.QtCore import Qt, QRectF, QSizeF, QSize, QPointF, Signal, QEvent, QTimer
 from PySide6.QtGui import QPainter, QColor, QPen, QPolygonF, QImage, QPageSize, QMouseEvent
 from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtPrintSupport import QPrinter
@@ -49,6 +49,22 @@ class CrossWellWidget(QWidget):
         # Depth ruler on right edge
         self._depth_ruler = DepthRuler(self)
 
+        # Timer for coalescing depth_range_changed events
+        self._coalesce_timer = QTimer(self)
+        self._coalesce_timer.setSingleShot(True)
+        self._coalesce_timer.setInterval(16)
+        self._coalesce_timer.timeout.connect(self._on_coalesced_depth_changed)
+
+    def _schedule_depth_changed(self):
+        """Schedule a coalesced update for depth changes."""
+        if not self._coalesce_timer.isActive():
+            self._coalesce_timer.start()
+
+    def _on_coalesced_depth_changed(self):
+        """Perform the actual update after coalescing."""
+        self.canvas_depth_changed.emit()
+        self._overlay.update()
+
     @property
     def canvas_count(self) -> int:
         return len(self._canvases)
@@ -91,8 +107,8 @@ class CrossWellWidget(QWidget):
             self._depth_ruler.set_depth_range(canvas.tracks[0].depth_top, canvas.tracks[0].depth_bottom)
         
         # Wire reactive signal connections to update overlays on zoom/pan depth scaling
-        canvas.depth_range_changed.connect(self.canvas_depth_changed)
-        canvas.depth_range_changed.connect(self._overlay.update)
+        # using a coalescing timer (16ms throttle) to prevent rapid redraws
+        canvas.depth_range_changed.connect(self._schedule_depth_changed)
         
         # Intercept child mouse events when manual well correlation is active
         canvas.installEventFilter(self)
@@ -108,8 +124,7 @@ class CrossWellWidget(QWidget):
             self._sync_manager.remove_canvas(canvas)
             
             try:
-                canvas.depth_range_changed.disconnect(self.canvas_depth_changed)
-                canvas.depth_range_changed.disconnect(self._overlay.update)
+                canvas.depth_range_changed.disconnect(self._schedule_depth_changed)
             except RuntimeError:
                 pass
             canvas.removeEventFilter(self)
