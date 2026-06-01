@@ -69,6 +69,7 @@ class MainWindow(QWidget):
         self.resize(1280, 800)
         self.cache = DataCache()
         self.current_project = None
+        self.current_project_path = None
         self._build_ui()
 
     def _build_ui(self):
@@ -183,6 +184,10 @@ class MainWindow(QWidget):
         if project_data.view_state:
             active_page = project_data.view_state.active_page
             self._switch_page(active_page)
+
+        # Sync DataPage display if instantiated
+        if hasattr(self, "data_page") and self.data_page is not None:
+            self.data_page.update_project_display()
 
     def sync_to_project(self):
         """Gather current application state from all pages and return a ProjectSchema."""

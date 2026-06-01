@@ -51,3 +51,27 @@ def test_main_window_project_synchronization(window):
     collected = window.sync_to_project()
     assert collected.view_state.active_page == 2
 
+
+def test_data_page_project_controls(window):
+    """Verify that DataPage exposes project lifecycle buttons and syncs metadata display."""
+    from PySide6.QtWidgets import QPushButton, QLabel
+    
+    dp = window.data_page
+    # 1. Assert UI controls exist
+    assert hasattr(dp, "_new_proj_btn")
+    assert hasattr(dp, "_open_proj_btn")
+    assert hasattr(dp, "_save_proj_btn")
+    assert hasattr(dp, "_save_as_proj_btn")
+    assert hasattr(dp, "_project_meta_label")
+
+    assert isinstance(dp._new_proj_btn, QPushButton)
+    assert isinstance(dp._project_meta_label, QLabel)
+    assert dp._project_meta_label.text() == "工程: 未加载"
+
+    # 2. Test "New Project" creation
+    dp._new_proj_btn.click()
+    assert window.current_project is not None
+    assert window.current_project.meta.name == "新工程"
+    assert "工程: 新工程" in dp._project_meta_label.text()
+
+
