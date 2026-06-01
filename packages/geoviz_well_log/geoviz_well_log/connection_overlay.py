@@ -66,9 +66,15 @@ class ConnectionOverlay(QWidget):
         return header_h + ratio * content_h
 
     def _canvas_left(self, canvas: WellLogCanvas) -> float:
+        parent = self.parent()
+        if parent is not None:
+            return canvas.mapTo(parent, canvas.rect().topLeft()).x()
         return canvas.mapTo(self, canvas.rect().topLeft()).x()
 
     def _canvas_right(self, canvas: WellLogCanvas) -> float:
+        parent = self.parent()
+        if parent is not None:
+            return canvas.mapTo(parent, canvas.rect().topRight()).x()
         return canvas.mapTo(self, canvas.rect().topRight()).x()
 
     def paintEvent(self, event):
