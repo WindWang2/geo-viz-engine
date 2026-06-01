@@ -113,17 +113,58 @@ def main():
     app.setFont(font)
 
     app.setStyleSheet("""
-        QWidget { background: #ffffff; color: #1a202c; }
-        QGroupBox { border: 1px solid #cbd5e0; border-radius: 4px; margin-top: 8px; padding-top: 16px; }
-        QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
-        QPushButton { background: #edf2f7; border: 1px solid #cbd5e0; border-radius: 4px; padding: 6px 16px; color: #1a202c; }
-        QPushButton:hover { background: #e2e8f0; }
-        QPushButton:pressed { background: #cbd5e0; }
-        QTableWidget { background: #ffffff; gridline-color: #e2e8f0; border: 1px solid #e2e8f0; }
-        QHeaderView::section { background: #f7fafc; border: 1px solid #e2e8f0; padding: 4px; }
-        QScrollBar:vertical { background: #f7fafc; width: 10px; }
-        QScrollBar::handle:vertical { background: #cbd5e0; border-radius: 5px; }
-        QScrollArea { border: none; }
+        QWidget { background: #faf9f5; color: #586878; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; }
+        
+        QGroupBox { 
+            border: 1.6px solid #586878; 
+            border-radius: 8px; 
+            margin-top: 12px; 
+            padding-top: 16px; 
+            font-weight: bold;
+        }
+        QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; }
+        
+        QPushButton { 
+            background: #ffffff; 
+            border: 1.6px solid #586878; 
+            border-radius: 8px; 
+            padding: 8px 16px; 
+            color: #586878; 
+            font-weight: 500;
+        }
+        QPushButton:hover { background: #f0f4f8; border-color: #1f66d4; color: #1f66d4; }
+        QPushButton:pressed { background: #e9effa; }
+        QPushButton:checked { background: #1f66d4; color: #ffffff; border-color: #1f66d4; }
+        
+        QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+            background: #ffffff;
+            border: 1.6px solid #586878;
+            border-radius: 6px;
+            padding: 4px 8px;
+            min-height: 24px;
+        }
+        QLineEdit:focus, QComboBox:focus { border-color: #1f66d4; }
+        
+        QTableWidget { 
+            background: #ffffff; 
+            gridline-color: #f0f4f8; 
+            border: 1.6px solid #586878; 
+            border-radius: 8px;
+        }
+        QHeaderView::section { 
+            background: #f0f4f8; 
+            border: none;
+            border-right: 1.6px solid #586878;
+            border-bottom: 1.6px solid #586878;
+            padding: 6px; 
+            font-weight: bold;
+        }
+        
+        QScrollBar:vertical { background: #faf9f5; width: 12px; margin: 0px; }
+        QScrollBar::handle:vertical { background: #586878; border-radius: 6px; min-height: 20px; margin: 2px; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        
+        QScrollArea { border: none; background: transparent; }
     """)
     app.setApplicationName("GeoViz Engine")
 
