@@ -24,6 +24,7 @@ PAGES = [
     ("well_log",  _get_icon_path("well_log.svg"),  "井剖面"),
     ("cross_well",_get_icon_path("cross_well.svg"),"连井对比"),
     ("seismic",   _get_icon_path("seismic.svg"),   "地震3D"),
+    ("plots",     _get_icon_path("map.svg"),       "平面图件"),
     ("data",      _get_icon_path("data.svg"),       "数据管理"),
     ("tools",     _get_icon_path("tools.svg"),      "工具箱"),
 ]
@@ -147,12 +148,16 @@ class MainWindow(QWidget):
         from src.pages.tools import ToolsPage
         self.tools_page = ToolsPage()
 
+        from src.pages.plots import PlotsPage
+        self.plots_page = PlotsPage()
+
         page_widgets = [
             map_widget,                            # map
             paleo_map_widget,                      # paleo map
             self.well_log_page,                   # well log
             self.cross_well_page,                # cross well
             seismic_widget,                       # seismic
+            self.plots_page,                      # plots
             self.data_page,                      # data
             self.tools_page,                     # tools
         ]
