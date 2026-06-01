@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QObject, QThread, Signal, QEvent
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QWheelEvent, QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QDialog, QListWidget, QListWidgetItem, QAbstractItemView,
@@ -184,6 +184,14 @@ class _WellLoadWorker(QObject):
 class CrossWellPage(QWidget):
     """Cross-well correlation page with grouped toolbar and picking workflow."""
 
+    def _get_ui_icon(self, name: str) -> QIcon:
+        """Resolve icon from project resources."""
+        from src.utils.paths import get_resources_dir
+        path = get_resources_dir() / "icons" / "ui" / name
+        if path.exists():
+            return QIcon(str(path))
+        return QIcon()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker = None
@@ -198,45 +206,38 @@ class CrossWellPage(QWidget):
         # --- Toolbar ---
         self._toolbar = QWidget()
         self._toolbar.setStyleSheet(
-            "background: #f7fafc; border-bottom: 1px solid #e2e8f0;"
+            "background: #faf9f5; border-bottom: 1px solid #e2e8f0;"
         )
         tb = QHBoxLayout(self._toolbar)
-        tb.setContentsMargins(12, 6, 12, 6)
+        tb.setContentsMargins(12, 8, 12, 8)
 
-        title = QLabel("连井对比")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1a202c;")
+        title = QLabel(" 连井对比")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1f66d4;")
         tb.addWidget(title)
         tb.addSpacing(12)
 
         # Data group
-        self._add_btn = self._make_btn("添加井")
+        self._add_btn = self._make_btn(" 添加井", "plus.svg")
         self._add_btn.setToolTip("打开井选择对话框，加载多口井并显示在画布上")
         self._add_btn.clicked.connect(self._on_add_wells)
         tb.addWidget(self._add_btn)
 
-        self._clear_btn = QPushButton("清除")
+        self._clear_btn = QPushButton(" 清除")
+        self._clear_btn.setIcon(self._get_ui_icon("undo.svg"))
         self._clear_btn.setFixedHeight(28)
         self._clear_btn.setToolTip("清除所有井和拾取数据，回到初始状态")
-        self._clear_btn.setStyleSheet("""
-            QPushButton {
-                background: #fed7d7; color: #9b2c2c;
-                border: 1px solid #feb2b2; border-radius: 4px;
-                padding: 0 12px; font-size: 13px;
-            }
-            QPushButton:hover { background: #fc8181; color: white; }
-        """)
         self._clear_btn.clicked.connect(self._on_clear)
         tb.addWidget(self._clear_btn)
 
         self._sep(tb)
 
         # View group
-        self._track_btn = self._make_btn("选择井道")
+        self._track_btn = self._make_btn(" 选择井道", "table.svg")
         self._track_btn.setToolTip("勾选要显示的井道（深度/岩性固定，最多再选3个）")
         self._track_btn.clicked.connect(self._on_select_tracks)
         tb.addWidget(self._track_btn)
 
-        self._domain_btn = self._make_btn("域: MD")
+        self._domain_btn = self._make_btn(" 域: MD", "globe.svg")
         self._domain_btn.setCheckable(True)
         self._domain_btn.setToolTip("切换深度域：MD（测量深度）↔ TWT（双程旅行时，需先导入井震标定）")
         self._domain_btn.clicked.connect(self._on_toggle_domain)
@@ -245,39 +246,35 @@ class CrossWellPage(QWidget):
         self._sep(tb)
 
         # Correlate group
-        self._pick_btn = QPushButton("手动拾取")
-        self._pick_btn.setFixedHeight(28)
+        self._pick_btn = self._make_btn(" 手动拾取", "pin.svg")
         self._pick_btn.setCheckable(True)
         self._pick_btn.setToolTip(
             "进入拾取模式：左键添加层位点，Shift+左键连接到其他井，右键删除，Esc 退出"
         )
-        self._pick_btn.setStyleSheet(self._btn_style())
         self._pick_btn.clicked.connect(self._on_toggle_pick)
         tb.addWidget(self._pick_btn)
 
-        self._manual_link_btn = QPushButton("手动连井")
-        self._manual_link_btn.setFixedHeight(28)
+        self._manual_link_btn = self._make_btn(" 手动连井", "palette.svg")
         self._manual_link_btn.setCheckable(True)
         self._manual_link_btn.setToolTip(
             "进入手动连井模式：依次左键点击相邻两口井中的砂体或小层进行对比连线，再次点击退出"
         )
-        self._manual_link_btn.setStyleSheet(self._btn_style())
         self._manual_link_btn.clicked.connect(self._on_toggle_manual_link)
         tb.addWidget(self._manual_link_btn)
 
-        self._auto_btn = self._make_btn("自动连井")
+        self._auto_btn = self._make_btn(" 自动连井", "share.svg")
         self._auto_btn.setToolTip("按层位名匹配相邻井（如「万山组」），无名时不会连接")
         self._auto_btn.clicked.connect(self._on_auto_link)
         tb.addWidget(self._auto_btn)
 
-        self._dtw_btn = self._make_btn("DTW 传播")
+        self._dtw_btn = self._make_btn(" DTW 传播", "search.svg")
         self._dtw_btn.setToolTip(
             "用 DTW 把当前已有的层位点从一口井传播到所有其他井（产生灰色 ghost 点，左键确认 / 右键拒绝）"
         )
         self._dtw_btn.clicked.connect(self._on_dtw_propagate)
         tb.addWidget(self._dtw_btn)
 
-        self._tops_btn = self._make_btn("导入层位")
+        self._tops_btn = self._make_btn(" 导入层位", "upload.svg")
         self._tops_btn.setToolTip("从 CSV 文件导入层位顶界数据（well, formation, depth_m）")
         self._tops_btn.clicked.connect(self._on_load_tops)
         tb.addWidget(self._tops_btn)
@@ -285,17 +282,7 @@ class CrossWellPage(QWidget):
         tb.addStretch()
 
         # Export group
-        self._export_btn = QPushButton("导出")
-        self._export_btn.setFixedHeight(28)
-        self._export_btn.setStyleSheet("""
-            QPushButton {
-                background: #3182ce; color: white;
-                border: none; border-radius: 4px;
-                padding: 0 12px; font-size: 13px;
-            }
-            QPushButton:hover { background: #2b6cb0; }
-            QPushButton:pressed { background: #2c5282; }
-        """)
+        self._export_btn = self._make_btn(" 导出", "export.svg")
         self._export_btn.clicked.connect(self._on_export)
         tb.addWidget(self._export_btn)
 
@@ -308,8 +295,8 @@ class CrossWellPage(QWidget):
         # --- Status bar ---
         self._status = QLabel()
         self._status.setStyleSheet(
-            "background: #f7fafc; border-top: 1px solid #e2e8f0; "
-            "padding: 4px 12px; font-size: 12px; color: #4a5568;"
+            "background: #faf9f5; border-top: 1px solid #e2e8f0; "
+            "padding: 6px 12px; font-size: 12px; color: #586878;"
         )
         self._update_status()
         outer.addWidget(self._status)
@@ -325,33 +312,26 @@ class CrossWellPage(QWidget):
         self._placeholder = QWidget()
         ph_layout = QVBoxLayout(self._placeholder)
         ph_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ph_title = QLabel("连井对比")
+        ph_title = QLabel(" 连井对比")
         ph_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ph_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1a202c;")
+        ph_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1f66d4;")
         ph_sub = QLabel("点击「添加井」选择要对比的井号")
         ph_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ph_sub.setStyleSheet("font-size: 14px; color: #718096; margin-top: 8px;")
-        ph_cta = QPushButton("添加井")
-        ph_cta.setFixedSize(120, 36)
-        ph_cta.setStyleSheet("""
-            QPushButton {
-                background: #3182ce; color: white;
-                border: none; border-radius: 6px;
-                font-size: 14px; font-weight: bold;
-            }
-            QPushButton:hover { background: #2b6cb0; }
-        """)
+        ph_sub.setStyleSheet("font-size: 14px; color: #586878; margin-top: 8px;")
+        ph_cta = QPushButton(" 添加井")
+        ph_cta.setIcon(self._get_ui_icon("plus.svg"))
+        ph_cta.setFixedSize(140, 40)
         ph_cta.clicked.connect(self._on_add_wells)
         ph_layout.addWidget(ph_title)
         ph_layout.addWidget(ph_sub)
-        ph_layout.addSpacing(16)
+        ph_layout.addSpacing(20)
         cta_box = QHBoxLayout()
         cta_box.addStretch()
         cta_box.addWidget(ph_cta)
         cta_box.addStretch()
         ph_layout.addLayout(cta_box)
         self._placeholder.setStyleSheet(
-            "background: #f7fafc; border: 2px dashed #cbd5e1; border-radius: 12px;"
+            "background: #faf9f5; border: 2px dashed #586878; border-radius: 12px;"
         )
         self._cross_well._container_layout.insertWidget(0, self._placeholder)
 
@@ -407,27 +387,16 @@ class CrossWellPage(QWidget):
             if self._canvas.pick_mode:
                 self.canvas.pick_mode = False
                 self._pick_btn.setChecked(False)
-                self._pick_btn.setStyleSheet(self._btn_style())
                 return
         super().keyPressEvent(event)
 
     # --- Helpers ---
 
-    @staticmethod
-    def _btn_style() -> str:
-        return """
-            QPushButton {
-                background: #edf2f7; color: #1e293b;
-                border: 1px solid #cbd5e1; border-radius: 4px;
-                padding: 0 12px; font-size: 13px;
-            }
-            QPushButton:hover { background: #e2e8f0; }
-        """
-
-    def _make_btn(self, text: str) -> QPushButton:
+    def _make_btn(self, text: str, icon_name: str | None = None) -> QPushButton:
         btn = QPushButton(text)
         btn.setFixedHeight(28)
-        btn.setStyleSheet(self._btn_style())
+        if icon_name:
+            btn.setIcon(self._get_ui_icon(icon_name))
         return btn
 
     @staticmethod
@@ -657,11 +626,6 @@ class CrossWellPage(QWidget):
             if self._manual_link_btn.isChecked():
                 self._manual_link_btn.setChecked(False)
                 self._on_toggle_manual_link()
-            self._pick_btn.setStyleSheet(
-                self._btn_style() + "QPushButton { background: #fef3c7; border-color: #f59e0b; }"
-            )
-        else:
-            self._pick_btn.setStyleSheet(self._btn_style())
         self._update_status()
 
     def _on_toggle_manual_link(self):
@@ -671,17 +635,12 @@ class CrossWellPage(QWidget):
             if self._pick_btn.isChecked():
                 self._pick_btn.setChecked(False)
                 self._on_toggle_pick()
-            self._manual_link_btn.setStyleSheet(
-                self._btn_style() + "QPushButton { background: #fee2e2; border-color: #f87171; }"
-            )
-        else:
-            self._manual_link_btn.setStyleSheet(self._btn_style())
         self._update_status()
 
     def _on_toggle_domain(self):
         checked = self._domain_btn.isChecked()
         domain = "TWT" if checked else "MD"
-        self._domain_btn.setText(f"域: {domain}")
+        self._domain_btn.setText(f" 域: {domain}")
         self._canvas._overlay.set_depth_domain(domain)
 
     def _on_load_tops(self):
@@ -702,9 +661,7 @@ class CrossWellPage(QWidget):
         self._selected_labels = None
         self._placeholder.setVisible(True)
         self._pick_btn.setChecked(False)
-        self._pick_btn.setStyleSheet(self._btn_style())
         self._manual_link_btn.setChecked(False)
-        self._manual_link_btn.setStyleSheet(self._btn_style())
         self._update_status()
 
     def _on_export(self):

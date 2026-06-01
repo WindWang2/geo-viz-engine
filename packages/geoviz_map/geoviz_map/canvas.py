@@ -29,7 +29,7 @@ class MapCanvas(QWidget):
                  reference_labels: list[ReferenceLabel] | None = None,
                  initial_center: tuple[float, float] | None = None,
                  initial_zoom: float = 7.5,
-                 background_color: str = "#cbebfb",
+                 background_color: str = "#faf9f5",
                  parent: QWidget | None = None):
         super().__init__(parent)
         self.setMouseTracking(True)
@@ -55,18 +55,18 @@ class MapCanvas(QWidget):
 
         self._layers: list[MapLayer] = [
             BackgroundLayer(background_color),
-            GraticuleLayer(),
+            GraticuleLayer(color="#586878", opacity=0.08),
             GeoJsonPolygonLayer(
                 world_geojson,
-                fill_color="#f3f1ec",
-                border_color="#cbd5e1",
-                border_width=0.8,
+                fill_color="#f0eee9",
+                border_color="#586878",
+                border_width=0.6,
                 feature_filter=lambda p: p.get("ISO_A3") not in ("CHN", "TWN"),
             ),
             GeoJsonPolygonLayer(
                 china_geojson,
-                fill_color="#f3f1ec",
-                border_color="#cbd5e1",
+                fill_color="#f0eee9",
+                border_color="#586878",
                 border_width=0.8,
             ),
             ReferenceLabelsLayer(reference_labels or []),
@@ -88,10 +88,10 @@ class MapCanvas(QWidget):
                 from PySide6.QtGui import QColor, QPen
                 from PySide6.QtCore import QRectF
                 rect = QRectF(self._box_start, self._box_current)
-                # Semi-transparent blue fill
-                painter.fillRect(rect, QColor(59, 130, 246, 50))
-                # Dashed blue border
-                pen = QPen(QColor(59, 130, 246), 1.5, Qt.PenStyle.DashLine)
+                # Semi-transparent Azurite Blue fill
+                painter.fillRect(rect, QColor(31, 102, 212, 40))
+                # Solid Azurite Blue border
+                pen = QPen(QColor(31, 102, 212), 1.6, Qt.PenStyle.SolidLine)
                 painter.setPen(pen)
                 painter.drawRect(rect)
         finally:

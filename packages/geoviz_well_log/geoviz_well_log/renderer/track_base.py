@@ -4,17 +4,17 @@ from PySide6.QtCore import QRectF, Qt, QSizeF, Signal, QPointF
 from PySide6.QtGui import QPainter, QFont, QColor, QPen
 from PySide6.QtWidgets import QWidget
 
-# ECharts-matching visual constants (Tailwind slate palette)
-ECHARTS_BORDER = "#94a3b8"
-ECHARTS_GRID = "#cbd5e1"
-ECHARTS_HEADER_BG = "#e2e8f0"
-ECHARTS_SUB_HEADER_BG = "#f8fafc"
-ECHARTS_TEXT = "#0f172a"
+# Azurite Design System constants
+ECHARTS_BORDER = "#586878"
+ECHARTS_GRID = "#e2e8f0"
+ECHARTS_HEADER_BG = "#f0f4f8"
+ECHARTS_SUB_HEADER_BG = "#faf9f5"
+ECHARTS_TEXT = "#586878"
 ECHARTS_HEADER_TOP = 10
 ECHARTS_GROUP_HEADER_HEIGHT = 32
 ECHARTS_TRACK_HEADER_HEIGHT = 56
 ECHARTS_BODY_TOP_GAP = 8
-ECHARTS_FONT_FAMILY = "Inter, 'Microsoft YaHei', sans-serif"
+ECHARTS_FONT_FAMILY = "'Microsoft YaHei', 'Segoe UI', sans-serif"
 
 
 class BaseTrack(QWidget):

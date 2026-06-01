@@ -6,7 +6,7 @@ from geoviz_map.viewport import MapViewport
 
 
 class BackgroundLayer(MapLayer):
-    def __init__(self, color: str = "#cbebfb"):
+    def __init__(self, color: str = "#faf9f5"):
         self.color = QColor(color)
 
     def paint(self, painter: QPainter, viewport: MapViewport) -> None:

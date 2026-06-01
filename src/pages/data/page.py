@@ -5,33 +5,46 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLabel, QGroupBox, QMessageBox,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 
 from src.data.cache import DataCache
 
 
 class DataPage(QWidget):
+    def _get_ui_icon(self, name: str) -> QIcon:
+        """Resolve icon from project resources."""
+        from src.utils.paths import get_resources_dir
+        path = get_resources_dir() / "icons" / "ui" / name
+        if path.exists():
+            return QIcon(str(path))
+        return QIcon()
+
     def __init__(self, cache: DataCache):
         super().__init__()
         self.cache = cache
         layout = QVBoxLayout(self)
 
         # 1. Project Management section (Phase 15 - Phase 3)
-        proj_group = QGroupBox("工程项目管理")
+        proj_group = QGroupBox(" 工程项目管理")
         proj_layout = QHBoxLayout(proj_group)
 
         self._project_meta_label = QLabel("工程: 未加载")
-        self._project_meta_label.setStyleSheet("font-weight: bold; color: #2b6cb0; font-size: 13px;")
+        self._project_meta_label.setStyleSheet("font-weight: bold; color: #1f66d4; font-size: 13px;")
 
-        self._new_proj_btn = QPushButton("新建工程")
+        self._new_proj_btn = QPushButton(" 新建工程")
+        self._new_proj_btn.setIcon(self._get_ui_icon("plus.svg"))
         self._new_proj_btn.clicked.connect(self._on_new_project)
 
-        self._open_proj_btn = QPushButton("打开工程")
+        self._open_proj_btn = QPushButton(" 打开工程")
+        self._open_proj_btn.setIcon(self._get_ui_icon("upload.svg"))
         self._open_proj_btn.clicked.connect(self._on_open_project)
 
-        self._save_proj_btn = QPushButton("保存工程")
+        self._save_proj_btn = QPushButton(" 保存工程")
+        self._save_proj_btn.setIcon(self._get_ui_icon("check.svg"))
         self._save_proj_btn.clicked.connect(self._on_save_project)
 
-        self._save_as_proj_btn = QPushButton("另存工程")
+        self._save_as_proj_btn = QPushButton(" 另存工程")
+        self._save_as_proj_btn.setIcon(self._get_ui_icon("export.svg"))
         self._save_as_proj_btn.clicked.connect(self._on_save_as_project)
 
         proj_layout.addWidget(self._project_meta_label)
@@ -44,14 +57,19 @@ class DataPage(QWidget):
         layout.addWidget(proj_group)
 
         # 2. Import section
-        import_group = QGroupBox("数据导入")
+        import_group = QGroupBox(" 数据导入")
         import_layout = QHBoxLayout(import_group)
 
-        import_excel = QPushButton("导入 Excel (.xlsx)")
+        import_excel = QPushButton(" 导入 Excel")
+        import_excel.setIcon(self._get_ui_icon("table.svg"))
         import_excel.clicked.connect(lambda: self._import_file("Excel (*.xlsx *.xls)"))
-        import_las = QPushButton("导入 LAS (.las)")
+        
+        import_las = QPushButton(" 导入 LAS")
+        import_las.setIcon(self._get_ui_icon("doc.svg"))
         import_las.clicked.connect(lambda: self._import_file("LAS (*.las)"))
-        import_segy = QPushButton("导入 SEGY (.sgy)")
+        
+        import_segy = QPushButton(" 导入 SEGY")
+        import_segy.setIcon(self._get_ui_icon("upload.svg"))
         import_segy.clicked.connect(lambda: self._import_file("SEGY (*.sgy *.segy)"))
 
         import_layout.addWidget(import_excel)
@@ -60,7 +78,7 @@ class DataPage(QWidget):
         layout.addWidget(import_group)
 
         # 3. Well coordinates table
-        table_group = QGroupBox("井位坐标")
+        table_group = QGroupBox(" 井位坐标")
         table_layout = QVBoxLayout(table_group)
         self.table = QTableWidget()
         self.table.setColumnCount(3)

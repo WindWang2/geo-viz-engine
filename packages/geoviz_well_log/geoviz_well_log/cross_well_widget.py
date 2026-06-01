@@ -32,6 +32,8 @@ class CrossWellWidget(QWidget):
         self._manual_link_active = False
         self._manual_link_picks: list[tuple[str, IntervalItem]] = []
         self._formation_data: dict[str, list[IntervalItem]] = {}
+        
+        self.setStyleSheet("background: #faf9f5;")
 
         # Direct horizontal layout (no QScrollArea — avoids viewport backing-store
         # corruption when this widget lives inside a hidden QStackedWidget page).

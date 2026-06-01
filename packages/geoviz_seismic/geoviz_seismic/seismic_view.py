@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtGui import QIcon, QColor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QPushButton, QComboBox, QLabel, QFileDialog, QToolBar,
@@ -88,27 +89,24 @@ class SeismicView(QWidget):
 
         for label, color, profile, key, row, col in profile_panels:
             panel = QWidget()
-            panel.setStyleSheet("background: #ffffff; border-radius: 4px;")
+            panel.setStyleSheet("background: #faf9f5; border: 1.6px solid #586878; border-radius: 8px;")
             panel_layout = QVBoxLayout(panel)
             panel_layout.setContentsMargins(2, 0, 2, 0)
             panel_layout.setSpacing(2)
 
             # Header bar with label + export button
             header = QWidget()
-            header.setStyleSheet(f"background: #f7fafc; border-bottom: 2px solid {color};")
+            header.setStyleSheet(f"background: #f0f4f8; border-bottom: 1.6px solid {color}; border-top-left-radius: 6px; border-top-right-radius: 6px;")
             header_layout = QHBoxLayout(header)
             header_layout.setContentsMargins(6, 2, 6, 2)
             lbl = QLabel(label)
-            lbl.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 12px;")
+            lbl.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 11px;")
             header_layout.addWidget(lbl)
             header_layout.addStretch()
 
-            export_btn = QPushButton("导出")
-            export_btn.setFixedSize(50, 22)
-            export_btn.setStyleSheet(
-                "QPushButton { background: #edf2f7; border: 1px solid #cbd5e0; border-radius: 3px; font-size: 11px; }"
-                "QPushButton:hover { background: #e2e8f0; }"
-            )
+            export_btn = QPushButton()
+            export_btn.setIcon(self._get_ui_icon("export.svg"))
+            export_btn.setFixedSize(26, 22)
             export_btn.clicked.connect(lambda checked, k=key: self._export_slice(k))
             header_layout.addWidget(export_btn)
 
@@ -379,24 +377,37 @@ class SeismicView(QWidget):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _get_ui_icon(self, name: str) -> QIcon:
+        """Resolve icon from project resources."""
+        try:
+            from src.utils.paths import get_resources_dir
+            path = get_resources_dir() / "icons" / "ui" / name
+            if path.exists():
+                return QIcon(str(path))
+        except ImportError:
+            pass
+        return QIcon()
+
     def _build_toolbar(self) -> QWidget:
         # Two-row toolbar: 主操作 (row 1) | 视图与属性 (row 2)
         self._toolbar_row1 = QToolBar()
         self._toolbar_row2 = QToolBar()
         bar = self._toolbar_row1  # row 1 is primary actions (load/pick/tie)
 
-        load_btn = QPushButton("加载 SEGY")
+        load_btn = QPushButton(" 加载 SEGY")
+        load_btn.setIcon(self._get_ui_icon("upload.svg"))
         load_btn.clicked.connect(self._load_segy)
-        demo_btn = QPushButton("Demo")
+        
+        demo_btn = QPushButton(" Demo")
+        demo_btn.setIcon(self._get_ui_icon("play.svg"))
         demo_btn.clicked.connect(self._load_demo_data)
-        horizon_btn = QPushButton("层位")
+        
+        horizon_btn = QPushButton(" 层位")
+        horizon_btn.setIcon(self._get_ui_icon("layers.svg"))
         horizon_btn.clicked.connect(self._load_horizon)
 
-        horizon_list_btn = QPushButton("层位管理")
-        horizon_list_btn.setStyleSheet(
-            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
-            "border-radius: 4px; padding: 0 10px; font-size: 13px; }"
-        )
+        horizon_list_btn = QPushButton(" 层位管理")
+        horizon_list_btn.setIcon(self._get_ui_icon("table.svg"))
         horizon_list_btn.clicked.connect(self._show_horizon_list)
 
         self._slice_type_combo = QComboBox()
@@ -433,10 +444,6 @@ class SeismicView(QWidget):
         self._clip_spin.setSingleStep(1.0)
         self._clip_spin.setDecimals(1)
         self._clip_spin.setFixedWidth(80)
-        self._clip_spin.setStyleSheet(
-            "QDoubleSpinBox { border: 1px solid #cbd5e1; border-radius: 3px; "
-            "padding: 0 4px; font-size: 12px; }"
-        )
         self._clip_spin.valueChanged.connect(self._on_clip_changed)
 
         # Toolbar slice sliders
@@ -451,24 +458,24 @@ class SeismicView(QWidget):
             s.setEnabled(False)
             s.setFixedWidth(100)
             s.setStyleSheet(
-                "QSlider::groove:horizontal{height:3px;background:#e2e8f0;border-radius:1px;}"
-                "QSlider::handle:horizontal{background:#4a5568;width:10px;height:10px;"
-                "margin:-4px 0;border-radius:5px;}"
+                "QSlider::groove:horizontal{height:4px;background:#e2e8f0;border-radius:2px;}"
+                "QSlider::handle:horizontal{background:#586878;width:12px;height:12px;"
+                "margin:-4px 0;border-radius:6px;}"
             )
         self._tb_il_slider.setStyleSheet(
-            "QSlider::groove:horizontal{height:3px;background:#e2e8f0;border-radius:1px;}"
-            "QSlider::handle:horizontal{background:#e53e3e;width:10px;height:10px;"
-            "margin:-4px 0;border-radius:5px;}"
+            "QSlider::groove:horizontal{height:4px;background:#e2e8f0;border-radius:2px;}"
+            "QSlider::handle:horizontal{background:#e53e3e;width:12px;height:12px;"
+            "margin:-4px 0;border-radius:6px;}"
         )
         self._tb_xl_slider.setStyleSheet(
-            "QSlider::groove:horizontal{height:3px;background:#e2e8f0;border-radius:1px;}"
-            "QSlider::handle:horizontal{background:#38a169;width:10px;height:10px;"
-            "margin:-4px 0;border-radius:5px;}"
+            "QSlider::groove:horizontal{height:4px;background:#e2e8f0;border-radius:2px;}"
+            "QSlider::handle:horizontal{background:#38a169;width:12px;height:12px;"
+            "margin:-4px 0;border-radius:6px;}"
         )
         self._tb_t_slider.setStyleSheet(
-            "QSlider::groove:horizontal{height:3px;background:#e2e8f0;border-radius:1px;}"
-            "QSlider::handle:horizontal{background:#3182ce;width:10px;height:10px;"
-            "margin:-4px 0;border-radius:5px;}"
+            "QSlider::groove:horizontal{height:4px;background:#e2e8f0;border-radius:2px;}"
+            "QSlider::handle:horizontal{background:#3182ce;width:12px;height:12px;"
+            "margin:-4px 0;border-radius:6px;}"
         )
         self._tb_il_label.setStyleSheet("color: #e53e3e; font-size: 11px; font-weight: bold;")
         self._tb_xl_label.setStyleSheet("color: #38a169; font-size: 11px; font-weight: bold;")
@@ -487,37 +494,22 @@ class SeismicView(QWidget):
         )
         self._readout_label.setMinimumWidth(300)
 
-        self._pick_btn = QPushButton("拾取层位")
+        self._pick_btn = QPushButton(" 拾取层位")
         self._pick_btn.setCheckable(True)
-        self._pick_btn.setStyleSheet(
-            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
-            "border-radius: 4px; padding: 0 10px; font-size: 13px; } "
-            "QPushButton:checked { background: #fef3c7; border-color: #f59e0b; }"
-        )
+        self._pick_btn.setIcon(self._get_ui_icon("pin.svg"))
         self._pick_btn.toggled.connect(self._on_pick_toggled)
 
-        clear_pick_btn = QPushButton("清除拾取")
-        clear_pick_btn.setStyleSheet(
-            "QPushButton { background: #fed7d7; color: #9b2c2c; "
-            "border: 1px solid #feb2b2; border-radius: 4px; "
-            "padding: 0 10px; font-size: 13px; }"
-        )
+        clear_pick_btn = QPushButton(" 清除拾取")
+        clear_pick_btn.setIcon(self._get_ui_icon("undo.svg"))
         clear_pick_btn.clicked.connect(self._on_clear_picks)
 
-        export_pick_btn = QPushButton("导出层位")
-        export_pick_btn.setStyleSheet(
-            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
-            "border-radius: 4px; padding: 0 10px; font-size: 13px; }"
-        )
+        export_pick_btn = QPushButton(" 导出层位")
+        export_pick_btn.setIcon(self._get_ui_icon("export.svg"))
         export_pick_btn.clicked.connect(self._on_export_picks)
 
-        self._annotation_btn = QPushButton("标注")
+        self._annotation_btn = QPushButton(" 标注")
         self._annotation_btn.setCheckable(True)
-        self._annotation_btn.setStyleSheet(
-            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
-            "border-radius: 4px; padding: 0 10px; font-size: 13px; } "
-            "QPushButton:checked { background: #c6f6d5; border-color: #38a169; }"
-        )
+        self._annotation_btn.setIcon(self._get_ui_icon("plus.svg"))
         self._annotation_btn.toggled.connect(self._on_annotation_toggled)
 
         # Attribute combo + RGB fusion channel selectors
@@ -543,21 +535,14 @@ class SeismicView(QWidget):
         for lbl in (self._rgb_r_label, self._rgb_g_label, self._rgb_b_label):
             lbl.setVisible(False)
 
-        crossplot_btn = QPushButton("交叉图")
-        crossplot_btn.setStyleSheet(
-            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
-            "border-radius: 4px; padding: 0 10px; font-size: 13px; }"
-        )
+        crossplot_btn = QPushButton(" 交叉图")
+        crossplot_btn.setIcon(self._get_ui_icon("plots.svg"))
         crossplot_btn.clicked.connect(self._on_crossplot)
 
         # Overlay volume controls (Phase 12a)
-        self._overlay_btn = QPushButton("叠加")
+        self._overlay_btn = QPushButton(" 叠加")
         self._overlay_btn.setCheckable(True)
-        self._overlay_btn.setStyleSheet(
-            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
-            "border-radius: 4px; padding: 0 10px; font-size: 13px; } "
-            "QPushButton:checked { background: #e6fffa; border-color: #319795; }"
-        )
+        self._overlay_btn.setIcon(self._get_ui_icon("layers.svg"))
         self._overlay_btn.toggled.connect(self._on_overlay_toggled)
 
         self._overlay_cmap_combo = QComboBox()
@@ -589,13 +574,9 @@ class SeismicView(QWidget):
         bar.addWidget(self._readout_label)
 
         # Well-tie toggle button on row 1 (right-aligned via stretch later)
-        self._well_tie_btn = QPushButton("井震标定")
+        self._well_tie_btn = QPushButton(" 井震标定")
         self._well_tie_btn.setCheckable(True)
-        self._well_tie_btn.setStyleSheet(
-            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
-            "border-radius: 4px; padding: 0 10px; font-size: 13px; } "
-            "QPushButton:checked { background: #ebf8ff; border-color: #4299e1; }"
-        )
+        self._well_tie_btn.setIcon(self._get_ui_icon("share.svg"))
         self._well_tie_btn.toggled.connect(self._on_well_tie_toggled)
         bar.addSeparator()
         bar.addWidget(self._well_tie_btn)

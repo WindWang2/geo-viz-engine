@@ -78,56 +78,45 @@ class PaleoMapPage(QWidget):
 
         # Toolbar
         toolbar = QWidget()
-        toolbar.setStyleSheet("background: #f8fafc; border-bottom: 1px solid #e2e8f0;")
+        toolbar.setStyleSheet("background: #faf9f5; border-bottom: 1px solid #e2e8f0;")
         tb_layout = QHBoxLayout(toolbar)
-        tb_layout.setContentsMargins(10, 6, 10, 6)
+        tb_layout.setContentsMargins(10, 8, 10, 8)
 
-        load_btn = QPushButton("加载")
+        load_btn = QPushButton(" 加载")
+        load_btn.setIcon(self._get_ui_icon("upload.svg"))
         load_btn.setToolTip("加载 GeoJSON 或 CSV 文件 (支持拖拽)")
-        load_btn.setStyleSheet("QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;border-radius:4px;padding:6px 12px;}QPushButton:hover{background:#e2e8f0;}QPushButton:pressed{background:#cbd5e1;}")
         load_btn.clicked.connect(self._on_load_clicked)
 
         self._period_combo = QComboBox()
         self._period_combo.setToolTip("选择地质时期")
-        self._period_combo.setStyleSheet("QComboBox{padding:4px 8px;border:1px solid #cbd5e1;border-radius:4px;}")
         self._period_combo.currentTextChanged.connect(self._on_period_changed)
 
-        export_btn = QPushButton("导出")
+        export_btn = QPushButton(" 导出")
+        export_btn.setIcon(self._get_ui_icon("export.svg"))
         export_btn.setToolTip("导出为 SVG / PDF / PNG")
-        export_btn.setStyleSheet("QPushButton{background:#2563eb;color:#fff;border:none;border-radius:4px;padding:6px 14px;font-weight:600;}QPushButton:hover{background:#1d4ed8;}QPushButton:pressed{background:#1e40af;}")
         export_btn.clicked.connect(self._on_export_clicked)
 
         tb_layout.addWidget(load_btn)
-        tb_layout.addWidget(QLabel("时期:"))
+        tb_layout.addWidget(QLabel(" 时期:"))
         tb_layout.addWidget(self._period_combo)
 
         # Add a Level Lock dropdown
-        tb_layout.addWidget(QLabel("层级锁定:"))
+        tb_layout.addWidget(QLabel(" 层级锁定:"))
         self._level_lock_combo = QComboBox()
         self._level_lock_combo.setToolTip("锁定地图图层级别（自动表示根据比例尺切换）")
-        self._level_lock_combo.setStyleSheet("QComboBox{padding:4px 8px;border:1px solid #cbd5e1;border-radius:4px;}")
         self._level_lock_combo.addItems(["自动", "相", "亚相", "微相"])
         self._level_lock_combo.currentTextChanged.connect(self._on_level_lock_changed)
         tb_layout.addWidget(self._level_lock_combo)
 
-        self._edit_btn = QPushButton("编辑模式")
+        self._edit_btn = QPushButton(" 编辑模式")
         self._edit_btn.setCheckable(True)
+        self._edit_btn.setIcon(self._get_ui_icon("palette.svg"))
         self._edit_btn.setToolTip("切换编辑模式 (E)")
-        self._edit_btn.setStyleSheet(
-            "QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;"
-            "border-radius:4px;padding:6px 12px;}"
-            "QPushButton:hover{background:#e2e8f0;}"
-            "QPushButton:checked{background:#dbeafe;color:#1d4ed8;border-color:#93c5fd;}"
-        )
         self._edit_btn.clicked.connect(self._toggle_edit_mode)
 
-        self._save_btn = QPushButton("保存")
+        self._save_btn = QPushButton(" 保存")
+        self._save_btn.setIcon(self._get_ui_icon("check.svg"))
         self._save_btn.setToolTip("保存编辑 (Ctrl+S)")
-        self._save_btn.setStyleSheet(
-            "QPushButton{background:#059669;color:#fff;border:none;border-radius:4px;"
-            "padding:6px 14px;font-weight:600;}"
-            "QPushButton:hover{background:#047857;}"
-        )
         self._save_btn.clicked.connect(self._on_save_clicked)
         self._save_btn.setVisible(False)
 
