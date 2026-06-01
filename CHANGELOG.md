@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-01
+
+### Added
+- **Azurite Design System 全量 UI 重构 (Phase 20)**:
+  - 引入了“蓝铜” (Azurite) 视觉规范，全应用统一采用 Azurite 蓝 (`#1f66d4`)、描边灰 (`#586878`) 与暖米白 (`#faf9f5`) 配色。
+  - 迁移至全套线性矢量图标 (Linear 24x24, 1.6px weight)，覆盖导航、工具栏与核心 UI 动作。
+  - 标准化了所有 Qt 基础组件（QPushButton, QGroupBox, QComboBox, QTableWidget）的 QSS 样式，实现 1.6px 描边与 8px 圆角的现代视觉风格。
+  - 重构了侧边栏 (Sidebar)，宽度增加至 160px，并集成了全新的 GeoViz 品牌标识。
+  - 深度同步了七大核心模块 (Seismic, Map, WellLog, CrossWell, Plots, Data, Tools) 的页面内 UI 风格，消除了所有硬编码的 Tailwind 风格残余。
+
 ## [0.13.0] - 2026-06-01
 
 ### Added
