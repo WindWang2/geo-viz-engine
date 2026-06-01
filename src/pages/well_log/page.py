@@ -168,6 +168,14 @@ class _WellLogLoadWorker(QObject):
 
 
 class WellLogPage(QWidget):
+    def _get_ui_icon(self, name: str) -> QIcon:
+        """Resolve icon from project resources."""
+        from src.utils.paths import get_resources_dir
+        path = get_resources_dir() / "icons" / "ui" / name
+        if path.exists():
+            return QIcon(str(path))
+        return QIcon()
+
     def __init__(self):
         super().__init__()
         outer = QVBoxLayout(self)
@@ -176,28 +184,20 @@ class WellLogPage(QWidget):
 
         # Toolbar
         self._toolbar = QWidget()
-        self._toolbar.setStyleSheet("background: #f7fafc; border-bottom: 1px solid #e2e8f0;")
+        self._toolbar.setStyleSheet("background: #faf9f5; border-bottom: 1px solid #e2e8f0;")
         toolbar_layout = QHBoxLayout(self._toolbar)
-        toolbar_layout.setContentsMargins(12, 6, 12, 6)
+        toolbar_layout.setContentsMargins(12, 8, 12, 8)
 
         self._well_name_label = QLabel()
-        self._well_name_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #1a202c;")
+        self._well_name_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #1f66d4;")
         toolbar_layout.addWidget(self._well_name_label)
 
         toolbar_layout.addSpacing(12)
 
         self._well_combo = QComboBox()
         self._well_combo.setFixedHeight(28)
-        self._well_combo.setMinimumWidth(140)
-        self._well_combo.setStyleSheet("""
-            QComboBox {
-                border: 1px solid #cbd5e1; border-radius: 4px;
-                padding: 0 8px; font-size: 13px; background: white;
-            }
-            QComboBox:hover { border-color: #3182ce; }
-            QComboBox::drop-down { border: none; width: 20px; }
-        """)
-        self._well_combo.addItem("选择测井...")
+        self._well_combo.setMinimumWidth(160)
+        self._well_combo.addItem(" 选择测井...")
         for name in list_wells():
             self._well_combo.addItem(name)
         self._well_combo.currentTextChanged.connect(self._on_well_selected)
@@ -205,17 +205,9 @@ class WellLogPage(QWidget):
 
         toolbar_layout.addStretch()
 
-        self._export_btn = QPushButton("导出")
+        self._export_btn = QPushButton(" 导出")
+        self._export_btn.setIcon(self._get_ui_icon("export.svg"))
         self._export_btn.setFixedHeight(28)
-        self._export_btn.setStyleSheet("""
-            QPushButton {
-                background: #3182ce; color: white;
-                border: none; border-radius: 4px;
-                padding: 0 12px; font-size: 13px;
-            }
-            QPushButton:hover { background: #2b6cb0; }
-            QPushButton:pressed { background: #2c5282; }
-        """)
         self._export_btn.clicked.connect(self._on_export)
         toolbar_layout.addWidget(self._export_btn)
 
@@ -239,56 +231,39 @@ class WellLogPage(QWidget):
         self._content_layout.addWidget(self._stack, 4)
 
         # Control panel
-        self._control_panel = QGroupBox("轨道显示与排序")
-        self._control_panel.setFixedWidth(240)
-        self._control_panel.setStyleSheet("QGroupBox { font-weight: bold; margin-top: 12px; }")
+        self._control_panel = QGroupBox(" 轨道显示与排序")
+        self._control_panel.setFixedWidth(260)
         panel_layout = QVBoxLayout(self._control_panel)
-        panel_layout.setContentsMargins(6, 12, 6, 6)
+        panel_layout.setContentsMargins(8, 16, 8, 8)
 
         self._track_list_widget = QListWidget()
         self._track_list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._track_list_widget.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self._track_list_widget.setStyleSheet("""
-            QListWidget { border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px; background: #f8fafc; }
-            QListWidget::item { padding: 8px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
-            QListWidget::item:hover { background: #e2e8f0; }
-            QListWidget::item:selected { background: #cbd5e1; color: #000; }
+            QListWidget { background: #ffffff; }
+            QListWidget::item { padding: 8px; border-bottom: 1px solid #f0f4f8; }
+            QListWidget::item:hover { background: #f0f4f8; }
+            QListWidget::item:selected { background: #e9effa; color: #1f66d4; }
         """)
         self._track_list_widget.model().rowsMoved.connect(self._update_tracks)
         self._track_list_widget.itemChanged.connect(self._update_tracks)
         panel_layout.addWidget(self._track_list_widget)
 
         btn_layout = QHBoxLayout()
-        self._merge_btn = QPushButton("合并曲线")
+        self._merge_btn = QPushButton(" 合并")
+        self._merge_btn.setIcon(self._get_ui_icon("share.svg"))
         self._merge_btn.clicked.connect(self._on_merge_curves)
-        self._split_btn = QPushButton("拆分曲线")
+        
+        self._split_btn = QPushButton(" 拆分")
+        self._split_btn.setIcon(self._get_ui_icon("layers.svg"))
         self._split_btn.clicked.connect(self._on_split_curve)
 
-        btn_style = """
-            QPushButton {
-                background: #edf2f7; color: #1e293b;
-                border: 1px solid #cbd5e1; border-radius: 4px;
-                padding: 5px 8px; font-size: 11px; font-weight: bold;
-            }
-            QPushButton:hover { background: #e2e8f0; }
-        """
-        self._merge_btn.setStyleSheet(btn_style)
-        self._split_btn.setStyleSheet(btn_style)
         btn_layout.addWidget(self._merge_btn)
         btn_layout.addWidget(self._split_btn)
         panel_layout.addLayout(btn_layout)
 
-        self._predict_btn = QPushButton("🤖 AI预测沉积相")
-        self._predict_btn.setStyleSheet("""
-            QPushButton {
-                background: #3182ce; color: white;
-                border: none; border-radius: 4px;
-                padding: 6px 12px; font-size: 12px; font-weight: bold;
-                margin-top: 6px;
-            }
-            QPushButton:hover { background: #2b6cb0; }
-            QPushButton:pressed { background: #2c5282; }
-        """)
+        self._predict_btn = QPushButton(" AI 预测沉积相")
+        self._predict_btn.setIcon(self._get_ui_icon("play.svg"))
         self._predict_btn.clicked.connect(self._on_predict_facies)
         panel_layout.addWidget(self._predict_btn)
 

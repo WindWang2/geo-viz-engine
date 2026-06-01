@@ -5,10 +5,19 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QGroupBox, QLineEdit
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 
 from scripts.convert_xml_to_laolong import convert_to_laolong_xls
 
 class ToolsPage(QWidget):
+    def _get_ui_icon(self, name: str) -> QIcon:
+        """Resolve icon from project resources."""
+        from src.utils.paths import get_resources_dir
+        path = get_resources_dir() / "icons" / "ui" / name
+        if path.exists():
+            return QIcon(str(path))
+        return QIcon()
+
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
@@ -16,22 +25,25 @@ class ToolsPage(QWidget):
         layout.setSpacing(20)
 
         # Title
-        title = QLabel("工具箱")
-        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2d3748;")
+        title = QLabel(" 工具箱")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1f66d4;")
         layout.addWidget(title)
 
         # Tool 1: XML to Excel Converter
-        xml_converter_group = QGroupBox("测井 XML 转 Excel (LaoLong 格式)")
+        xml_converter_group = QGroupBox(" 测井 XML 转 Excel (LaoLong 格式)")
         xml_layout = QVBoxLayout(xml_converter_group)
 
         # Input row
         in_layout = QHBoxLayout()
         self.in_xml_path = QLineEdit()
-        self.in_xml_path.setPlaceholderText("选择输入的 XML 文件...")
+        self.in_xml_path.setPlaceholderText(" 选择输入的 XML 文件...")
         self.in_xml_path.setReadOnly(True)
-        in_btn = QPushButton("浏览...")
+        
+        in_btn = QPushButton(" 浏览")
+        in_btn.setIcon(self._get_ui_icon("search.svg"))
         in_btn.clicked.connect(self._select_input_xml)
-        in_layout.addWidget(QLabel("输入 XML:"))
+        
+        in_layout.addWidget(QLabel(" 输入 XML:"))
         in_layout.addWidget(self.in_xml_path)
         in_layout.addWidget(in_btn)
         xml_layout.addLayout(in_layout)
@@ -39,32 +51,21 @@ class ToolsPage(QWidget):
         # Output row
         out_layout = QHBoxLayout()
         self.out_xls_path = QLineEdit()
-        self.out_xls_path.setPlaceholderText("选择输出的 Excel 文件路径...")
-        out_btn = QPushButton("浏览...")
+        self.out_xls_path.setPlaceholderText(" 选择输出的 Excel 文件路径...")
+        
+        out_btn = QPushButton(" 浏览")
+        out_btn.setIcon(self._get_ui_icon("search.svg"))
         out_btn.clicked.connect(self._select_output_xls)
-        out_layout.addWidget(QLabel("输出 Excel:"))
+        
+        out_layout.addWidget(QLabel(" 输出 Excel:"))
         out_layout.addWidget(self.out_xls_path)
         out_layout.addWidget(out_btn)
         xml_layout.addLayout(out_layout)
 
         # Action row
         action_layout = QHBoxLayout()
-        self.run_btn = QPushButton("执行转换")
-        self.run_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3182ce;
-                color: white;
-                font-weight: bold;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #2b6cb0;
-            }
-            QPushButton:disabled {
-                background-color: #a0aec0;
-            }
-        """)
+        self.run_btn = QPushButton(" 执行转换")
+        self.run_btn.setIcon(self._get_ui_icon("play.svg"))
         self.run_btn.clicked.connect(self._run_conversion)
         action_layout.addStretch()
         action_layout.addWidget(self.run_btn)
