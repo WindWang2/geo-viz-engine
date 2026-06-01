@@ -288,6 +288,22 @@ class SeismicView(QWidget):
         self._segy_worker.error.connect(self._on_segy_error)
         self._segy_worker.start()
 
+    def load_overlay_volume(self, data: np.ndarray, colormap: str = "jet", opacity: float = 0.5):
+        """Load an overlay attribute/property volume and display it superimposed."""
+        self._renderer_3d.load_overlay_volume(data, colormap=colormap, opacity=opacity)
+        # Sync control states
+        self._overlay_opacity_slider.blockSignals(True)
+        self._overlay_opacity_slider.setValue(int(opacity * 100))
+        self._overlay_opacity_slider.blockSignals(False)
+
+        self._overlay_cmap_combo.blockSignals(True)
+        self._overlay_cmap_combo.setCurrentText(colormap)
+        self._overlay_cmap_combo.blockSignals(False)
+
+        self._overlay_btn.blockSignals(True)
+        self._overlay_btn.setChecked(True)
+        self._overlay_btn.blockSignals(False)
+
     def set_display_mode(self, mode: str):
         """Switch the profile display mode (``"vd"`` or ``"wiggle"``)."""
         for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
@@ -345,6 +361,19 @@ class SeismicView(QWidget):
     def _on_3d_mode_changed(self, index: int):
         mode = "planes" if index == 0 else "volume"
         self._renderer_3d.set_render_mode(mode)
+
+    @Slot(bool)
+    def _on_overlay_toggled(self, checked: bool):
+        self._renderer_3d.set_overlay_visible(checked)
+
+    @Slot(str)
+    def _on_overlay_cmap_changed(self, cmap_name: str):
+        self._renderer_3d.set_overlay_colormap(cmap_name)
+
+    @Slot(int)
+    def _on_overlay_opacity_changed(self, value: int):
+        opacity = value / 100.0
+        self._renderer_3d.set_overlay_opacity(opacity)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -521,6 +550,31 @@ class SeismicView(QWidget):
         )
         crossplot_btn.clicked.connect(self._on_crossplot)
 
+        # Overlay volume controls (Phase 12a)
+        self._overlay_btn = QPushButton("叠加")
+        self._overlay_btn.setCheckable(True)
+        self._overlay_btn.setStyleSheet(
+            "QPushButton { background: #edf2f7; border: 1px solid #cbd5e1; "
+            "border-radius: 4px; padding: 0 10px; font-size: 13px; } "
+            "QPushButton:checked { background: #e6fffa; border-color: #319795; }"
+        )
+        self._overlay_btn.toggled.connect(self._on_overlay_toggled)
+
+        self._overlay_cmap_combo = QComboBox()
+        self._overlay_cmap_combo.addItems(["jet", "gray", "seismic"])
+        self._overlay_cmap_combo.currentTextChanged.connect(self._on_overlay_cmap_changed)
+
+        self._overlay_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self._overlay_opacity_slider.setRange(0, 100)
+        self._overlay_opacity_slider.setValue(50)
+        self._overlay_opacity_slider.setFixedWidth(80)
+        self._overlay_opacity_slider.setStyleSheet(
+            "QSlider::groove:horizontal{height:3px;background:#e2e8f0;border-radius:1px;}"
+            "QSlider::handle:horizontal{background:#319795;width:10px;height:10px;"
+            "margin:-4px 0;border-radius:5px;}"
+        )
+        self._overlay_opacity_slider.valueChanged.connect(self._on_overlay_opacity_changed)
+
         bar.addWidget(load_btn)
         bar.addWidget(demo_btn)
         bar.addWidget(horizon_btn)
@@ -560,6 +614,12 @@ class SeismicView(QWidget):
         bar2.addSeparator()
         bar2.addWidget(QLabel(" 裁剪:"))
         bar2.addWidget(self._clip_spin)
+        bar2.addSeparator()
+        bar2.addWidget(QLabel(" 叠加:"))
+        bar2.addWidget(self._overlay_btn)
+        bar2.addWidget(self._overlay_cmap_combo)
+        bar2.addWidget(QLabel(" 不透明度:"))
+        bar2.addWidget(self._overlay_opacity_slider)
         bar2.addWidget(QLabel(" 属性:"))
         bar2.addWidget(self._attr_combo)
         bar2.addWidget(self._rgb_r_label)

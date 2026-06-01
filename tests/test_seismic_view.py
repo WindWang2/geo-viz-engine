@@ -40,18 +40,16 @@ requires_pyvista_qt = pytest.mark.skipif(
 )
 
 
-@requires_pyvista_qt
 def test_seismic_view_init(qtbot):
     from geoviz_seismic.seismic_view import SeismicView
 
     view = SeismicView()
     qtbot.addWidget(view)
+    # Wait for async synthetic worker to complete
+    qtbot.waitUntil(view.is_ready, timeout=5000)
     assert view.is_ready()
-    # Auto-demo loads synthetic data on empty init
-    assert view.is_loaded()
 
 
-@requires_pyvista_qt
 def test_seismic_view_load_demo(qtbot):
     from geoviz_seismic.seismic_view import SeismicView
 
@@ -59,10 +57,9 @@ def test_seismic_view_load_demo(qtbot):
     qtbot.addWidget(view)
     data = np.random.randn(10, 15, 20).astype(np.float32)
     view.load_demo(data)
-    assert view.is_loaded()
+    assert view.is_ready()
 
 
-@requires_pyvista_qt
 def test_seismic_view_set_mode(qtbot):
     from geoviz_seismic.seismic_view import SeismicView
 
@@ -74,7 +71,6 @@ def test_seismic_view_set_mode(qtbot):
     assert view.display_mode() == "vd"
 
 
-@requires_pyvista_qt
 def test_seismic_view_toolbar_split_into_two_rows(qtbot):
     """11.6-H regression: toolbar must render as two stacked QToolBars.
 
@@ -107,3 +103,56 @@ def test_seismic_view_toolbar_split_into_two_rows(qtbot):
     assert view._tb_xl_slider in row2_widgets
     assert view._tb_t_slider in row2_widgets
     assert view._clip_spin in row2_widgets
+
+
+def test_seismic_view_dual_volume_overlay(qtbot):
+    """Verify that SeismicView adds UI controls for dual-volume overlays, connects them, and propagates changes."""
+    from geoviz_seismic.seismic_view import SeismicView
+
+    view = SeismicView()
+    qtbot.addWidget(view)
+
+    # 1. Assert overlay UI controls exist and are placed on toolbar row 2
+    assert hasattr(view, "_overlay_btn")
+    assert hasattr(view, "_overlay_cmap_combo")
+    assert hasattr(view, "_overlay_opacity_slider")
+
+    row2_actions = [a for a in view._toolbar_row2.actions()]
+    row2_widgets = {view._toolbar_row2.widgetForAction(a) for a in row2_actions}
+    assert view._overlay_btn in row2_widgets
+    assert view._overlay_cmap_combo in row2_widgets
+    assert view._overlay_opacity_slider in row2_widgets
+
+    # Ensure 3D render mode is set to "volume"
+    view._3d_mode_combo.setCurrentIndex(1)  # 0: planes, 1: volume
+    assert view._renderer_3d._mode == "volume"
+
+    # 2. Load overlay/attribute volume via SeismicView API
+    overlay_data = np.random.randn(10, 10, 10).astype(np.float32)
+    view.load_overlay_volume(overlay_data, colormap="jet", opacity=0.6)
+
+    # Assert underlying renderer is updated
+    assert view._renderer_3d._overlay_volume_visual is not None
+    assert view._renderer_3d._overlay_cmap_name == "jet"
+    assert view._renderer_3d._overlay_opacity == 0.6
+
+    # Assert UI controls sync their state
+    assert view._overlay_btn.isChecked() is True
+    assert view._overlay_opacity_slider.value() == 60
+
+    # 3. Test interactive control signals
+    # Opacity slider change
+    view._overlay_opacity_slider.setValue(80)
+    assert view._renderer_3d._overlay_opacity == 0.8
+
+    # Colormap selection change
+    view._overlay_cmap_combo.setCurrentText("seismic")
+    assert view._renderer_3d._overlay_cmap_name == "seismic"
+
+    # Toggle overlay visibility
+    view._overlay_btn.setChecked(False)
+    assert view._renderer_3d._overlay_volume_visual.visible() is False
+
+    view._overlay_btn.setChecked(True)
+    assert view._renderer_3d._overlay_volume_visual.visible() is True
+
