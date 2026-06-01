@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 
 from geoviz_well_log import build_qpainter_tracks
 from geoviz_well_log.renderer.canvas import WellLogCanvas
-from geoviz_cross_well import CrossWellCanvas
+from geoviz_cross_well import CrossWellCanvas, export_cross_well_report
 from src.data.well_registry import list_wells, get_well_data
 from src.utils.floating_progress import FloatingProgressOverlay
 
@@ -414,6 +414,31 @@ class CrossWellPage(QWidget):
 
     # --- Actions ---
 
+    def load_planned_section(self, well_names: list[str]):
+        """Plan a contiguous well section path from geographic coordinates and load them."""
+        from src.data.cache import DataCache
+        from src.utils.paths import get_data_dir
+        from geoviz_cross_well.auto_section_planner import plan_section
+        
+        # Load coordinate dictionary
+        coords_file = get_data_dir() / "well_coordinates.json"
+        cache = DataCache()
+        all_coords = cache.get_well_coordinates(coords_file)
+        
+        # Filter coordinates for selected wells
+        selected_coords = [c for c in all_coords if c.name in well_names]
+        
+        if len(selected_coords) > 1:
+            # Sort wells along the first principal component (PCA) for logical geographic flow
+            sorted_coords = plan_section(selected_coords, method="pca")
+            sorted_names = [c.name for c in sorted_coords]
+        else:
+            sorted_names = list(well_names)
+            
+        # Clear existing section and load new sorted wells
+        self._on_clear()
+        self._load_wells(sorted_names)
+
     def _on_add_wells(self):
         available = list_wells()
         if not available:
@@ -639,7 +664,30 @@ class CrossWellPage(QWidget):
             if not lower.endswith(".svg"):
                 path += ".svg"
             fmt = "svg"
-        self._cross_well.export_composite(path, fmt=fmt)
+
+        # Ask the user for the report title
+        from PySide6.QtWidgets import QInputDialog
+        title, ok = QInputDialog.getText(
+            self, "输入报告标题", "请输入导出的报告图件标题：",
+            text="连井对比剖面图"
+        )
+        if not ok or not title.strip():
+            title = "连井对比剖面图"
+
+        try:
+            export_cross_well_report(
+                self._canvas,
+                path,
+                format=fmt,
+                title=title,
+                page_size="A4",
+                orientation="landscape",
+                include_legend=True,
+                include_grid_frame=True,
+            )
+            QMessageBox.information(self, "导出成功", f"连井对比报告已成功导出至：\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "导出失败", f"导出过程中发生错误：\n{str(e)}")
 
     def contextMenuEvent(self, event):
         from PySide6.QtWidgets import QMenu

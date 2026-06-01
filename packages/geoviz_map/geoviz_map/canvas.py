@@ -20,6 +20,7 @@ from geoviz_map.zoom_pan import ZoomPanHandler
 class MapCanvas(QWidget):
     well_clicked = Signal(str)
     well_hovered = Signal(str)  # emits empty string when hover leaves
+    section_selected = Signal(list)  # emits list of well names in the box selection
 
     def __init__(self,
                  wells: list[WellMarker],
@@ -33,6 +34,10 @@ class MapCanvas(QWidget):
         super().__init__(parent)
         self.setMouseTracking(True)
         self._press_pos: QPointF | None = None
+        self._box_start: QPointF | None = None
+        self._box_current: QPointF | None = None
+        self._box_selecting: bool = False
+
         if initial_center is None:
             if wells:
                 avg_lng = sum(w.lng for w in wells) / len(wells)
@@ -77,6 +82,18 @@ class MapCanvas(QWidget):
         try:
             for cache in self._layer_caches:
                 cache.paint(painter, self._viewport)
+
+            # Draw selection box if actively selecting
+            if self._box_selecting and self._box_start and self._box_current:
+                from PySide6.QtGui import QColor, QPen
+                from PySide6.QtCore import QRectF
+                rect = QRectF(self._box_start, self._box_current)
+                # Semi-transparent blue fill
+                painter.fillRect(rect, QColor(59, 130, 246, 50))
+                # Dashed blue border
+                pen = QPen(QColor(59, 130, 246), 1.5, Qt.PenStyle.DashLine)
+                painter.setPen(pen)
+                painter.drawRect(rect)
         finally:
             painter.end()
 
@@ -88,12 +105,21 @@ class MapCanvas(QWidget):
     # Input --------------------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._zoom_pan.start_drag(QPointF(event.position()))
-            self._press_pos = QPointF(event.position())
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                # Start box selection
+                self._box_start = QPointF(event.position())
+                self._box_current = QPointF(event.position())
+                self._box_selecting = True
+            else:
+                self._zoom_pan.start_drag(QPointF(event.position()))
+                self._press_pos = QPointF(event.position())
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         pos = QPointF(event.position())
-        if self._zoom_pan.is_dragging():
+        if self._box_selecting:
+            self._box_current = pos
+            self.update()
+        elif self._zoom_pan.is_dragging():
             self._zoom_pan.update_drag(pos)
             self._scheduler.schedule()
         else:
@@ -107,6 +133,28 @@ class MapCanvas(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        
+        if self._box_selecting:
+            self._box_selecting = False
+            release_pos = QPointF(event.position())
+            if self._box_start is not None:
+                from PySide6.QtCore import QRectF
+                rect = QRectF(self._box_start, release_pos)
+                selected_well_names = []
+                for well in self._wells_layer.wells:
+                    if well.has_data:
+                        well_screen_pos = self._viewport.lnglat_to_screen(well.lng, well.lat)
+                        if rect.contains(well_screen_pos):
+                            selected_well_names.append(well.name)
+                
+                if selected_well_names:
+                    self.section_selected.emit(selected_well_names)
+            
+            self._box_start = None
+            self._box_current = None
+            self.update()
+            return
+
         release_pos = QPointF(event.position())
         # Distinguish click vs drag: if total drag is small, treat as click
         drag_distance = 0.0

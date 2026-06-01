@@ -135,6 +135,10 @@ class MainWindow(QWidget):
         from src.pages.cross_well import CrossWellPage
         self.cross_well_page = CrossWellPage()
 
+        # Connect map box-selection to cross-well planned section loader
+        if self.map_page and hasattr(self.map_page, "map_canvas"):
+            self.map_page.map_canvas.section_selected.connect(self._on_section_selected)
+
         from src.pages.data import DataPage
         self.data_page = DataPage(self.cache)
 
@@ -165,3 +169,7 @@ class MainWindow(QWidget):
     def _on_well_clicked(self, well_name: str):
         self.well_log_page.load_well(well_name)
         self._switch_page(2)
+
+    def _on_section_selected(self, well_names: list[str]):
+        self.cross_well_page.load_planned_section(well_names)
+        self._switch_page(3)
