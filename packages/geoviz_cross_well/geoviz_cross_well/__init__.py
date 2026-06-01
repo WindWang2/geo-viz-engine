@@ -16,6 +16,7 @@ from .dtw_engine import DTWEngine, DTWResult
 from .seismic_tie import SeismicTie, CheckshotTable
 from .canvas import CrossWellCanvas, PickingOverlay
 from .auto_section_planner import plan_section, plan_section_pca, plan_section_nearest_neighbor
+from .report_export import export_cross_well_report
 
 __all__ = [
     "FormationTop",
@@ -38,4 +39,5 @@ __all__ = [
     "plan_section",
     "plan_section_pca",
     "plan_section_nearest_neighbor",
+    "export_cross_well_report",
 ]
