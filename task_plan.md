@@ -42,7 +42,8 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 14 | 连井剖面自动化与专业报告导出 | ✅ | 井位地图 Shift+Drag 框选，PCA 自动走向排井，高保真 PDF 报告导出 |
 | 15 | Project 工程文件序列化 (.gvz) | ✅ | 基于 Pydantic 的 Git 友好 schema，相对路径转换，DataPage UI 整合 |
 | 19 | 高阶可视化增强 (3D 结构增强与科学制图) | ⏳ | 3D地层雕刻、梯度光照、防碰撞标注与 LOD 路径简化 |
-| Audit | 连井专题深度审计与修复（2026-06-01 用户回归发现） | ✅ | 修复连井带 28px 标签偏移错位， 解决点击穿透和 Canvas 消费导致手动连井不起作用，实现连井带与拾取点对齐、跟随 Zoom/Pan 实时平移缩 放渲染 |
+| 20 | UI 视觉全量升级 (Azurite Design System) | ✅ | 蓝铜设计规范、全新线性图标、全局 QSS 主题同步 |
+| Audit | 连井专题深度审计与修复（2026-06-01 用户回归发现） | ✅ | 修复连井带 28px 标签偏移错 位， 解决点击穿透和 Canvas 消费导致手动连井不起作用，实现连井带与拾取点对齐、跟随 Zoom/Pan 实时平移缩 放渲染 |
 
 
 ## 🔴 Phase 11.5: 收尾与债务清理（最高优先级，必须先于 Phase 12）
@@ -238,6 +239,27 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
   - 3D 窗口支持“显示万山组至泥盆系之间”的独立切块，切换时无明显延迟。
   - 地震反射层在侧光模式下呈现清晰的浮雕阴影。
   - 地图在多井密集区自动隐藏或偏移标签，保持 100% 文字可读。
+
+---
+
+### 🆕 Phase 20: UI 视觉全量升级 (Azurite Design System)
+> **Goal**: 提升产品的视觉专业度与品牌一致性，对标顶级行业软件。
+
+- **Tasks & Roadmap**:
+  - **Task 20.1 (🔴 P0) - 全局图标资产同步**: 将 `UI-REF/icons` 下的导航及 UI 图标迁移并重命名至 `src/resources/icons`，替换所有过时的系统内置图标。 (✅ DONE)
+  - **Task 20.2 (🔴 P0) - MainWindow 与侧栏风格化**: 调整 `MainWindow` 侧栏宽度、背景色（`#faf9f5`）及 `SidebarButton` 的 Azurite 蓝（`#1f66d4`）高亮效果。 (✅ DONE)
+  - **Task 20.3 (🟡 P1) - 通用组件 QSS 标准化**: 编写全局样式表，统一 Button、QGroupBox、QComboBox 和 QTableWidget 的 1.6px 描边与圆角风格。 (✅ DONE)
+  - **Task 20.4 (🟡 P1) - 各功能页 UI 同步**:
+    - **MapPage**: 更新地图覆盖层文字风格。 (✅ DONE)
+    - **WellLogPage**: 更新轨道标签与控制栏样式。 (✅ DONE)
+    - **SeismicPage**: 同步多行 Toolbar 的 Azurite 风格。 (✅ DONE)
+    - **PlotsPage**: 调整图表边框与轴标签配色。 (✅ DONE)
+  - **Task 20.5 (🟢 P2) - 启动页与品牌标识**: 集成 `UI-REF/icons/brand` 下 of logo，增加精美的启动闪屏 (Splash Screen)。 (✅ DONE)
+
+- **Acceptance Criteria**:
+  - 整个应用呈现统一的 Azurite 蓝 + 暖白米色调，无视觉死角。
+  - 所有图标均替换为 1.6px 线性的线性设计。
+  - 在不同 DPI 下 UI 元素缩放正确且边缘清晰。
 
 ---
 
