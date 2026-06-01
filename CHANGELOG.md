@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ## [0.12.0] - 2026-06-01
 
 ### Added
+- **共享纹理与 GLSL 着色器体渲染优化 (Phase 12b)**：开发了高性能自定义着色器三维渲染器 `DualGLVolumeItem`，主振幅体和属性体共享单个三维 RGBA 纹理，节省 50% GPU 显存占用；在 GPU 端使用 GLSL Fragment Shader 实现实时 colormapping 和 alpha blending 融合，使属性参数/不透明度/显隐修改由 O(N^3) 纹理重新上传优化至 O(1) uniform 变量/LUT 纹理更新。
 - **双 GLVolumeItem 叠加渲染 (Phase 12a)**：实现了主振幅数据体与属性数据体（如相干、曲率）的双 GLVolumeItem 三维叠加，支持独立 opacity 不透明度调节、GPU colormap 映射和空间坐标对齐。
 - **连井剖面几何规划与报告导出 (Phase 14)**：
   - `auto_section_planner`：自研基于地理走向的 PCA (主成分分析) 与最近邻算法进行多井几何自动选井与连线走向排序。
