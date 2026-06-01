@@ -64,8 +64,8 @@ def test_slider_drag_calculations(qtbot):
     zoom_left = slider._frac_to_zoom(frac_left)
     assert zoom_left == pytest.approx(10.0)
 
-    # Rightmost position should equal maximum denominator (minimum zoom = 0.5)
+    # Rightmost position should equal maximum denominator (minimum zoom = 0.1)
     frac_right = slider._x_to_frac(x1)
     assert frac_right == 1.0
     zoom_right = slider._frac_to_zoom(frac_right)
-    assert zoom_right == pytest.approx(0.5)
+    assert zoom_right == pytest.approx(0.1)

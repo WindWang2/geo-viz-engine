@@ -19,6 +19,8 @@ class ScreenPathCache:
         # draw at the wrong offset, separating polygons from live-transformed
         # overlays (e.g. RegionLabels).
         self._zoom_center: dict[float, tuple[float, float]] = {}
+        self._vp_width: int = 0
+        self._vp_height: int = 0
 
     def mark_dirty(self, feature_id: str) -> None:
         self._dirty.add(feature_id)
@@ -30,6 +32,12 @@ class ScreenPathCache:
     def get_or_build(self, feature_id: str, world_path: QPainterPath,
                      viewport: PaleoMapViewport) -> QPainterPath:
         """Return screen-space path, building if needed."""
+        if viewport.width != self._vp_width or viewport.height != self._vp_height:
+            self._cache.clear()
+            self._zoom_center.clear()
+            self._vp_width = viewport.width
+            self._vp_height = viewport.height
+
         zoom_key = round(viewport.zoom * 4) / 4
         cache_key = (zoom_key, feature_id)
 

@@ -10,7 +10,7 @@ class ZoomPanHandler:
     """Mutates a PaleoMapViewport based on mouse drag and wheel events."""
 
     def __init__(self, viewport: PaleoMapViewport,
-                 min_zoom: float = 0.5, max_zoom: float = 10.0):
+                 min_zoom: float = 0.1, max_zoom: float = 10.0):
         self.viewport = viewport
         self.min_zoom = min_zoom
         self.max_zoom = max_zoom

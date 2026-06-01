@@ -79,9 +79,9 @@ class LayerPixmapCache:
         # Viewport resize invalidates the cached pixmap: the cache was rendered
         # for a (buf_w, buf_h) sized buffer matched to the old vp dimensions,
         # and _blit reads a (vp.width, vp.height) rect from it. If the live
-        # viewport grew, the rect runs off the cached pixmap and content
-        # collapses into the upper-left of the canvas.
-        if vp.width > self._vp_width or vp.height > self._vp_height:
+        # viewport size changed, rerender to ensure correct centering and
+        # blitting coordinates.
+        if vp.width != self._vp_width or vp.height != self._vp_height:
             return True
         dx = abs(vp.center_world[0] - self._vp_center[0]) * vp.scale
         dy = abs(vp.center_world[1] - self._vp_center[1]) * vp.scale
@@ -119,8 +119,15 @@ class LayerPixmapCache:
             return
         dx_px = (vp.center_world[0] - self._vp_center[0]) * vp.scale
         dy_px = (self._vp_center[1] - vp.center_world[1]) * vp.scale
-        # Source coords are logical (pixmap has setDevicePixelRatio set);
-        # Qt translates to physical pixels internally.
-        src_x = int(vp.width / 2 + dx_px)
-        src_y = int(vp.height / 2 + dy_px)
-        painter.drawPixmap(0, 0, self._pixmap, src_x, src_y, vp.width, vp.height)
+        
+        # Source coordinates in logical space
+        src_x = vp.width / 2 + dx_px
+        src_y = vp.height / 2 + dy_px
+        
+        # Convert logical source coordinates to physical pixels of the source pixmap
+        src_x_phys = int(round(src_x * self._dpr))
+        src_y_phys = int(round(src_y * self._dpr))
+        src_w_phys = int(round(vp.width * self._dpr))
+        src_h_phys = int(round(vp.height * self._dpr))
+        
+        painter.drawPixmap(0, 0, self._pixmap, src_x_phys, src_y_phys, src_w_phys, src_h_phys)

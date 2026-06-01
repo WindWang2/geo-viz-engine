@@ -1,0 +1,27 @@
+[project]
+name = "geoviz-plots"
+version = "0.1.0"
+description = "General-purpose 2D plotting and point-to-surface contour rendering library in PySide6"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Kevin", email = "kevin@example.com" }]
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6",
+    "numpy",
+    "scipy",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-qt"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["geoviz_plots"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/geoviz_plots"]
