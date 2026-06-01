@@ -51,6 +51,12 @@ class Renderer3D(QWidget):
         self._use_volume = False
         self._arb_polyline: list[tuple[float, float]] | None = None  # index-space waypoints
 
+        # Overlay / Attribute volume state (Phase 12a)
+        self._overlay_volume_data_cpu: np.ndarray | None = None
+        self._overlay_cmap_name = "jet"
+        self._overlay_opacity = 0.5
+        self._overlay_volume_visual = None
+
         self._init_pyqtgraph(layout)
         self._plotter = True  # Keeps state parity with external API expectations
 
@@ -135,6 +141,11 @@ class Renderer3D(QWidget):
                 self._volume_visual.show()
             else:
                 self._volume_visual.hide()
+        if self._overlay_volume_visual is not None:
+            if mode == "volume":
+                self._overlay_volume_visual.show()
+            else:
+                self._overlay_volume_visual.hide()
         self._view.update()
 
     def load_volume(self, data: np.ndarray, origin=(0, 0, 0),
@@ -342,15 +353,96 @@ class Renderer3D(QWidget):
         except Exception as e:
             logger.warning(f"Rebuild volume visual failed: {e}")
 
+    def load_overlay_volume(self, data: np.ndarray, colormap: str = "jet", opacity: float = 0.5):
+        """Load an overlay attribute/property volume and display it superimposed with alpha blending."""
+        self._overlay_volume_data_cpu = data
+        self._overlay_cmap_name = colormap
+        self._overlay_opacity = opacity
+        
+        self.rebuild_overlay_volume_visual()
+
+    def rebuild_overlay_volume_visual(self):
+        """Rebuild the overlay volume visual item using colormap and opacity."""
+        if self._overlay_volume_visual is not None:
+            try:
+                self._view.removeItem(self._overlay_volume_visual)
+            except Exception:
+                pass
+            self._overlay_volume_visual = None
+
+        if self._overlay_volume_data_cpu is None:
+            return
+
+        try:
+            # Get colormap LUT data
+            cmap_data = ColormapManager.get_colormap(self._overlay_cmap_name).copy()
+            
+            # Apply global opacity factor as standard alpha overlay
+            alpha_curve = self._build_alpha_curve("sharp", len(cmap_data))
+            # Multiply alpha curve by our opacity factor (0.0 to 1.0)
+            alpha_curve = alpha_curve * self._overlay_opacity
+            cmap_data[:, 3] = alpha_curve.astype(np.uint8)
+            
+            # Downsample attribute volume for visual parity with primary volume (sliceDensity=3)
+            vol_data = self._overlay_volume_data_cpu
+            from .gpu_ops import apply_colormap_gpu
+            vol_rgba = apply_colormap_gpu(vol_data[::2, ::2, ::2], cmap_data)
+
+            # Create visual item
+            si, sx, st = self._volume_spacing
+            self._overlay_volume_visual = gl.GLVolumeItem(vol_rgba, sliceDensity=3, smooth=True)
+            self._overlay_volume_visual.scale(si * 2, sx * 2, st * 2)
+            self._view.addItem(self._overlay_volume_visual)
+            
+            # Sync visibility with main volume mode
+            if self._mode != "volume":
+                self._overlay_volume_visual.hide()
+                
+            self._view.update()
+        except Exception as e:
+            logger.warning(f"Rebuild overlay volume visual failed: {e}")
+
+    def set_overlay_colormap(self, cmap_name: str):
+        """Change the colormap of the overlay volume."""
+        self._overlay_cmap_name = cmap_name
+        self.rebuild_overlay_volume_visual()
+
+    def set_overlay_opacity(self, opacity: float):
+        """Change the opacity (alpha multiplier) of the overlay volume."""
+        self._overlay_opacity = opacity
+        self.rebuild_overlay_volume_visual()
+
+    def set_overlay_visible(self, visible: bool):
+        """Toggle visibility of the overlay volume visual."""
+        if self._overlay_volume_visual is not None:
+            if visible and self._mode == "volume":
+                self._overlay_volume_visual.show()
+            else:
+                self._overlay_volume_visual.hide()
+            self._view.update()
+
+    def clear_overlay_volume(self):
+        """Clear and remove the overlay volume visual."""
+        if self._overlay_volume_visual is not None:
+            try:
+                self._view.removeItem(self._overlay_volume_visual)
+            except Exception:
+                pass
+            self._overlay_volume_visual = None
+        self._overlay_volume_data_cpu = None
+        self._view.update()
+
     def clear(self):
         """Reset state and clean visual graph."""
         self._clear_visuals()
         self._loaded = False
         self._volume_data_cpu = None
         self._volume_data_gpu = None
+        self._overlay_volume_data_cpu = None
+        self._overlay_volume_visual = None
 
     def _clear_visuals(self):
-        for v in (self._volume_visual, self._img_il, self._img_xl,
+        for v in (self._volume_visual, self._overlay_volume_visual, self._img_il, self._img_xl,
                   self._img_t, self._img_arb, self._horizon_visual,
                   self._picks_visual, self._bbox_visual, self._cursor_sphere):
             if v is not None:

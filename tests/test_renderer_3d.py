@@ -38,3 +38,42 @@ def test_renderer_3d_add_horizon(qtbot):
     widget.add_horizon(h_data, name="test_horizon")
     assert "test_horizon" in widget._horizons
     assert widget._horizons["test_horizon"] is not None
+
+def test_renderer_3d_dual_volume(qtbot):
+    """Verify that Renderer3D supports loading and managing a dual-volume overlay (amplitude + attribute)."""
+    from geoviz_seismic.renderer_3d import Renderer3D
+    
+    widget = Renderer3D()
+    qtbot.addWidget(widget)
+    
+    # 1. Load primary volume
+    primary_data = np.random.randn(10, 10, 10).astype(np.float32)
+    widget.load_volume(primary_data)
+    assert widget._loaded
+    widget.set_render_mode("volume")
+    
+    # 2. Load overlay/attribute volume
+    overlay_data = np.random.randn(10, 10, 10).astype(np.float32)
+    widget.load_overlay_volume(overlay_data, colormap="jet", opacity=0.6)
+    
+    # Ensure overlay visual item created and added
+    assert widget._overlay_volume_visual is not None
+    assert widget._overlay_volume_visual in widget._view.items
+    
+    # 3. Test changing overlay properties
+    widget.set_overlay_colormap("seismic")
+    assert widget._overlay_cmap_name == "seismic"
+    
+    widget.set_overlay_opacity(0.8)
+    assert widget._overlay_opacity == 0.8
+    
+    # 4. Test visibility toggle
+    widget.set_overlay_visible(False)
+    assert widget._overlay_volume_visual.visible() is False
+    
+    widget.set_overlay_visible(True)
+    assert widget._overlay_volume_visual.visible() is True
+    
+    # 5. Clear overlay
+    widget.clear_overlay_volume()
+    assert widget._overlay_volume_visual is None
