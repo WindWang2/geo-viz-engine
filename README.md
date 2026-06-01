@@ -194,7 +194,11 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 | Phase 7 | ✅ 已完成 | STFT 谱分解、RGB 属性融合、属性交叉图 |
 | Phase 8 | ✅ 已完成 | 井震结合可视化集成（WellTiePanel 面板、合成记录叠合、Auto-Tie 互相关、BinGridGeometry 空间参考） |
 | Phase 11.8/11.9 | ✅ 已完成 | 层级锁定、比例尺/图例重叠修复、沉积相色彩与纹理库扩充 |
+| Phase 12a/12b | ✅ 已完成 | 双 GLVolumeItem 叠加，共享纹理与 GLSL 着色器深度优化，GPU colormap 映射和 alpha blending |
+| Phase 14 | ✅ 已完成 | 连井剖面几何 PCA 自动规划排井与高保真 PDF 矢量报告导出 |
+| Phase 15 | ✅ 已完成 | Project 工程文件 (.gvz) 序列化架构与 DataPage 跨页面共享状态管理 |
 | Phase 17 | ✅ 已完成 | 通用二维图表 PlotWidget、自适应刻度、LTTB 十万点降采样、规则网格 IDW / SciPy 插值与 Marching Squares 等值线/面渲染 |
+| Phase 18 | ✅ 已完成 | 深度性能优化（QPixmap 静态层缓存、Pickle 二进制序列化、多线程数据加载、CurveTrack NumPy 向量化映射、QTimer 节流） |
 
 ---
 
