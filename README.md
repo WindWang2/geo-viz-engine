@@ -113,13 +113,15 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 
 | 层级 | 技术 | 用途 |
 |------|------|------|
-| UI 框架 | PySide6 6.6+ | 桌面窗口、导航、控件 |
-| 测井渲染 | ECharts 5.x (SVG) | 曲线、岩性/相柱状图（通过 `geoviz-well-log` 包） |
-| 3D 渲染 | pyqtgraph 0.13+ / PyOpenGL | 地震体三维显示、剖面切片 |
-| 地图 | QPainter (geoviz-map) | 井位地图、Web Mercator 投影、交互选井 |
-| 数据模型 | Pydantic v2 | 强类型数据验证与序列化 |
-| Excel 解析 | python-calamine | 基于 Rust 的极速表格数据解析引擎 |
-| 数据处理 | pandas 2.x / numpy 1.26+ | 表格数据、数值计算 |
+| UI 框架 | PySide6 6.6+ | 桌面窗口、多线程并发加载、状态流转 |
+| 测井/图表 | ECharts 5.x (SVG) / QPainter | ECharts负责复杂相柱状图，QPainter负责极速连井联动与十万点LTTB图表渲染 |
+| 3D 渲染 | pyqtgraph 0.13+ / PyOpenGL | 地震体三维显示、GLSL双体叠加混合与着色器级colormap、切片提取 |
+| 空间制图 | QPainter | Web Mercator/Plate Carrée投影地图绘制、古地理多边形交互编辑 |
+| GPU 加速 | CuPy 13.x | 基于 CUDA 的地震体三维属性计算（相干、曲率）、高速大数组切片 |
+| 科学计算 | SciPy / NumPy | STFT时频分解、SciPy RBF空间网格化插值、DTW地层对比、信号互相关 |
+| 数据模型 | Pydantic v2 | 强类型数据验证、`.gvz` 项目工程嵌套数据结构的序列化规范 |
+| 序列化缓存 | Pickle Binary | 二进制高速缓存持久化，NaN值保护，提速大型测井/地震阵列数据I/O |
+| Excel 解析 | python-calamine | 基于 Rust 的极速电子表格数据解析引擎（比 Pandas 默认快 5-10 倍） |
 
 ---
 
