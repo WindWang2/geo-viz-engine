@@ -7,11 +7,11 @@
 GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Phase 1–17 已完成，702 tests passed。**核心市场定位**：科研院所 + 中小油田 + 教学（差异化于 Petrel 的轻量、可二次开发、出版级出图）。
 
 ## Current State
-- **Branch:** main (synced with origin)
-- **Tests:** 702 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
-- **Latest commit:** `cb2b7d25 feat(geoviz-plots): add general 2D plotting, IDW/SciPy interpolation, and SurfaceWidget contouring`
-- **Active phase:** Phase 14 in_progress (Cross-Well Section Planner & Professional PDF Report)
-- **Health rating:** A+（Phase 11 + 11.5 + 11.6 + 11.7 + 11.8 + 11.9 + 17 全清，832 个单元测试全绿）
+- **Branch:** feat/geoviz-plots
+- **Tests:** 723 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
+- **Latest commit:** `8f074c5c feat(project): build DataPage project management UI controls and wire Open/Save button signals`
+- **Active phase:** Handover / Next Phase Planning
+- **Health rating:** A+（所有 Phase 全清，723 个单元测试全绿）
 
 ## Completed Phases
 
@@ -37,6 +37,9 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 11.8 | 层级锁定与图例/比例尺文字重叠修复（三子任务全 ship） | ✅ | 684 tests passed |
 | 11.9 | 相纹理资料设计与微相/亚相色彩系统扩充 | ✅ | 687 tests passed, evaporite SVG added |
 | 17 | geoviz-plots 通用图表与等值线插值渲染 | ✅ | 702 tests passed, 15个新 TDD 测试完美全绿 |
+| 12a | 双 GLVolumeItem 叠加 MVP | ✅ | 振幅体与属性体叠加，GPU colormap 及独立不透明度控制 |
+| 14 | 连井剖面自动化与专业报告导出 | ✅ | 井位地图 Shift+Drag 框选，PCA 自动走向排井，高保真 PDF 报告导出 |
+| 15 | Project 工程文件序列化 (.gvz) | ✅ | 基于 Pydantic 的 Git 友好 schema，相对路径转换，DataPage UI 整合 |
 
 
 ## 🔴 Phase 11.5: 收尾与债务清理（最高优先级，必须先于 Phase 12）
@@ -247,10 +250,11 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 ---
 
 ## Notes
-- 710 tests passed, 4 skipped — full suite green
+- 723 tests passed, 4 skipped — full suite green
 - cross-well 依赖 well-tie（纯 NumPy，零 Qt）
 - Phase 11.9 shipped — microfacies CNPC colors and evaporite SVG added
-- 下一步动作：开发 Phase 14 连井可视化 PDF 报告生成核心
+- Phase 12a, 14, 15 fully completed and committed under strict TDD
+- 下一步动作：等待用户新需求反馈
 
 ## Errors Encountered
 | Error | Phase | Attempt | Resolution |

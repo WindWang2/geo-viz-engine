@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-01
+
+### Added
+- **双 GLVolumeItem 叠加渲染 (Phase 12a)**：实现了主振幅数据体与属性数据体（如相干、曲率）的双 GLVolumeItem 三维叠加，支持独立 opacity 不透明度调节、GPU colormap 映射和空间坐标对齐。
+- **连井剖面几何规划与报告导出 (Phase 14)**：
+  - `auto_section_planner`：自研基于地理走向的 PCA (主成分分析) 与最近邻算法进行多井几何自动选井与连线走向排序。
+  - **地图框选交互**：支持在 `MapPage` 井位地图上进行 Shift+Drag 鼠标框选，自动获取框内所有有效测井数据并跳转连井剖面进行 PCA 走向规划排布。
+  - **高保真矢量报告导出**：为连井剖面设计了出版级的高保真 PDF/SVG 矢量图件核心导出器。
+- **Project 工程文件序列化 (Phase 15)**：
+  - 设计了基于 Pydantic 规范的 Git 友好、轻量级嵌套 JSON schema `.gvz` 文件格式，存储多井数据、地震数据、拾取层位、视图设置等全景工程状态。
+  - **工程文件数据相对化**：保存时自动相对化路径为工程文件同级或子目录路径，打开时自动还原绝对路径，确保跨机器工程包的便携共享。
+  - **DataPage 工程管理 UI**：重构 DataPage，在顶端增加“工程项目管理”分组框，集成“新建/打开/保存/另存为”操作并对接标准 QFileDialog 文件管理器，提供元数据自适应显示。
+- **测试套件扩充**：新增 9 个单元测试与 UI 集成测试，验证三维双体叠加、DataPage controls、MainWindow state sync 接口以 100% 绿全部通过，全量测试达到 723 passed。
+
 ## [0.11.0] - 2026-06-01
 
 ### Added

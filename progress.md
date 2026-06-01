@@ -1,6 +1,22 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE, Phase 11.8 COMPLETE, Phase 11.9 COMPLETE, Phase 17 COMPLETE
+## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE, Phase 11.8 COMPLETE, Phase 11.9 COMPLETE, Phase 12a COMPLETE, Phase 14 COMPLETE, Phase 15 COMPLETE, Phase 17 COMPLETE
+
+### Session: 2026-06-01 (Phase 12a, 14, 15 — Shipped)
+
+#### Implementation & Shipping Completed
+- **Phase 12a (Dual GLVolumeItem Overlay)**:
+  - Developed independent alpha blending, colormapping, coordinates alignment, and visibility controls for superimposed primary/secondary seismic volumes inside `Renderer3D` and `SeismicView`.
+  - Wrote robust TDD unit tests in `test_renderer_3d.py` and integration tests in `test_seismic_view.py`.
+- **Phase 14 (Auto Section & Professional PDF Report)**:
+  - Coded `auto_section_planner` in `geoviz_cross_well` with PCA and nearest neighbor layout routing.
+  - Implemented Shift+Drag bounding box selection in `MapPage` to collect well lists and dynamically load planned section.
+  - Developed publishing-grade off-screen high-resolution PDF/SVG/PNG vector exporter inside `report_export.py` under TDD.
+- **Phase 15 (Project Serialization)**:
+  - Designed Git-friendly `ProjectSchema` using `pydantic` and built path-relativizing `ProjectManager` inside `src/data/project.py`.
+  - Integrated `sync_from_project` / `sync_to_project` APIs into `MainWindow` (`src/app.py`).
+  - Added new "工程项目管理" QGroupBox with "New/Open/Save/Save As" buttons in DataPage (`src/pages/data/page.py`) under TDD.
+- **Verification**: All 723 tests passed, 4 skipped, 0 failures.
 
 ### Session: 2026-06-01 (Phase 17 — Shipped)
 
