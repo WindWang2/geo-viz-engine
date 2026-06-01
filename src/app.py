@@ -20,11 +20,11 @@ def _get_icon_path(name: str) -> str:
 
 PAGES = [
     ("map",       _get_icon_path("map.svg"),       "地图总览"),
-    ("paleo_map", _get_icon_path("map.svg"),       "古地理图"),
-    ("well_log",  _get_icon_path("well_log.svg"),  "井剖面"),
-    ("cross_well",_get_icon_path("cross_well.svg"),"连井对比"),
+    ("paleo_map", _get_icon_path("paleo.svg"),     "古地理图"),
+    ("well_log",  _get_icon_path("well.svg"),      "井剖面"),
+    ("cross_well",_get_icon_path("cross.svg"),     "连井对比"),
     ("seismic",   _get_icon_path("seismic.svg"),   "地震3D"),
-    ("plots",     _get_icon_path("curve.svg"),     "平面图件"),
+    ("plots",     _get_icon_path("plots.svg"),     "平面图件"),
     ("data",      _get_icon_path("data.svg"),       "数据管理"),
     ("tools",     _get_icon_path("tools.svg"),      "工具箱"),
 ]
