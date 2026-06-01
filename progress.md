@@ -1,6 +1,19 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE, Phase 11.8 COMPLETE, Phase 11.9 COMPLETE
+## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE, Phase 11.8 COMPLETE, Phase 11.9 COMPLETE, Phase 17 COMPLETE
+
+### Session: 2026-06-01 (Phase 17 — Shipped)
+
+#### Implementation & Shipping Completed
+- **Version Bump**: Bumped root package version in `VERSION`, `pyproject.toml`, and `uv.lock` from `0.7.0` to `0.8.0`.
+- **CHANGELOG Entry**: Added version `0.11.0` release notes detailing all Phase 17 plotting and contouring core capabilities, plus Phase 11.8/11.9 locking/overlap/resolver additions.
+- **CLAUDE.md & README.md Docs**: Documented `geoviz_plots` package architecture, independent package specs, and project layouts in both core entry documents.
+- **Staging & Commit**:
+  - Implementation changes committed as `feat(geoviz-plots): add general 2D plotting, IDW/SciPy interpolation, and SurfaceWidget contouring` (`cb2b7d25`).
+  - Documentation committed as `docs: update project documentation for v0.8.0` (`f4caed97`).
+  - Lockfile committed as `chore: bump version number in package spec and lockfile` (`1cda312f`).
+- **PR open on GitHub**: Successfully pushed branch `feat/geoviz-plots` and opened Pull Request [PR #21](https://github.com/WindWang2/geo-viz-engine/pull/21).
+- **Verification**: 702 tests passed, 4 skipped, 0 failures.
 
 ### Session: 2026-06-01 (Phase 11.9 — Facies SVG Assets & Color Config Expansion)
 
