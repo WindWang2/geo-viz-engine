@@ -50,15 +50,15 @@ class SidebarButton(QPushButton):
                 padding-left: 12px;
                 font-size: 14px;
                 font-weight: 500;
-                color: #4a5568;
+                color: #586878;
             }
             SidebarButton:checked {
-                background: #edf2f7;
-                color: #2b6cb0;
+                background: #e9effa;
+                color: #1f66d4;
                 font-weight: bold;
             }
             SidebarButton:hover {
-                background: #e2e8f0;
+                background: #f0f4f8;
             }
         """)
 
@@ -80,8 +80,8 @@ class MainWindow(QWidget):
 
         # Sidebar
         self.sidebar = QWidget()
-        self.sidebar.setFixedWidth(140)
-        self.sidebar.setStyleSheet("background: #f7fafc; border-right: 1px solid #e2e8f0;")
+        self.sidebar.setFixedWidth(160)
+        self.sidebar.setStyleSheet("background: #faf9f5; border-right: 1px solid #e2e8f0;")
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(8, 12, 8, 12)
         sidebar_layout.setSpacing(6)
