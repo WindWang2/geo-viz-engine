@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-01
+
+### Added
+- **通用图表与等值线插值渲染（Phase 17）**：构建了纯自研、轻量级且高品质的 PySide6 二维通用图表及空间散点等值线/色斑图渲染库。
+  - `PlotWidget`：高性能 QPainter 二维通用图表，支持 Heckbert 自适应刻度轴标定、折线及散点绘制。
+  - **LTTB 数据降采样算法**：支持 $100K+$ 点大数据量下 QPainter 60+ FPS 流畅渲染，保证十万级数据渲染不假死。
+  - **空间插值核心**：实现二维规则网格自研 IDW 向量化插值计算，及 SciPy (RBF/Linear) 空间散点网格化插值。
+  - **QThread 异步计算**：将耗时的空间插值计算路由至后台 QThread 异步执行，配合进度/完成信号传递，实现流畅的 GUI 响应。
+  - **异常数据与外插边界保护**：引入 NaN 数据清洗掩膜 (Masking) 与外插 Convex Hull 边界防护，防止外插发散或越界。
+  - **等值线提取核心**：自研 Marching Squares 算法实现等值线（Line）与等值面（Filled Polygons）的几何路径拓扑提取与多边形闭合。
+  - **中石油 (CNPC) 地质色标库**：集成了标准化地质色标模板渲染，支持高品质 PDF/SVG 矢量无损导出。
+- **古地理图层级锁定与重叠修复（Phase 11.8 & 11.9）**：
+  - 实现全局层级锁定（相/亚相/微相），提供缩放平移层级同步锁。
+  - 修复比例尺滑动条刻度防水平重叠保护（最少保持 45px 间距），以及图例标题与色块色卡垂直重叠。
+  - 扩充微相/亚相色彩系统，支持超咸水潟湖、湖底泥、三角洲前缘等 13 种地层岩相的 SVGs 图例与 resolvers。
+- **15 条新增测试**：覆盖自适应刻度、NaN series 边界、LTTB 压缩、IDW/SciPy 插值、Marching Squares contouring 以及 QThread async worker 生命周期的全量自动化 TDD 测试。
+
 ## [0.10.0] - 2026-05-30
 
 ### Added

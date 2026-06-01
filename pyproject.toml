@@ -1,6 +1,6 @@
 [project]
 name = "geo-viz-engine"
-version = "0.7.0"
+version = "0.8.0"
 description = "地质数据可视化桌面引擎"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -22,6 +22,7 @@ dependencies = [
     "geoviz-paleo-map",
     "geoviz-cross-well",
     "geoviz-well-tie",
+    "geoviz-plots",
 ]
 
 [project.optional-dependencies]
@@ -49,6 +50,7 @@ members = [
     "packages/geoviz_paleo_map",
     "packages/geoviz_cross_well",
     "packages/geoviz_well_tie",
+    "packages/geoviz_plots",
 ]
 
 [tool.uv.sources]
@@ -58,6 +60,7 @@ geoviz-map = { workspace = true }
 geoviz-paleo-map = { workspace = true }
 geoviz-cross-well = { workspace = true }
 geoviz-well-tie = { workspace = true }
+geoviz-plots = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

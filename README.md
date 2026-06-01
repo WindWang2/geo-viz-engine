@@ -10,7 +10,7 @@
 
 > **v0.1-web** (Tauri + React + FastAPI 架构) 已归档于 git tag `v0.1-web`。
 
-> **Version 说明**：根目录 `VERSION` 文件追踪发布版本号（用于打包/发布），与 `CHANGELOG.md` 中的版本号是**有意脱钩**的——`CHANGELOG.md` 按 Phase 推进记录功能演进；`VERSION` 仅在执行正式发布时更新。当前 `VERSION=0.7.0`、`CHANGELOG=0.10.0` 是预期状态，不是 bug。
+> **Version 说明**：根目录 `VERSION` 文件追踪发布版本号（用于打包/发布），与 `CHANGELOG.md` 中的版本号是**有意脱钩** of——`CHANGELOG.md` 按 Phase 推进记录功能演进；`VERSION` 仅在执行正式发布时更新。当前 `VERSION=0.8.0`、`CHANGELOG=0.11.0` 是预期状态，不是 bug。
 
 ---
 
@@ -93,6 +93,16 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 │  │  ├── WellTieCalibration T-D 转换与重采样          │    │
 │  │  ├── Synthetic       Ricker/Ormsby 合成记录       │    │
 │  │  └── AutoTie         互相关自动标定               │    │
+│  └─────────────────────────────────────────────────┘    │
+│                                                         │
+│  packages/geoviz-plots/                                 │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  独立通用图表与等值线插值引擎 (QPainter-based)    │    │
+│  │  ├── PlotWidget     高性能QPainter图表          │    │
+│  │  ├── Axes           Heckbert自适应刻度轴        │    │
+│  │  ├── Series         数据序列与LTTB降采样        │    │
+│  │  ├── Interpolation  IDW向量化/SciPy RBF插值     │    │
+│  │  └── MarchingSquares 等值线线/面几何网格提取      │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                         │
 │  src/   data/ loaders & models │ pages/ UI              │
@@ -183,6 +193,8 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 | Phase 6 | ✅ 已完成 | 地震属性分析（瞬时频率/RMS/甜点/相对阻抗）、沿层位提取、井震结合（合成地震记录+标定） |
 | Phase 7 | ✅ 已完成 | STFT 谱分解、RGB 属性融合、属性交叉图 |
 | Phase 8 | ✅ 已完成 | 井震结合可视化集成（WellTiePanel 面板、合成记录叠合、Auto-Tie 互相关、BinGridGeometry 空间参考） |
+| Phase 11.8/11.9 | ✅ 已完成 | 层级锁定、比例尺/图例重叠修复、沉积相色彩与纹理库扩充 |
+| Phase 17 | ✅ 已完成 | 通用二维图表 PlotWidget、自适应刻度、LTTB 十万点降采样、规则网格 IDW / SciPy 插值与 Marching Squares 等值线/面渲染 |
 
 ---
 
@@ -286,6 +298,19 @@ geo-viz-engine/
 │       │   ├── synthetic.py    # Ricker/Ormsby 子波 + 合成记录
 │       │   └── auto_tie.py     # 互相关自动标定
 │       └── pyproject.toml
+│   └── geoviz_plots/             # 独立通用二维图表及等值线插值可视化包 (pip installable)
+│       ├── geoviz_plots/
+│       │   ├── chart/
+│       │   │   ├── plot_widget.py # 高性能 QPainter 图表
+│       │   │   ├── axes.py        # Heckbert 自适应刻度轴标定
+│       │   │   └── series.py      # LineSeries, ScatterSeries, LTTB
+│       │   ├── interpolation/
+│       │   │   ├── idw.py         # IDW 向量化插值
+│       │   │   └── scipy_grid.py  # SciPy RBF/Linear 插值与异步 QThread Worker
+│       │   ├── surface/
+│       │   │   ├── marching_squares.py # Marching Squares 等值线线/面提取
+│       │   │   └── surface_widget.py   # SurfaceWidget 等值面色块绘制与色标
+│       │   └── pyproject.toml
 ├── src/                           # 主应用代码
 │   ├── main.py                    # 入口 (QApplication)
 │   ├── app.py                     # MainWindow + 侧栏导航

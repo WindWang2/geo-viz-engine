@@ -88,13 +88,14 @@ PySide6 (Qt for Python) — Single Process
 │       ├── edit_overlay.py      → EditOverlayLayer
 │       ├── save_export.py       → save/export functions
 │       └── layers/              → Background, FaciesPolygons, RegionLabels, WellsScatter, Title, NorthArrow, ScaleBar, Legend
-│   └── geoviz-cross-well/  → Independent cross-well correlation engine (composes geoviz-well-log)
-│       ├── canvas.py            → CrossWellCanvas + PickingOverlay (composes CrossWellWidget)
-│       ├── tops_model.py        → FormationTopsModel (CSV I/O, color palette)
-│       ├── picks_model.py       → HorizonPicksModel + PicksUndoManager (two-stack undo)
-│       ├── correlation_layer.py → CorrelationLayer (bezier tie lines)
-│       ├── dtw_engine.py        → DTWEngine (banded DTW with Sakoe-Chiba)
-│       └── seismic_tie.py       → SeismicTie (checkshot T-D conversion)
+│   ├── geoviz-cross-well/  → Independent cross-well correlation engine (composes geoviz-well-log)
+│   │   ├── canvas.py            → CrossWellCanvas + PickingOverlay (composes CrossWellWidget)
+│   │   ├── tops_model.py        → FormationTopsModel (CSV I/O, color palette)
+│   │   ├── picks_model.py       → HorizonPicksModel + PicksUndoManager (two-stack undo)
+│   │   ├── correlation_layer.py → CorrelationLayer (bezier tie lines)
+│   │   ├── dtw_engine.py        → DTWEngine (banded DTW with Sakoe-Chiba)
+│   │   └── seismic_tie.py       → SeismicTie (checkshot T-D conversion)
+│   └── geoviz-plots/       → Independent QPainter-based 2D plotting & spatial contour map engine
 ├── src/data/              → (loaders, models, cache, well_registry)
 └── src/pages/             → (each page in its own subfolder with renderer/loader)
 ```
@@ -106,6 +107,7 @@ PySide6 (Qt for Python) — Single Process
 - **Independent Package**: `geoviz-paleo-map` is a fully decoupled paleogeographic map engine using only QPainter. Plate Carrée projection. Per-feature composite SVG pattern fills via `geoviz-well-log.PatternEngine` extensions (`get_composite_brush`, `get_color_fuzzy`). 8 layers: 4 data-driven + 4 chrome. Can be `pip install`-ed and used in any PySide6 project.
 - **Independent Package**: `geoviz-cross-well` is a fully decoupled cross-well correlation engine that composes `geoviz_well_log.WellLogCanvas` for rendering. Adds formation tops database (CSV I/O), manual horizon picking with undo/redo (PicksUndoManager), DTW auto-correlation (banded Sakoe-Chiba), bezier correlation ties, and seismic tie (checkshot T-D conversion). Can be `pip install`-ed and used in any PySide6 project.
 - **Independent Package**: `geoviz-well-tie` is a pure-NumPy well-seismic tie library with no Qt dependency. Provides Ricker/Ormsby wavelet generation, synthetic seismogram computation, WellTieCalibration (T-D conversion via sonic integration), auto-tie cross-correlation (shift + quality), and seismic grid resampling. Can be `pip install`-ed and used in any Python project.
+- **Independent Package**: `geoviz-plots` is a fully decoupled 2D plotting and contour rendering library using only QPainter. Heckbert self-adaptive ticks, LTTB downsampling for 100K+ points, IDW/SciPy griddata spatial interpolation in background QThread, convex hull masking, Marching Squares contour lines and filled polygons extraction, and standard CNPC colormaps. Can be `pip install`-ed and used in any PySide6 project.
 - **WellLogPage is thin**: Only ~350 lines of UI orchestration. Calls `build_tracks_from_data()` and `TrackManager` from the package. AI prediction business logic (API calls, Excel writing) stays in the page layer.
 - **Data layer**: `src/data/loaders.py` handles lasio (LAS), segyio (SEGY), openpyxl (Excel), and JSON loading. `src/data/models.py` defines Pydantic models. `src/data/cache.py` provides in-memory caching. `src/data/well_registry.py` maps well names to loader functions.
 - **Well log rendering flow**: `WellLogData` → `build_tracks_from_data()` → track pool → `TrackManager.build_payload()` → JSON → `ChartEngine.render_data()` → ECharts SVG rendering.
@@ -183,6 +185,14 @@ PySide6 (Qt for Python) — Single Process
   - `geoviz_cross_well/correlation_layer.py` — CorrelationLayer (bezier tie lines)
   - `geoviz_cross_well/dtw_engine.py` — DTWEngine (banded DTW with Sakoe-Chiba)
   - `geoviz_cross_well/seismic_tie.py` — SeismicTie (checkshot T-D conversion)
+- `packages/geoviz_plots/` — Independent 2D plotting and contouring package
+  - `geoviz_plots/chart/plot_widget.py` — High-performance 2D QPainter chart widget
+  - `geoviz_plots/chart/axes.py` — Heckbert self-adaptive scale tick generator
+  - `geoviz_plots/chart/series.py` — LineSeries, ScatterSeries, LTTB downsample
+  - `geoviz_plots/interpolation/idw.py` — Inverse Distance Weighting spatial interpolation
+  - `geoviz_plots/interpolation/scipy_grid.py` — SciPy (RBF/Linear) griddata & async InterpolationWorker
+  - `geoviz_plots/surface/marching_squares.py` — Marching Squares contour lines & filled polygons extraction
+  - `geoviz_plots/surface/surface_widget.py` — SurfaceWidget with standard colorbar
 - `src/` — Main application code
   - `main.py` — Entry point (QApplication)
   - `app.py` — MainWindow + sidebar navigation

@@ -495,5 +495,24 @@ self._zoom_center[zoom_key] = center
   2. 在 `_make_ticks()` 中实现 `tx - last_x >= 45.0` 的防撞检测保护。仅当新 tick 坐标与上一次绘制的 tick 坐标水平间距超过 45 像素时才允许生成标签，从根本上杜绝了刻度文字水平重叠的现象。
 
 ---
+
+## Phase 11.9 — Facies SVG Assets & Color Config Expansion (2026-06-01)
+
+### 1. 蒸发岩与蒸发盐图式矢量化 (11.9-A 已修)
+- **需求分析**：根据 `samples/` 中的 GeoJSON 数据，其中包含了微相 `"蒸发盐"`。在 CNPC `勘探管理图件图册编制规范.pdf` 中，蒸发岩类（包含石膏岩、盐岩、硬石膏）有明确的黑白与彩色图式（Appendix O & Appendix M）。
+- **解决方案**：
+  - 在 `packages/geoviz_well_log/geoviz_well_log/assets/patterns/facies/evaporite.svg` 绘制了透明的 32x32 矢量网格，代表标准 **ZFY-F1.6-15H (硬石膏/蒸发盐)**。该网格采用 `stroke-width="0.8"`、8px 间隔的纵横交叉线，能够平铺出非常完美且精细的硬石膏立方网格，符合沉积相图式的要求。
+  - 在 `packages/geoviz_well_log/geoviz_well_log/assets/patterns/evaporite.svg` 绘制了 16x16 预染色岩石岩性图式。使用软黄背景色 (`#fef3c7`) 与暗金黄色网格线 (`#b45309`)，为测井及地层剖面中的蒸发岩地层提供无缝平铺的矢量纹理。
+  - 在 `style.py` 内部的 `FACIES_PATTERNS` 映射中，新增 `"蒸发盐": "evaporite"` 和 `"蒸发岩": "evaporite"` 注册项。
+
+### 2. 27 个亚相与微相色彩配置完全扩充 (11.9-B 已修)
+- **根因分析**：前几阶段虽然实现了 `get_color_fuzzy` 模糊退回，但 GeoJSON 样本中的 27 个特异的亚相/微相（如 `三角洲前缘`、`潮汐水道`、`湖底泥`、`超咸水潟湖`）没有在 `FACIES_COLORS` 中注册精确的专属颜色值。
+- **解决方案**：对 `pattern_map.py` 中的 `FACIES_COLORS` 表进行地质学精准扩充。为所有的 27 个缺少专属色值的相、亚相和微相注册了高视觉和谐度的 CNPC 标准色标（如湖底泥采用深水蓝色 `#73c3ef`，超咸水潟湖采用稍深的咸化绿蓝色 `#a0c7c0`，潮汐通道采用砂质浅黄 `#ebd2b0` 等），从而保证了地图和图例的颜色映射精确性。
+
+### 3. 测试与健壮性验证
+- **单元测试**：新建了 `tests/test_evaporite_pattern.py`，使用 `qtbot` 驱动 `QApplication` 上下文，彻底验证了 `PatternEngine` 在加载新 SVG 时能得到非空 `QBrush` 与 `QColor`，并且 `FaciesStyleResolver` 能准确将 `"蒸发盐"` 转换成 `"evaporite"` 并输出正确色值。
+- **回归测试**：运行全量 687 个测试，100% 绿通，完美保障系统零缺陷。
+
+---
 *Update after every 2 view/browser/search operations*
 

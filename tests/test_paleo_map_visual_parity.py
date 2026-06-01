@@ -31,6 +31,7 @@ def _build_canvas() -> PaleoMapCanvas:
     ]
     c = PaleoMapCanvas()
     c.load_features(sample["features"], period_name="测试", wells=wells)
+    c._viewport.clamp_to_bounds = False
     c._viewport.center_world = (115.0, 31.5)
     c._viewport.zoom = 4.0
     return c

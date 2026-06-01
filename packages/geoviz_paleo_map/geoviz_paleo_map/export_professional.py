@@ -97,27 +97,55 @@ def export_professional_figure(
 
     # Margins (in pixels)
     margin = int(15 / mm_per_px)
-    title_h = int(20 / mm_per_px) if title else 0
-    bottom_h = int(15 / mm_per_px)
-    right_w = int(60 / mm_per_px) if include_legend else 0
 
-    # Map area
+    # Map area covers the whole page area within margins as one single canvas
     map_x = margin
-    map_y = margin + title_h
-    map_w = page_w - margin * 2 - right_w
-    map_h = page_h - margin - title_h - bottom_h - margin
-
-    # --- Title Block ---
-    if title:
-        painter.setPen(QPen(QColor("#1a202c")))
-        font = QFont("Microsoft YaHei", 14)
-        font.setBold(True)
-        painter.setFont(font)
-        title_rect = QRectF(margin, margin, page_w - margin * 2, title_h)
-        painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, title)
-
-    # --- Grid Frame ---
+    map_y = margin
+    map_w = page_w - margin * 2
+    map_h = page_h - margin * 2
     map_rect = QRectF(map_x, map_y, map_w, map_h)
+
+    # --- Map Content ---
+    # Create a temporary viewport scaled to the map rect
+    from geoviz_paleo_map.viewport import PaleoMapViewport
+    from geoviz_paleo_map.projection import world_to_lnglat
+    center_lng, center_lat = world_to_lnglat(*canvas._viewport.center_world)
+    vp = PaleoMapViewport(
+        center_lng=center_lng,
+        center_lat=center_lat,
+        zoom=canvas._viewport.zoom,
+        width=map_w,
+        height=map_h,
+    )
+
+    painter.save()
+    painter.setClipRect(map_rect)
+    painter.translate(map_x, map_y)
+    
+    from geoviz_paleo_map.layers.legend import LegendLayer
+    from geoviz_paleo_map.layers.scale_bar import ScaleBarLayer
+    from geoviz_paleo_map.layers.north_arrow import NorthArrowLayer
+    from geoviz_paleo_map.layers.title import TitleLayer
+
+    for layer in canvas._layers:
+        if not include_legend and isinstance(layer, LegendLayer):
+            continue
+        if not include_scale_bar and isinstance(layer, ScaleBarLayer):
+            continue
+        if not include_north_arrow and isinstance(layer, NorthArrowLayer):
+            continue
+            
+        if isinstance(layer, TitleLayer):
+            old_text = layer.text
+            layer.set_text(title if title is not None else old_text)
+            layer.paint(painter, vp)
+            layer.set_text(old_text)
+        else:
+            layer.paint(painter, vp)
+            
+    painter.restore()
+
+    # --- Optional Grid Frame around the single canvas map area ---
     if include_grid_frame:
         pen = QPen(QColor("#a0aec0"), 1.0)
         pen.setCosmetic(True)
@@ -137,43 +165,6 @@ def export_professional_figure(
             painter.drawLine(QPointF(map_x, y), QPointF(map_x + 5, y))
             # Right
             painter.drawLine(QPointF(map_x + map_w, y), QPointF(map_x + map_w - 5, y))
-
-    # --- Map Content ---
-    # Create a temporary viewport scaled to the map rect
-    from geoviz_paleo_map.viewport import PaleoMapViewport
-    from geoviz_paleo_map.projection import world_to_lnglat
-    center_lng, center_lat = world_to_lnglat(*canvas._viewport.center_world)
-    vp = PaleoMapViewport(
-        center_lng=center_lng,
-        center_lat=center_lat,
-        zoom=canvas._viewport.zoom,
-        width=map_w,
-        height=map_h,
-    )
-
-    painter.save()
-    painter.setClipRect(map_rect)
-    painter.translate(map_x, map_y)
-    from geoviz_paleo_map.layers.legend import LegendLayer
-    for layer in canvas._layers:
-        if not include_legend and isinstance(layer, LegendLayer):
-            continue
-        layer.paint(painter, vp)
-    painter.restore()
-
-    # --- Scale Bar ---
-    if include_scale_bar:
-        _draw_scale_bar(painter, map_x + 10, map_y + map_h - 25,
-                        canvas._viewport, dpi)
-
-    # --- North Arrow ---
-    if include_north_arrow:
-        _draw_north_arrow(painter, map_x + map_w - 30, map_y + 10)
-
-    # --- Legend Panel ---
-    if include_legend:
-        _draw_legend_panel(painter, map_x + map_w + 10, map_y,
-                           right_w - 10, map_h, canvas)
 
     painter.end()
 

@@ -1,6 +1,33 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE, Phase 11.8 COMPLETE
+## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE, Phase 11.8 COMPLETE, Phase 11.9 COMPLETE, Phase 17 COMPLETE
+
+### Session: 2026-06-01 (Phase 17 — Shipped)
+
+#### Implementation & Shipping Completed
+- **Version Bump**: Bumped root package version in `VERSION`, `pyproject.toml`, and `uv.lock` from `0.7.0` to `0.8.0`.
+- **CHANGELOG Entry**: Added version `0.11.0` release notes detailing all Phase 17 plotting and contouring core capabilities, plus Phase 11.8/11.9 locking/overlap/resolver additions.
+- **CLAUDE.md & README.md Docs**: Documented `geoviz_plots` package architecture, independent package specs, and project layouts in both core entry documents.
+- **Staging & Commit**:
+  - Implementation changes committed as `feat(geoviz-plots): add general 2D plotting, IDW/SciPy interpolation, and SurfaceWidget contouring` (`cb2b7d25`).
+  - Documentation committed as `docs: update project documentation for v0.8.0` (`f4caed97`).
+  - Lockfile committed as `chore: bump version number in package spec and lockfile` (`1cda312f`).
+- **PR open on GitHub**: Successfully pushed branch `feat/geoviz-plots` and opened Pull Request [PR #21](https://github.com/WindWang2/geo-viz-engine/pull/21).
+- **Verification**: 702 tests passed, 4 skipped, 0 failures.
+
+### Session: 2026-06-01 (Phase 11.9 — Facies SVG Assets & Color Config Expansion)
+
+#### Implementation Completed
+- **SVG Design & Creation**:
+  - Created `evaporite.svg` (ZFY-F1.6-15H Hard Anhydrite / Evaporite) in `packages/geoviz_well_log/geoviz_well_log/assets/patterns/facies/evaporite.svg` (transparent overlay, 32x32 pixel grid).
+  - Created `evaporite.svg` in `packages/geoviz_well_log/geoviz_well_log/assets/patterns/evaporite.svg` (pre-colored rock pattern, 16x16 grid with `#fef3c7` fill and `#b45309` grid lines).
+- **Resolver Mappings**:
+  - Mapped `"蒸发岩"` and `"蒸发盐"` to `"evaporite"` in `FACIES_PATTERNS` inside `style.py`.
+- **Explicit Color Mapping**:
+  - Expanded `FACIES_COLORS` in `pattern_map.py` to add explicit, precise color definitions for all 27 unique sub-facies and micro-facies names found in the GeoJSON samples (e.g. `三角洲前缘`, `超咸水潟湖`, `湖底泥`, `藻席`, `砂坪` etc.), resolving the "missing colors" issue and aligning with the CNPC geosciences standard.
+- **Verification**:
+  - Added dedicated integration tests in `tests/test_evaporite_pattern.py` (resolving pattern matching, brush creation, color resolving).
+  - Ran the full test suite. 687 passed, 4 skipped.
 
 ### Session: 2026-06-01 (Phase 11.8 — Level Lock & Overlaps)
 

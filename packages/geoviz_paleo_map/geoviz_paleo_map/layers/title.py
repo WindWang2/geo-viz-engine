@@ -29,8 +29,10 @@ class TitleLayer(PaleoLayer):
         metrics = painter.fontMetrics()
         w = metrics.horizontalAdvance(self.text)
         h = metrics.height()
+        
         cx = viewport.width / 2
         rect = QRectF(cx - w / 2 - 12, 4, w + 24, h + 8)
+            
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(TITLE_BG)
         painter.drawRoundedRect(rect, 4, 4)

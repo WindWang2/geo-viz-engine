@@ -15,6 +15,7 @@ from .correlation_layer import CorrelationLayer
 from .dtw_engine import DTWEngine, DTWResult
 from .seismic_tie import SeismicTie, CheckshotTable
 from .canvas import CrossWellCanvas, PickingOverlay
+from .auto_section_planner import plan_section, plan_section_pca, plan_section_nearest_neighbor
 
 __all__ = [
     "FormationTop",
@@ -34,4 +35,7 @@ __all__ = [
     "CheckshotTable",
     "CrossWellCanvas",
     "PickingOverlay",
+    "plan_section",
+    "plan_section_pca",
+    "plan_section_nearest_neighbor",
 ]

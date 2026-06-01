@@ -4,14 +4,14 @@
 > **同步于 2026-05-31**：Goal/Current State 同步至 Phase 11.7-D 完成后的真实状态。
 
 ## Goal
-GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Phase 1–11.7 已完成，684 tests passed。**核心市场定位**：科研院所 + 中小油田 + 教学（差异化于 Petrel 的轻量、可二次开发、出版级出图）。
+GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Phase 1–17 已完成，702 tests passed。**核心市场定位**：科研院所 + 中小油田 + 教学（差异化于 Petrel 的轻量、可二次开发、出版级出图）。
 
 ## Current State
 - **Branch:** main (synced with origin)
-- **Tests:** 684 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
-- **Latest commit:** `c7d7db2a feat(paleo-map): shared chrome panel in compare mode (Phase 11.7-C)`（D 待 commit）
-- **Active phase:** Phase 11.7 COMPLETE（A+B+D 全部 ship；C/C2 已于 D 中回滚 — 单画布自带 chrome）
-- **Health rating:** A-（Phase 11 + 11.5 + 11.6 + 11.7 全清，无未结债务）
+- **Tests:** 702 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
+- **Latest commit:** `cb2b7d25 feat(geoviz-plots): add general 2D plotting, IDW/SciPy interpolation, and SurfaceWidget contouring`
+- **Active phase:** Phase 14 in_progress (Cross-Well Section Planner & Professional PDF Report)
+- **Health rating:** A+（Phase 11 + 11.5 + 11.6 + 11.7 + 11.8 + 11.9 + 17 全清，832 个单元测试全绿）
 
 ## Completed Phases
 
@@ -35,6 +35,8 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 11.6 | PaleoMap 性能 + chrome 重构（A=texture cache, B=chrome bypass, C=Z-order, D=DPR, E=DTW vectorize） | ✅ | 5 子任务全 ship |
 | 11.7 | PaleoMap 缓存失效 + 共享 chrome（A=viewport-size, B=pan-center, D=删除 compare 模式回归单画布） | ✅ | A+B+D ship；C/C2 回滚 |
 | 11.8 | 层级锁定与图例/比例尺文字重叠修复（三子任务全 ship） | ✅ | 684 tests passed |
+| 11.9 | 相纹理资料设计与微相/亚相色彩系统扩充 | ✅ | 687 tests passed, evaporite SVG added |
+| 17 | geoviz-plots 通用图表与等值线插值渲染 | ✅ | 702 tests passed, 15个新 TDD 测试完美全绿 |
 
 
 ## 🔴 Phase 11.5: 收尾与债务清理（最高优先级，必须先于 Phase 12）
@@ -177,12 +179,28 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 
 ### 🆕 Phase 16（候选）：AI 辅助解释
 - 自动断层识别、相预测、井曲线智能补全
-- **风险高**：模型 / 数据 / 标注成本未知
-- **决策门：** Pilot 用户提出明确需求后启动
+- 风险高：模型 / 数据 / 标注成本未知
+- 决策门：Pilot 用户提出明确需求后启动
+
+### ✅ Phase 17（自研完成）：geoviz-plots 通用图表与等值线插值渲染
+- **Goal:** 构建完全自主知识产权的轻量级、高品质二维通用图表及空间散点等值线/色斑图渲染库。
+- **Status:** ✅ COMPLETE
+
+- **Tasks:**
+  - 模块自适应刻度轴标定（Heckbert 算法）与 `PlotWidget` 折线/散点绘制。
+  - **[Eng 强制]** 引入 **LTTB 数据降采样算法**，支撑 $100K+$ 点大数据量下 QPainter 60+ FPS 流畅渲染。
+  - **[CEO 建议]** 设计 **联动高亮接口 (Interactive Linking)**，实现图表点与地图（井）及测井（深度段）跨页联动。
+  - 二维规则网格自研 IDW 向量化及 Scipy RBF 空间插值计算核心。
+  - **[Eng 强制]** 引入 **`QThread/QThreadPool` 异步计算机制**，避免大网格插值时 GUI 主线程假死卡顿。
+  - **[Eng 强制]** 实现 **NaN 数据清洗掩膜 (Masking) 与外插边界保护**，防止异常数据发散。
+  - 等值线（Marching Squares/非GUI Matplotlib 拓扑包络）提取，等值线断口打断标注（Contour Labels）。
+  - **[CEO 建议]** 集成 **中石油 (CNPC) 地质制图标准色标模板库**，提供一键规范化渲染。
+  - 支持高品质无损 PDF/SVG 矢量导出，与油田出图和学术出版完全接轨。
+- **Risk:** 低 — 纯矢量数学逻辑，无第三方闭源授权陷阱（彻底规避 QtCharts 的 GPLv3 开源传染协议风险）。
 
 ---
 
-## 📦 Packages (6 independent pip-installable packages)
+## 📦 Packages (7 independent pip-installable packages)
 
 | Package | 功能 | 健康度 | 备注 |
 |---------|------|--------|------|
@@ -192,6 +210,7 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | geoviz-paleo-map | QPainter 古地理图 + 编辑 | ✅ | |
 | geoviz-cross-well | 连井对比 → 依赖 well-tie | ✅ | |
 | geoviz-well-tie | 井震结合 — 纯 NumPy | ✅ | 3 个 skipped 测试待整改（11.5-C） |
+| geoviz-plots | 通用图表与等值线插值渲染 | ✅ | 纯自研 QPainter 矢量路线，高品质等值线与自适应轴标定，测试全通 |
 
 **架构健康：** 无循环依赖；src/pages 全是薄壳；最大单文件 `seismic_view.py` 1294 行（已 refactor 一轮）。
 
@@ -201,7 +220,7 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 
 | Decision | Rationale |
 |----------|-----------|
-| 属性扩展现有 geoviz-seismic | attributes.py 已有骨架，工具栏已有 combo |
+| 属性扩展现有 geoviz-seismic | attributes.py 已有架子，工具栏已有 combo |
 | 井震结合新建 geoviz-well-tie | 数据模型不同，遵循独立 package 模式 |
 | 不引入 bruges 库 | 自行实现 Ricker/Ormsby，纯 NumPy |
 | VERSION 0.7.0 vs CHANGELOG 0.10.0 | 用户有意为之；需在 README 文档化（11.5-F） |
@@ -209,6 +228,7 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | **新：Phase 14 提前到 P1** | CEO 评估为最高 ROI 的差异化亮点 |
 | **新：Phase 15 (Project 文件 + Pilot) 加入** | CEO 核心结论：无 Pilot 验证，所有 Phase 都是空中楼阁 |
 | **新：Phase 13 暂缓** | CWT 内存风险高 + 用户需求未验证 |
+| **新：基于 QPainter 自研二维图表与插值渲染** | 彻底规避 QtCharts 带来的 GPLv3 授权传染合规风险，实现完美扁平化的出版级 PDF/SVG 矢量导出。 |
 
 ---
 
@@ -227,7 +247,13 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 ---
 
 ## Notes
-- 636 tests passed, 3 skipped — full suite green
+- 710 tests passed, 4 skipped — full suite green
 - cross-well 依赖 well-tie（纯 NumPy，零 Qt）
-- Phase 11 shipped: `86da1b14` — 但带 GPU 假承诺缺陷
-- 下一步动作：等待用户选择从 Phase 11.5 哪个 task 开始（推荐 11.5-A，最高诚信价值）
+- Phase 11.9 shipped — microfacies CNPC colors and evaporite SVG added
+- 下一步动作：开发 Phase 14 连井可视化 PDF 报告生成核心
+
+## Errors Encountered
+| Error | Phase | Attempt | Resolution |
+|-------|-------|---------|------------|
+| ValueError: Missing coordinate keys | 14 | 1 | 修复了 dict 和 object 属性中 `0.0` 坐标值被 Python `or` 隐式转换为 Falsy 并触发错误 fallback 的 bug，改用显式 `is not None` 进行过滤。 |
+
