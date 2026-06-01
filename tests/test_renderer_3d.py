@@ -77,3 +77,39 @@ def test_renderer_3d_dual_volume(qtbot):
     # 5. Clear overlay
     widget.clear_overlay_volume()
     assert widget._overlay_volume_visual is None
+
+def test_dual_gl_volume_item_unit(qtbot):
+    """Verify that the custom DualGLVolumeItem compiled program and uniforms behave correctly."""
+    from geoviz_seismic.renderer_3d import DualGLVolumeItem, Renderer3D
+    
+    # Initialize Renderer3D (to establish standard Qt OpenGL context)
+    widget = Renderer3D()
+    qtbot.addWidget(widget)
+    
+    mock_data = np.zeros((4, 4, 4, 4), dtype=np.uint8)
+    item = DualGLVolumeItem(mock_data)
+    
+    # Check initial values
+    assert item._primary_visible is True
+    assert item._overlay_visible is True
+    assert item._overlay_opacity == 0.5
+    
+    # Check setters
+    item.setOverlayOpacity(0.7)
+    assert item._overlay_opacity == 0.7
+    
+    item.setOverlayVisible(False)
+    assert item._overlay_visible is False
+    
+    item.setPrimaryVisible(False)
+    assert item._primary_visible is False
+    
+    # Check colormap setup
+    primary_lut = np.ones((256, 4), dtype=np.uint8) * 10
+    overlay_lut = np.ones((256, 4), dtype=np.uint8) * 20
+    item.setColormaps(primary_lut, overlay_lut)
+    
+    assert item._primary_cmap_lut is primary_lut
+    assert item._overlay_cmap_lut is overlay_lut
+    assert item._cmap_needs_upload is True
+

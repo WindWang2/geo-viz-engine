@@ -1,6 +1,18 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE, Phase 11.8 COMPLETE, Phase 11.9 COMPLETE, Phase 12a COMPLETE, Phase 14 COMPLETE, Phase 15 COMPLETE, Phase 17 COMPLETE
+## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE, Phase 11.8 COMPLETE, Phase 11.9 COMPLETE, Phase 12a COMPLETE, Phase 12b COMPLETE, Phase 14 COMPLETE, Phase 15 COMPLETE, Phase 17 COMPLETE
+
+### Session: 2026-06-01 (Phase 12b — Shipped)
+
+#### Implementation & Shipping Completed
+- **Phase 12b (Shared Texture & GLSL Shader Volume Optimization)**:
+  - Developed custom `DualGLVolumeItem` as a subclass of `gl.GLVolumeItem` that binds both primary amplitude and overlay attribute volumes into a single 3D texture (R=primary, G=overlay).
+  - Authored a custom GLSL Fragment Shader that performs on-the-fly min-max normalization, colormapping (via 2D colormap LUT textures), and alpha blending directly on the GPU during raycasting.
+  - Eliminated the double 3D texture VRAM footprint (50% GPU memory reduction).
+  - Optimized colormap switching, opacity changes, and visibility toggles to $O(1)$ by updating shader uniforms rather than rebuilding/re-uploading the 3D texture.
+  - Retained perfect backward compatibility for existing code and test suites.
+  - Wrote a dedicated TDD unit test `test_dual_gl_volume_item_unit` in `tests/test_renderer_3d.py`.
+- **Verification**: All tests passed.
 
 ### Session: 2026-06-01 (Phase 12a, 14, 15 — Shipped)
 

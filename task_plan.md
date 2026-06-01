@@ -38,6 +38,7 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 11.9 | 相纹理资料设计与微相/亚相色彩系统扩充 | ✅ | 687 tests passed, evaporite SVG added |
 | 17 | geoviz-plots 通用图表与等值线插值渲染 | ✅ | 702 tests passed, 15个新 TDD 测试完美全绿 |
 | 12a | 双 GLVolumeItem 叠加 MVP | ✅ | 振幅体与属性体叠加，GPU colormap 及独立不透明度控制 |
+| 12b | 共享纹理与 GLSL 着色器深度优化 | ✅ | 单 3D 纹理多通道打包，GLSL 在线色彩映射与混合，VRAM 减半，O(1) 调参 |
 | 14 | 连井剖面自动化与专业报告导出 | ✅ | 井位地图 Shift+Drag 框选，PCA 自动走向排井，高保真 PDF 报告导出 |
 | 15 | Project 工程文件序列化 (.gvz) | ✅ | 基于 Pydantic 的 Git 友好 schema，相对路径转换，DataPage UI 整合 |
 
@@ -146,10 +147,10 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 - **Tests:** ~6 (alpha blending, layer toggle, memory)
 - **Spike:** 开工前先验证 GLVolumeItem * 2 在当前 pyqtgraph 版本可正常显示
 
-#### Phase 12b: 共享纹理优化（低优先级 stretch）
-- **Goal:** 避免双份 GPU 显存占用，写 GLSL shader 让一个纹理多通道显示
-- **Risk:** 高 — 需手写 GLSL，与 pyqtgraph 抽象层冲突
-- **决策门：** 仅当 12a 真实数据测试发现显存瓶颈时才启动
+#### Phase 12b: 共享纹理与 GLSL 深度优化（DONE ✅）
+- **Goal:** 避免双份 GPU 显存占用，通过单个 DualGLVolumeItem 包装多通道数据，手写 GLSL Fragment Shader 在 GPU 端完成在线 colormapping 和 alpha blending。
+- **Benefit:** GPU VRAM 开销降低 50%，拖拽不透明度/切换色标性能由 O(N^3) 纹理重传缩短为 O(1) 仅更新 shader uniforms，体验极速流畅。
+- **Tests:** 新增专门的 `test_dual_gl_volume_item_unit` 测试以验证其正常运行。
 
 ### 🥇 Phase 14（提前到 P1）：连井剖面自动化 + 报告导出
 > **CEO 建议从 P3 提升到 P1** — 投入低、产出高、构成"地图点一下出一本报告"的杀手级 demo
