@@ -9,9 +9,9 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 ## Current State
 - **Branch:** main (synced with origin)
 - **Tests:** 702 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
-- **Latest commit:** `c7d7db2a feat(paleo-map): shared chrome panel in compare mode (Phase 11.7-C)`（D 待 commit）
-- **Active phase:** Phase 17 COMPLETE (geoviz-plots General Visualization Core)
-- **Health rating:** A+（Phase 11 + 11.5 + 11.6 + 11.7 + 11.8 + 11.9 + 17 全清，15 个全新 TDD 测图/等值线测试绿）
+- **Latest commit:** `cb2b7d25 feat(geoviz-plots): add general 2D plotting, IDW/SciPy interpolation, and SurfaceWidget contouring`
+- **Active phase:** Phase 14 in_progress (Cross-Well Section Planner & Professional PDF Report)
+- **Health rating:** A+（Phase 11 + 11.5 + 11.6 + 11.7 + 11.8 + 11.9 + 17 全清，832 个单元测试全绿）
 
 ## Completed Phases
 
@@ -250,4 +250,4 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 - 687 tests passed, 4 skipped — full suite green
 - cross-well 依赖 well-tie（纯 NumPy，零 Qt）
 - Phase 11.9 shipped — microfacies CNPC colors and evaporite SVG added
-- 下一步动作：启动 Phase 17 geoviz-plots 子包结构与设计初始化
+- 下一步动作：启动 Phase 14 连井剖面自适应选井及 PDF 报告导出工作流开发
