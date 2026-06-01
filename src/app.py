@@ -86,6 +86,14 @@ class MainWindow(QWidget):
         sidebar_layout.setContentsMargins(8, 12, 8, 12)
         sidebar_layout.setSpacing(6)
 
+        # Brand Logo
+        logo_label = QLabel()
+        logo_path = _get_icon_path("brand/geoviz-mark.svg")
+        logo_label.setPixmap(QIcon(logo_path).pixmap(48, 48))
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_label.setContentsMargins(0, 8, 0, 16)
+        sidebar_layout.addWidget(logo_label)
+
         self.sidebar_buttons: list[SidebarButton] = []
         for i, (key, icon, tooltip) in enumerate(PAGES):
             btn = SidebarButton(icon, tooltip, key)
