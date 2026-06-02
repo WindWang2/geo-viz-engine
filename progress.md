@@ -2,6 +2,24 @@
 
 ## Project Status: Phase 1–17 COMPLETE, Performance Audit COMPLETE, Phase 20 (UI 视觉全量升级 — Azurite Design System 像素级还原) COMPLETE
 
+### Session: 2026-06-02 (Phase 23 — WellLog 表头/宽度/滚动条优化 — Shipped)
+
+#### Implementation Completed
+- **Task 23.1 (表头优化)**:
+  - CurveTrack `paint_header`: track name 改为 `AlignCenter` 居中绘制。
+  - `header_height` 动态计算：`max(56, 28 + n_curves * 18)`，3 条曲线 = 82px，确保所有图例可见。
+  - 图例布局改为紧凑排列（色块 + 名称，省略范围数值和线型标识），每条曲线仅占 14px。
+- **Task 23.2 (井道宽度拖动)**:
+  - `WellLogCanvas` 新增 `_handle_x_positions` / `_hit_handle` 方法检测相邻 track 边界的 resize handle。
+  - `mousePressEvent/Move/Release` 实现拖动逻辑，左右 track 宽度联动调整。
+  - 每个 track 宽度约束：min=40px, max=300px（`BaseTrack.set_width`）。
+  - 鼠标悬停在 track 边界时显示 `SplitHCursor` 双向箭头光标。
+- **Task 23.3 (垂直滚动条)**:
+  - `QPainterWidget` 垂直滚动条策略改为 `ScrollBarAsNeeded`。
+  - 滚动条范围 0..10000，与当前深度范围中心点双向同步。
+  - `_sync_scrollbar_from_depth` 和 `_on_vscroll_changed` 实现深度↔滚动条双向联动。
+- **Verification**: 847 tests passed, 4 skipped, 0 failures.
+
 ### Session: 2026-06-02 (Phase 20 Task 20.5/20.6 收尾 — Shipped)
 
 #### Implementation & Shipping Completed

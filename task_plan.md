@@ -9,9 +9,9 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 ## Current State
 - **Branch:** feat/geoviz-plots
 - **Tests:** 847 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
-- **Latest commit:** Phase 22a + 22b + 22c complete
+- **Latest commit:** Phase 23 complete
 - **Active phase:** None
-- **Health rating:** A（Phase 22 DONE，847 tests passed，all dead controls resolved）
+- **Health rating:** A（Phase 23 DONE，847 tests passed，WellLog 表头/宽度/滚动条优化完成）
 
 ## Completed Phases
 
@@ -434,6 +434,17 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
   - DataPage 重命名/删除操作真实修改数据
   - WellLogPage 快速切换井不泄漏 QThread
   - 所有新功能有 TDD 测试覆盖
+
+---
+
+### ✅ Phase 23: 井剖图 (WellLog) 表头/宽度/滚动条优化 — DONE (2026-06-02)
+> **Goal**: 优化井剖图的表头显示、支持拖动调整井道宽度、添加垂直滚动条。
+
+- **Tasks & Roadmap**:
+  - **Task 23.1 (🔴 P0) ✅ - 表头优化**: CurveTrack name 居中、header_height 动态 `max(56, 28+n*18)`、图例紧凑排列（色块+名称）。
+  - **Task 23.2 (🔴 P0) ✅ - 井道宽度拖动**: WellLogCanvas resize handle 机制、min=40/max=300 约束、SplitHCursor 光标。
+  - **Task 23.3 (🔴 P0) ✅ - 垂直滚动条**: ScrollBarAsNeeded + 深度↔滚动条 0..10000 范围双向同步。
+  - 847 tests passed.
 
 ---
 

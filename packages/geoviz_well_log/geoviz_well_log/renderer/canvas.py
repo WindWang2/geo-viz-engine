@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QRectF, Signal, QObject, QEvent, QSize
-from PySide6.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent, QPixmap
+from PySide6.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent, QPixmap, QCursor
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .track_base import BaseTrack, ECHARTS_HEADER_BG, ECHARTS_BORDER, ECHARTS_TEXT, ECHARTS_GROUP_HEADER_HEIGHT
 from .coordinator import LayoutCoordinator
 from .overlay import CrosshairOverlay
+
+# Track resize handle constants
+_RESIZE_HANDLE_WIDTH = 6  # px, clickable zone
+_TRACK_MIN_WIDTH = 40
+_TRACK_MAX_WIDTH = 300
 
 
 class _TrackMouseFilter(QObject):
@@ -61,6 +66,13 @@ class WellLogCanvas(QOpenGLWidget):
         self._static_cache: QPixmap | None = None
         self._cache_dirty: bool = True
         self.setMinimumSize(200, 400)
+        # Track resize state
+        self._resize_left_idx: int = -1  # index of left track being resized
+        self._resize_right_idx: int = -1  # index of right track being resized
+        self._resize_anchor_x: float = 0.0  # mouse x at drag start
+        self._resize_left_orig_w: int = 0
+        self._resize_right_orig_w: int = 0
+        self._is_resizing: bool = False
 
     @property
     def crosshair(self) -> CrosshairOverlay | None:
@@ -201,4 +213,80 @@ class WellLogCanvas(QOpenGLWidget):
 
     def leaveEvent(self, event):
         self.mouse_moved.emit(-1.0)
+        if not self._is_resizing:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
         super().leaveEvent(event)
+
+    # --- Track resize handle logic ---
+
+    def _handle_x_positions(self) -> list[tuple[float, int, int]]:
+        """Return list of (x_center, left_track_idx, right_track_idx) for resize handles."""
+        visible = [(i, t) for i, t in enumerate(self.tracks) if getattr(t, '_visible', True)]
+        if len(visible) < 2:
+            return []
+        w = self.width()
+        natural_width = self.total_width
+        scale = w / natural_width if natural_width > 0 else 1.0
+        handles = []
+        x = 0.0
+        for idx in range(len(visible) - 1):
+            _, track = visible[idx]
+            sw = track.width * scale
+            x += sw
+            handles.append((x, visible[idx][0], visible[idx + 1][0]))
+        return handles
+
+    def _hit_handle(self, mouse_x: float) -> tuple[int, int] | None:
+        """Return (left_idx, right_idx) if mouse_x is near a resize handle, else None."""
+        half = _RESIZE_HANDLE_WIDTH / 2
+        for hx, li, ri in self._handle_x_positions():
+            if abs(mouse_x - hx) <= half:
+                return (li, ri)
+        return None
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            hit = self._hit_handle(event.position().x())
+            if hit is not None:
+                li, ri = hit
+                self._resize_left_idx = li
+                self._resize_right_idx = ri
+                self._resize_anchor_x = event.position().x()
+                self._resize_left_orig_w = self.tracks[li].width
+                self._resize_right_orig_w = self.tracks[ri].width
+                self._is_resizing = True
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._is_resizing:
+            dx = event.position().x() - self._resize_anchor_x
+            li, ri = self._resize_left_idx, self._resize_right_idx
+            new_left = max(_TRACK_MIN_WIDTH, min(_TRACK_MAX_WIDTH, self._resize_left_orig_w + int(dx)))
+            new_right = max(_TRACK_MIN_WIDTH, min(_TRACK_MAX_WIDTH, self._resize_right_orig_w - int(dx)))
+            if self.tracks[li].width != new_left or self.tracks[ri].width != new_right:
+                self.tracks[li].set_width(new_left)
+                self.tracks[ri].set_width(new_right)
+                self._cache_dirty = True
+                self.setMinimumWidth(self.total_width)
+                self.update()
+            event.accept()
+            return
+        # Update cursor for resize handles
+        hit = self._hit_handle(event.position().x())
+        if hit is not None:
+            self.setCursor(Qt.CursorShape.SplitHCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.mouse_moved.emit(event.position().y())
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._is_resizing and event.button() == Qt.MouseButton.LeftButton:
+            self._is_resizing = False
+            self._resize_left_idx = -1
+            self._resize_right_idx = -1
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)

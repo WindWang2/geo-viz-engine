@@ -17,9 +17,12 @@ class CurveTrack(BaseTrack):
 
     def __init__(self, curves: list[CurveData], label: str = "",
                  width: int = 150, log_scale: bool = False,
-                 header_height: int = 56, parent=None):
+                 header_height: int | None = None, parent=None):
+        # Dynamic header height: base 28px + 18px per curve, min 56px
+        n_curves = len(curves)
+        computed_hh = header_height if header_height is not None else max(56, 28 + n_curves * 18)
         super().__init__(label=label or (curves[0].name if curves else ""),
-                         width=width, header_height=header_height, parent=parent)
+                         width=width, header_height=computed_hh, parent=parent)
         self._curves = curves
         self._log_scale = log_scale
         self._path_cache = {}
@@ -97,41 +100,37 @@ class CurveTrack(BaseTrack):
         return pen
 
     def paint_header(self, painter: QPainter, rect: QRectF):
-        """Draw header with track name and curve legends matching ECharts."""
-        # Track name at top
+        """Draw header with centered track name and compact curve legends."""
+        # Track name — centered at top
         font = painter.font()
-        font.setPixelSize(15)
+        font.setPixelSize(14)
         font.setBold(True)
         painter.setFont(font)
         painter.setPen(QColor(ECHARTS_TEXT))
+        name_rect = QRectF(rect.left(), rect.top() + 2, rect.width(), 18)
+        painter.drawText(name_rect, Qt.AlignmentFlag.AlignCenter, self._label)
 
-        name_rect = QRectF(rect.left() + 4, rect.top() + 2, rect.width() - 8, 20)
-        painter.drawText(name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, self._label)
-
-        # Curve legend rows
+        # Curve legends — compact layout, each row: [swatch] [name]
         font.setPixelSize(10)
         font.setBold(False)
         painter.setFont(font)
 
-        y_offset = rect.top() + 24
+        y_offset = rect.top() + 22
+        row_height = 14
         for curve in self._curves:
-            if y_offset + 14 > rect.bottom():
+            if y_offset + row_height > rect.bottom():
                 break
             color = QColor(curve.color)
 
-            # Color swatch
-            swatch_rect = QRectF(rect.left() + 4, y_offset + 2, 8, 4)
+            # Color swatch (small filled rect)
+            swatch_rect = QRectF(rect.left() + 6, y_offset + 4, 10, 5)
             painter.fillRect(swatch_rect, color)
 
-            # Legend text: style indicator + name + range
-            style = "- -" if curve.line_style == LineStyle.DASHED else "---"
-            range_str = f"{curve.display_range[0]} - {curve.display_range[1]}"
-            text = f"{style} {curve.name} ({range_str})"
-
+            # Curve name only (no range, no line style indicator)
             painter.setPen(color)
-            text_rect = QRectF(rect.left() + 16, y_offset, rect.width() - 20, 14)
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
-            y_offset += 16
+            text_rect = QRectF(rect.left() + 20, y_offset, rect.width() - 24, row_height)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, curve.name)
+            y_offset += row_height
 
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()

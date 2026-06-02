@@ -52,6 +52,13 @@ class BaseTrack(QWidget):
     def width(self) -> int:
         return self._width
 
+    def set_width(self, w: int):
+        """Update track width (clamped to min/max)."""
+        w = max(40, min(300, w))
+        self._width = w
+        self.setMinimumWidth(w)
+        self.setMaximumWidth(w)
+
     @property
     def header_height(self) -> int:
         return self._header_height
