@@ -82,6 +82,8 @@ class RegionLabelsLayer(PaleoLayer):
                 break  # one label per feature (use first polygon's centroid)
 
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
+        if not self.visible:
+            return
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         
         default_sizes = {"facies": 11, "sub_facies": 8, "micro_facies": 7}

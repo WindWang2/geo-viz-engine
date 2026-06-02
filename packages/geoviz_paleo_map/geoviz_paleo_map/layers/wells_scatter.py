@@ -27,6 +27,8 @@ class WellsScatterLayer(PaleoLayer):
         ]
 
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
+        if not self.visible:
+            return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         font = QFont("Sans Serif", 8)

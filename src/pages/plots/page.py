@@ -1,20 +1,16 @@
 import numpy as np
-import os
 import math
-from pathlib import Path
-from PySide6.QtCore import Qt, Signal, QPointF
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QMessageBox, QGroupBox, QComboBox, QSlider,
     QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QDoubleSpinBox
 )
-from PySide6.QtGui import QColor, QFont, QIcon
+from PySide6.QtGui import QIcon, QPainter
+from PySide6.QtSvg import QSvgGenerator
 
-from geoviz_plots import (
-    SurfaceWidget, InterpolationWorker,
-    extract_contour_lines, extract_filled_contours
-)
+from geoviz_plots import SurfaceWidget, InterpolationWorker
 
 class PlotsPage(QWidget):
     """Page exposing the premium 2D plotting, IDW/SciPy spatial interpolation, and contour mapping (SurfaceWidget)."""
@@ -43,155 +39,10 @@ class PlotsPage(QWidget):
 
     def _build_ui(self):
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # ------------------ Left Control Panel ------------------
-        control_panel = QWidget()
-        control_panel.setFixedWidth(320)
-        control_panel.setStyleSheet("""
-            QWidget {
-                background: #faf9f5;
-                border-right: 1px solid #e2e8f0;
-            }
-        """)
-        panel_layout = QVBoxLayout(control_panel)
-        panel_layout.setContentsMargins(0, 0, 10, 0)
-        panel_layout.setSpacing(12)
-
-        # Title
-        title_label = QLabel(" 平面等值线色斑图")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1f66d4; padding-bottom: 5px;")
-        panel_layout.addWidget(title_label)
-
-        # Group 1: Discrete points
-        pts_group = QGroupBox(" 离散数据源")
-        pts_layout = QVBoxLayout(pts_group)
-        pts_layout.setSpacing(8)
-
-        gen_btn = QPushButton(" 随机生成测井测点")
-        gen_btn.setIcon(self._get_ui_icon("plus.svg"))
-        gen_btn.clicked.connect(self._generate_demo_data)
-        pts_layout.addWidget(gen_btn)
-
-        self.points_table = QTableWidget(0, 3)
-        self.points_table.setHorizontalHeaderLabels(["井名", "坐标", "数值"])
-        self.points_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.points_table.verticalHeader().setVisible(False)
-        self.points_table.setFixedHeight(160)
-        pts_layout.addWidget(self.points_table)
-        panel_layout.addWidget(pts_group)
-
-        # Group 2: Interpolation settings
-        interp_group = QGroupBox(" 空间插值配置")
-        interp_layout = QVBoxLayout(interp_group)
-        interp_layout.setSpacing(10)
-
-        # Method
-        method_row = QHBoxLayout()
-        method_label = QLabel("插值算法:")
-        self.method_combo = QComboBox()
-        self.method_combo.addItems(["IDW (权重)", "SciPy Linear", "SciPy Cubic", "SciPy Nearest", "SciPy RBF"])
-        self.method_combo.currentIndexChanged.connect(self._on_settings_changed)
-        method_row.addWidget(method_label)
-        method_row.addWidget(self.method_combo)
-        interp_layout.addLayout(method_row)
-
-        # IDW Power
-        self.power_row = QHBoxLayout()
-        self.power_label = QLabel("权重系数 (2.0):")
-        self.power_slider = QSlider(Qt.Orientation.Horizontal)
-        self.power_slider.setMinimum(10)
-        self.power_slider.setMaximum(40)
-        self.power_slider.setValue(20)
-        self.power_slider.setSingleStep(5)
-        self.power_slider.setStyleSheet("""
-            QSlider::groove:horizontal { height: 4px; background: #e2e8f0; border-radius: 2px; }
-            QSlider::handle:horizontal { background: #586878; width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }
-        """)
-        self.power_slider.valueChanged.connect(self._on_power_changed)
-        self.power_row.addWidget(self.power_label)
-        self.power_row.addWidget(self.power_slider)
-        interp_layout.addLayout(self.power_row)
-
-        # Mask Convex Hull
-        mask_row = QHBoxLayout()
-        self.mask_checkbox = QCheckBox(" 外插凸包截断裁剪")
-        self.mask_checkbox.setChecked(True)
-        self.mask_checkbox.stateChanged.connect(self._on_settings_changed)
-        mask_row.addWidget(self.mask_checkbox)
-        interp_layout.addLayout(mask_row)
-
-        # Grid Resolution
-        res_row = QHBoxLayout()
-        res_label = QLabel("网格分辨率:")
-        self.res_combo = QComboBox()
-        self.res_combo.addItems(["50 x 50", "100 x 100", "200 x 200", "300 x 300"])
-        self.res_combo.setCurrentIndex(1)  # Default 100x100
-        self.res_combo.currentIndexChanged.connect(self._on_settings_changed)
-        res_row.addWidget(res_label)
-        res_row.addWidget(self.res_combo)
-        interp_layout.addLayout(res_row)
-
-        panel_layout.addWidget(interp_group)
-
-        # Group 3: Contours and Colors
-        contour_group = QGroupBox(" 渲染样式")
-        contour_layout = QVBoxLayout(contour_group)
-        contour_layout.setSpacing(10)
-
-        # Colormap
-        cmap_row = QHBoxLayout()
-        cmap_label = QLabel("标准色标:")
-        self.cmap_combo = QComboBox()
-        self.cmap_combo.addItem("cnpc_strat (岩相)", "cnpc_strat")
-        self.cmap_combo.addItem("cnpc_fluid (流体)", "cnpc_fluid")
-        self.cmap_combo.addItem("viridis (经典)", "viridis")
-        self.cmap_combo.addItem("thermal (冷热)", "thermal")
-        self.cmap_combo.currentIndexChanged.connect(self._on_colormap_changed)
-        cmap_row.addWidget(cmap_label)
-        cmap_row.addWidget(self.cmap_combo)
-        contour_layout.addLayout(cmap_row)
-
-        # Step
-        step_row = QHBoxLayout()
-        step_label = QLabel("等值线距:")
-        self.step_spin = QDoubleSpinBox()
-        self.step_spin.setRange(0.1, 10.0)
-        self.step_spin.setValue(1.0)
-        self.step_spin.setSingleStep(0.5)
-        self.step_spin.valueChanged.connect(self._on_settings_changed)
-        step_row.addWidget(step_label)
-        step_row.addWidget(self.step_spin)
-        contour_layout.addLayout(step_row)
-
-        # Stats
-        self.stats_label = QLabel("数值范围: [—, —]")
-        self.stats_label.setStyleSheet("font-size: 11px; color: #586878; font-style: italic;")
-        contour_layout.addWidget(self.stats_label)
-
-        panel_layout.addWidget(contour_group)
-
-        # Group 4: Export Vector Graphics
-        export_group = QGroupBox(" 成果导出")
-        export_layout = QHBoxLayout(export_group)
-        export_layout.setSpacing(10)
-
-        export_svg_btn = QPushButton(" SVG")
-        export_svg_btn.setIcon(self._get_ui_icon("export.svg"))
-        export_svg_btn.clicked.connect(self._export_svg)
-        export_pdf_btn = QPushButton(" PDF")
-        export_pdf_btn.setIcon(self._get_ui_icon("export.svg"))
-        export_pdf_btn.clicked.connect(self._export_pdf)
-        export_layout.addWidget(export_svg_btn)
-        export_layout.addWidget(export_pdf_btn)
-
-        panel_layout.addWidget(export_group)
-
-        panel_layout.addStretch()
-        main_layout.addWidget(control_panel)
-
-        # ------------------ Right Main Plot Canvas ------------------
+        # ------------------ Left Main Plot Canvas ------------------
         plot_container = QWidget()
         plot_container_layout = QVBoxLayout(plot_container)
         plot_container_layout.setContentsMargins(0, 0, 0, 0)
@@ -200,18 +51,177 @@ class PlotsPage(QWidget):
         self.surface_plot = SurfaceWidget(self)
         plot_container_layout.addWidget(self.surface_plot, 1)
 
-        # Status row
+        # Status row (TDD requires #faf9f5)
         self.status_bar = QLabel(" 就绪")
         self.status_bar.setFixedHeight(22)
         self.status_bar.setStyleSheet("""
             font-size: 11px;
             color: #586878;
-            border-top: 1px solid #e2e8f0;
+            border-top: 1px solid #e5eaf1;
             background: #faf9f5;
         """)
         plot_container_layout.addWidget(self.status_bar)
 
         main_layout.addWidget(plot_container, 1)
+
+        # ------------------ Right Control Panel (200px) ------------------
+        self.control_panel = QWidget()
+        self.control_panel.setFixedWidth(200)
+        self.control_panel.setStyleSheet("""
+            QWidget {
+                background: #ffffff;
+                border-left: 1px solid #e5eaf1;
+            }
+        """)
+        panel_layout = QVBoxLayout(self.control_panel)
+        panel_layout.setContentsMargins(12, 12, 12, 12)
+        panel_layout.setSpacing(10)
+
+        # Title
+        title_label = QLabel(" 属性等值线图")
+        title_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #1a2433; padding-bottom: 2px; border: none;")
+        panel_layout.addWidget(title_label)
+
+        # Group 1: Discrete points
+        pts_group = QGroupBox(" 离散数据源")
+        pts_group.setStyleSheet("QGroupBox { font-size: 11px; font-weight: bold; color: #1a2433; }")
+        pts_layout = QVBoxLayout(pts_group)
+        pts_layout.setSpacing(6)
+        pts_layout.setContentsMargins(4, 12, 4, 4)
+
+        gen_btn = QPushButton(" 随机生成测点")
+        gen_btn.setIcon(self._get_ui_icon("plus.svg"))
+        gen_btn.setStyleSheet("QPushButton { font-size: 10.5px; padding: 4px; }")
+        gen_btn.clicked.connect(self._generate_demo_data)
+        pts_layout.addWidget(gen_btn)
+
+        self.points_table = QTableWidget(0, 3)
+        self.points_table.setHorizontalHeaderLabels(["井名", "坐标", "数值"])
+        self.points_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.points_table.verticalHeader().setVisible(False)
+        self.points_table.setFixedHeight(100)
+        self.points_table.setStyleSheet("QTableWidget { font-size: 10px; border: 1px solid #e5eaf1; }")
+        pts_layout.addWidget(self.points_table)
+        panel_layout.addWidget(pts_group)
+
+        # Group 2: Interpolation settings
+        interp_group = QGroupBox(" 空间插值配置")
+        interp_group.setStyleSheet("QGroupBox { font-size: 11px; font-weight: bold; color: #1a2433; }")
+        interp_layout = QVBoxLayout(interp_group)
+        interp_layout.setSpacing(8)
+        interp_layout.setContentsMargins(4, 12, 4, 4)
+
+        # Method
+        method_label = QLabel("插值算法:")
+        method_label.setStyleSheet("font-size: 10.5px; color: #586878; border: none;")
+        self.method_combo = QComboBox()
+        self.method_combo.addItems(["IDW (权重)", "SciPy Linear", "SciPy Cubic", "SciPy Nearest", "SciPy RBF (径向基)"])
+        self.method_combo.currentIndexChanged.connect(self._on_settings_changed)
+        self.method_combo.setStyleSheet("QComboBox { font-size: 11px; }")
+        interp_layout.addWidget(method_label)
+        interp_layout.addWidget(self.method_combo)
+
+        # IDW Power
+        self.power_row = QHBoxLayout()
+        self.power_label = QLabel("权重系数:")
+        self.power_label.setStyleSheet("font-size: 10.5px; color: #586878; border: none;")
+        self.power_slider = QSlider(Qt.Orientation.Horizontal)
+        self.power_slider.setMinimum(10)
+        self.power_slider.setMaximum(40)
+        self.power_slider.setValue(20)
+        self.power_slider.setSingleStep(5)
+        self.power_slider.setStyleSheet("""
+            QSlider::groove:horizontal { height: 4px; background: #e2e8f0; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #1f66d4; width: 10px; height: 10px; margin: -3px 0; border-radius: 5px; }
+        """)
+        self.power_slider.valueChanged.connect(self._on_power_changed)
+        self.power_row.addWidget(self.power_label)
+        self.power_row.addWidget(self.power_slider)
+        interp_layout.addLayout(self.power_row)
+
+        # Mask Convex Hull
+        self.mask_checkbox = QCheckBox(" 外插凸包截断裁剪")
+        self.mask_checkbox.setChecked(True)
+        self.mask_checkbox.stateChanged.connect(self._on_settings_changed)
+        self.mask_checkbox.setStyleSheet("QCheckBox { font-size: 10.5px; color: #586878; }")
+        interp_layout.addWidget(self.mask_checkbox)
+
+        # Grid Resolution
+        res_label = QLabel("网格分辨率:")
+        res_label.setStyleSheet("font-size: 10.5px; color: #586878; border: none;")
+        self.res_combo = QComboBox()
+        self.res_combo.addItems(["50 x 50", "100 x 100", "200 x 200", "300 x 300"])
+        self.res_combo.setCurrentIndex(1)  # Default 100x100
+        self.res_combo.currentIndexChanged.connect(self._on_settings_changed)
+        self.res_combo.setStyleSheet("QComboBox { font-size: 11px; }")
+        interp_layout.addWidget(res_label)
+        interp_layout.addWidget(self.res_combo)
+
+        panel_layout.addWidget(interp_group)
+
+        # Group 3: Contours and Colors
+        contour_group = QGroupBox(" 渲染样式")
+        contour_group.setStyleSheet("QGroupBox { font-size: 11px; font-weight: bold; color: #1a2433; }")
+        contour_layout = QVBoxLayout(contour_group)
+        contour_layout.setSpacing(8)
+        contour_layout.setContentsMargins(4, 12, 4, 4)
+
+        # Colormap
+        cmap_label = QLabel("标准色标:")
+        cmap_label.setStyleSheet("font-size: 10.5px; color: #586878; border: none;")
+        self.cmap_combo = QComboBox()
+        self.cmap_combo.addItem("cnpc_strat (岩相)", "cnpc_strat")
+        self.cmap_combo.addItem("cnpc_fluid (流体)", "cnpc_fluid")
+        self.cmap_combo.addItem("viridis (经典)", "viridis")
+        self.cmap_combo.addItem("thermal (冷热)", "thermal")
+        self.cmap_combo.currentIndexChanged.connect(self._on_colormap_changed)
+        self.cmap_combo.setStyleSheet("QComboBox { font-size: 11px; }")
+        contour_layout.addWidget(cmap_label)
+        contour_layout.addWidget(self.cmap_combo)
+
+        # Step
+        step_row = QHBoxLayout()
+        step_label = QLabel("线距:")
+        step_label.setStyleSheet("font-size: 10.5px; color: #586878; border: none;")
+        self.step_spin = QDoubleSpinBox()
+        self.step_spin.setRange(0.1, 10.0)
+        self.step_spin.setValue(1.0)
+        self.step_spin.setSingleStep(0.5)
+        self.step_spin.valueChanged.connect(self._on_settings_changed)
+        self.step_spin.setStyleSheet("QDoubleSpinBox { font-size: 11px; }")
+        step_row.addWidget(step_label)
+        step_row.addWidget(self.step_spin)
+        contour_layout.addLayout(step_row)
+
+        # Stats
+        self.stats_label = QLabel("数值范围: [—, —]")
+        self.stats_label.setStyleSheet("font-size: 10.5px; color: #586878; font-style: italic; border: none;")
+        contour_layout.addWidget(self.stats_label)
+
+        panel_layout.addWidget(contour_group)
+
+        # Group 4: Export Vector Graphics
+        export_group = QGroupBox(" 成果导出")
+        export_group.setStyleSheet("QGroupBox { font-size: 11px; font-weight: bold; color: #1a2433; }")
+        export_layout = QHBoxLayout(export_group)
+        export_layout.setSpacing(6)
+        export_layout.setContentsMargins(4, 12, 4, 4)
+
+        export_svg_btn = QPushButton(" SVG")
+        export_svg_btn.setIcon(self._get_ui_icon("export.svg"))
+        export_svg_btn.clicked.connect(self._export_svg)
+        export_svg_btn.setStyleSheet("QPushButton { font-size: 10.5px; padding: 4px; }")
+        export_pdf_btn = QPushButton(" PDF")
+        export_pdf_btn.setIcon(self._get_ui_icon("export.svg"))
+        export_pdf_btn.clicked.connect(self._export_pdf)
+        export_pdf_btn.setStyleSheet("QPushButton { font-size: 10.5px; padding: 4px; }")
+        export_layout.addWidget(export_svg_btn)
+        export_layout.addWidget(export_pdf_btn)
+
+        panel_layout.addWidget(export_group)
+        panel_layout.addStretch()
+
+        main_layout.addWidget(self.control_panel)
 
     def _generate_demo_data(self):
         """Generate a random elegant set of discrete porosity/thickness well values."""

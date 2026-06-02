@@ -39,6 +39,8 @@ class GraticuleLayer(MapLayer):
         return out
 
     def paint(self, painter: QPainter, viewport: MapViewport) -> None:
+        if not self.visible:
+            return
         pen = QPen(self.color, self.width)
         pen.setStyle(Qt.PenStyle.CustomDashLine)
         pen.setDashPattern([4.0, 4.0])

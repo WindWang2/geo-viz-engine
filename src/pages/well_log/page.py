@@ -184,15 +184,14 @@ class WellLogPage(QWidget):
 
         # Toolbar
         self._toolbar = QWidget()
-        self._toolbar.setStyleSheet("background: #faf9f5; border-bottom: 1px solid #e2e8f0;")
+        self._toolbar.setStyleSheet("background: #faf9f5; border-bottom: 1px solid #e5eaf1;")
         toolbar_layout = QHBoxLayout(self._toolbar)
-        toolbar_layout.setContentsMargins(12, 8, 12, 8)
+        toolbar_layout.setContentsMargins(16, 8, 16, 8)
+        toolbar_layout.setSpacing(12)
 
         self._well_name_label = QLabel()
-        self._well_name_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #1f66d4;")
+        self._well_name_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #1a2433;")
         toolbar_layout.addWidget(self._well_name_label)
-
-        toolbar_layout.addSpacing(12)
 
         self._well_combo = QComboBox()
         self._well_combo.setFixedHeight(28)
@@ -201,14 +200,64 @@ class WellLogPage(QWidget):
         for name in list_wells():
             self._well_combo.addItem(name)
         self._well_combo.currentTextChanged.connect(self._on_well_selected)
+        self._well_combo.setStyleSheet(
+            "QComboBox { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 2px 10px; color: #1a2433; }"
+            "QComboBox:focus { border: 1px solid #1f66d4; }"
+        )
         toolbar_layout.addWidget(self._well_combo)
 
+        # Depth range label
+        self._depth_lbl = QLabel("深度范围: --")
+        self._depth_lbl.setStyleSheet("font-size: 12px; color: #586878; font-weight: 500;")
+        toolbar_layout.addWidget(self._depth_lbl)
+
+        # Segmented buttons for Column style
+        self._cols_btn = QPushButton(" 综合柱状")
+        self._cols_btn.setCheckable(True)
+        self._cols_btn.setChecked(True)
+        self._overlay_btn = QPushButton(" 曲线叠合")
+        self._overlay_btn.setCheckable(True)
+        
+        seg_style = (
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 4px; padding: 4px 10px; font-size: 11.5px; color: #586878; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:checked { background: #e9effa; border-color: #1f66d4; color: #1f66d4; font-weight: bold; }"
+        )
+        self._cols_btn.setStyleSheet(seg_style)
+        self._overlay_btn.setStyleSheet(seg_style)
+        
+        from PySide6.QtWidgets import QButtonGroup
+        self._segmented_group = QButtonGroup(self)
+        self._segmented_group.addButton(self._cols_btn)
+        self._segmented_group.addButton(self._overlay_btn)
+        self._segmented_group.setExclusive(True)
+        
+        toolbar_layout.addWidget(self._cols_btn)
+        toolbar_layout.addWidget(self._overlay_btn)
+
         toolbar_layout.addStretch()
+
+        # Tracks toggle button
+        self._tracks_btn = QPushButton(" 轨道")
+        self._tracks_btn.setCheckable(True)
+        self._tracks_btn.setIcon(self._get_ui_icon("layers.svg"))
+        self._tracks_btn.setFixedHeight(28)
+        self._tracks_btn.clicked.connect(lambda checked: self._control_panel.setVisible(checked))
+        self._tracks_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 12px; color: #1a2433; }"
+            "QPushButton:checked { background: #e9effa; border-color: #1f66d4; color: #1f66d4; font-weight: bold; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+        )
+        toolbar_layout.addWidget(self._tracks_btn)
 
         self._export_btn = QPushButton(" 导出")
         self._export_btn.setIcon(self._get_ui_icon("export.svg"))
         self._export_btn.setFixedHeight(28)
         self._export_btn.clicked.connect(self._on_export)
+        self._export_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 12px; color: #1a2433; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+        )
         toolbar_layout.addWidget(self._export_btn)
 
         self._toolbar.setVisible(True)
@@ -278,6 +327,30 @@ class WellLogPage(QWidget):
         self._current_data = None
         self._load_thread = None
         self._load_worker = None
+        self._pred_thread = None
+        self._pred_worker = None
+
+    def _cleanup_load_thread(self):
+        if self._load_thread:
+            try:
+                if self._load_thread.isRunning():
+                    self._load_thread.quit()
+                    self._load_thread.wait(2000)
+            except RuntimeError:
+                pass
+        self._load_thread = None
+        self._load_worker = None
+
+    def _cleanup_pred_thread(self):
+        if self._pred_thread:
+            try:
+                if self._pred_thread.isRunning():
+                    self._pred_thread.quit()
+                    self._pred_thread.wait(2000)
+            except RuntimeError:
+                pass
+        self._pred_thread = None
+        self._pred_worker = None
 
     def load_well(self, well_name: str) -> bool:
         if well_name == self._current_well and self._qpainter_widget:
@@ -287,7 +360,9 @@ class WellLogPage(QWidget):
         if entry is None:
             return False
 
-        loader_fn, xls_path, config = entry
+        loader_fn, xls_path, _config = entry
+
+        self._cleanup_load_thread()
 
         if self._qpainter_widget:
             self._stack.removeWidget(self._qpainter_widget)
@@ -311,9 +386,6 @@ class WellLogPage(QWidget):
         self._load_worker.error.connect(self._on_load_error)
         self._load_worker.finished.connect(self._load_thread.quit)
         self._load_worker.error.connect(self._load_thread.quit)
-        self._load_worker.finished.connect(self._load_worker.deleteLater)
-        self._load_worker.error.connect(self._load_worker.deleteLater)
-        self._load_thread.finished.connect(self._load_thread.deleteLater)
         self._load_thread.finished.connect(self._on_load_thread_finished)
 
         self._load_thread.start()
@@ -353,7 +425,12 @@ class WellLogPage(QWidget):
         self._populate_track_list()
 
         self._well_name_label.setText(well_name + " 综合测井解释图")
+        if self._all_tracks:
+            top = self._all_tracks[0].depth_top
+            bottom = self._all_tracks[0].depth_bottom
+            self._depth_lbl.setText(f"深度范围: {top:.1f}m - {bottom:.1f}m")
         self._control_panel.setVisible(True)
+        self._tracks_btn.setChecked(True)
 
     def _on_load_error(self, msg):
         self._well_combo.setEnabled(True)
@@ -362,6 +439,8 @@ class WellLogPage(QWidget):
         QMessageBox.warning(self, "加载失败", msg)
 
     def _on_load_thread_finished(self):
+        self._load_thread = None
+        self._load_worker = None
         self._well_combo.setEnabled(True)
         self._progress.hide_progress()
 
@@ -388,14 +467,23 @@ class WellLogPage(QWidget):
 
         label_map = {t.label: t for t in self._all_tracks}
 
+        ordered_labels = []
         visible_tracks = []
         for i in range(self._track_list_widget.count()):
             item = self._track_list_widget.item(i)
+            label = item.text()
+            ordered_labels.append(label)
             if item.checkState() != Qt.CheckState.Checked:
                 continue
-            label = item.text()
             if label in label_map:
                 visible_tracks.append(label_map[label])
+
+        # Reorder _all_tracks to match list widget order
+        reordered = []
+        for lbl in ordered_labels:
+            if lbl in label_map:
+                reordered.append(label_map[lbl])
+        self._all_tracks = reordered
 
         if visible_tracks:
             self._qpainter_widget.set_tracks(visible_tracks)
@@ -619,32 +707,37 @@ class WellLogPage(QWidget):
         self._update_tracks()
 
     def _run_ai_prediction(self):
+        self._cleanup_pred_thread()
+
         self._progress.show_progress("正在准备预测数据...", maximum=100)
 
-        self._thread = QThread()
-        self._worker = PredictionWorker(self._current_well, self._current_xls_path, self._current_data)
-        self._worker.moveToThread(self._thread)
+        self._pred_thread = QThread()
+        self._pred_worker = PredictionWorker(self._current_well, self._current_xls_path, self._current_data)
+        self._pred_worker.moveToThread(self._pred_thread)
 
-        self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self._on_prediction_progress)
-        self._worker.finished.connect(self._on_prediction_finished)
-        self._worker.error.connect(self._on_prediction_error)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.error.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._worker.error.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
+        self._pred_thread.started.connect(self._pred_worker.run)
+        self._pred_worker.progress.connect(self._on_prediction_progress)
+        self._pred_worker.finished.connect(self._on_prediction_finished)
+        self._pred_worker.error.connect(self._on_prediction_error)
+        self._pred_worker.finished.connect(self._pred_thread.quit)
+        self._pred_worker.error.connect(self._pred_thread.quit)
 
-        self._thread.start()
+        self._pred_thread.start()
 
     def _on_prediction_progress(self, val, msg):
         self._progress.update_progress(val, msg)
 
     def _on_prediction_finished(self, records):
+        self._pred_thread = None
+        self._pred_worker = None
         self._progress.hide_progress()
+        self._well_combo.setEnabled(True)
         self._apply_ai_prediction(records)
         QMessageBox.information(self, "AI 预测", "AI 预测完成！已成功渲染并写入 Excel。")
 
     def _on_prediction_error(self, err_msg):
+        self._pred_thread = None
+        self._pred_worker = None
         self._progress.hide_progress()
+        self._well_combo.setEnabled(True)
         QMessageBox.critical(self, "AI 预测错误", err_msg)

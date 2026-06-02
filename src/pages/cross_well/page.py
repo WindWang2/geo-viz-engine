@@ -202,24 +202,68 @@ class CrossWellPage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-
         # --- Toolbar ---
         self._toolbar = QWidget()
         self._toolbar.setStyleSheet(
-            "background: #faf9f5; border-bottom: 1px solid #e2e8f0;"
+            "background: #faf9f5; border-bottom: 1px solid #e5eaf1;"
         )
         tb = QHBoxLayout(self._toolbar)
-        tb.setContentsMargins(12, 8, 12, 8)
+        tb.setContentsMargins(10, 8, 10, 8)
+        tb.setSpacing(5)
 
-        title = QLabel(" 连井对比")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1f66d4;")
-        tb.addWidget(title)
-        tb.addSpacing(12)
+        # Well properties dynamic label (Shortened to fit layout)
+        self._well_props_lbl = QLabel("0 口井")
+        self._well_props_lbl.setToolTip("PCA 自动排井")
+        self._well_props_lbl.setStyleSheet("font-size: 12px; color: #586878; font-weight: 600; min-width: 45px;")
+        tb.addWidget(self._well_props_lbl)
+        tb.addSpacing(2)
+
+        # Segmented buttons (Pick, Link, Browse)
+        self._pick_seg = QPushButton("拾取")
+        self._pick_seg.setCheckable(True)
+        self._link_seg = QPushButton("连接")
+        self._link_seg.setCheckable(True)
+        self._browse_seg = QPushButton("浏览")
+        self._browse_seg.setCheckable(True)
+        self._browse_seg.setChecked(True)
+
+        seg_style = (
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 4px; padding: 4px 8px; font-size: 11.5px; color: #586878; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:checked { background: #e9effa; border-color: #1f66d4; color: #1f66d4; font-weight: bold; }"
+        )
+        for btn in [self._pick_seg, self._link_seg, self._browse_seg]:
+            btn.setStyleSheet(seg_style)
+
+        from PySide6.QtWidgets import QButtonGroup
+        self._mode_btn_group = QButtonGroup(self)
+        self._mode_btn_group.addButton(self._pick_seg)
+        self._mode_btn_group.addButton(self._link_seg)
+        self._mode_btn_group.addButton(self._browse_seg)
+        self._mode_btn_group.setExclusive(True)
+
+        tb.addWidget(self._pick_seg)
+        tb.addWidget(self._link_seg)
+        tb.addWidget(self._browse_seg)
+
+        # Aliases for compatibility
+        self._pick_btn = self._pick_seg
+        self._manual_link_btn = self._link_seg
+
+        self._pick_seg.clicked.connect(self._on_toggle_pick)
+        self._link_seg.clicked.connect(self._on_toggle_manual_link)
+        self._browse_seg.clicked.connect(self._on_browse_mode)
+
+        self._sep(tb)
 
         # Data group
-        self._add_btn = self._make_btn(" 添加井", "plus.svg")
+        self._add_btn = self._make_btn(" 添加", "plus.svg")
         self._add_btn.setToolTip("打开井选择对话框，加载多口井并显示在画布上")
         self._add_btn.clicked.connect(self._on_add_wells)
+        self._add_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+        )
         tb.addWidget(self._add_btn)
 
         self._clear_btn = QPushButton(" 清除")
@@ -227,64 +271,81 @@ class CrossWellPage(QWidget):
         self._clear_btn.setFixedHeight(28)
         self._clear_btn.setToolTip("清除所有井和拾取数据，回到初始状态")
         self._clear_btn.clicked.connect(self._on_clear)
+        self._clear_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+        )
         tb.addWidget(self._clear_btn)
 
         self._sep(tb)
 
         # View group
-        self._track_btn = self._make_btn(" 选择井道", "table.svg")
+        self._track_btn = self._make_btn(" 井道", "table.svg")
         self._track_btn.setToolTip("勾选要显示的井道（深度/岩性固定，最多再选3个）")
         self._track_btn.clicked.connect(self._on_select_tracks)
+        self._track_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+        )
         tb.addWidget(self._track_btn)
 
         self._domain_btn = self._make_btn(" 域: MD", "globe.svg")
         self._domain_btn.setCheckable(True)
         self._domain_btn.setToolTip("切换深度域：MD（测量深度）↔ TWT（双程旅行时，需先导入井震标定）")
         self._domain_btn.clicked.connect(self._on_toggle_domain)
+        self._domain_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
+            "QPushButton:checked { background: #e9effa; border-color: #1f66d4; color: #1f66d4; font-weight: bold; }"
+        )
         tb.addWidget(self._domain_btn)
 
         self._sep(tb)
 
         # Correlate group
-        self._pick_btn = self._make_btn(" 手动拾取", "pin.svg")
-        self._pick_btn.setCheckable(True)
-        self._pick_btn.setToolTip(
-            "进入拾取模式：左键添加层位点，Shift+左键连接到其他井，右键删除，Esc 退出"
-        )
-        self._pick_btn.clicked.connect(self._on_toggle_pick)
-        tb.addWidget(self._pick_btn)
-
-        self._manual_link_btn = self._make_btn(" 手动连井", "palette.svg")
-        self._manual_link_btn.setCheckable(True)
-        self._manual_link_btn.setToolTip(
-            "进入手动连井模式：依次左键点击相邻两口井中的砂体或小层进行对比连线，再次点击退出"
-        )
-        self._manual_link_btn.clicked.connect(self._on_toggle_manual_link)
-        tb.addWidget(self._manual_link_btn)
-
-        self._auto_btn = self._make_btn(" 自动连井", "share.svg")
+        self._auto_btn = self._make_btn(" 自动", "share.svg")
         self._auto_btn.setToolTip("按层位名匹配相邻井（如「万山组」），无名时不会连接")
         self._auto_btn.clicked.connect(self._on_auto_link)
+        self._auto_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+        )
         tb.addWidget(self._auto_btn)
 
-        self._dtw_btn = self._make_btn(" DTW 传播", "search.svg")
+        self._dtw_btn = self._make_btn("DTW", "search.svg")
         self._dtw_btn.setToolTip(
-            "用 DTW 把当前已有的层位点从一口井传播到所有其他井（产生灰色 ghost 点，左键确认 / 右键拒绝）"
+            "用 DTW 把当前已有的层位点从一口井传播 to 所有其他井（产生灰色 ghost 点，左键确认 / 右键拒绝）"
         )
         self._dtw_btn.clicked.connect(self._on_dtw_propagate)
+        self._dtw_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+        )
         tb.addWidget(self._dtw_btn)
+        
+        # DTW Auto Contrast alias for TDD
+        self._dtw_auto_btn = self._dtw_btn
 
-        self._tops_btn = self._make_btn(" 导入层位", "upload.svg")
+        self._tops_btn = self._make_btn(" 导入", "upload.svg")
         self._tops_btn.setToolTip("从 CSV 文件导入层位顶界数据（well, formation, depth_m）")
         self._tops_btn.clicked.connect(self._on_load_tops)
+        self._tops_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+        )
         tb.addWidget(self._tops_btn)
 
         tb.addStretch()
 
-        # Export group
+        # Export group: Ultra-wide SVG
         self._export_btn = self._make_btn(" 导出", "export.svg")
         self._export_btn.clicked.connect(self._on_export)
+        self._export_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+        )
         tb.addWidget(self._export_btn)
+        
+        self._svg_wide_btn = self._export_btn
 
         outer.addWidget(self._toolbar)
 
@@ -408,6 +469,7 @@ class CrossWellPage(QWidget):
     def _update_status(self):
         parts = []
         n = self._cross_well.canvas_count if hasattr(self, '_cross_well') else 0
+        self._well_props_lbl.setText(f"{n} 口井" if n else "0 口井")
         parts.append(f"{n} 口井" if n else "无井数据")
         if hasattr(self, '_canvas'):
             picks_n = len(self._canvas.picks_model.all_picks())
@@ -473,6 +535,7 @@ class CrossWellPage(QWidget):
         self._worker.moveToThread(self._thread)
 
         self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self._on_worker_progress)
         self._worker.finished.connect(self._on_load_finished)
         self._worker.error.connect(self._on_load_error)
         self._worker.finished.connect(self._thread.quit)
@@ -482,6 +545,10 @@ class CrossWellPage(QWidget):
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.finished.connect(self._on_thread_finished)
         self._thread.start()
+
+    def _on_worker_progress(self, completed: int, well_name: str):
+        """Update progress overlay during well loading."""
+        self._progress.update_progress(completed, f"正在加载 {well_name} ({completed})")
 
     def _on_load_finished(self, results: list):
         self._add_btn.setEnabled(True)
@@ -619,6 +686,17 @@ class CrossWellPage(QWidget):
         )
         self._update_status()
 
+    def _on_browse_mode(self):
+        # Uncheck pick mode if it was active
+        if self._pick_btn.isChecked():
+            self._pick_btn.setChecked(False)
+            self._canvas.pick_mode = False
+        # Uncheck manual link if it was active
+        if self._manual_link_btn.isChecked():
+            self._manual_link_btn.setChecked(False)
+            self._cross_well.toggle_manual_link()
+        self._update_status()
+
     def _on_toggle_pick(self):
         active = self._pick_btn.isChecked()
         self._canvas.pick_mode = active
@@ -626,6 +704,7 @@ class CrossWellPage(QWidget):
             if self._manual_link_btn.isChecked():
                 self._manual_link_btn.setChecked(False)
                 self._on_toggle_manual_link()
+            self._pick_seg.setChecked(True)
         self._update_status()
 
     def _on_toggle_manual_link(self):
@@ -635,6 +714,7 @@ class CrossWellPage(QWidget):
             if self._pick_btn.isChecked():
                 self._pick_btn.setChecked(False)
                 self._on_toggle_pick()
+            self._link_seg.setChecked(True)
         self._update_status()
 
     def _on_toggle_domain(self):

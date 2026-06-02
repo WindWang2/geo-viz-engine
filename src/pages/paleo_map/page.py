@@ -1,21 +1,76 @@
 import json
 import math
 import os
-from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal, QSize
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QStackedWidget, QMessageBox, QComboBox,
     QSplitter, QDialog, QRadioButton, QButtonGroup, QDialogButtonBox,
+    QFrame, QCheckBox, QScrollArea, QAbstractButton
 )
 
 from geoviz_paleo_map import PaleoMapCanvas
 from geoviz_paleo_map.hierarchy import FaciesHierarchy
 
 from src.pages.paleo_map.loader import PaleoDataLoader
-from src.utils.paths import get_data_dir
+from src.utils.paths import get_data_dir, get_resources_dir
 
 
+class ToggleSwitch(QAbstractButton):
+    """Azurite-style toggle switch (white track / accent thumb)."""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setChecked(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._label = text
+        self._track_w = 30
+        self._track_h = 16
+        self._gap = 8
+        self.setMinimumHeight(22)
+
+    def sizeHint(self) -> QSize:
+        fm = self.fontMetrics()
+        return QSize(self._track_w + self._gap + fm.horizontalAdvance(self._label) + 4, max(22, self._track_h + 4))
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Track
+        track_x = 0
+        track_y = (self.height() - self._track_h) // 2
+        track_rect = QRectF(track_x, track_y, self._track_w, self._track_h)
+        if self.isChecked():
+            p.setBrush(QBrush(QColor("#1f66d4")))
+            p.setPen(QPen(QColor("#1f66d4"), 1))
+        else:
+            p.setBrush(QBrush(QColor("#ffffff")))
+            p.setPen(QPen(QColor("#d3dbe6"), 1))
+        p.drawRoundedRect(track_rect, self._track_h / 2, self._track_h / 2)
+
+        # Thumb
+        thumb_d = self._track_h - 4
+        thumb_y = track_y + 2
+        thumb_x = track_x + (self._track_w - thumb_d - 2) if self.isChecked() else track_x + 2
+        if self.isChecked():
+            p.setBrush(QBrush(QColor("#ffffff")))
+            p.setPen(Qt.PenStyle.NoPen)
+        else:
+            p.setBrush(QBrush(QColor("#92a0b0")))
+            p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QRectF(thumb_x, thumb_y, thumb_d, thumb_d))
+
+        # Label
+        if self._label:
+            p.setPen(QColor("#586878"))
+            font = self.font()
+            font.setPointSizeF(9.5)
+            p.setFont(font)
+            text_rect = QRectF(self._track_w + self._gap, 0, self.width() - self._track_w - self._gap, self.height())
+            p.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self._label)
 
 
 def _load_well_markers() -> list[dict]:
@@ -35,6 +90,13 @@ def _load_well_markers() -> list[dict]:
 
 
 class PaleoMapPage(QWidget):
+    def _get_ui_icon(self, name: str) -> QIcon:
+        """Resolve icon from project resources."""
+        path = get_resources_dir() / "icons" / "ui" / name
+        if path.exists():
+            return QIcon(str(path))
+        return QIcon()
+
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
@@ -42,6 +104,11 @@ class PaleoMapPage(QWidget):
         self._hierarchies: dict[str, FaciesHierarchy] = {}
         self._multi_file_periods: dict[str, list[str]] = {}  # period -> [file_paths] for sibling discovery
         self._current_period = ""
+        self._coord_format = "DD"  # "DD" or "DMS"
+
+        # Subscribe to global coordinate format changes
+        from src.utils.preferences import get_preference_bus
+        get_preference_bus().coordinate_format_changed.connect(self._apply_coordinate_format)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -52,17 +119,17 @@ class PaleoMapPage(QWidget):
 
         # 1. Empty State
         self.empty_widget = QWidget()
-        self.empty_widget.setStyleSheet("background: #f7fafc;")
+        self.empty_widget.setStyleSheet("background: #f4f7fb;")
         empty_layout = QVBoxLayout(self.empty_widget)
         drop_area = QLabel("拖拽古地理 GeoJSON / CSV 文件到此处\n或点击加载")
         drop_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
         drop_area.setStyleSheet("""
             QLabel {
-                border: 2px dashed #cbd5e1; border-radius: 8px;
-                background: #ffffff; color: #64748b;
+                border: 2px dashed #cbd5e1; border-radius: 12px;
+                background: #ffffff; color: #586878;
                 font-size: 16px; padding: 40px;
             }
-            QLabel:hover { border-color: #3182ce; color: #3182ce; background: #ebf8ff; }
+            QLabel:hover { border-color: #1f66d4; color: #1f66d4; background: #e9effa; }
         """)
         drop_area.mousePressEvent = lambda e: self._on_load_clicked()
         empty_layout.addStretch()
@@ -78,34 +145,41 @@ class PaleoMapPage(QWidget):
 
         # Toolbar
         toolbar = QWidget()
-        toolbar.setStyleSheet("background: #faf9f5; border-bottom: 1px solid #e2e8f0;")
+        toolbar.setStyleSheet("background: #ffffff; border-bottom: 1px solid #e5eaf1;")
         tb_layout = QHBoxLayout(toolbar)
-        tb_layout.setContentsMargins(10, 8, 10, 8)
+        tb_layout.setContentsMargins(16, 8, 16, 8)
+        tb_layout.setSpacing(12)
 
         load_btn = QPushButton(" 加载")
         load_btn.setIcon(self._get_ui_icon("upload.svg"))
         load_btn.setToolTip("加载 GeoJSON 或 CSV 文件 (支持拖拽)")
         load_btn.clicked.connect(self._on_load_clicked)
+        load_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 5px 12px; color: #1a2433; }"
+            "QPushButton:hover { background: #f4f7fb; }"
+        )
 
         self._period_combo = QComboBox()
         self._period_combo.setToolTip("选择地质时期")
         self._period_combo.currentTextChanged.connect(self._on_period_changed)
-
-        export_btn = QPushButton(" 导出")
-        export_btn.setIcon(self._get_ui_icon("export.svg"))
-        export_btn.setToolTip("导出为 SVG / PDF / PNG")
-        export_btn.clicked.connect(self._on_export_clicked)
+        self._period_combo.setStyleSheet(
+            "QComboBox { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 10px; color: #1a2433; min-width: 120px; }"
+            "QComboBox:focus { border: 1px solid #1f66d4; }"
+        )
 
         tb_layout.addWidget(load_btn)
-        tb_layout.addWidget(QLabel(" 时期:"))
+        tb_layout.addWidget(QLabel("时期:"))
         tb_layout.addWidget(self._period_combo)
 
         # Add a Level Lock dropdown
-        tb_layout.addWidget(QLabel(" 层级锁定:"))
+        tb_layout.addWidget(QLabel("层级锁定:"))
         self._level_lock_combo = QComboBox()
         self._level_lock_combo.setToolTip("锁定地图图层级别（自动表示根据比例尺切换）")
         self._level_lock_combo.addItems(["自动", "相", "亚相", "微相"])
         self._level_lock_combo.currentTextChanged.connect(self._on_level_lock_changed)
+        self._level_lock_combo.setStyleSheet(
+            "QComboBox { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 10px; color: #1a2433; min-width: 80px; }"
+        )
         tb_layout.addWidget(self._level_lock_combo)
 
         self._edit_btn = QPushButton(" 编辑模式")
@@ -113,34 +187,164 @@ class PaleoMapPage(QWidget):
         self._edit_btn.setIcon(self._get_ui_icon("palette.svg"))
         self._edit_btn.setToolTip("切换编辑模式 (E)")
         self._edit_btn.clicked.connect(self._toggle_edit_mode)
+        self._edit_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 5px 12px; color: #1a2433; }"
+            "QPushButton:checked { background: #e9effa; border-color: #1f66d4; color: #1f66d4; font-weight: bold; }"
+        )
 
         self._save_btn = QPushButton(" 保存")
         self._save_btn.setIcon(self._get_ui_icon("check.svg"))
         self._save_btn.setToolTip("保存编辑 (Ctrl+S)")
         self._save_btn.clicked.connect(self._on_save_clicked)
         self._save_btn.setVisible(False)
+        self._save_btn.setStyleSheet(
+            "QPushButton { background: #1f66d4; color: #ffffff; border: none; border-radius: 6px; padding: 5px 12px; font-weight: bold; }"
+            "QPushButton:hover { background: #1a54b2; }"
+        )
 
         tb_layout.addWidget(self._edit_btn)
         tb_layout.addWidget(self._save_btn)
-
         tb_layout.addStretch()
-        tb_layout.addWidget(export_btn)
 
         map_layout.addWidget(toolbar)
 
-        # Map view area (single or split)
-        self._map_layout = QVBoxLayout()
-        self._map_layout.setContentsMargins(0, 0, 0, 0)
+        # High-Fidelity Split Layout: Canvas (left) and Sidebar (right)
+        self.map_content_area = QWidget()
+        content_layout = QHBoxLayout(self.map_content_area)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        # Left area container
+        self.map_view_container = QWidget()
+        map_view_layout = QVBoxLayout(self.map_view_container)
+        map_view_layout.setContentsMargins(0, 0, 0, 0)
+        map_view_layout.setSpacing(0)
+
         self.map_view = PaleoMapCanvas(parent=self)
-        self._map_layout.addWidget(self.map_view)
         self.map_view.edit_mode_changed.connect(self._on_edit_mode_changed)
         self.map_view.selection_changed.connect(self._on_selection_changed)
-        map_layout.addLayout(self._map_layout, 1)
+        map_view_layout.addWidget(self.map_view)
+        content_layout.addWidget(self.map_view_container, 1)
+
+        # Floating Toolbar Overlay (top-right of canvas container)
+        self.float_tb = QFrame(self.map_view_container)
+        self.float_tb.setStyleSheet(
+            "QFrame { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5eaf1; border-radius: 8px; }"
+        )
+        tb_layout_float = QVBoxLayout(self.float_tb)
+        tb_layout_float.setContentsMargins(6, 6, 6, 6)
+        tb_layout_float.setSpacing(6)
+
+        self.btn_zoom_in = QPushButton("＋")
+        self.btn_zoom_out = QPushButton("－")
+        self.btn_fit = QPushButton("⛶")
+        
+        tb_btn_style = (
+            "QPushButton { border: none; background: transparent; color: #586878; font-size: 14px; min-width: 28px; min-height: 28px; border-radius: 4px; }"
+            "QPushButton:hover { background: #f4f7fb; color: #1f66d4; }"
+        )
+        for btn in [self.btn_zoom_in, self.btn_zoom_out, self.btn_fit]:
+            btn.setStyleSheet(tb_btn_style)
+            tb_layout_float.addWidget(btn)
+
+        # Wire floating actions
+        self.btn_zoom_in.clicked.connect(lambda: self.map_view.set_zoom(self.map_view.zoom * 1.2))
+        self.btn_zoom_out.clicked.connect(lambda: self.map_view.set_zoom(self.map_view.zoom / 1.2))
+        self.btn_fit.clicked.connect(lambda: self.map_view.fit_viewport_to_data())
+
+        # 3. Right Sidebar Frame (230px wide)
+        self.right_sidebar = QFrame()
+        self.right_sidebar.setFixedWidth(230)
+        self.right_sidebar.setStyleSheet(
+            "QFrame { background: #ffffff; border-left: 1px solid #e5eaf1; }"
+        )
+        sidebar_layout = QVBoxLayout(self.right_sidebar)
+        sidebar_layout.setContentsMargins(16, 16, 16, 16)
+        sidebar_layout.setSpacing(16)
+
+        # Section 1: Legend Title
+        self.legend_title = QLabel("沉积相图例")
+        self.legend_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #1a2433; border: none;")
+        sidebar_layout.addWidget(self.legend_title)
+
+        # Facies Color Swatch List inside QScrollArea
+        self.legend_scroll = QScrollArea()
+        self.legend_scroll.setWidgetResizable(True)
+        self.legend_scroll.setStyleSheet("QScrollArea { border: none; background: #ffffff; }")
+        self.legend_content = QWidget()
+        self.legend_content.setStyleSheet("background: #ffffff;")
+        self.legend_layout = QVBoxLayout(self.legend_content)
+        self.legend_layout.setContentsMargins(0, 0, 0, 0)
+        self.legend_layout.setSpacing(8)
+        self.legend_layout.addStretch()
+        self.legend_scroll.setWidget(self.legend_content)
+        sidebar_layout.addWidget(self.legend_scroll, 1)
+
+        # Section 2: Layer Controls Title
+        self.layer_controls_title = QLabel("图层控制")
+        self.layer_controls_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #1a2433; border: none; margin-top: 12px;")
+        sidebar_layout.addWidget(self.layer_controls_title)
+
+        # Custom Switches (White/transparent Azurite Toggle Switch)
+        self.toggle_wells = ToggleSwitch("显示井位标定")
+        self.toggle_wells.setChecked(True)
+        sidebar_layout.addWidget(self.toggle_wells)
+
+        self.toggle_labels = ToggleSwitch("显示沉积相标注")
+        self.toggle_labels.setChecked(True)
+        sidebar_layout.addWidget(self.toggle_labels)
+
+        # Wire layer toggles
+        self.toggle_wells.toggled.connect(self._on_layer_toggled)
+        self.toggle_labels.toggled.connect(self._on_layer_toggled)
+
+        # Section 3: Bottom "导出图件" Button
+        self.export_map_btn = QPushButton("导出图件")
+        self.export_map_btn.setIcon(self._get_ui_icon("export.svg"))
+        self.export_map_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #1f66d4; color: #1f66d4; font-weight: bold; border-radius: 6px; padding: 8px 12px; }"
+            "QPushButton:hover { background: #e9effa; }"
+        )
+        self.export_map_btn.clicked.connect(self._on_export_clicked)
+        sidebar_layout.addWidget(self.export_map_btn)
+
+        content_layout.addWidget(self.right_sidebar)
+        map_layout.addWidget(self.map_content_area, 1)
 
         self.stack.addWidget(self.map_container)
         self.stack.setCurrentWidget(self.empty_widget)
 
+    def _on_layer_toggled(self):
+        show_wells = self.toggle_wells.isChecked()
+        show_labels = self.toggle_labels.isChecked()
+        # Find active layers in PaleoMapCanvas and show/hide them accordingly
+        for layer in self.map_view.layers:
+            cls_name = layer.__class__.__name__
+            if "Well" in cls_name:
+                layer.visible = show_wells
+            elif "Label" in cls_name:
+                layer.visible = show_labels
+        self.map_view.update()
 
+    def _apply_coordinate_format(self, fmt: str):
+        """Receive global coordinate-format broadcasts and refresh display."""
+        if fmt not in ("DD", "DMS"):
+            return
+        self._coord_format = fmt
+        # Trigger repaint so any coord-aware layer can refresh
+        if hasattr(self, "map_view"):
+            self.map_view.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Position floating toolbar in top-right corner of map canvas area
+        if hasattr(self, "float_tb") and self.map_view.width() > 100:
+            self.float_tb.setGeometry(
+                self.map_view_container.width() - 44 - 16,
+                16,
+                44,
+                112
+            )
 
     # --- Period Management ---
 
@@ -176,6 +380,57 @@ class PaleoMapPage(QWidget):
                 self.map_view.load_features(features,
                                             period_name=period_name,
                                             wells=_load_well_markers())
+            # Dynamically update right sidebar facies color swatches
+            self._update_facies_legend()
+
+    def _update_facies_legend(self):
+        # Clear existing legend swatches
+        while self.legend_layout.count() > 0:
+            item = self.legend_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        # Query colors and names from active model or facies colors
+        model = self.map_view.topology_model
+        if not model:
+            return
+        
+        # Build swatches
+        facies_set = set()
+        for ref in model.all_features().values():
+            facies = ref.properties.get("facies")
+            if facies:
+                facies_set.add(facies)
+
+        for facies in sorted(facies_set):
+            color = "#cbd5e1"
+            if hasattr(self.map_view, "_resolver"):
+                try:
+                    color = self.map_view._resolver.resolve(facies).base_color.name()
+                except Exception:
+                    pass
+            
+            row = QFrame()
+            row.setStyleSheet("QFrame { background: #ffffff; border: none; }")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(4, 4, 4, 4)
+            row_layout.setSpacing(10)
+            
+            swatch = QFrame()
+            swatch.setFixedSize(14, 14)
+            swatch.setStyleSheet(f"border-radius: 3px; background: {color}; border: 1px solid #cbd5e1;")
+            
+            lbl = QLabel(facies)
+            lbl.setStyleSheet("color: #1a2433; font-size: 11.5px; border: none;")
+            
+            row_layout.addWidget(swatch)
+            row_layout.addWidget(lbl)
+            row_layout.addStretch()
+            
+            self.legend_layout.addWidget(row)
+        
+        self.legend_layout.addStretch()
 
     def _on_level_lock_changed(self, text: str):
         level_map = {

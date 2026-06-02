@@ -1,6 +1,36 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–11 COMPLETE, Refactor COMPLETE, Phase 11.8 COMPLETE, Phase 11.9 COMPLETE, Phase 12a COMPLETE, Phase 12b COMPLETE, Phase 14 COMPLETE, Phase 15 COMPLETE, Phase 17 COMPLETE, Performance Audit COMPLETE
+## Project Status: Phase 1–17 COMPLETE, Performance Audit COMPLETE, Phase 20 (UI 视觉全量升级 — Azurite Design System 像素级还原) COMPLETE
+
+### Session: 2026-06-02 (Phase 20 Task 20.5/20.6 收尾 — Shipped)
+
+#### Implementation & Shipping Completed
+- **审计**: 比对 Phase 20 spec 与实现，定位 3 处 UI-REF 偏离：ToolsPage 仅 1 组 QGroupBox（缺 6 张工具卡）、PaleoMap 用 QCheckBox 代替 Toggle Switch、MapPage 搜索框用 emoji 而非 SVG 线性图标。
+- **ToolsPage 6 张 ToolCard (Task 20.5)**: 新增 `ToolCard` 组件（accent-soft 圆角图标容器 + 名称 + Tag 芯片 + 描述 + hover 高亮），按 2×3 网格平铺 6 张卡片（XML→Excel / SEGY 头查看器 / LAS 重采样 / TVD 计算器 / 坐标转换 / 层位插值）。XML→Excel 现作为弹窗对话框打开，保留原 `convert_to_laolong_xls` 功能。`tests/test_tools_ui.py` 重写为基于 ToolCard 的高保真断言。
+- **PaleoMap ToggleSwitch (Task 20.5)**: 新增自定义 `ToggleSwitch(QAbstractButton)`，QPainter 自绘白底/蓝底滑轨 + 白色圆形滑钮 + 右侧文字，替换 `toggle_wells` / `toggle_labels` 两个 QCheckBox。信号从 `stateChanged` 切换到 `toggled`，对 `_on_layer_toggled` 透明。
+- **MapPage 搜索图标 (Task 20.5)**: `search_box` 移除 `🔍` emoji 占位符，改用 `QLineEdit.addAction(QIcon("search.svg"), LeadingPosition)` 渲染 Azurite 线性图标。
+- **Splash Screen (Task 20.6)**: 已验证 `src/main.py:BrandSplashScreen` (450×280 暖白底 `#faf9f5`, 铜蓝渐变 Logo, `QPropertyAnimation` 淡入/淡出 400ms)，`tests/test_splash.py` 覆盖。
+- **Verification**: `pytest tests/test_tools_ui.py tests/test_paleo_map_fidelity.py tests/test_map_fidelity.py tests/test_ui_styling.py tests/test_ui_qss.py tests/test_splash.py tests/test_app.py` — 25/25 通过。
+
+### Session: 2026-06-02 (Phase 20: UI 视觉全量升级 - 像素级还原 — AppShell & QSS 初版 Shipped)
+
+#### Implementation & Shipping Completed
+- **TDD Workflow**: Strictly executed Test Driven Development. Wrote high-fidelity styling, layout, and reactive binding assertions in `tests/test_ui_styling.py` and updated QSS token assertions in `tests/test_ui_qss.py` to fail first, then implemented the code to make them pass cleanly.
+- **Task 20.1 (AppShell Main Restructuring)**:
+  - Re-structured `MainWindow` layout from a simple side-by-side layout to a high-fidelity vertical AppShell containing a top header (`self.header_frame`, 52px height) and a bottom status bar (`self.footer_frame`, 26px height).
+  - Expanded `sidebar` width from `160px` to `212px` and set background to `#ffffff` (pure white) with border color `#e5eaf1`.
+  - Added brand section in the sidebar with a copper blue gradient brand logo label showing the `seismic` icon and HTML rich-text brand name `GeoViz Engine`.
+- **Task 20.2 (Dynamic Header/Footer Binding)**:
+  - Developed dynamic reactive bindings. When switching pages, the header context (`self.header_title` & `self.header_sub`) and the footer status bar (`self.status_text`) automatically update to exactly match the page configs (e.g. MapPage displays "地图总览" | "46 口井 · EPSG:4326").
+  - Implemented dynamic header tools (`self.header_tools_layout`) rendering page-specific action buttons with linear SVG icons (like ruler, layers, export, undo, redo, etc.) and segmented controls.
+- **Task 20.3 (Sidebar Grouping & permanent Settings)**:
+  - Added labeled category dividers `.side-group-label` for "可视化" (first 6 pages) and "工作区" (last 2 pages).
+  - Placed a permanent "设置" (Settings) navigation button in the sidebar footer layout with divider lines.
+  - Added a `3.5px` active accent border-left indicator (`border-left: 3.5px solid #1f66d4`) on the selected sidebar button to perfectly match `.nav-item.on::before` in `UI-REF`.
+- **Task 20.4 (Azurite global QSS Standardization)**:
+  - Updated global QSS in `src/main.py` using Azurite design system color tokens: primary text `#1a2433`, secondary `#586878`, clean borders `#d3dbe6` and `#e5eaf1`.
+  - Configured `QGroupBox` to render as elegant cards (`.card` style) with `12px` border radius, `#ffffff` background, and clean borders.
+- **Verification**: Ran the full test suite (`pytest`). All 14 tests across the three main visual/styling suites passed cleanly with 100% green!
 
 ### Session: 2026-06-01 (Performance Audit & High-Performance Optimizations — Shipped)
 

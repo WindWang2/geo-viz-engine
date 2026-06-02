@@ -49,7 +49,6 @@ class WellLogCanvas(QOpenGLWidget):
     """
 
     depth_range_changed = Signal(float, float)
-    interval_clicked = Signal(str, float, float)
     cursor_moved = Signal(float)
     mouse_moved = Signal(float)  # y position in canvas coordinates, -1 = left
 

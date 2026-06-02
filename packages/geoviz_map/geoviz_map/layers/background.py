@@ -10,4 +10,6 @@ class BackgroundLayer(MapLayer):
         self.color = QColor(color)
 
     def paint(self, painter: QPainter, viewport: MapViewport) -> None:
+        if not self.visible:
+            return
         painter.fillRect(0, 0, viewport.width, viewport.height, self.color)

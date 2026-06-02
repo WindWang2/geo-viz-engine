@@ -31,36 +31,57 @@ class PaintScheduler:
 
 
 class LayerPixmapCache:
-    """Per-layer pixmap cache with oversized buffer for pan headroom."""
+    """Per-layer pixmap cache with oversized buffer for pan headroom.
+
+    Renders the layer into a 2x-viewport QPixmap. On pan, blit-shifts
+    from the cached pixmap instead of re-rendering. Re-renders only on
+    zoom change, data change (mark_dirty), or pan > 50% margin.
+
+    Respects ``devicePixelRatio`` so text and lines render at native
+    screen density on HiDPI displays.
+    """
 
     def __init__(self, layer):
         self._layer = layer
         self._pixmap: QPixmap | None = None
         self._vp_center: tuple[float, float] = (0.0, 0.0)
         self._vp_scale: float = 0.0
+        self._vp_width: int = 0
+        self._vp_height: int = 0
+        self._dpr: float = 1.0
         self._dirty: bool = True
 
     def mark_dirty(self) -> None:
         self._dirty = True
 
     def paint(self, painter: QPainter, viewport: MapViewport) -> None:
-        if self._needs_rerender(viewport):
-            self._rerender(viewport)
+        dpr = painter.device().devicePixelRatioF() if painter.device() else 1.0
+        if dpr <= 0:
+            dpr = 1.0
+        if self._needs_rerender(viewport, dpr):
+            self._rerender(viewport, dpr)
         self._blit(painter, viewport)
 
-    def _needs_rerender(self, vp: MapViewport) -> bool:
+    def _needs_rerender(self, vp: MapViewport, dpr: float) -> bool:
         if self._dirty:
             return True
+        if abs(dpr - self._dpr) > 1e-3:
+            return True
         if abs(vp.scale - self._vp_scale) > 1e-6:
+            return True
+        if vp.width != self._vp_width or vp.height != self._vp_height:
             return True
         dx = abs(vp.center_world[0] - self._vp_center[0]) * vp.scale
         dy = abs(vp.center_world[1] - self._vp_center[1]) * vp.scale
         return dx > vp.width * 0.5 or dy > vp.height * 0.5
 
-    def _rerender(self, vp: MapViewport) -> None:
+    def _rerender(self, vp: MapViewport, dpr: float) -> None:
         buf_w = vp.width * 2
         buf_h = vp.height * 2
-        self._pixmap = QPixmap(buf_w, buf_h)
+        phys_w = max(1, int(round(buf_w * dpr)))
+        phys_h = max(1, int(round(buf_h * dpr)))
+        self._pixmap = QPixmap(phys_w, phys_h)
+        self._pixmap.setDevicePixelRatio(dpr)
         self._pixmap.fill(Qt.transparent)
         p = QPainter(self._pixmap)
         try:
@@ -75,6 +96,9 @@ class LayerPixmapCache:
             p.end()
         self._vp_center = vp.center_world
         self._vp_scale = vp.scale
+        self._vp_width = vp.width
+        self._vp_height = vp.height
+        self._dpr = dpr
         self._dirty = False
 
     def _blit(self, painter: QPainter, vp: MapViewport) -> None:
@@ -82,6 +106,15 @@ class LayerPixmapCache:
             return
         dx_px = (vp.center_world[0] - self._vp_center[0]) * vp.scale
         dy_px = (self._vp_center[1] - vp.center_world[1]) * vp.scale
-        src_x = int(vp.width / 2 + dx_px)
-        src_y = int(vp.height / 2 + dy_px)
-        painter.drawPixmap(0, 0, self._pixmap, src_x, src_y, vp.width, vp.height)
+
+        # Source coordinates in logical space
+        src_x = vp.width / 2 + dx_px
+        src_y = vp.height / 2 + dy_px
+
+        # Convert logical source coordinates to physical pixels
+        src_x_phys = int(round(src_x * self._dpr))
+        src_y_phys = int(round(src_y * self._dpr))
+        src_w_phys = int(round(vp.width * self._dpr))
+        src_h_phys = int(round(vp.height * self._dpr))
+
+        painter.drawPixmap(0, 0, self._pixmap, src_x_phys, src_y_phys, src_w_phys, src_h_phys)

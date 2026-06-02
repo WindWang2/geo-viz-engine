@@ -15,15 +15,16 @@ def test_main_window_title(window):
 
 
 def test_sidebar_has_eight_buttons(window):
+    assert len(window.sidebar_buttons) == 8
     buttons = window.sidebar.findChildren(object)
     nav_buttons = [b for b in buttons if hasattr(b, "property") and b.property("nav_key") is not None]
-    assert len(nav_buttons) == 8
+    assert len(nav_buttons) == 9
 
 
-def test_stacked_widget_has_eight_pages(window):
+def test_stacked_widget_has_nine_pages(window):
     stack = window.findChild(QStackedWidget)
     assert stack is not None
-    assert stack.count() == 8
+    assert stack.count() == 9
 
 
 def test_plots_page_exists(window):

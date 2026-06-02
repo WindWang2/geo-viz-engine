@@ -11,8 +11,8 @@ def test_global_qss_azurite_standards(app):
     with open("src/main.py", "r", encoding="utf-8") as f:
         content = f.read()
     
-    assert "#faf9f5" in content.lower()  # Background
-    assert "1.6px" in content.lower()    # Stroke width
-    assert "border-radius: 8px" in content.lower()
+    assert "#faf9f5" in content.lower()  # Canvas Background
+    assert "#ffffff" in content.lower()  # Surface Background
+    assert "border-radius: 12px" in content.lower()  # Card Radius
     assert "#1f66d4" in content.lower()  # Azurite Blue
-    assert "#586878" in content.lower()  # Stroke Color
+    assert "#d3dbe6" in content.lower()  # Stroke Color

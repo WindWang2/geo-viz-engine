@@ -104,6 +104,11 @@ class PaleoMapCanvas(QWidget):
         self._layer_caches: list[LayerPixmapCache] = []
         self._locked_level: str = ""
 
+    @property
+    def layers(self) -> list[PaleoLayer]:
+        """Public read-only access to the composite layer list."""
+        return list(self._layers)
+
     def _rebuild_layer_caches(self) -> None:
         """Rebuild LayerPixmapCache wrappers for current layer list.
 
@@ -323,6 +328,10 @@ class PaleoMapCanvas(QWidget):
                     cache.paint(painter, self._viewport)
         finally:
             painter.end()
+
+    @property
+    def zoom(self) -> float:
+        return self._viewport.zoom
 
     def set_zoom(self, zoom: float) -> None:
         """Set zoom level programmatically (e.g. from slider)."""

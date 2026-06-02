@@ -35,7 +35,7 @@ def test_dtw_button_exists_and_tooltip(qtbot):
     page = CrossWellPage()
     qtbot.addWidget(page)
     assert page._dtw_btn is not None
-    assert page._dtw_btn.text() == "DTW 传播"
+    assert "DTW" in page._dtw_btn.text()
     assert "DTW" in page._dtw_btn.toolTip()
     assert "ghost" in page._dtw_btn.toolTip() or "灰色" in page._dtw_btn.toolTip()
 

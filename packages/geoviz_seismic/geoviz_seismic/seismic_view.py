@@ -1086,11 +1086,11 @@ class SeismicView(QWidget):
 
     def _on_crossplot(self):
         """Open an attribute crossplot dialog for the current slice."""
-        raw = (
-            self._slice_data.get("inline")
-            or self._slice_data.get("crossline")
-            or self._slice_data.get("time")
-        )
+        raw = self._slice_data.get("inline")
+        if raw is None:
+            raw = self._slice_data.get("crossline")
+        if raw is None:
+            raw = self._slice_data.get("time")
         if raw is None:
             return
         si = self._meta.sample_interval if self._meta else 1.0

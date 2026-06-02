@@ -15,6 +15,7 @@ class PaleoLayer(ABC):
     # real widget viewport — never go through LayerPixmapCache, which uses an
     # oversized 2x buffer that shifts their anchor points off-screen.
     is_chrome: bool = False
+    visible: bool = True
 
     @abstractmethod
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None: ...

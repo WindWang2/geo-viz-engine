@@ -175,3 +175,17 @@ class MapCanvas(QWidget):
         # Multiply delta by 0.15 to make scrolling zoom smooth and precise
         self._zoom_pan.wheel_zoom(QPointF(event.position()), delta_steps=delta * 0.15)
         self._scheduler.schedule()
+
+    @property
+    def layers(self) -> list[MapLayer]:
+        """Public read-only access to the composite layer list."""
+        return list(self._layers)
+
+    @property
+    def zoom(self) -> float:
+        return self._viewport.zoom
+
+    def set_zoom(self, zoom: float) -> None:
+        self._viewport.zoom = max(self._zoom_pan.min_zoom,
+                                  min(self._zoom_pan.max_zoom, zoom))
+        self._scheduler.schedule()

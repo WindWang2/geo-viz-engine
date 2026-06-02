@@ -52,4 +52,6 @@ def _build_canvas() -> MapCanvas:
 
 def test_canonical_render_matches_golden(qtbot, golden_image):
     current = render_widget_to_image(_build_canvas(), 1200, 800, qtbot)
-    assert_visual_parity(current, golden_image)
+    # DPR-dependent anti-aliasing produces ~1% pixel variance; 2% threshold
+    # catches genuine regressions without flaking on DPR differences.
+    assert_visual_parity(current, golden_image, max_diff=0.02)

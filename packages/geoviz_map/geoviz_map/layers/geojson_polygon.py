@@ -85,6 +85,8 @@ class GeoJsonPolygonLayer(MapLayer):
         return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
 
     def paint(self, painter: QPainter, viewport: MapViewport) -> None:
+        if not self.visible:
+            return
         vp_bbox = viewport.world_bbox()
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)

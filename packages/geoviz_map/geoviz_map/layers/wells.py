@@ -27,6 +27,8 @@ class WellsLayer(MapLayer):
         self.hovered_name = name
 
     def paint(self, painter: QPainter, viewport: MapViewport) -> None:
+        if not self.visible:
+            return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         positions: list[tuple[str, QPointF]] = []

@@ -1,24 +1,33 @@
 import pytest
-from PySide6.QtWidgets import QApplication, QPushButton, QGroupBox
-from src.pages.tools.page import ToolsPage
+from PySide6.QtWidgets import QApplication, QLabel
+from src.pages.tools.page import ToolsPage, ToolCard
+
 
 @pytest.fixture
 def app():
     return QApplication.instance() or QApplication([])
 
-def test_tools_page_azurite_icons(app):
-    page = ToolsPage()
-    
-    # Check for icons on conversion button
-    # Since it's a local variable in __init__, we might need to find children
-    btns = page.findChildren(QPushButton)
-    icon_btns = [b for b in btns if not b.icon().isNull()]
-    assert len(icon_btns) >= 3, f"Expected at least 3 buttons with icons in ToolsPage, found {len(icon_btns)}"
 
-def test_tools_page_styling(app):
+def test_tools_page_has_six_cards(app):
+    """Task 20.5: ToolsPage must render 6 Azurite tool cards."""
     page = ToolsPage()
-    # Check for Azurite title color
-    from PySide6.QtWidgets import QLabel
+    cards = page.findChildren(ToolCard)
+    assert len(cards) == 6, f"Expected 6 ToolCards, found {len(cards)}"
+
+
+def test_tools_page_title_and_subtitle(app):
+    page = ToolsPage()
     labels = page.findChildren(QLabel)
-    title_label = [l for l in labels if l.text() == " 工具箱"][0]
-    assert "#1f66d4" in title_label.styleSheet().lower()
+    titles = [l.text() for l in labels]
+    assert "工具箱" in titles
+    assert "独立小工具集" in titles
+
+
+def test_tool_cards_have_icons_and_tags(app):
+    """Each card must contain an icon, name, tag chip, and description."""
+    page = ToolsPage()
+    cards = page.findChildren(ToolCard)
+    for card in cards:
+        labels = card.findChildren(QLabel)
+        # icon label + name label + tag label + description label
+        assert len(labels) >= 4, f"Card has too few labels: {len(labels)}"

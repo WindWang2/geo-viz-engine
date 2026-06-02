@@ -1,5 +1,24 @@
 # Findings & Decisions — GeoViz Engine (All Phases)
 
+## Phase 20: UI 视觉全量升级 (Azurite Design System)
+
+### 1. 核心视觉架构尺寸与定位
+- **Header (`hdr`)**: 页面顶部常驻页头栏，高度为 `52px`，背景为白色 `#ffffff`，底边框为薄灰 `#e5eaf1`。左侧显示渐变背景圆角品牌 Logo 与 `GeoViz Engine` HTML 标题，右侧承载按需渲染的页面专用工具集。
+- **Sidebar (`side`)**: 侧栏宽度由原先的 `160px` 拓宽至 `212px`，背景为纯白 `#ffffff`，右侧框线为 `#e5eaf1`。将导航项目合理归纳进 “.side-group-label” 分组中，并置于 “可视化” 与 “工作区” 两大板块下。
+- **Footer (`status`)**: 页脚状态栏高度为 `26px`，背景为白色 `#ffffff`，顶边框为 `#e5eaf1`。放置绿色运行指示灯并动态同步状态与版本信息。
+
+### 2. 动态页头与页脚响应绑定 (HCtxA & status)
+- **动态上下文同步**：建立了 `QStackedWidget` 当前页码与页头上下文/工具栏的响应式机制。切换页面时自动清空页头工具栏，从全局 `PAGE_CONFIGS` 读取标题、副标题、状态字、动作按钮（利用 `globe`、`ruler`、`layers` 等 linear SVG 资产）进行重构，实现多功能套件的一致性。
+- **Segmented Control (双态/多态切换)**：为 `WellLogPage` 的测井图/数据切换设计了嵌入式胶囊段按钮，完全对齐 `UI-REF` 中的 `.seg` css 规范。
+- **指示器指示带**：SidebarButton 选中时，在按钮最左端绘制一条 `3.5px` 宽的亮蓝色高亮竖条 (`border-left: 3.5px solid #1f66d4`)，背景匹配暖白蓝色 `#e9effa`。
+
+### 3. Azurite QSS 设计变量映射
+- **画布背景 (`--canvas`)**：全局 `QWidget` 背景设定为 `#f4f7fb`，营造高级淡雅的底盘视觉。
+- **白卡片面板 (`--surface`)**：`QGroupBox`、`QTableWidget` 等容器重构为白底大卡片，边框为极淡的 `#e5eaf1`，圆角扩宽至 `12px`。
+- **组件描边 (`--border-strong`)**：按钮、输入框、微调框采用 `1px` 薄框线（颜色为 `#d3dbe6`），圆角为 `6px` / `8px`。在获取焦点时，输入框和下拉框高亮亮起强调色 `#1f66d4`。
+
+---
+
 ## Project Architecture
 - 单进程 PySide6 桌面应用，6 个独立 pip-installable 包
 - 无 IPC、无 HTTP、无 token auth — 纯 Python 函数调用

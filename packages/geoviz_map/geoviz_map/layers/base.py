@@ -14,6 +14,8 @@ class MapLayer(ABC):
     (topmost first), so interactive layers should be appended last.
     """
 
+    visible: bool = True
+
     @abstractmethod
     def paint(self, painter: QPainter, viewport: MapViewport) -> None: ...
 

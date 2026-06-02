@@ -93,8 +93,51 @@ try:
 except ImportError:
     pass
 
-from PySide6.QtGui import QFont, QSurfaceFormat
+from PySide6.QtGui import QFont, QSurfaceFormat, QPixmap
+from PySide6.QtWidgets import QSplashScreen, QFrame, QVBoxLayout, QLabel
+from PySide6.QtCore import QPropertyAnimation
 from src.app import MainWindow
+
+
+class BrandSplashScreen(QSplashScreen):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
+        self.setFixedSize(450, 280)
+        
+        pixmap = QPixmap(450, 280)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        self.setPixmap(pixmap)
+        
+        bg = QFrame(self)
+        bg.setGeometry(0, 0, 450, 280)
+        bg.setStyleSheet(
+            "QFrame { background: #faf9f5; border: 1px solid #d3dbe6; border-radius: 12px; }"
+        )
+        
+        layout = QVBoxLayout(bg)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+        layout.addStretch()
+        
+        self.logo_lbl = QLabel()
+        self.logo_lbl.setText('<span style="font-size: 32px; font-weight: bold; color: #1f66d4;">GeoViz</span> '
+                              '<span style="font-size: 32px; font-weight: 300; color: #586878;">Engine</span>')
+        self.logo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_lbl.setStyleSheet("border: none; background: transparent;")
+        layout.addWidget(self.logo_lbl)
+        
+        sub_lbl = QLabel("Azurite Design System · Desktop地质可视化引擎")
+        sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub_lbl.setStyleSheet("color: #92a0b0; font-size: 12px; border: none; background: transparent;")
+        layout.addWidget(sub_lbl)
+        
+        layout.addStretch()
+        
+        self.status_lbl = QLabel("正在加载地质数据模块...")
+        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_lbl.setStyleSheet("color: #586878; font-size: 11px; border: none; background: transparent;")
+        layout.addWidget(self.status_lbl)
 
 
 def main():
@@ -106,6 +149,11 @@ def main():
 
     app = QApplication(sys.argv)
 
+    from PySide6.QtGui import QIcon
+    from src.utils.paths import get_resources_dir
+    logo_path = str(get_resources_dir() / "icons" / "brand" / "geoviz-mark.svg")
+    app.setWindowIcon(QIcon(logo_path))
+
     font = QFont()
     font.setFamilies(["Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", "Arial"])
     font.setPointSize(10)
@@ -113,62 +161,96 @@ def main():
     app.setFont(font)
 
     app.setStyleSheet("""
-        QWidget { background: #faf9f5; color: #586878; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; }
+        QWidget { background: #faf9f5; color: #1a2433; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; }
         
         QGroupBox { 
-            border: 1.6px solid #586878; 
-            border-radius: 8px; 
+            border: 1px solid #e5eaf1; 
+            border-radius: 12px; 
             margin-top: 12px; 
             padding-top: 16px; 
             font-weight: bold;
+            background: #ffffff;
         }
-        QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; }
+        QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #1f66d4; }
         
         QPushButton { 
             background: #ffffff; 
-            border: 1.6px solid #586878; 
+            border: 1px solid #d3dbe6; 
             border-radius: 8px; 
-            padding: 8px 16px; 
-            color: #586878; 
+            padding: 6px 12px; 
+            color: #1a2433; 
             font-weight: 500;
         }
-        QPushButton:hover { background: #f0f4f8; border-color: #1f66d4; color: #1f66d4; }
+        QPushButton:hover { background: #f1f4f9; border-color: #1f66d4; color: #1f66d4; }
         QPushButton:pressed { background: #e9effa; }
         QPushButton:checked { background: #1f66d4; color: #ffffff; border-color: #1f66d4; }
         
         QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
             background: #ffffff;
-            border: 1.6px solid #586878;
+            border: 1px solid #d3dbe6;
             border-radius: 6px;
             padding: 4px 8px;
             min-height: 24px;
+            color: #1a2433;
         }
         QLineEdit:focus, QComboBox:focus { border-color: #1f66d4; }
         
         QTableWidget { 
             background: #ffffff; 
-            gridline-color: #f0f4f8; 
-            border: 1.6px solid #586878; 
-            border-radius: 8px;
+            gridline-color: #f1f4f9; 
+            border: 1px solid #d3dbe6; 
+            border-radius: 12px;
         }
         QHeaderView::section { 
-            background: #f0f4f8; 
+            background: #fafbfd; 
             border: none;
-            border-right: 1.6px solid #586878;
-            border-bottom: 1.6px solid #586878;
+            border-right: 1px solid #e5eaf1;
+            border-bottom: 1px solid #e5eaf1;
             padding: 6px; 
             font-weight: bold;
+            color: #586878;
         }
         
-        QScrollBar:vertical { background: #faf9f5; width: 12px; margin: 0px; }
-        QScrollBar::handle:vertical { background: #586878; border-radius: 6px; min-height: 20px; margin: 2px; }
+        QScrollBar:vertical { background: #faf9f5; width: 8px; margin: 0px; }
+        QScrollBar::handle:vertical { background: #cbd5e1; border-radius: 4px; min-height: 20px; }
+        QScrollBar::handle:vertical:hover { background: #94a3b8; }
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        
+        QScrollBar:horizontal { background: #faf9f5; height: 8px; margin: 0px; }
+        QScrollBar::handle:horizontal { background: #cbd5e1; border-radius: 4px; min-width: 20px; }
+        QScrollBar::handle:horizontal:hover { background: #94a3b8; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
         
         QScrollArea { border: none; background: transparent; }
     """)
     app.setApplicationName("GeoViz Engine")
 
+    # 1. Show Splash Screen with fade-in animation
+    splash = BrandSplashScreen()
+    splash.setWindowOpacity(0.0)
+    splash.show()
+    
+    anim = QPropertyAnimation(splash, b"windowOpacity")
+    anim.setDuration(400)
+    anim.setStartValue(0.0)
+    anim.setEndValue(1.0)
+    anim.start()
+    app.processEvents()
+    
+    # Simulate loading latency
+    import time
+    time.sleep(1.0)
+
     window = MainWindow()
+    
+    # Fade out splash and show main window
+    anim_out = QPropertyAnimation(splash, b"windowOpacity")
+    anim_out.setDuration(400)
+    anim_out.setStartValue(1.0)
+    anim_out.setEndValue(0.0)
+    anim_out.finished.connect(splash.close)
+    anim_out.start()
+    
     window.show()
     sys.exit(app.exec())
 

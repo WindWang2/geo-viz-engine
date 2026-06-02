@@ -8,10 +8,10 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 
 ## Current State
 - **Branch:** feat/geoviz-plots
-- **Tests:** 723 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
-- **Latest commit:** `8f074c5c feat(project): build DataPage project management UI controls and wire Open/Save button signals`
-- **Active phase:** Handover / Next Phase Planning
-- **Health rating:** A+（所有 Phase 全清，723 个单元测试全绿）
+- **Tests:** 847 passed, 4 skipped (4 skipped 来自 `test_seismic_view.py` 对 `pyvistaqt.QtInteractor` 的环境探测——无显示则 skip，为正确的环境闸门行为，不待整改)
+- **Latest commit:** Phase 22a + 22b + 22c complete
+- **Active phase:** None
+- **Health rating:** A（Phase 22 DONE，847 tests passed，all dead controls resolved）
 
 ## Completed Phases
 
@@ -42,8 +42,9 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 | 14 | 连井剖面自动化与专业报告导出 | ✅ | 井位地图 Shift+Drag 框选，PCA 自动走向排井，高保真 PDF 报告导出 |
 | 15 | Project 工程文件序列化 (.gvz) | ✅ | 基于 Pydantic 的 Git 友好 schema，相对路径转换，DataPage UI 整合 |
 | 19 | 高阶可视化增强 (3D 结构增强与科学制图) | ⏳ | 3D地层雕刻、梯度光照、防碰撞标注与 LOD 路径简化 |
-| 20 | UI 视觉全量升级 (Azurite Design System) | ✅ | 蓝铜设计规范、全新线性图标、全局 QSS 主题同步 |
-| Audit | 连井专题深度审计与修复（2026-06-01 用户回归发现） | ✅ | 修复连井带 28px 标签偏移错 位， 解决点击穿透和 Canvas 消费导致手动连井不起作用，实现连井带与拾取点对齐、跟随 Zoom/Pan 实时平移缩 放渲染 |
+| 20 | UI 视觉全量升级 (Azurite Design System) | ✅ | 像素级还原 UI-REF 蓝铜设计规范，全量重构主窗口 Shell 并实现 Chrome 动态响应 |
+| Audit | 连井专题深度审计与修复（2026-06-01 用户回归发现） | ✅ | 修复连井带 28px 标签偏移错 位， 解决点击穿透 and Canvas 消费导致手动连井不起作用，实现连井带与拾取点对齐、跟随 Zoom/Pan 实时平移缩 放渲染 |
+| 21 | UI 交互深度联动整合 (Premium UI Interactive Complete Integration) | ⏳ | 对设置页面、6大辅助工具、DataPage KPI、PlotsPage实时插值和合成标定进行交互深度联动，确保 100% 交互响应 |
 
 
 ## 🔴 Phase 11.5: 收尾与债务清理（最高优先级，必须先于 Phase 12）
@@ -242,24 +243,197 @@ GeoViz Engine 是一款基于 PySide6 的桌面地质数据可视化引擎。Pha
 
 ---
 
-### 🆕 Phase 20: UI 视觉全量升级 (Azurite Design System)
-> **Goal**: 提升产品的视觉专业度与品牌一致性，对标顶级行业软件。
+### 🆕 Phase 20: UI 视觉全量升级 (Azurite Design System 像素级还原) ✅ DONE (2026-06-02)
+> **Goal**: 深度还原 `UI-REF` 里的 HTML 蓝铜设计规范（Azurite Design System），实现主窗口与各子页面的高保真还原与线性图标完美同步。
 
 - **Tasks & Roadmap**:
-  - **Task 20.1 (🔴 P0) - 全局图标资产同步**: 将 `UI-REF/icons` 下的导航及 UI 图标迁移并重命名至 `src/resources/icons`，替换所有过时的系统内置图标。 (✅ DONE)
-  - **Task 20.2 (🔴 P0) - MainWindow 与侧栏风格化**: 调整 `MainWindow` 侧栏宽度、背景色（`#faf9f5`）及 `SidebarButton` 的 Azurite 蓝（`#1f66d4`）高亮效果。 (✅ DONE)
-  - **Task 20.3 (🟡 P1) - 通用组件 QSS 标准化**: 编写全局样式表，统一 Button、QGroupBox、QComboBox 和 QTableWidget 的 1.6px 描边与圆角风格。 (✅ DONE)
-  - **Task 20.4 (🟡 P1) - 各功能页 UI 同步**:
-    - **MapPage**: 更新地图覆盖层文字风格。 (✅ DONE)
-    - **WellLogPage**: 更新轨道标签与控制栏样式。 (✅ DONE)
-    - **SeismicPage**: 同步多行 Toolbar 的 Azurite 风格。 (✅ DONE)
-    - **PlotsPage**: 调整图表边框与轴标签配色。 (✅ DONE)
-  - **Task 20.5 (🟢 P2) - 启动页与品牌标识**: 集成 `UI-REF/icons/brand` 下 of logo，增加精美的启动闪屏 (Splash Screen)。 (✅ DONE)
+  - **Task 20.1 (🔴 P0) - 核心 AppShell 主架构重构 (MainWindow 像素级升级)**:
+    - 将 `MainWindow` 的侧边栏宽度从 `160px` 拓宽至 `212px`，背景色统一为纯白 `#ffffff`，右侧框线为 `#e5eaf1`。
+    - 在侧栏顶部集成完整的品牌区：包含铜蓝渐变背景的 `brand-mark`（内含 `seismic` 图标）及高精细的 HTML 富文本品牌名 `GeoViz <span style="color: #92a0b0; font-weight: 500;">Engine</span>`。
+    - 引入顶部页头部件 (`hdr`, 高度 `52px`, 背景 `#ffffff`, 底边框 `#e5eaf1`) 和底部状态栏部件 (`status`, 高度 `26px`, 背景 `#ffffff`, 顶边框 `#e5eaf1`)，实现与 Web 页面完全一致的布局。
+  - **Task 20.2 (🔴 P0) - 页头上下文与全局状态栏的响应式动态绑定**:
+    - **页头标题与副标题动态同步 (`HCtxA`)**: 切换页面时，页头左侧动态更新为与 UI-REF 完全一致的标题与副标题。如：地图页 ("地图总览", "46 口井 · EPSG:4326")、古地理图 ("古地理图", "沧浪铺组 · Plate Carrée") 等。
+    - **页头工具栏按需渲染 (`hdr-tools`)**: 为各子页面配置独立的工具栏按钮集合，直接嵌入页头右侧（利用 linear 图标资产如 `layers`、`ruler`、`palette`、`export`、`undo`、`redo`、`filter` 等），且支持中/英文切换下拉项 ("中文" 带 `globe` 图标)。
+    - **状态栏动态更新**: 在底部状态栏左侧放置绿色呼吸灯 `dot` (`#2ca36b`) 和页面就绪状态文案，右侧常驻显示 `GeoViz Engine v0.8.0`。
+  - **Task 20.3 (🔴 P0) - 侧栏导航分组化与底部设置菜单**:
+    - 在侧栏菜单中引入 `.side-group-label`（分组小标题，大小 10.5px，加粗，间距 0.8px，大写，颜色 `#92a0b0`），分为 “可视化” (前6页) 和 “工作区” (后2页) 两大类别。
+    - 在侧栏底部 (`side-foot`) 增加一条细线分割，并常驻放置 “设置” (Settings) 导航菜单，悬浮与点击状态与普通导航项对齐。
+    - 重构导航按钮 `SidebarButton`：选中时显示为背景 `#e9effa`、前景色 `#1f66d4`、加粗，且左侧边缘显示一条 `3.5px` 宽 of 蓝色高亮长条指示器 (`border-left: 3.5px solid #1f66d4`)，深度贴合 `.nav-item.on::before` 视觉效果。
+  - **Task 20.4 (🟡 P1) - 蓝铜设计规范 QSS 全局标准化**:
+    - 重写 `main.py` 的全局样式表，收敛至 Azurite 配色：主要文字 `#1a2433`，次要文字 `#586878`，边框 `#d3dbe6`。
+    - 将 `QGroupBox` 深度改写为 `.card` 样式：圆角 `12px`，边框 `#e5eaf1`，背景纯白 `#ffffff`，并配以微弱卡片投影。
+    - 标准化 `QLineEdit`、`QComboBox`、`QSpinBox` 圆角为 `6px`，焦点状态下边框变为主色 `#1f66d4`。
+  - **Task 20.5 (🟡 P1) - 页面及子部件的像素级深度对齐 (Subpages High-Fidelity Configuration)**:
+    - **地图页 (MapPage)**:
+      - 页面采用左右分栏。左侧为 `252px` 宽的侧边栏，背景 `#ffffff`，带搜索框（背景 `#fafbfd` 且输入框带 `search` 线性图标）、三个分类 Chip (`全部 46`, `已解释 31`, `含气 12`)，以及井位滚动列表（左侧 `pin` 图标，右侧带高度 Tag）。
+      - 右侧底图上配置坐标网格标定，并在已选中的井位上展示高亮光晕气泡（外圈大半透明圈，内圈 `accent` 圆心）。
+      - 弹出悬浮信息卡片（Well Callout Card），高精度展示选中的井名、Gas 标签、地理坐标与主按钮“打开井剖面”。
+      - 地图画布的右上角悬浮一套白卡片工具栏 (`float-tb`，含 `zoomIn`, `zoomOut`, `fit`, `ruler`)；左上角悬浮图层管理器白卡片，左下角悬浮比例尺与指北针。
+    - **古地理图页 (PaleoMapPage)**:
+      - 页面采用左右分栏。右侧为 `230px` 宽的沉积相图例侧边栏，包含沉积相色斑图例和图层控制项（用白底透明背景的 Toggle Switch 滑块实现高保真开关），底部带“导出图件”按钮。
+      - 地图画布渲染相带填充并融合岩性 SVG 纹理（包含 `pf-dots`, `pf-wave`, `pf-dash`, `pf-ring` 等），并在相带中央绘制相名称标注，井投影显示为地质标准的十字交叉针圆圈符合。
+      - 地图右上角配置 `float-tb` (含 `zoomIn`, `zoomOut`, `fit` 图标)，左下角配置指北针图标。
+    - **井剖面页 (WellLogPage)**:
+      - 控制面板高度重构为无缝贴合的白卡片样式，包含井选择 Dropdown、深度范围标签、双段 Toggle Button ("综合柱状" / "曲线叠合")，以及 "轨道"、"导出 SVG" 动作按钮。
+      - 剖面纸张主区域配置 11 个独立的轨道（从左到右：地层系统、AC/GR 曲线、深度、岩性图、RT/RXO 曲线、岩性描述、微相、亚相、相、体系域、层序），头部显示高精度的变量与刻度，轨道内容填充地质纹理、曲线色谱和文字走向。
+    - **连井对比页 (CrossWellPage)**:
+      - 顶栏包含连井属性标签 "4 口井 · PCA 自动排井"，段按钮 ("拾取", "连接", "浏览")，以及 "DTW 自动对比" 与 "超宽 SVG" 导出按钮。
+      - 主画布为超宽滚动视图，多井之间绘制优美的三次贝塞尔连接色带（Facies Connectivity Bands），并在层位界线上绘制虚线连接线 (Tops Pick Lines) 和标志性 Pick 点；每口井顶部渲染 `accent-soft` 色块的井名标签。
+    - **地震 3D 页 (SeismicPage)**:
+      - 采用左右分栏。左侧主区域包含两个白底圆角卡片：上半部分为 "3D 体渲染 · GLVolumeItem" 黑色画布（绘制 3D oblique 立方体，前面板渲染地震层位波形波段，顶部叠加 horizon surface 及井柱）；下半部分为 "2D 剖面 · inline 420" 剖面图（带 Wiggle 波形包络曲线）。
+      - 右侧为 `226px` 宽控制面板，带有 Inline/Crossline/Time 滚动条、Colormap 色卡带（seismic, gray, jet 切换）和井震标定 Auto-Tie 参数面板。
+    - **平面图件页 (PlotsPage)**:
+      - 左侧为平面图卡片，高精细度展示“沧浪铺组 砂体厚度等值图”，绘制渐变的多级砂体厚度色斑多边形和轴标定。
+      - 右侧为 `200px` 宽插值控制面板，包含插值方法切换 (IDW / RBF / Kriging)、幂指数滑块、垂直渐变 Colormap 色条与导出 PDF 按钮。
+    - **数据管理页 (DataPage)**:
+      - 顶栏包含 "导入数据" 主按钮，以及 Excel / LAS / SEGY 快速导入小按钮，右侧带过滤输入框。
+      - 页面中部为 4 个 KPI 卡片（注册井数、缓存占用、数据格式、Calamine 引擎速度）。
+      - 下半部分为高保真数据表格（`table.gv` 样式），带 sticky 表头、状态指示点和向右详情箭头。
+    - **工具箱页 (ToolsPage)**:
+      - 标题带 "独立小工具集" 说明，下部平铺 6 个圆角白卡片工具（如 XML 转换、层位补全等），卡片内左侧采用 `accent-soft` 背景的图标，右侧为工具名、Tag 芯片和工具描述，鼠标悬浮带浮雕阴影。
+  - **Task 20.6 (🟢 P2) - 启动闪屏 (Splash Screen) 与渐变动效**:
+    - 新增启动闪屏，高保真呈现暖白背景 `#faf9f5` 下铜蓝渐变 Logo 逐渐淡入的解包动效，提升首屏高级感。
 
 - **Acceptance Criteria**:
-  - 整个应用呈现统一的 Azurite 蓝 + 暖白米色调，无视觉死角。
-  - 所有图标均替换为 1.6px 线性的线性设计。
-  - 在不同 DPI 下 UI 元素缩放正确且边缘清晰。
+  - 应用界面骨架完美对齐 `UI-REF`，包含页头、212px 分组侧栏、主页面、状态栏。
+  - 侧栏菜单点击切换时，页头标题、副标题、工具按钮及底部状态文字实时、无延迟同步响应。
+  - 整个应用没有任何原生/粗糙的 Qt 边缘，圆角、描边、字色、背景色严格遵循 Azurite (Direction A) 主干规范。
+  - 所有子页面（WellLog、CrossWell 等）与主框架视觉无缝贴合。
+
+---
+
+### ✅ Phase 21: UI 交互深度联动整合 (Premium UI Interactive Complete Integration) — DONE (2026-06-02)
+> **Goal**: 围绕全新 Azurite 视觉大框架，对全量子页面进行 100% 深度交互与响应逻辑的开发与对齐，彻底告别只读占位符，保证所有按钮、滑块、配置项都有敏捷的地质背景数据和图形响应，提供极致的生产力体验。
+>
+> **Result**: 5/5 子任务全部 TDD 完成，新增 46 个测试全绿，全套 801 tests passed。
+
+- **Tasks & Roadmap**:
+  - **Task 21.1 (🔴 P0) ✅ - 独立设置页面 (SettingsPage) 与偏好广播持久化** — 6 tests GREEN:
+    - **设置主页面**：新增 App 偏好设置页作为 Stack 的第 9 个常驻页，连接侧栏底部的“设置”按钮。
+    - **主题动态切换**：提供 QComboBox 进行“浅米白 (默认) / 矿石灰”主题切换，触发加载对应的 QSS 文件并重刷全界面。
+    - **坐标网格分发**：支持十进制 DD 格式与度分秒 DMS 格式一键切换，并通过全局信号（`coordinate_format_changed`）实时重置 MapPage / PaleoMapPage 的状态显示及标定值。
+    - **高速缓存清除**：加入一键清理地质切片与 SVG 矢量图缓存动作，并在按钮右侧带转动动画及即时释放容量显示（MB/GB级）。
+  - **Task 21.2 (🟡 P1) ✅ - 工具箱 (ToolsPage) 6 大独立小工具交互对话框闭环** — 18 tests GREEN:
+    - **浮雕卡片点击响应**：为 ToolsPage 的 6 大卡片注册交互点击过滤器，点击时滑出/弹出一个专用的 Azurite 规范对话框 (Dialog Drawer) 并加载真实功能：
+      1. **SEGY 头信息查看器 (SEGY Header Inspector)**：用户导入 SEGY，直观呈现并检索 EBCDIC 文本头及二进制线头数据。
+      2. **测井曲线深度采样器 (LAS Curve Resampler)**：允许导入测井曲线，设置采样间隔步长进行降采样并输出对比。
+      3. **井斜校正计算器 (Deviation/TVD Calculator)**：支持输入测斜表 (MD/Incl/Azim)，采用最小曲率法计算并输出 TVD/X/Y 三维轨迹坐标表。
+      4. **XML 坐标转换工具 (XML Coordinates Converter)**：提供北京54/西安80/CGCS2000 投影坐标与经纬度的批量换算界面。
+      5. **地层分层缺失自动插值器 (Tops Completion Interpolator)**：向导式缺失层位推导工具，辅助生成连井背景层。
+      6. **Calamine 脚本高速编译引擎 (Calamine Compiler Simulation)**：地质公式的高速校验与编译提示框。
+  - **Task 21.3 (🔴 P0) ✅ - 数据管理卡片 (DataPage) KPI 状态指标动态刷新与表项级联** — 6 tests GREEN:
+    - **运行数据绑定**：将 DataPage 中部的 4 个大卡片 KPI 数值直接连接到底层 Cache（如 `len(self.cache.wells)` 动态刷新已注册井数，缓存占用空间以 `os.path.getsize` 计算，加载 SEGY IO 速度等）。
+    - **表项向右箭头详情**：表格每行最右侧的 "向右箭头" 添加悬浮及点击响应，滑出右侧侧拉面板，精细展示此井的完整工程 JSON 元数据，并支持直接对其进行更名和快速删除操作。
+  - **Task 21.4 (🟡 P1) ✅ - 平面图件页 (PlotsPage) 砂厚图参数实时插值与一键更新** — 6 tests GREEN:
+    - **参数联动**：将右侧控制面板中所有的插值参数（插值方法 IDW/RBF/Kriging 下拉框、K值幂指数滑块、网格分辨率）与左侧 QPainter 二维图表连接。
+    - **自动重算**：当用户拖动滑块或切换下拉框时，毫秒级异步触发后端插值运算，实时重绘带平滑等值线和色调斑块的“沧浪铺组砂体厚度图”，解除静止画面的呆板体验。
+  - **Task 21.5 (🔴 P0) ✅ - 测井与平面地图双向联动工作流 (Map-to-WellLog Linkage)** — 3 tests GREEN:
+    - **双向对齐**：在 MapPage 选中某口井，点击悬浮信息卡片（Well Callout Card）中的“打开井剖面”按钮时，不仅切换到测井页 (WellLogPage)，并且使测井页面的“当前井下拉框”立即变更并加载该井的 11 条地质曲线。
+
+- **Acceptance Criteria**:
+  - 点击“设置”菜单，界面流畅滑入第 9 页，视觉完全对齐 Azurite 扁平白卡片风格。
+  - 改变坐标格式，平面地图和古地理图的坐标标定文字瞬时完成 DD 与 DMS 格式刷新，不产生内存重叠或黑白闪动。
+  - 工具箱内 6 个小工具弹窗在 1280px 分辨率下完美适配，能导入本地 SEGY/LAS 文件并展现正确的地质图表。
+  - 改变 PlotsPage 二维插值参数时，等值线及厚度色斑重绘耗时 < 300ms 且无卡顿。
+---
+
+### 🆕 Phase 22: Dead UI 大扫除 (Dead UI Audit & Fix)
+> **Goal**: 2026-06-02 8-agent fan-out audit 发现 138 个控件中 60 个有不同程度的问题（3 崩溃、28 无响应、16 桩、13 有 bug）。逐项 TDD 修复，消灭所有死控件。
+
+- **Sub-phases**:
+  - **Phase 22a (🔴 Critical)**: 3 崩溃 + 20 HeaderToolButtons + MapPage 芯片/图层开关
+  - **Phase 22b (🟡 High)**: ToolsPage 4 对话框后端 + SettingsPage 信号监听 + DataPage 导入/重命名/删除 + PaleoMap fit
+  - **Phase 22c (🟢 Medium)**: QThread 泄漏 + 孤立代码清理 + 未使用导入 + 小 bug
+
+#### Phase 22a (🔴 Critical) ✅ DONE — 2026-06-02
+
+- **Task 22a.1 (🔴 P0) - PlotsPage SVG/PDF 导出按钮崩溃修复** ✅:
+  - `_export_svg` 和 `_export_pdf` 使用 `QSvgGenerator` / `QPainter` 但从未导入 → `NameError`
+  - 修复: 添加 `from PySide6.QtSvg import QSvgGenerator` + `from PySide6.QtGui import QPainter`
+  - Tests: 4 tests in `test_plots_export_imports.py`
+
+- **Task 22a.2 (🔴 P0) - PaleoMapPage 图层可见性开关崩溃修复** ✅:
+  - "显示井位标定" / "显示沉积相标注" toggle 访问 `self.map_view.layers` → `AttributeError` (私有属性 `_layers`)
+  - 修复: 在 `PaleoMapCanvas` 添加 `layers` property; 在 `PaleoLayer` 添加 `visible` 属性; `WellsScatterLayer.paint()` / `RegionLabelsLayer.paint()` 检查 `self.visible`
+  - Tests: 6 tests in `test_paleo_layer_visibility.py`
+
+- **Task 22a.3 (🔴 P0) - HeaderToolButton 全部 20 个按钮无响应** ✅:
+  - `app.py:_update_header_and_footer()` 创建 `HeaderToolButton(t)` 后从未连接 `clicked`
+  - 修复: 添加 `tool_key` attr 到 `HeaderToolButton`, `_on_header_tool` dispatch method 到 `MainWindow`, 连接 `.clicked` 到 dispatch
+  - Tests: 4 tests in `test_header_tool_buttons.py`
+
+- **Task 22a.4 (🔴 P0) - MapPage 6 个死控件修复** ✅:
+  - 3 个 chip (全部/已解释/含气): 无 `toggled` 连接 → 修复: 连接到 well list 过滤器
+  - 2 个 layer checkbox (井位标记/坐标网格): 无 `stateChanged` → 修复: 添加 `visible` toggle 到 `MapLayer` base
+  - 1 个 ruler button "📏": 无 `clicked` → 修复: 隐藏按钮 (无后端)
+  - Tests: 8 tests in `test_map_page_dead_controls.py`
+
+#### Phase 22b (🟡 High) ✅ DONE — 2026-06-02
+
+- **Task 22b.1 (🟡 P1) - ToolsPage 4 个对话框后端实现** ✅:
+  - **LASCurveResamplerDialog**: 添加 `_do_resample(path, step)` → lasio 加载+np.interp 重采样
+  - **DeviationTVDDialog**: `_compute_min_curvature(rows)` → 完整最小曲率法 (TVD/X/Y)
+  - **XMLCoordsConverterDialog**: 添加 `_do_convert(src, dst, coords)` → pyproj 坐标转换
+  - **TopsCompletionDialog**: 添加 `_do_interpolate(tops, method)` → 线性插值
+  - **CalamineCompilerDialog**: 添加 `_do_compile(expr)` → 地质公式语法校验
+  - Tests: 11 tests in `test_tools_dialog_backends.py`
+
+- **Task 22b.2 (🟡 P1) - SettingsPage 信号无监听者修复** ✅:
+  - `theme_changed` 发出但零监听者 → MainWindow 连接 `_on_theme_preference`
+  - `cache_cleared` 发出但零监听者 → MainWindow 连接 `_on_cache_cleared` 更新 status bar
+  - Tests: 5 tests in `test_settings_signals.py`
+
+- **Task 22b.3 (🟡 P1) - DataPage 导入/重命名/删除按钮** ✅:
+  - "导入数据" button: 连接 `_on_import_data` → 多格式文件对话框
+  - 导入 Excel/LAS/SEGY: `_import_file` → 连接实际 loader
+  - 重命名 button: 添加 `_on_rename_well` 用 `QInputDialog`
+  - 删除 button: 添加 `_on_delete_well` 带确认对话框
+  - DataCache: 添加 `rename_well()`, `remove_well()`, `put_file()`
+  - Tests: 4 tests in `test_data_page_buttons.py`
+
+- **Task 22b.4 (🟡 P1) - PaleoMap fit 按钮修复** ✅:
+  - Fit 按钮改用 `fit_viewport_to_data()` 替代 `set_zoom(1.0)`
+  - Tests: 2 tests in `test_paleo_map_fit.py`
+
+- **Task 22b.5 (🟡 P1) - CrossWell TWT 域切换 + 缺失 UI** ✅:
+  - Worker progress 信号连接到 progress overlay → `_on_worker_progress`
+  - Tests: 2 tests in `test_cross_well_ui.py`
+
+#### Phase 22c (🟢 Medium) ✅ DONE — 2026-06-02
+
+- **Task 22c.1 (🟢 P2) - WellLogPage QThread 泄漏 + 排序 bug**:
+  - 快速切换井时 `_load_thread` 重新赋值无清理 → 添加 quit+wait
+  - AI 预测 `_thread` 同样泄漏
+  - Track 拖拽排序仅视觉生效 (`_update_tracks` 使用 `_all_tracks` 顺序)
+  - `_tracks_btn` checked 状态与控制面板不同步
+  - `_on_prediction_error` 未重新启用 combo
+
+- **Task 22c.2 (🟢 P2) - PlotsPage power slider 初始状态 + 清理**:
+  - power_slider 在非 IDW 方法下初始启用 (默认 SciPy Linear)
+  - 9 个未使用导入
+  - `contourpy` 缺失于 pyproject.toml (matplotlib 传递依赖掩盖)
+
+- **Task 22c.3 (🟢 P2) - 孤立代码清理**:
+  - `CrossWellScenePage`: 类从未实例化 → 连接或删除 `scene_page.py`
+  - `CalamineCompilerDialog`: 类从未实例化 → 连接或删除
+  - `interval_clicked` signal on WellLogCanvas: 声明但从未 emit → 删除或实现
+  - `laolong1_config` / `config` variable in WellLogPage: 解包后未使用
+
+- **Task 22c.4 (🟢 P2) - 小修复**:
+  - MapPage `well_hovered` signal 未连接 → 连接到 status bar
+  - `status_dot` 始终绿色 → 连接真实健康信号或移除
+  - `version_label` 硬编码 "v0.8.0" → 读取 package `__version__`
+  - WellLog `interval_clicked` signal 从未 emit → 删除声明
+
+- **Acceptance Criteria**:
+  - 所有 HeaderToolButton 要么工作要么移除 (零死控件)
+  - PlotsPage SVG/PDF 导出不崩溃
+  - PaleoMapPage 图层开关实际切换可见性
+  - 4 个 ToolsPage 对话框执行真实操作
+  - SettingsPage 主题切换加载 QSS 文件
+  - DataPage 重命名/删除操作真实修改数据
+  - WellLogPage 快速切换井不泄漏 QThread
+  - 所有新功能有 TDD 测试覆盖
 
 ---
 

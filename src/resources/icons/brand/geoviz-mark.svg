@@ -1,8 +1,65 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0" stop-color="#2b7be0"></stop><stop offset="1" stop-color="#16407f"></stop></linearGradient></defs>
-  <rect width="64" height="64" rx="16" fill="url(#g)"></rect>
-  <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M32 16 18 23v18l14 7 14-7V23l-14-7Z"></path><path d="M32 16v32M18 23l14 7 14-7"></path>
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1f66d4" />
+      <stop offset="100%" stop-color="#08204a" />
+    </linearGradient>
+    
+    <!-- Top Face Gradient -->
+    <linearGradient id="top-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#cbd5e1" stop-opacity="0.7" />
+    </linearGradient>
+    
+    <!-- Drop Shadow Filter for 3D Block -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.3" />
+    </filter>
+  </defs>
+  
+  <!-- Outer Rounded Container (Azurite Base) -->
+  <rect width="64" height="64" rx="16" fill="url(#bg)" />
+  
+  <!-- 3D Stacked Strata Block (with Drop Shadow) -->
+  <g filter="url(#shadow)">
+    <!-- Bottom Layer (Teal/Emerald - Carbonate Base) -->
+    <polygon points="16,36 32,44 32,52 16,44" fill="#14b8a6" />
+    <polygon points="32,44 48,36 48,44 32,52" fill="#0d9488" />
+    
+    <!-- Middle Layer (Slate Blue - Mudstone/Shale) -->
+    <polygon points="16,28 32,36 32,44 16,36" fill="#64748b" />
+    <polygon points="32,36 48,28 48,36 32,44" fill="#475569" />
+    
+    <!-- Top Layer (Warm Sand/Gold - Sandstone) -->
+    <polygon points="16,20 32,28 32,36 16,28" fill="#fbbf24" />
+    <polygon points="32,28 48,20 48,28 32,36" fill="#f59e0b" />
+    
+    <!-- Top Surface (Crystalline Horizon) -->
+    <polygon points="32,12 48,20 32,28 16,20" fill="url(#top-grad)" />
+    
+    <!-- Facies Boundary lines on the block sides for extra geo detail -->
+    <polyline points="16,20 32,28 48,20" fill="none" stroke="#ffffff" stroke-width="0.8" opacity="0.5" />
+    <polyline points="16,28 32,36 48,28" fill="none" stroke="#ffffff" stroke-width="0.8" opacity="0.4" />
+    <polyline points="16,36 32,44 48,36" fill="none" stroke="#ffffff" stroke-width="0.8" opacity="0.4" />
+    
+    <!-- Vertical Corner Lines -->
+    <line x1="32" y1="28" x2="32" y2="52" stroke="#000000" stroke-width="0.6" opacity="0.15" />
+    <line x1="16" y1="20" x2="16" y2="44" stroke="#000000" stroke-width="0.6" opacity="0.1" />
+    <line x1="48" y1="20" x2="48" y2="44" stroke="#000000" stroke-width="0.6" opacity="0.1" />
+  </g>
+  
+  <!-- Wellbore Trajectory Path (White glowing dashed line) -->
+  <!-- Starts from Top Face -> Penetrates Down into Middle Strata -->
+  <path d="M32,18 Q35,28 32,40" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="2.5,1.5" />
+  
+  <!-- Horizon Pick Star (Highlight Target) -->
+  <g transform="translate(32, 40)">
+    <!-- Glow Halo -->
+    <circle cx="0" cy="0" r="4.5" fill="#ffffff" opacity="0.4" />
+    <!-- Center Point -->
+    <circle cx="0" cy="0" r="2.2" fill="#ffffff" />
+    <!-- Star Rays -->
+    <path d="M-4,0 H4 M0,-4 V4" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" />
   </g>
 </svg>

@@ -11,8 +11,26 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtGui import QImage
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QWidget
+
+# Fixed comparison resolution (logical pixels). Both golden and current are
+# scaled to this size before comparing, making the test DPR-agnostic.
+_COMPARE_W = 1200
+_COMPARE_H = 800
+
+
+def _scale_to_compare(img: QImage) -> QImage:
+    """Scale image to a fixed comparison size, ignoring DPR."""
+    if img.width() == _COMPARE_W and img.height() == _COMPARE_H:
+        return img
+    return (QPixmap.fromImage(img)
+            .scaled(_COMPARE_W, _COMPARE_H,
+                    Qt.AspectRatioMode.IgnoreAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation)
+            .toImage()
+            .convertToFormat(QImage.Format.Format_ARGB32))
 
 
 def pixel_diff_ratio(a: QImage, b: QImage,
@@ -22,6 +40,8 @@ def pixel_diff_ratio(a: QImage, b: QImage,
     `step` controls sampling density (step=4 ⇒ 1/16 of pixels). Increase for
     speed, decrease for stricter coverage.
     """
+    a = _scale_to_compare(a)
+    b = _scale_to_compare(b)
     assert a.size() == b.size(), f"size mismatch: {a.size()} vs {b.size()}"
     differing = 0
     total = 0

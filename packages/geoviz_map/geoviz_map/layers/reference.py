@@ -20,6 +20,8 @@ class ReferenceLabelsLayer(MapLayer):
         self.labels = labels
 
     def paint(self, painter: QPainter, viewport: MapViewport) -> None:
+        if not self.visible:
+            return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         for lbl in self.labels:
