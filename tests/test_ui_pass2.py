@@ -102,3 +102,27 @@ def test_sidebar_state_persists_in_qsettings(window, qtbot):
     settings = QSettings("GeoViz", "Engine")
     window._toggle_sidebar()  # collapse
     assert settings.value("sidebar/collapsed", False, type=bool) is True
+
+
+# ---------------------------------------------------------------------------
+# Header refinement tests (Task 3)
+# ---------------------------------------------------------------------------
+
+def test_header_height_is_48(window):
+    """Header should be 48px tall (was 52px)."""
+    assert window.header_frame.height() == 48
+
+
+def test_header_has_search_bar(window):
+    """Header should contain an integrated search bar."""
+    assert hasattr(window, "search_bar")
+
+
+def test_search_bar_has_placeholder(window):
+    """Search bar should have placeholder text."""
+    assert "搜索" in window.search_bar.placeholderText()
+
+
+def test_header_has_notification_bell(window):
+    """Header should have a notification bell button."""
+    assert hasattr(window, "notification_bell_btn")

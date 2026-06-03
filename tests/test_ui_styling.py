@@ -30,8 +30,8 @@ def test_mainwindow_appshell_elements(window):
     assert isinstance(window.header_frame, QFrame)
     assert isinstance(window.footer_frame, QFrame)
     
-    # Check header height constraint (Task 20.1: height 52px)
-    assert window.header_frame.height() == 52 or window.header_frame.maximumHeight() == 52
+    # Check header height constraint (Task 20.1: height 48px)
+    assert window.header_frame.height() == 48 or window.header_frame.maximumHeight() == 48
     
     # Check footer height constraint (Task 20.1: height 26px)
     assert window.footer_frame.height() == 26 or window.footer_frame.maximumHeight() == 26

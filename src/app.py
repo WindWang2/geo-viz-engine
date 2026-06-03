@@ -206,7 +206,7 @@ class MainWindow(QWidget):
         # 1. Top Header Frame
         self.header_frame = QFrame()
         self.header_frame.setObjectName("header_frame")
-        self.header_frame.setFixedHeight(52)
+        self.header_frame.setFixedHeight(48)
         self.header_frame.setStyleSheet("""
             #header_frame {
                 background: #ffffff;
@@ -254,7 +254,7 @@ class MainWindow(QWidget):
         divider1 = QFrame()
         divider1.setFrameShape(QFrame.Shape.VLine)
         divider1.setFrameShadow(QFrame.Shadow.Plain)
-        divider1.setStyleSheet("color: #e5eaf1; max-width: 1px; min-height: 22px;")
+        divider1.setStyleSheet("color: #e5eaf1; max-width: 1px; min-height: 20px;")
         header_layout.addWidget(divider1)
 
         # Dynamic Header Context (Title & Subtitle)
@@ -265,6 +265,36 @@ class MainWindow(QWidget):
         
         header_layout.addWidget(self.header_title)
         header_layout.addWidget(self.header_sub)
+
+        # Search bar
+        from PySide6.QtWidgets import QLineEdit
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("搜索功能、井名...")
+        self.search_bar.setFixedHeight(30)
+        self.search_bar.setMinimumWidth(200)
+        self.search_bar.setStyleSheet("""
+            QLineEdit {
+                background: #f1f4f9;
+                border: none;
+                border-radius: 8px;
+                padding: 5px 12px 5px 28px;
+                font-size: 12px;
+                color: #92a0b0;
+            }
+            QLineEdit:focus {
+                background: #ffffff;
+                border: 1px solid #1f66d4;
+            }
+        """)
+        search_icon_path = _get_icon_path("ui/search.svg")
+        self.search_bar.addAction(QIcon(search_icon_path), QLineEdit.ActionPosition.LeadingPosition)
+        header_layout.addWidget(self.search_bar)
+
+        # Notification bell
+        self.notification_bell_btn = HeaderToolButton("bell")
+        self.notification_bell_btn.setToolTip("通知")
+        header_layout.addWidget(self.notification_bell_btn)
+
         header_layout.addStretch()
 
         # Dynamic Tools Container
@@ -278,7 +308,7 @@ class MainWindow(QWidget):
         divider2 = QFrame()
         divider2.setFrameShape(QFrame.Shape.VLine)
         divider2.setFrameShadow(QFrame.Shadow.Plain)
-        divider2.setStyleSheet("color: #e5eaf1; max-width: 1px; min-height: 22px;")
+        divider2.setStyleSheet("color: #e5eaf1; max-width: 1px; min-height: 20px;")
         header_layout.addWidget(divider2)
 
         # Language dropdown / label
