@@ -17,8 +17,8 @@ def test_map_page_layout_and_sidebar(map_page):
     assert hasattr(map_page, "left_sidebar")
     assert isinstance(map_page.left_sidebar, QFrame)
     
-    # 1. Left sidebar width should be constrained to 252px
-    assert map_page.left_sidebar.width() == 252 or map_page.left_sidebar.maximumWidth() == 252
+    # 1. Left sidebar width should be constrained to 260px
+    assert map_page.left_sidebar.width() == 260 or map_page.left_sidebar.maximumWidth() == 260
     
     # 2. Sidebar contains search bar
     assert hasattr(map_page, "search_box")
