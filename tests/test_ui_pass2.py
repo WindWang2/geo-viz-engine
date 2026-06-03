@@ -192,3 +192,30 @@ def test_cross_well_page_exists(window):
 def test_seismic_page_exists(window):
     """Seismic page should be instantiated."""
     assert hasattr(window, "seismic_page") or window.stack.count() > 4
+
+
+# ---------------------------------------------------------------------------
+# Map page styling tests (Phase 27)
+# ---------------------------------------------------------------------------
+
+def test_map_page_left_panel_width(window):
+    """Map page left panel should be 260px."""
+    if not hasattr(window, 'map_page') or window.map_page is None:
+        pytest.skip("MapPage not available")
+    assert window.map_page.left_sidebar.width() == 260
+
+
+def test_map_page_chip_radius(window):
+    """Map page filter chips should have 6px radius."""
+    if not hasattr(window, 'map_page') or window.map_page is None:
+        pytest.skip("MapPage not available")
+    ss = window.map_page.chip_all.styleSheet()
+    assert "border-radius: 6px" in ss
+
+
+def test_map_page_floating_controls_have_shadow(window):
+    """Map page floating controls should have L1 shadow."""
+    if not hasattr(window, 'map_page') or window.map_page is None:
+        pytest.skip("MapPage not available")
+    ss = window.map_page.layer_manager.styleSheet()
+    assert "rgba(0,0,0" in ss

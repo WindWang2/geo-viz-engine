@@ -77,7 +77,7 @@ class MapPage(QWidget):
 
         # 1. Left Sidebar
         self.left_sidebar = QFrame()
-        self.left_sidebar.setFixedWidth(252)
+        self.left_sidebar.setFixedWidth(260)
         self.left_sidebar.setStyleSheet(
             "QFrame { background: #ffffff; border-right: 1px solid #e5eaf1; }"
         )
@@ -106,7 +106,7 @@ class MapPage(QWidget):
         self.chip_gas = QPushButton("含气 12")
 
         chip_style = (
-            "QPushButton { border-radius: 12px; background: #fafbfd; color: #586878; border: 1px solid #d3dbe6; font-size: 11px; padding: 4px 8px; }"
+            "QPushButton { border-radius: 6px; background: #fafbfd; color: #586878; border: 1px solid #d3dbe6; font-size: 11px; padding: 4px 8px; }"
             "QPushButton:hover { background: #e9effa; color: #1f66d4; border-color: #1f66d4; }"
             "QPushButton:checked { background: #e9effa; color: #1f66d4; border-color: #1f66d4; font-weight: bold; }"
         )
@@ -122,8 +122,8 @@ class MapPage(QWidget):
         self.well_list = QListWidget()
         self.well_list.setStyleSheet(
             "QListWidget { border: none; background: #ffffff; }"
-            "QListWidget::item { padding: 8px; border-bottom: 1px solid #f4f7fb; color: #1a2433; }"
-            "QListWidget::item:hover { background: #fafbfd; }"
+            "QListWidget::item { padding: 8px; border-radius: 8px; margin: 1px 4px; color: #1a2433; }"
+            "QListWidget::item:hover { background: #f1f4f9; }"
             "QListWidget::item:selected { background: #e9effa; color: #1f66d4; font-weight: bold; }"
         )
         sidebar_layout.addWidget(self.well_list)
@@ -166,7 +166,7 @@ class MapPage(QWidget):
         # Layer Manager overlay (top-left)
         self.layer_manager = QFrame(self.right_container)
         self.layer_manager.setStyleSheet(
-            "QFrame { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5eaf1; border-radius: 8px; }"
+            "QFrame { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5eaf1; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }"
         )
         lm_layout = QVBoxLayout(self.layer_manager)
         lm_layout.setContentsMargins(10, 10, 10, 10)
@@ -186,7 +186,7 @@ class MapPage(QWidget):
         # Floating Toolbar overlay (top-right)
         self.float_tb = QFrame(self.right_container)
         self.float_tb.setStyleSheet(
-            "QFrame { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5eaf1; border-radius: 8px; }"
+            "QFrame { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5eaf1; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }"
         )
         tb_layout = QVBoxLayout(self.float_tb)
         tb_layout.setContentsMargins(6, 6, 6, 6)
