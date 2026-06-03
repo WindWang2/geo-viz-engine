@@ -4,10 +4,10 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QFrame, QLineEdit, QPushButton,
-    QListWidget, QListWidgetItem, QLabel, QCheckBox
+    QListWidget, QListWidgetItem, QLabel, QCheckBox, QGraphicsDropShadowEffect
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QIcon, QColor
 
 from src.utils.paths import get_resources_dir as _get_res_dir
 
@@ -40,6 +40,15 @@ REFERENCE_LABELS: list[ReferenceLabel] = [
     ReferenceLabel(name="南宁 (Nanning)", lng=108.3200, lat=22.8240, kind="city"),
     ReferenceLabel(name="南海 (South China Sea)", lng=115.5, lat=20.2, kind="sea"),
 ]
+
+
+def _l1_shadow(widget):
+    """Add L1 (subtle) drop-shadow effect to a widget."""
+    shadow = QGraphicsDropShadowEffect(widget)
+    shadow.setBlurRadius(8)
+    shadow.setOffset(0, 1)
+    shadow.setColor(QColor(0, 0, 0, 20))
+    widget.setGraphicsEffect(shadow)
 
 
 def _load_json(path: Path) -> dict:
@@ -166,8 +175,9 @@ class MapPage(QWidget):
         # Layer Manager overlay (top-left)
         self.layer_manager = QFrame(self.right_container)
         self.layer_manager.setStyleSheet(
-            "QFrame { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5eaf1; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }"
+            "QFrame { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5eaf1; border-radius: 8px; }"
         )
+        _l1_shadow(self.layer_manager)
         lm_layout = QVBoxLayout(self.layer_manager)
         lm_layout.setContentsMargins(10, 10, 10, 10)
         lm_layout.setSpacing(6)
@@ -186,8 +196,9 @@ class MapPage(QWidget):
         # Floating Toolbar overlay (top-right)
         self.float_tb = QFrame(self.right_container)
         self.float_tb.setStyleSheet(
-            "QFrame { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5eaf1; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }"
+            "QFrame { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5eaf1; border-radius: 8px; }"
         )
+        _l1_shadow(self.float_tb)
         tb_layout = QVBoxLayout(self.float_tb)
         tb_layout.setContentsMargins(6, 6, 6, 6)
         tb_layout.setSpacing(6)

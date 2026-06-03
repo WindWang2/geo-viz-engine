@@ -10,7 +10,6 @@ GLOBAL_STYLESHEET = """
         padding-top: 16px;
         font-weight: bold;
         background: #ffffff;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
     QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #1f66d4; }
 

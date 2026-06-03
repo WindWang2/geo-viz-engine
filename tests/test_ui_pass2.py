@@ -26,10 +26,10 @@ def test_global_stylesheet_contains_radius_tokens(app_instance):
     assert "border-radius: 12px" in ss  # QGroupBox cards
 
 
-def test_global_stylesheet_contains_shadow_tokens(app_instance):
-    """QGroupBox cards should have L2 shadow."""
+def test_global_stylesheet_no_css_shadow(app_instance):
+    """QGroupBox should not use CSS box-shadow (Qt ignores it)."""
     ss = app_instance.styleSheet()
-    assert "rgba(0,0,0" in ss
+    assert "box-shadow" not in ss
 
 
 def test_global_stylesheet_contains_animation_tokens(app_instance):
@@ -65,17 +65,20 @@ def test_sidebar_default_width_is_200(window):
     assert window.sidebar.width() == 200
 
 
-def test_sidebar_can_collapse_to_56(window):
+def test_sidebar_can_collapse_to_56(window, qtbot):
     """Sidebar should collapse to 56px when toggle is clicked."""
     window._toggle_sidebar()
-    assert window.sidebar.width() == 56
+    qtbot.wait(300)
+    assert window.sidebar.maximumWidth() == 56
 
 
-def test_sidebar_can_expand_back_to_200(window):
+def test_sidebar_can_expand_back_to_200(window, qtbot):
     """Sidebar should expand back to 200px when toggle is clicked again."""
     window._toggle_sidebar()
+    qtbot.wait(300)
     window._toggle_sidebar()
-    assert window.sidebar.width() == 200
+    qtbot.wait(300)
+    assert window.sidebar.maximumWidth() == 200
 
 
 def test_sidebar_collapsed_shows_icons_only(window):
@@ -102,6 +105,15 @@ def test_sidebar_state_persists_in_qsettings(window, qtbot):
     settings = QSettings("GeoViz", "Engine")
     window._toggle_sidebar()  # collapse
     assert settings.value("sidebar/collapsed", False, type=bool) is True
+
+
+def test_sidebar_toggle_has_animation(window):
+    """Sidebar toggle should create a QPropertyAnimation."""
+    from PySide6.QtCore import QPropertyAnimation
+    window._toggle_sidebar()
+    assert hasattr(window, "_sidebar_anim")
+    assert isinstance(window._sidebar_anim, QPropertyAnimation)
+    assert window._sidebar_anim.duration() == 200
 
 
 # ---------------------------------------------------------------------------
@@ -214,11 +226,12 @@ def test_map_page_chip_radius(window):
 
 
 def test_map_page_floating_controls_have_shadow(window):
-    """Map page floating controls should have L1 shadow."""
+    """Map page floating controls should have QGraphicsDropShadowEffect."""
     if not hasattr(window, 'map_page') or window.map_page is None:
         pytest.skip("MapPage not available")
-    ss = window.map_page.layer_manager.styleSheet()
-    assert "rgba(0,0,0" in ss
+    from PySide6.QtWidgets import QGraphicsDropShadowEffect
+    assert isinstance(window.map_page.layer_manager.graphicsEffect(), QGraphicsDropShadowEffect)
+    assert isinstance(window.map_page.float_tb.graphicsEffect(), QGraphicsDropShadowEffect)
 
 
 # ---------------------------------------------------------------------------
@@ -228,3 +241,35 @@ def test_map_page_floating_controls_have_shadow(window):
 def test_all_content_pages_exist(window):
     """All 9 content pages should be instantiated."""
     assert window.stack.count() == 9
+
+
+# ---------------------------------------------------------------------------
+# Gap Fix 1: Ctrl+B shortcut, header button size
+# ---------------------------------------------------------------------------
+
+def test_sidebar_keyboard_shortcut_exists(window):
+    """Ctrl+B should toggle sidebar."""
+    assert hasattr(window, "_sidebar_shortcut")
+
+
+def test_header_tool_buttons_are_30x30(window):
+    """Header tool buttons should be 30x30px."""
+    from src.app import HeaderToolButton
+    btns = window.header_frame.findChildren(HeaderToolButton)
+    for btn in btns:
+        assert btn.width() == 30 or btn.fixedWidth() == 30
+
+
+# ---------------------------------------------------------------------------
+# Gap Fix 2: Ctrl+K search shortcut & hint badge
+# ---------------------------------------------------------------------------
+
+def test_search_shortcut_exists(window):
+    """Ctrl+K shortcut should exist for search."""
+    assert hasattr(window, "_search_shortcut")
+
+
+def test_search_bar_has_hint_badge(window):
+    """Search bar should have a Ctrl+K hint badge."""
+    actions = window.search_bar.actions()
+    assert len(actions) >= 2  # Leading search icon + trailing hint
