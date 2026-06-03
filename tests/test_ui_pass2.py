@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QApplication, QPushButton, QStackedWidget
+from PySide6.QtWidgets import QApplication, QPushButton, QStackedWidget, QFrame
 from PySide6.QtCore import Qt
 from src.utils.global_style import GLOBAL_STYLESHEET
 
@@ -126,3 +126,37 @@ def test_search_bar_has_placeholder(window):
 def test_header_has_notification_bell(window):
     """Header should have a notification bell button."""
     assert hasattr(window, "notification_bell_btn")
+
+
+# ---------------------------------------------------------------------------
+# Footer enhancement tests (Task 4)
+# ---------------------------------------------------------------------------
+
+def test_footer_height_is_32(window):
+    """Footer should be 32px tall (was 26px)."""
+    assert window.footer_frame.height() == 32
+
+
+def test_footer_has_gpu_info(window):
+    """Footer should display GPU info."""
+    assert hasattr(window, "gpu_info_label")
+    assert "GPU" in window.gpu_info_label.text()
+
+
+def test_footer_has_cache_info(window):
+    """Footer should display cache size."""
+    assert hasattr(window, "cache_info_label")
+    assert "缓存" in window.cache_info_label.text()
+
+
+def test_footer_has_dividers(window):
+    """Footer should have section dividers."""
+    dividers = window.footer_frame.findChildren(QFrame)
+    h_dividers = [d for d in dividers if d.frameShape() == QFrame.Shape.VLine]
+    assert len(h_dividers) >= 2
+
+
+def test_footer_technical_text_is_monospace(window):
+    """Footer technical data should use monospace font."""
+    ss = window.gpu_info_label.styleSheet()
+    assert "monospace" in ss

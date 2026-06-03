@@ -33,8 +33,8 @@ def test_mainwindow_appshell_elements(window):
     # Check header height constraint (Task 20.1: height 48px)
     assert window.header_frame.height() == 48 or window.header_frame.maximumHeight() == 48
     
-    # Check footer height constraint (Task 20.1: height 26px)
-    assert window.footer_frame.height() == 26 or window.footer_frame.maximumHeight() == 26
+    # Check footer height constraint (Task 4: height 32px)
+    assert window.footer_frame.height() == 32 or window.footer_frame.maximumHeight() == 32
 
 def test_brand_section_contents(window):
     # Verify brand logo and name label exist and show the correct HTML text

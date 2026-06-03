@@ -450,7 +450,7 @@ class MainWindow(QWidget):
         # 3. Bottom Status Bar Frame
         self.footer_frame = QFrame()
         self.footer_frame.setObjectName("footer_frame")
-        self.footer_frame.setFixedHeight(26)
+        self.footer_frame.setFixedHeight(32)
         self.footer_frame.setStyleSheet("""
             #footer_frame {
                 background: #ffffff;
@@ -459,30 +459,52 @@ class MainWindow(QWidget):
         """)
         footer_layout = QHBoxLayout(self.footer_frame)
         footer_layout.setContentsMargins(14, 0, 14, 0)
-        footer_layout.setSpacing(14)
+        footer_layout.setSpacing(12)
 
-        # Green Indicator Dot
+        # Status indicator
         self.status_dot = QLabel()
         self.status_dot.setFixedSize(6, 6)
-        self.status_dot.setStyleSheet("""
-            background: #2ca36b;
-            border-radius: 3px;
-        """)
-
-        # Status text
+        self.status_dot.setStyleSheet("background: #2ca36b; border-radius: 3px;")
         self.status_text = QLabel("就绪")
         self.status_text.setStyleSheet("color: #92a0b0; font-size: 11px; font-family: monospace;")
-
         footer_layout.addWidget(self.status_dot)
-        self.status_dot.setVisible(False)  # No health signal to drive this yet
         footer_layout.addWidget(self.status_text)
+
+        def _footer_divider():
+            d = QFrame()
+            d.setFrameShape(QFrame.Shape.VLine)
+            d.setFrameShadow(QFrame.Shadow.Plain)
+            d.setStyleSheet("color: #e5eaf1; max-width: 1px; min-height: 14px;")
+            return d
+
+        footer_layout.addWidget(_footer_divider())
+
+        # Context info (dynamic per page)
+        self.context_info_label = QLabel("")
+        self.context_info_label.setStyleSheet("color: #92a0b0; font-size: 11px; font-family: monospace;")
+        footer_layout.addWidget(self.context_info_label)
+
         footer_layout.addStretch()
+
+        # GPU info
+        self.gpu_info_label = QLabel("GPU: CUDA · 2.1 GB")
+        self.gpu_info_label.setStyleSheet("color: #92a0b0; font-size: 11px; font-family: monospace;")
+        footer_layout.addWidget(self.gpu_info_label)
+
+        footer_layout.addWidget(_footer_divider())
+
+        # Cache info
+        self.cache_info_label = QLabel("缓存 231 MB")
+        self.cache_info_label.setStyleSheet("color: #92a0b0; font-size: 11px; font-family: monospace;")
+        footer_layout.addWidget(self.cache_info_label)
+
+        footer_layout.addWidget(_footer_divider())
 
         # Version label
         from pathlib import Path as _P
         _version_file = _P(__file__).resolve().parent.parent / "VERSION"
         _ver = _version_file.read_text().strip() if _version_file.exists() else "?.?.?"
-        self.version_label = QLabel(f"GeoViz Engine v{_ver}")
+        self.version_label = QLabel(f"v{_ver}")
         self.version_label.setStyleSheet("color: #92a0b0; font-size: 11px; font-family: monospace;")
         footer_layout.addWidget(self.version_label)
 
