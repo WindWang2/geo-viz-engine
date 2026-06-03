@@ -219,3 +219,12 @@ def test_map_page_floating_controls_have_shadow(window):
         pytest.skip("MapPage not available")
     ss = window.map_page.layer_manager.styleSheet()
     assert "rgba(0,0,0" in ss
+
+
+# ---------------------------------------------------------------------------
+# All content pages existence test (Phase 27-C2 through C8)
+# ---------------------------------------------------------------------------
+
+def test_all_content_pages_exist(window):
+    """All 9 content pages should be instantiated."""
+    assert window.stack.count() == 9

@@ -91,7 +91,7 @@ class PlotsPage(QWidget):
 
         gen_btn = QPushButton(" 随机生成测点")
         gen_btn.setIcon(self._get_ui_icon("plus.svg"))
-        gen_btn.setStyleSheet("QPushButton { font-size: 10.5px; padding: 4px; }")
+        gen_btn.setStyleSheet("QPushButton { font-size: 10.5px; padding: 4px; border-radius: 6px; } QPushButton:hover { background: #f1f4f9; }")
         gen_btn.clicked.connect(self._generate_demo_data)
         pts_layout.addWidget(gen_btn)
 
@@ -117,7 +117,7 @@ class PlotsPage(QWidget):
         self.method_combo = QComboBox()
         self.method_combo.addItems(["IDW (权重)", "SciPy Linear", "SciPy Cubic", "SciPy Nearest", "SciPy RBF (径向基)"])
         self.method_combo.currentIndexChanged.connect(self._on_settings_changed)
-        self.method_combo.setStyleSheet("QComboBox { font-size: 11px; }")
+        self.method_combo.setStyleSheet("QComboBox { font-size: 11px; border: 1px solid #d3dbe6; border-radius: 6px; padding: 2px 8px; }")
         interp_layout.addWidget(method_label)
         interp_layout.addWidget(self.method_combo)
 
@@ -153,7 +153,7 @@ class PlotsPage(QWidget):
         self.res_combo.addItems(["50 x 50", "100 x 100", "200 x 200", "300 x 300"])
         self.res_combo.setCurrentIndex(1)  # Default 100x100
         self.res_combo.currentIndexChanged.connect(self._on_settings_changed)
-        self.res_combo.setStyleSheet("QComboBox { font-size: 11px; }")
+        self.res_combo.setStyleSheet("QComboBox { font-size: 11px; border: 1px solid #d3dbe6; border-radius: 6px; padding: 2px 8px; }")
         interp_layout.addWidget(res_label)
         interp_layout.addWidget(self.res_combo)
 
@@ -175,7 +175,7 @@ class PlotsPage(QWidget):
         self.cmap_combo.addItem("viridis (经典)", "viridis")
         self.cmap_combo.addItem("thermal (冷热)", "thermal")
         self.cmap_combo.currentIndexChanged.connect(self._on_colormap_changed)
-        self.cmap_combo.setStyleSheet("QComboBox { font-size: 11px; }")
+        self.cmap_combo.setStyleSheet("QComboBox { font-size: 11px; border: 1px solid #d3dbe6; border-radius: 6px; padding: 2px 8px; }")
         contour_layout.addWidget(cmap_label)
         contour_layout.addWidget(self.cmap_combo)
 
@@ -188,7 +188,7 @@ class PlotsPage(QWidget):
         self.step_spin.setValue(1.0)
         self.step_spin.setSingleStep(0.5)
         self.step_spin.valueChanged.connect(self._on_settings_changed)
-        self.step_spin.setStyleSheet("QDoubleSpinBox { font-size: 11px; }")
+        self.step_spin.setStyleSheet("QDoubleSpinBox { font-size: 11px; border: 1px solid #d3dbe6; border-radius: 6px; padding: 2px 8px; }")
         step_row.addWidget(step_label)
         step_row.addWidget(self.step_spin)
         contour_layout.addLayout(step_row)
@@ -210,11 +210,11 @@ class PlotsPage(QWidget):
         export_svg_btn = QPushButton(" SVG")
         export_svg_btn.setIcon(self._get_ui_icon("export.svg"))
         export_svg_btn.clicked.connect(self._export_svg)
-        export_svg_btn.setStyleSheet("QPushButton { font-size: 10.5px; padding: 4px; }")
+        export_svg_btn.setStyleSheet("QPushButton { font-size: 10.5px; padding: 4px; border-radius: 6px; } QPushButton:hover { background: #f1f4f9; }")
         export_pdf_btn = QPushButton(" PDF")
         export_pdf_btn.setIcon(self._get_ui_icon("export.svg"))
         export_pdf_btn.clicked.connect(self._export_pdf)
-        export_pdf_btn.setStyleSheet("QPushButton { font-size: 10.5px; padding: 4px; }")
+        export_pdf_btn.setStyleSheet("QPushButton { font-size: 10.5px; padding: 4px; border-radius: 6px; } QPushButton:hover { background: #f1f4f9; }")
         export_layout.addWidget(export_svg_btn)
         export_layout.addWidget(export_pdf_btn)
 

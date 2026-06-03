@@ -156,7 +156,7 @@ class PaleoMapPage(QWidget):
         load_btn.clicked.connect(self._on_load_clicked)
         load_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 5px 12px; color: #1a2433; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
 
         self._period_combo = QComboBox()
@@ -189,6 +189,7 @@ class PaleoMapPage(QWidget):
         self._edit_btn.clicked.connect(self._toggle_edit_mode)
         self._edit_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 5px 12px; color: #1a2433; }"
+            "QPushButton:hover { background: #f1f4f9; }"
             "QPushButton:checked { background: #e9effa; border-color: #1f66d4; color: #1f66d4; font-weight: bold; }"
         )
 
@@ -241,7 +242,7 @@ class PaleoMapPage(QWidget):
         
         tb_btn_style = (
             "QPushButton { border: none; background: transparent; color: #586878; font-size: 14px; min-width: 28px; min-height: 28px; border-radius: 4px; }"
-            "QPushButton:hover { background: #f4f7fb; color: #1f66d4; }"
+            "QPushButton:hover { background: #f1f4f9; color: #1f66d4; }"
         )
         for btn in [self.btn_zoom_in, self.btn_zoom_out, self.btn_fit]:
             btn.setStyleSheet(tb_btn_style)

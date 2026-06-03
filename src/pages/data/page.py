@@ -61,7 +61,7 @@ class DataPage(QWidget):
 
         btn_style = (
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 5px 12px; color: #1a2433; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
         for btn in [self._new_proj_btn, self._open_proj_btn, self._save_proj_btn, self._save_as_proj_btn]:
             btn.setStyleSheet(btn_style)
@@ -103,7 +103,7 @@ class DataPage(QWidget):
 
         sub_btn_style = (
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 6px 12px; color: #586878; }"
-            "QPushButton:hover { background: #f4f7fb; color: #1f66d4; border-color: #1f66d4; }"
+            "QPushButton:hover { background: #f1f4f9; color: #1f66d4; border-color: #1f66d4; }"
         )
         for btn in [self._import_excel_btn, self._import_las_btn, self._import_segy_btn]:
             btn.setStyleSheet(sub_btn_style)

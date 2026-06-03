@@ -229,7 +229,7 @@ class CrossWellPage(QWidget):
 
         seg_style = (
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 4px; padding: 4px 8px; font-size: 11.5px; color: #586878; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
             "QPushButton:checked { background: #e9effa; border-color: #1f66d4; color: #1f66d4; font-weight: bold; }"
         )
         for btn in [self._pick_seg, self._link_seg, self._browse_seg]:
@@ -262,7 +262,7 @@ class CrossWellPage(QWidget):
         self._add_btn.clicked.connect(self._on_add_wells)
         self._add_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
         tb.addWidget(self._add_btn)
 
@@ -273,7 +273,7 @@ class CrossWellPage(QWidget):
         self._clear_btn.clicked.connect(self._on_clear)
         self._clear_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
         tb.addWidget(self._clear_btn)
 
@@ -285,7 +285,7 @@ class CrossWellPage(QWidget):
         self._track_btn.clicked.connect(self._on_select_tracks)
         self._track_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
         tb.addWidget(self._track_btn)
 
@@ -295,6 +295,7 @@ class CrossWellPage(QWidget):
         self._domain_btn.clicked.connect(self._on_toggle_domain)
         self._domain_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
+            "QPushButton:hover { background: #f1f4f9; }"
             "QPushButton:checked { background: #e9effa; border-color: #1f66d4; color: #1f66d4; font-weight: bold; }"
         )
         tb.addWidget(self._domain_btn)
@@ -307,7 +308,7 @@ class CrossWellPage(QWidget):
         self._auto_btn.clicked.connect(self._on_auto_link)
         self._auto_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
         tb.addWidget(self._auto_btn)
 
@@ -318,7 +319,7 @@ class CrossWellPage(QWidget):
         self._dtw_btn.clicked.connect(self._on_dtw_propagate)
         self._dtw_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
         tb.addWidget(self._dtw_btn)
         
@@ -330,7 +331,7 @@ class CrossWellPage(QWidget):
         self._tops_btn.clicked.connect(self._on_load_tops)
         self._tops_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
         tb.addWidget(self._tops_btn)
 
@@ -341,7 +342,7 @@ class CrossWellPage(QWidget):
         self._export_btn.clicked.connect(self._on_export)
         self._export_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 8px; color: #1a2433; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
         tb.addWidget(self._export_btn)
         
@@ -446,7 +447,7 @@ class CrossWellPage(QWidget):
                 return
         if event.key() == Qt.Key.Key_Escape:
             if self._canvas.pick_mode:
-                self.canvas.pick_mode = False
+                self._canvas.pick_mode = False
                 self._pick_btn.setChecked(False)
                 return
         super().keyPressEvent(event)

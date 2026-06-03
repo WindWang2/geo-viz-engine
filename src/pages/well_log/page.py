@@ -220,7 +220,7 @@ class WellLogPage(QWidget):
         
         seg_style = (
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 4px; padding: 4px 10px; font-size: 11.5px; color: #586878; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
             "QPushButton:checked { background: #e9effa; border-color: #1f66d4; color: #1f66d4; font-weight: bold; }"
         )
         self._cols_btn.setStyleSheet(seg_style)
@@ -246,7 +246,7 @@ class WellLogPage(QWidget):
         self._tracks_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 12px; color: #1a2433; }"
             "QPushButton:checked { background: #e9effa; border-color: #1f66d4; color: #1f66d4; font-weight: bold; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
         toolbar_layout.addWidget(self._tracks_btn)
 
@@ -256,7 +256,7 @@ class WellLogPage(QWidget):
         self._export_btn.clicked.connect(self._on_export)
         self._export_btn.setStyleSheet(
             "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 12px; color: #1a2433; }"
-            "QPushButton:hover { background: #f4f7fb; }"
+            "QPushButton:hover { background: #f1f4f9; }"
         )
         toolbar_layout.addWidget(self._export_btn)
 
@@ -291,7 +291,7 @@ class WellLogPage(QWidget):
         self._track_list_widget.setStyleSheet("""
             QListWidget { background: #ffffff; }
             QListWidget::item { padding: 8px; border-bottom: 1px solid #f0f4f8; }
-            QListWidget::item:hover { background: #f0f4f8; }
+            QListWidget::item:hover { background: #f1f4f9; }
             QListWidget::item:selected { background: #e9effa; color: #1f66d4; }
         """)
         self._track_list_widget.model().rowsMoved.connect(self._update_tracks)
