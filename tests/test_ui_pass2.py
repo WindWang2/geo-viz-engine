@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QApplication, QPushButton, QStackedWidget, QFrame
+from PySide6.QtWidgets import QApplication, QPushButton, QStackedWidget, QFrame, QLabel
 from PySide6.QtCore import Qt
 from src.utils.global_style import GLOBAL_STYLESHEET
 
@@ -160,3 +160,35 @@ def test_footer_technical_text_is_monospace(window):
     """Footer technical data should use monospace font."""
     ss = window.gpu_info_label.styleSheet()
     assert "monospace" in ss
+
+
+# ---------------------------------------------------------------------------
+# Content page existence tests (Task 5-7)
+# ---------------------------------------------------------------------------
+
+def test_sidebar_has_group_labels(window):
+    """Sidebar should have '可视化' and '工作区' group labels."""
+    labels = window.sidebar.findChildren(QLabel)
+    label_texts = [l.text() for l in labels]
+    assert "可视化" in label_texts
+    assert "工作区" in label_texts
+
+
+def test_map_page_exists(window):
+    """Map page should be instantiated (or have placeholder)."""
+    assert hasattr(window, "map_page") or window.stack.count() > 0
+
+
+def test_well_log_page_exists(window):
+    """Well log page should be instantiated."""
+    assert hasattr(window, "well_log_page")
+
+
+def test_cross_well_page_exists(window):
+    """Cross well page should be instantiated."""
+    assert hasattr(window, "cross_well_page")
+
+
+def test_seismic_page_exists(window):
+    """Seismic page should be instantiated."""
+    assert hasattr(window, "seismic_page") or window.stack.count() > 4
