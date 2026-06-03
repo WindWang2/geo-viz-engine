@@ -7,10 +7,12 @@ def app():
     return QApplication.instance() or QApplication([])
 
 def test_global_qss_azurite_standards(app):
-    # Verify that the Azurite design system constants are present in src/main.py
-    with open("src/main.py", "r", encoding="utf-8") as f:
+    # Verify that the Azurite design system constants are present in the global stylesheet
+    import os
+    style_path = os.path.join(os.path.dirname(__file__), "..", "src", "utils", "global_style.py")
+    with open(style_path, "r", encoding="utf-8") as f:
         content = f.read()
-    
+
     assert "#faf9f5" in content.lower()  # Canvas Background
     assert "#ffffff" in content.lower()  # Surface Background
     assert "border-radius: 12px" in content.lower()  # Card Radius
