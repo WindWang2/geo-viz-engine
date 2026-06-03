@@ -16,8 +16,8 @@ def window(app, qtbot):
 def test_mainwindow_sidebar_styling(window):
     sidebar = window.sidebar
     
-    # Task 20.1: Sidebar width expanded to 212px
-    assert sidebar.width() == 212 or sidebar.maximumWidth() == 212
+    # Task 20.1: Sidebar width expanded to 200px
+    assert sidebar.width() == 200 or sidebar.maximumWidth() == 200
     
     # Task 20.1: Sidebar background color is #ffffff (pure white)
     ss = sidebar.styleSheet()

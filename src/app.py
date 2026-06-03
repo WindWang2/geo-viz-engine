@@ -194,6 +194,10 @@ class MainWindow(QWidget):
         self._build_ui()
 
     def _build_ui(self):
+        self._sidebar_collapsed = False
+        self._sidebar_width_expanded = 200
+        self._sidebar_width_collapsed = 56
+
         # Base outer layout is Vertical to place Header, Body (Sidebar+Stack), and Footer
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -232,6 +236,19 @@ class MainWindow(QWidget):
 
         header_layout.addWidget(self.brand_logo)
         header_layout.addWidget(self.brand_name_label)
+
+        # Sidebar toggle button
+        self.sidebar_toggle_btn = QPushButton("☰")
+        self.sidebar_toggle_btn.setFixedSize(32, 32)
+        self.sidebar_toggle_btn.setStyleSheet("""
+            QPushButton {
+                border: none; border-radius: 8px;
+                background: transparent; font-size: 16px; color: #586878;
+            }
+            QPushButton:hover { background: #f1f4f9; }
+        """)
+        self.sidebar_toggle_btn.clicked.connect(self._toggle_sidebar)
+        header_layout.addWidget(self.sidebar_toggle_btn)
 
         # Divider
         divider1 = QFrame()
@@ -282,7 +299,7 @@ class MainWindow(QWidget):
 
         # Sidebar
         self.sidebar = QWidget()
-        self.sidebar.setFixedWidth(212)
+        self.sidebar.setFixedWidth(200)
         self.sidebar.setStyleSheet("background: #ffffff; border-right: 1px solid #e5eaf1;")
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(10, 10, 10, 10)
@@ -450,11 +467,57 @@ class MainWindow(QWidget):
         bus.theme_changed.connect(self._on_theme_preference)
         bus.cache_cleared.connect(self._on_cache_cleared)
 
+        # Restore sidebar collapsed state
+        from PySide6.QtCore import QSettings
+        settings = QSettings("GeoViz", "Engine")
+        if settings.value("sidebar/collapsed", False, type=bool):
+            self._sidebar_collapsed = False
+            self._toggle_sidebar()
+
     def _switch_page(self, index: int):
+        # 1. Cleanup current page if needed (stop threads, free GPU)
+        current = self.stack.currentWidget()
+        if current is not None and hasattr(current, "cleanup"):
+            try:
+                current.cleanup()
+            except Exception as e:
+                print(f"Error during page cleanup: {e}")
+
+        # 2. Perform switch
         for i, btn in enumerate(self.sidebar_buttons):
             btn.setChecked(i == index)
         self.stack.setCurrentIndex(index)
         self._update_header_and_footer(index)
+
+    def _toggle_sidebar(self):
+        from PySide6.QtCore import QSettings
+
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        w = self._sidebar_width_collapsed if self._sidebar_collapsed else self._sidebar_width_expanded
+        self.sidebar.setFixedWidth(w)
+
+        for btn in self.sidebar_buttons:
+            if self._sidebar_collapsed:
+                btn.setText("")
+                btn.setFixedWidth(44)
+            else:
+                # Restore text from tooltip (nav_key label)
+                tooltip = btn.toolTip()
+                btn.setText(" " + tooltip)
+                btn.setFixedWidth(160)
+
+        # Also handle settings button
+        if hasattr(self, 'settings_btn'):
+            if self._sidebar_collapsed:
+                self.settings_btn.setText("")
+                self.settings_btn.setFixedWidth(44)
+            else:
+                self.settings_btn.setText(" " + self.settings_btn.toolTip())
+                self.settings_btn.setFixedWidth(160)
+
+        # Persist state
+        settings = QSettings("GeoViz", "Engine")
+        settings.setValue("sidebar/collapsed", self._sidebar_collapsed)
 
     def _update_header_and_footer(self, index: int):
         cfg = PAGE_CONFIGS.get(index, {})
