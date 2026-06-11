@@ -42,10 +42,10 @@ class GeoJsonPolygonLayer(MapLayer):
                 rings = geom["coordinates"]
             else:
                 continue
-            for poly in rings:
+            for poly_idx, poly in enumerate(rings):
                 path, bbox = self._build_path(poly)
                 if path is not None:
-                    self._features.append((f"geojson_{idx}", path, bbox))
+                    self._features.append((f"geojson_{idx}_{poly_idx}", path, bbox))
 
     @staticmethod
     def _build_path(poly: list[list[list[float]]]) -> tuple[QPainterPath | None,
