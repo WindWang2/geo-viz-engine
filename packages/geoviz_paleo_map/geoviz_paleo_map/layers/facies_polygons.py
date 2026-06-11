@@ -22,6 +22,11 @@ class _Item:
     path: QPainterPath
     bbox: tuple[float, float, float, float]  # min_x, min_y, max_x, max_y
     boundary_kind: str | None
+    cache_key: str = ""
+
+    def __post_init__(self):
+        if not self.cache_key:
+            self.cache_key = self.feature_id
 
 
 class QuadtreeNode:
@@ -126,9 +131,11 @@ class FaciesPolygonsLayer(PaleoLayer):
             facies = props.get("facies") or props.get("name") or ""
             feature_id = props.get("id", "")
             boundary_kind = props.get("boundary_type")
-            for poly in rings:
+            for poly_idx, poly in enumerate(rings):
                 item = self._build_item(poly, facies, feature_id, boundary_kind)
                 if item is not None:
+                    if poly_idx > 0:
+                        item.cache_key = f"{feature_id}#{poly_idx}"
                     self._items.append(item)
 
         # Build Quadtree Spatial Index for fast viewport culling
@@ -158,9 +165,11 @@ class FaciesPolygonsLayer(PaleoLayer):
                         rings = geom["coordinates"]
                     else:
                         continue
-                    for poly in rings:
+                    for poly_idx, poly in enumerate(rings):
                         item = self._build_item(poly, ff.facies_name, ff.id, None)
                         if item is not None:
+                            if poly_idx > 0:
+                                item.cache_key = f"{ff.id}#{poly_idx}"
                             lvl_items.append(item)
 
                 if lvl_items:
@@ -194,7 +203,7 @@ class FaciesPolygonsLayer(PaleoLayer):
                     item.path = new_path
                     br = new_path.boundingRect()
                     item.bbox = (br.left(), br.top(), br.right(), br.bottom())
-            self._screen_cache.mark_dirty(fid)
+                    self._screen_cache.mark_dirty(item.cache_key)
         if feature_ids and self._items:
             min_x = min(item.bbox[0] for item in self._items)
             min_y = min(item.bbox[1] for item in self._items)
@@ -266,7 +275,7 @@ class FaciesPolygonsLayer(PaleoLayer):
             painter.setPen(QPen(Qt.PenStyle.NoPen))
             for item in items:
                 screen_path = self._screen_cache.get_or_build(
-                    item.feature_id, item.path, viewport)
+                    item.cache_key, item.path, viewport)
                 if has_selection and item.feature_id != self._selected_id:
                     painter.setOpacity(0.6)
                     painter.setBrush(style.brush)
@@ -285,7 +294,7 @@ class FaciesPolygonsLayer(PaleoLayer):
                     painter.setPen(glow_pen)
                     painter.setBrush(Qt.BrushStyle.NoBrush)
                     screen_path = self._screen_cache.get_or_build(
-                        item.feature_id, item.path, viewport)
+                        item.cache_key, item.path, viewport)
                     painter.drawPath(screen_path)
                     break
 
@@ -351,7 +360,7 @@ class FaciesPolygonsLayer(PaleoLayer):
                         is_faded = True
 
                     screen_border = self._screen_cache.get_or_build(
-                        border_item.feature_id, border_item.path, viewport)
+                        border_item.cache_key, border_item.path, viewport)
                     if is_faded:
                         faded_pen = QPen(pen)
                         color = faded_pen.color()
@@ -376,7 +385,7 @@ class FaciesPolygonsLayer(PaleoLayer):
                 painter.setBrush(style.brush)
                 for item in items:
                     screen_path = self._screen_cache.get_or_build(
-                        item.feature_id, item.path, viewport)
+                        item.cache_key, item.path, viewport)
                     painter.drawPath(screen_path)
 
         painter.restore()

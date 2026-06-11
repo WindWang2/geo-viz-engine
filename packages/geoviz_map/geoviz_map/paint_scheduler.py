@@ -3,9 +3,8 @@ LayerPixmapCache — per-layer oversized QPixmap buffer for pan headroom."""
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QPainter, QPixmap, QTransform
+from PySide6.QtGui import QPainter, QPixmap
 
-from geoviz_map.layers.base import MapLayer
 from geoviz_map.viewport import MapViewport
 
 
