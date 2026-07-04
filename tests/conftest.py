@@ -1,6 +1,46 @@
+import os
+
 import numpy as np
 import pytest
 import segyio
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _qt_offscreen():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+def pytest_collection_modifyitems(config, items):
+    slow_modules = (
+        "test_seismic_view",
+        "test_renderer_3d",
+        "test_seismic_3d",
+        "test_well_tie_canvas",
+        "test_chart_engine",
+        "test_seismic_interaction",
+        "test_advanced_viz",
+        "test_well_tie_panel",
+        "test_visual_parity",
+        "test_well_log_ui",
+        "test_well_log_fidelity",
+        "test_map_visual",
+        "test_paleo_map_visual",
+        "test_plots_ui",
+        "test_seismic_fidelity",
+        "test_qpainter_widget",
+        "test_hillshading_ui",
+        "test_sculpting_ui",
+        "test_surface_widget_interaction",
+        "test_3d_contour_sync",
+        "test_cross_plot_widget",
+        "test_well_tie_export",
+        "test_data_page_buttons",
+        "test_data_fidelity",
+        "test_data_kpi_detail",
+    )
+    for item in items:
+        if any(m in item.nodeid for m in slow_modules):
+            item.add_marker(pytest.mark.slow)
 
 
 @pytest.fixture

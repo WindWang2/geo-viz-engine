@@ -77,6 +77,7 @@ class MapPage(QWidget):
 
     def __init__(self, cache: DataCache, well_click_callback=None):
         super().__init__()
+        self.cache = cache
         self.well_click_callback = well_click_callback
 
         # Main Layout: horizontal split
@@ -262,6 +263,21 @@ class MapPage(QWidget):
         self.chip_all.toggled.connect(lambda checked: self._on_chip_toggled("all", checked))
         self.chip_interpreted.toggled.connect(lambda checked: self._on_chip_toggled("interpreted", checked))
         self.chip_gas.toggled.connect(lambda checked: self._on_chip_toggled("gas", checked))
+
+    def reload_wells(self):
+        """Refresh well markers and sidebar list from the catalog."""
+        coords = self.cache.get_well_coordinates(WELL_COORDS_FILE)
+        self.data_wells = available_wells()
+        self.wells = _coords_to_markers(coords, self.data_wells)
+        self.map_canvas._wells_layer.wells = self.wells
+        self.map_canvas._wells_layer._build_index()
+        self.map_canvas.update()
+        self.well_list.clear()
+        for w in self.wells:
+            item = QListWidgetItem(f"📍 {w.name}")
+            item.setData(Qt.UserRole, w.name)
+            self.well_list.addItem(item)
+        self.chip_all.setText(f"全部 {len(self.wells)}")
 
     def _on_layer_toggled(self):
         """Toggle map layer visibility from checkboxes."""

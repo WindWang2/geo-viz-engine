@@ -35,10 +35,10 @@ source .venv/bin/activate && python scripts/build.py
 PySide6 (Qt for Python) — Single Process
 ├── MainWindow (app.py)
 │   ├── Sidebar (7 icon+text buttons)
-│   └── QStackedWidget (7 pages)
+│   └── QStackedWidget (9 pages)
 │       ├── MapPage        → QPainter (via geoviz-map package)
 │       ├── PaleoMapPage   → QPainter (via geoviz-paleo-map package)
-│       ├── WellLogPage    → ECharts (via geoviz-well-log package)
+│       ├── WellLogPage    → QPainter (via geoviz-well-log package)
 │       ├── CrossWellPage  → QPainter (via geoviz-cross-well package)
 │       ├── SeismicPage    → pyqtgraph OpenGL + CuPy
 │       ├── DataPage       → QTableWidget + file dialogs
@@ -121,7 +121,7 @@ PySide6 (Qt for Python) — Single Process
 - **Track building** (`payload_builder.py`): Pure functions, no Qt dependency. `build_tracks_from_data(data: WellLogData) -> dict[str, dict]` auto-detects converted vs legacy format.
 - **Track management** (`track_manager.py`): `TrackManager` wraps a track pool dict. `build_payload(metadata, display_items)` resolves grouped tracks (地层系统, 沉积相) and merged curves into flat JSON.
 - **Vector export** (`export.py`): SVG via ECharts `getDataURL({type:'svg'})` — identical to display. PDF via `QWebEngineView.printToPdf()` — vector from same SVG renderer. PNG via `grab()` — raster fallback.
-- **Map well markers**: MapLibre GL renders GeoJSON well features as circles. Click events sent via Qt WebChannel bridge (`MapBridge.onWellClicked`).
+- **Map well markers**: Native QPainter via `geoviz-map` WellsLayer. Click events emitted via Qt `Signal(str)` (`MapCanvas.well_clicked`).
 - **Well selection**: Two paths — map click (`_on_well_clicked`) or combo box in toolbar (`_on_well_selected`). Both call `WellLogPage.load_well()`.
 - **Seismic rendering**: `SeismicView` (in `geoviz-seismic` package) combines `Renderer3D` (pyqtgraph GLViewWidget 3D volume + interactive slice planes) with `ProfileWidget` (VD heatmap / Wiggle trace) and toolbar. `SeismicPage` is a thin wrapper (~5 lines) inheriting `SeismicView`. Data transposed from segyio convention `(n_traces, n_samples)` to display convention `(n_samples, n_traces)` before rendering. Optional CuPy GPU acceleration for volume slicing and colormapping.
 - **Data models**: Pydantic `BaseModel` — `WellLogData`, `CurveData`, `LithologyInterval`, `FaciesInterval`, `WellCoordinates`. Seismic models (`SeismicVolumeMeta`, `SliceInfo`, `HorizonData`, `BinGridGeometry`) live in `geoviz-seismic` package.
@@ -226,7 +226,7 @@ PySide6 (Qt for Python) — Single Process
 - **Lithology pattern reference**: SVG patterns follow GB/T 勘探管理图件图册编制规范 附录M (岩石图式).
 - **Sedimentary facies patterns**: Based on 附录O (沉积相图式). Carbonate platform facies (潮坪/陆棚/砂坪 etc.) use composite patterns reflecting their lithologic character.
 - **pyqtgraph OpenGL**: Uses pyqtgraph.opengl.GLViewWidget (inherits QOpenGLWidget) for 3D seismic rendering. Must be initialized before any QWebEngineView on Windows to avoid GPU context conflicts.
-- **QWebEngineView**: Requires `PySide6.QtWebEngineWidgets`. MapLibre GL JS loads from CDN — first load requires internet.
+- **QWebEngineView**: Optional legacy ECharts path in `geoviz-well-log`; primary well-log rendering is QPainter-native.
 - **Package can be used standalone**: `from geoviz_well_log import ChartEngine, TrackManager, build_tracks_from_data` works without the main app.
 - **Seismic package can be used standalone**: `from geoviz_seismic import SeismicView, SeismicLoader, Renderer3D` works without the main app. Optional CuPy acceleration for GPU-accelerated volume slicing. Well-tie panel and synthetic overlay included.
 - **Well-tie package can be used standalone**: `from geoviz_well_tie import WellTieCalibration, generate_synthetic_twt, auto_tie_with_quality` works without the main app or Qt. Pure NumPy.

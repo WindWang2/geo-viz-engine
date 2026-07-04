@@ -34,6 +34,7 @@ class SeismicView(QWidget):
     def __init__(self, parent=None, path: str | None = None):
         super().__init__(parent)
         self._loader: SeismicLoader | None = None
+        self._segy_path: str | None = None
         self._cache = SeismicCache(max_slices=50)
         self._meta: SeismicVolumeMeta | None = None
         self._horizon_grids: dict[str, np.ndarray] = {}
@@ -219,9 +220,42 @@ class SeismicView(QWidget):
             if self._synth_worker.isRunning():
                 self._synth_worker.requestInterruption()
                 self._synth_worker.wait(500)
-        
-        # Optionally free 3D textures if they are huge
-        # self._renderer_3d.clean()
+
+    def get_project_state(self) -> dict:
+        """Return seismic file path and view settings for .gvz persistence."""
+        mode_index = self._3d_mode_combo.currentIndex()
+        render_mode = "planes" if mode_index == 0 else "volume"
+        return {
+            "file_path": self._segy_path,
+            "slice_positions": {
+                "inline": self._tb_il_slider.value(),
+                "crossline": self._tb_xl_slider.value(),
+                "time": self._tb_t_slider.value(),
+            },
+            "colormap": self._cmap_combo.currentText(),
+            "render_mode": render_mode,
+        }
+
+    def apply_project_view_state(self, view_state) -> None:
+        """Restore slice positions, colormap, and 3D render mode from project."""
+        if view_state is None:
+            return
+        positions = getattr(view_state, "seismic_slice_positions", None) or {}
+        for key, slider in (
+            ("inline", self._tb_il_slider),
+            ("crossline", self._tb_xl_slider),
+            ("time", self._tb_t_slider),
+        ):
+            if key in positions and slider.maximum() >= positions[key] >= slider.minimum():
+                slider.setValue(positions[key])
+        cmap = getattr(view_state, "seismic_colormap", None)
+        if cmap and self._cmap_combo.findText(cmap) >= 0:
+            self._cmap_combo.setCurrentText(cmap)
+        render_mode = getattr(view_state, "seismic_render_mode", None)
+        if render_mode:
+            idx = 0 if render_mode == "planes" else 1
+            if idx < self._3d_mode_combo.count():
+                self._3d_mode_combo.setCurrentIndex(idx)
 
     def load_demo(self, data: np.ndarray):
         """Load a synthetic or pre-computed 3-D volume for quick demo."""
@@ -262,6 +296,7 @@ class SeismicView(QWidget):
 
     def load_segy(self, path: str):
         """Load a SEGY file synchronously (for backward compat)."""
+        self._segy_path = path
         if self._loader is not None:
             self._loader.close()
         self._loader = SeismicLoader(path)
@@ -290,6 +325,7 @@ class SeismicView(QWidget):
 
     def load_segy_async(self, path: str):
         """Load a SEGY file in a background thread."""
+        self._segy_path = path
         if self._loader is not None:
             self._loader.close()
         if hasattr(self, '_segy_worker') and self._segy_worker is not None and self._segy_worker.isRunning():

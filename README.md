@@ -10,18 +10,18 @@
 
 > **v0.1-web** (Tauri + React + FastAPI 架构) 已归档于 git tag `v0.1-web`。
 
-> **Version 说明**：根目录 `VERSION` 文件追踪发布版本号（用于打包/发布），与 `CHANGELOG.md` 中的版本号是**有意脱钩** of——`CHANGELOG.md` 按 Phase 推进记录功能演进；`VERSION` 仅在执行正式发布时更新。当前 `VERSION=0.8.0`、`CHANGELOG=0.11.0` 是预期状态，不是 bug。
+> **Version 说明**：根目录 `VERSION` 文件追踪发布版本号（用于打包/发布），与 `CHANGELOG.md` 中的版本号是**有意脱钩**的——`CHANGELOG.md` 按 Phase 推进记录功能演进；`VERSION` 仅在执行正式发布时更新。当前 `VERSION=0.14.0`、`CHANGELOG=0.20.0` 是预期状态，不是 bug。
 
 ---
 
 ## About / 项目简介
 
-GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地质数据可视化桌面应用：
+GeoViz Engine 是一款基于 **PySide6 + QPainter + pyqtgraph** 的单进程地质数据可视化桌面应用：
 
 - **UI 框架（PySide6/Qt）**：窗口管理、页面导航、文件对话框、表格展示
-- **测井渲染（ECharts SVG）**：测井曲线、岩性柱、沉积相综合柱状图，通过独立 `geoviz-well-log` 包提供
+- **测井渲染（QPainter）**：测井曲线、岩性柱、沉积相综合柱状图，通过独立 `geoviz-well-log` 包提供
 - **3D 渲染（pyqtgraph OpenGL）**：地震体三维显示、任意方向剖面、等值面提取
-- **地图（MapLibre GL）**：井位分布、底图、交互选井
+- **地图（QPainter geoviz-map）**：井位分布、底图、交互选井
 
 目标用户：地质工程师、测井分析人员、地球科学领域科研人员。
 
@@ -35,15 +35,17 @@ GeoViz Engine 是一款基于 **PySide6 + ECharts + pyqtgraph** 的单进程地�
 │                                                         │
 │  MainWindow                                             │
 │  ┌──────┬──────────────────────────────────────────┐    │
-│  │ 侧栏 │  QStackedWidget (7 页面)                  │    │
+│  │ 侧栏 │  QStackedWidget (9 页面)                  │    │
 │  │      │                                          │    │
 │  │ 🗺   │  MapPage     QPainter (geoviz-map)        │    │
 │  │ 🌍   │  PaleoMap    QPainter (geoviz-paleo-map)  │    │
-│  │ ⛏   │  WellLogPage ECharts + WebEngine         │    │
+│  │ ⛏   │  WellLogPage QPainter (geoviz-well-log)  │    │
 │  │ ⛓   │  CrossWell   QPainter (geoviz-cross-well)│    │
 │  │ 🧊   │  SeismicPage pyqtgraph OpenGL            │    │
+│  │ 📈   │  PlotsPage   QPainter (geoviz-plots)     │    │
 │  │ 📁   │  DataPage    QTableWidget + 文件对话框     │    │
 │  │ 🛠   │  ToolsPage   独立小工具集                 │    │
+│  │ ⚙   │  SettingsPage 主题/坐标/缓存偏好           │    │
 │  └──────┴──────────────────────────────────────────┘    │
 │                                                         │
 │  packages/geoviz-well-log/                              │

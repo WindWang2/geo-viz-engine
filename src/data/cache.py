@@ -1,42 +1,38 @@
 from pathlib import Path
-from src.data.loaders import load_well_coordinates
+
+from src.data.catalog import WellCatalog
 from src.data.models import WellCoordinates
+from src.data import well_registry
 
 
 class DataCache:
+    """Application data cache — delegates well/catalog state to WellCatalog."""
+
     def __init__(self):
-        self._well_coords: list[WellCoordinates] | None = None
+        self._catalog = WellCatalog()
+        well_registry.set_catalog(self._catalog)
+
+    @property
+    def catalog(self) -> WellCatalog:
+        return self._catalog
 
     def get_well_coordinates(self, path: Path) -> list[WellCoordinates]:
-        if self._well_coords is None:
-            self._well_coords = load_well_coordinates(path)
-        return self._well_coords
+        return self._catalog.get_coordinates()
 
     def invalidate(self):
-        self._well_coords = None
+        self._catalog.invalidate()
 
     def rename_well(self, old_name: str, new_name: str):
-        """Rename a well in the cached coordinate list."""
-        if self._well_coords:
-            for w in self._well_coords:
-                if w.name == old_name:
-                    w.name = new_name
-                    break
+        self._catalog.rename_well(old_name, new_name)
+        well_registry.refresh_registry()
 
     def remove_well(self, name: str):
-        """Remove a well from the cached coordinate list."""
-        if self._well_coords:
-            self._well_coords = [w for w in self._well_coords if w.name != name]
+        self._catalog.remove_well(name)
+        well_registry.refresh_registry()
 
     def put_file(self, path: str):
-        """Register an imported file path in the cache."""
-        if not hasattr(self, "_imported_files"):
-            self._imported_files: list[str] = []
-        if path not in self._imported_files:
-            self._imported_files.append(path)
+        self._catalog.register_imported_file(path)
+        well_registry.refresh_registry()
 
     def imported_files(self) -> list[str]:
-        """Return list of imported file paths."""
-        if not hasattr(self, "_imported_files"):
-            self._imported_files = []
-        return list(self._imported_files)
+        return self._catalog.imported_files()

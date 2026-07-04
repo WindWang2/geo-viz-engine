@@ -927,6 +927,62 @@ class CrossWellPage(QWidget):
     def _on_sidebar_horizon_changed(self, name: str):
         self._canvas.active_formation = name
 
+    def cleanup(self):
+        """Stop well-loading thread when leaving this page."""
+        thread = getattr(self, "_thread", None)
+        if thread is not None:
+            try:
+                if thread.isRunning():
+                    thread.quit()
+                    thread.wait(1500)
+            except RuntimeError:
+                pass
+        self._thread = None
+        self._worker = None
+
+    def export_project_picks(self):
+        from src.data.project import ProjectPick
+
+        picks = []
+        if hasattr(self, "_canvas"):
+            for hp in self._canvas.picks_model.all_picks():
+                for well, depth in hp.well_depths:
+                    if depth is not None:
+                        picks.append(
+                            ProjectPick(
+                                well_name=well,
+                                depth=depth,
+                                formation=hp.formation_name,
+                                pick_group=hp.pick_id,
+                            )
+                        )
+        return picks
+
+    def export_project_correlations(self):
+        return []
+
+    def import_project_picks(self, picks, correlations=None):
+        from geoviz_cross_well.picks_model import HorizonPick
+
+        if not hasattr(self, "_canvas") or not picks:
+            return
+        grouped: dict[str, HorizonPick] = {}
+        for p in picks:
+            gid = p.pick_group or f"{p.formation}:{p.well_name}"
+            if gid not in grouped:
+                grouped[gid] = HorizonPick(
+                    pick_id=gid if p.pick_group else HorizonPick.new_id(),
+                    formation_name=p.formation,
+                    well_depths=[],
+                    source="manual",
+                )
+            grouped[gid].set_depth(p.well_name, p.depth)
+        self._canvas.picks_model.clear()
+        for pick in grouped.values():
+            self._canvas.picks_model._picks[pick.pick_id] = pick
+        self._canvas.picks_model.picks_changed.emit()
+        self._update_status()
+
     def _on_sidebar_curve_changed(self, curve_name: str):
         self._canvas.active_curve = curve_name
 

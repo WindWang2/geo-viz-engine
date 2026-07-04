@@ -1,62 +1,49 @@
-import json
+"""Well registry backed by WellCatalog (dynamic, not import-time frozen)."""
+from __future__ import annotations
+
 from pathlib import Path
 
-from src.data.loaders import load_well_log_from_excel
-from src.utils.paths import get_data_dir
+from src.data.catalog import WellCatalog
 
-_DATA_DIR = get_data_dir()
-
-
-def _build_well_registry():
-    registry = {}
-    
-    # Defaults/Hardcoded preferences
-    registry["HZ25-10-1"] = (load_well_log_from_excel, _DATA_DIR / "HZ25-10-1-laolong.xlsx")
-    registry["老龙1"] = (load_well_log_from_excel, _DATA_DIR / "老龙1井-野外剖面数据整理 .xlsx")
-    
-    coords_file = _DATA_DIR / "well_coordinates.json"
-    if coords_file.exists():
-        try:
-            with open(coords_file, "r", encoding="utf-8") as f:
-                coords_data = json.load(f)
-            short_names = [w["well_name"] for w in coords_data.get("wells", [])]
-        except Exception:
-            short_names = []
-    else:
-        short_names = []
-
-    all_files = list(_DATA_DIR.glob("*.xlsx")) + list(_DATA_DIR.glob("*.xls"))
-    
-    for w_name in short_names:
-        if w_name in registry:
-            continue
-            
-        for f in all_files:
-            if w_name.upper() in f.name.upper():
-                registry[w_name] = (load_well_log_from_excel, f)
-                break
-                
-    return registry
+_catalog: WellCatalog | None = None
 
 
-_WELL_REGISTRY: dict[str, tuple] = _build_well_registry()
+def _get_catalog() -> WellCatalog:
+    global _catalog
+    if _catalog is None:
+        _catalog = WellCatalog()
+    return _catalog
+
+
+def set_catalog(catalog: WellCatalog) -> None:
+    """Inject shared catalog instance (called from MainWindow / DataCache)."""
+    global _catalog
+    _catalog = catalog
 
 
 def get_well_data(well_name: str):
     """Return (loader_fn, xls_path, config) or None."""
     from geoviz_well_log.configs.laolong1 import laolong1_config
 
-    entry = _WELL_REGISTRY.get(well_name)
+    entry = _get_catalog().get_loader_entry(well_name)
     if entry is None:
         return None
     loader_fn, xls_path = entry
     return loader_fn, xls_path, laolong1_config
 
 
+def get_well_file(well_name: str) -> Path | None:
+    return _get_catalog().get_well_file(well_name)
+
+
 def available_wells() -> set[str]:
-    return set(_WELL_REGISTRY.keys())
+    return set(_get_catalog().list_well_names())
 
 
 def list_wells() -> list[str]:
-    return sorted(list(_WELL_REGISTRY.keys()))
+    return _get_catalog().list_well_names()
 
+
+def refresh_registry() -> None:
+    _get_catalog().invalidate()
+    _get_catalog()._rebuild_registry()

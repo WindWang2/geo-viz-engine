@@ -123,3 +123,22 @@ def test_project_manager_save_and_load():
         assert loaded_proj.view_state.seismic_slice_positions["inline"] == 15
         assert loaded_proj.view_state.seismic_colormap == "jet"
         assert loaded_proj.view_state.seismic_render_mode == "volume"
+
+
+def test_expand_path_rejects_traversal(tmp_path):
+    """Malicious relative paths must not escape the project directory."""
+    proj_dir = tmp_path / "my_project"
+    proj_dir.mkdir()
+    gvz = proj_dir / "test.gvz"
+    gvz.write_text('{"meta": {"name": "x", "created_at": "t", "updated_at": "t"}, "wells": []}')
+
+    manager = ProjectManager(gvz)
+    data = {
+        "meta": {"name": "x", "created_at": "t", "updated_at": "t"},
+        "wells": [{"name": "W1", "latitude": 1.0, "longitude": 2.0, "file_path": "../../../etc/passwd"}],
+    }
+    with open(gvz, "w") as f:
+        json.dump(data, f)
+
+    loaded = manager.load_project()
+    assert loaded.wells[0].file_path is None

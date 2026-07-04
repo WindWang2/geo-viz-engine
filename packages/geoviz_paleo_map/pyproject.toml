@@ -10,6 +10,7 @@ dependencies = [
     "PySide6",
     "pydantic",
     "geoviz-well-log",
+    "geoviz-common",
 ]
 
 [project.optional-dependencies]

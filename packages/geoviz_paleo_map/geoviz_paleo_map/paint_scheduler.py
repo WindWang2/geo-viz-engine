@@ -2,37 +2,12 @@
 LayerPixmapCache — per-layer oversized QPixmap buffer for pan headroom."""
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QPixmap, QTransform
 
+from geoviz_common.paint_scheduler import PaintScheduler
 from geoviz_paleo_map.layers.base import PaleoLayer
 from geoviz_paleo_map.viewport import PaleoMapViewport
-
-
-class PaintScheduler:
-    """Coalesce rapid update() calls into ~60fps repaints."""
-
-    def __init__(self, widget):
-        self._widget = widget
-        self._timer = QTimer()
-        self._timer.setSingleShot(True)
-        self._timer.setInterval(16)  # ~60fps
-        self._timer.timeout.connect(self._do_update)
-        self._pending = False
-
-    def schedule(self) -> None:
-        """Request a repaint. Multiple calls before timer fires = one repaint."""
-        if not self._pending:
-            self._pending = True
-            self._timer.start()
-
-    def _do_update(self) -> None:
-        self._pending = False
-        try:
-            self._widget.update()
-        except RuntimeError:
-            # Widget already destroyed (e.g. test teardown)
-            pass
 
 
 class LayerPixmapCache:

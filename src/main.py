@@ -13,36 +13,27 @@ if getattr(sys, 'frozen', False) and sys.platform == 'win32' and hasattr(os, 'ad
     base_dirs = []
     if hasattr(sys, '_MEIPASS'):
         base_dirs.append(Path(sys._MEIPASS))
-    else:
-        print("DEBUG: sys._MEIPASS is NOT set!", file=sys.stderr)
-
     exe_dir = Path(sys.executable).parent
     base_dirs.append(exe_dir)
     base_dirs.append(exe_dir / "_internal")
-
-    print(f"DEBUG: base_dirs to search: {base_dirs}", file=sys.stderr)
 
     for base_dir in base_dirs:
         if base_dir.exists():
             try:
                 os.add_dll_directory(str(base_dir))
-                print(f"DEBUG: Added DLL directory: {base_dir}", file=sys.stderr)
-            except Exception as e:
-                print(f"DEBUG: Failed to add DLL directory {base_dir}: {e}", file=sys.stderr)
+            except OSError:
+                pass
             for sub in ["PySide6", "shiboken6"]:
                 sub_dir = base_dir / sub
                 if sub_dir.exists():
                     try:
                         os.add_dll_directory(str(sub_dir))
-                        print(f"DEBUG: Added DLL directory: {sub_dir}", file=sys.stderr)
-                    except Exception as e:
-                        print(f"DEBUG: Failed to add DLL directory {sub_dir}: {e}", file=sys.stderr)
+                    except OSError:
+                        pass
 
-    # Also add them to PATH as a fallback
     os.environ["PATH"] = str(exe_dir / "_internal" / "PySide6") + os.pathsep + os.environ["PATH"]
     os.environ["PATH"] = str(exe_dir / "_internal" / "shiboken6") + os.pathsep + os.environ["PATH"]
     os.environ["PATH"] = str(exe_dir / "_internal") + os.pathsep + os.environ["PATH"]
-    print(f"DEBUG: Final PATH starts with: {os.environ['PATH'][:200]}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------

@@ -76,7 +76,7 @@ def test_dynamic_header_footer_binding(window):
     # Switch to Map Page (index 0)
     window._switch_page(0)
     assert window.header_title.text() == "地图总览"
-    assert "46" in window.header_sub.text()
+    assert "口井" in window.header_sub.text()
     assert "地图就绪" in window.status_text.text()
     
     # Switch to Paleo Page (index 1)

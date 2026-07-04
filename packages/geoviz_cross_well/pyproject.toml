@@ -10,12 +10,12 @@ dependencies = [
     "PySide6",
     "pydantic",
     "geoviz-well-log",
-    "scipy",
+    "geoviz-well-tie",
     "numpy",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-qt", "numpy"]
+dev = ["pytest", "pytest-qt", "numpy", "scipy"]
 
 [build-system]
 requires = ["hatchling"]

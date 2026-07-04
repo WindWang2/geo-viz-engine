@@ -23,9 +23,10 @@ class DataPage(QWidget):
             return QIcon(str(path))
         return QIcon()
 
-    def __init__(self, cache: DataCache):
+    def __init__(self, cache: DataCache, main_window=None):
         super().__init__()
         self.cache = cache
+        self._main_window = main_window
         
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(16, 16, 16, 16)
@@ -317,8 +318,10 @@ class DataPage(QWidget):
         self._detail_panel.hide()
 
     def _get_main_window(self):
-        """Traverse widget hierarchy to find the top-level MainWindow instance."""
-        curr = self
+        """Return the MainWindow reference injected at construction."""
+        if self._main_window is not None:
+            return self._main_window
+        curr = self.parent()
         while curr is not None:
             if curr.__class__.__name__ == "MainWindow":
                 return curr
@@ -438,9 +441,11 @@ class DataPage(QWidget):
     def _load_imported_file(self, path: str, filter_str: str):
         """Load an imported file into the cache and refresh display."""
         try:
+            p = Path(path)
             if "Excel" in filter_str:
                 from src.data.loaders import load_well_log_from_excel
-                load_well_log_from_excel(Path(path))
+                load_well_log_from_excel(p)
+                self.cache.catalog.register_well_file(p.stem, p)
             self.cache.put_file(path)
             self._load_well_table()
             self.refresh_kpis()

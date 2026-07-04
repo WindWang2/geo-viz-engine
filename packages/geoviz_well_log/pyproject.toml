@@ -9,6 +9,7 @@ requires-python = ">=3.10"
 dependencies = [
     "PySide6",
     "pydantic",
+    "numpy",
 ]
 
 [project.optional-dependencies]

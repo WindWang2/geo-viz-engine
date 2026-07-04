@@ -434,7 +434,7 @@ class MainWindow(QWidget):
             self.map_page.open_well_log_requested.connect(self._on_open_well_log_requested)
 
         from src.pages.data import DataPage
-        self.data_page = DataPage(self.cache)
+        self.data_page = DataPage(self.cache, main_window=self)
 
         from src.pages.tools import ToolsPage
         self.tools_page = ToolsPage()
@@ -541,8 +541,10 @@ class MainWindow(QWidget):
         from PySide6.QtCore import QSettings
         settings = QSettings("GeoViz", "Engine")
         if settings.value("sidebar/collapsed", False, type=bool):
-            self._sidebar_collapsed = False
-            self._toggle_sidebar()
+            self._apply_sidebar_collapsed(True)
+
+        self._refresh_footer_stats()
+        self.search_bar.returnPressed.connect(self._on_global_search)
 
         # Ctrl+B keyboard shortcut to toggle sidebar
         self._sidebar_shortcut = QShortcut(QKeySequence("Ctrl+B"), self)
@@ -562,6 +564,29 @@ class MainWindow(QWidget):
             btn.setChecked(i == index)
         self.stack.setCurrentIndex(index)
         self._update_header_and_footer(index)
+        self._refresh_footer_stats()
+
+    def _apply_sidebar_collapsed(self, collapsed: bool):
+        """Set sidebar to collapsed or expanded without toggling."""
+        from PySide6.QtCore import QPropertyAnimation
+
+        self._sidebar_collapsed = collapsed
+        target_w = self._sidebar_width_collapsed if collapsed else self._sidebar_width_expanded
+        self.sidebar.setMaximumWidth(target_w)
+        for btn in self.sidebar_buttons:
+            if collapsed:
+                btn.setText("")
+                btn.setFixedWidth(44)
+            else:
+                btn.setText(" " + btn.toolTip())
+                btn.setFixedWidth(160)
+        if hasattr(self, "settings_btn"):
+            if collapsed:
+                self.settings_btn.setText("")
+                self.settings_btn.setFixedWidth(44)
+            else:
+                self.settings_btn.setText(" " + self.settings_btn.toolTip())
+                self.settings_btn.setFixedWidth(160)
 
     def _toggle_sidebar(self):
         from PySide6.QtCore import QPropertyAnimation, QSettings
@@ -658,62 +683,147 @@ class MainWindow(QWidget):
     def sync_from_project(self, project_data):
         """Apply project state to the main window and all pages."""
         self.current_project = project_data
-        
-        # Restore active page
-        if project_data.view_state:
-            active_page = project_data.view_state.active_page
-            self._switch_page(active_page)
 
-        # Sync DataPage display if instantiated
+        if project_data.wells:
+            from src.data import well_registry
+
+            self.cache.catalog.apply_project_wells(project_data.wells)
+            self.cache.invalidate()
+            well_registry.refresh_registry()
+            if getattr(self, "map_page", None) is not None:
+                self.map_page.reload_wells()
+
+        if project_data.seismic and project_data.seismic.file_path:
+            path = project_data.seismic.file_path
+            if hasattr(self, "seismic_page") and hasattr(self.seismic_page, "load_segy_async"):
+                self.seismic_page.load_segy_async(path)
+
+        if project_data.view_state and hasattr(self, "seismic_page"):
+            if hasattr(self.seismic_page, "apply_project_view_state"):
+                self.seismic_page.apply_project_view_state(project_data.view_state)
+
+        if project_data.picks and hasattr(self, "cross_well_page"):
+            self.cross_well_page.import_project_picks(
+                project_data.picks, project_data.correlations
+            )
+
+        if project_data.view_state:
+            self._switch_page(project_data.view_state.active_page)
+
         if hasattr(self, "data_page") and self.data_page is not None:
             self.data_page.update_project_display()
+            self.data_page._load_well_table()
+            self.data_page.refresh_kpis()
+
+        self._refresh_footer_stats()
 
     def sync_to_project(self):
         """Gather current application state from all pages and return a ProjectSchema."""
-        from src.data.project import ProjectSchema, ProjectMeta, ProjectViewState
+        from src.data.project import ProjectSchema, ProjectMeta, ProjectSeismic, ProjectWell
         from datetime import datetime
+        from src.utils.paths import get_data_dir
+        from src.data import well_registry
 
-        # Create defaults if no project is active
         if self.current_project is None:
             now_str = datetime.now().isoformat()
             meta = ProjectMeta(
                 name="New Project",
-                version="0.8.0",
+                version="0.14.0",
                 created_at=now_str,
-                updated_at=now_str
+                updated_at=now_str,
             )
             self.current_project = ProjectSchema(meta=meta)
 
-        # Update metadata timestamp
         self.current_project.meta.updated_at = datetime.now().isoformat()
 
-        # Gather view state
-        self.current_project.view_state.active_page = self.stack.currentIndex()
+        coords_file = get_data_dir() / "well_coordinates.json"
+        wells = []
+        for w in self.cache.get_well_coordinates(coords_file):
+            fp = well_registry.get_well_file(w.name)
+            wells.append(
+                ProjectWell(
+                    name=w.name,
+                    latitude=w.latitude,
+                    longitude=w.longitude,
+                    file_path=str(fp) if fp else None,
+                )
+            )
+        self.current_project.wells = wells
 
+        if hasattr(self, "seismic_page") and hasattr(self.seismic_page, "get_project_state"):
+            state = self.seismic_page.get_project_state()
+            if state.get("file_path"):
+                self.current_project.seismic = ProjectSeismic(file_path=state["file_path"])
+            vs = self.current_project.view_state
+            vs.seismic_slice_positions = state.get("slice_positions", vs.seismic_slice_positions)
+            vs.seismic_colormap = state.get("colormap", vs.seismic_colormap)
+            vs.seismic_render_mode = state.get("render_mode", vs.seismic_render_mode)
+
+        if hasattr(self, "cross_well_page"):
+            self.current_project.picks = self.cross_well_page.export_project_picks()
+            self.current_project.correlations = self.cross_well_page.export_project_correlations()
+
+        self.current_project.view_state.active_page = self.stack.currentIndex()
         return self.current_project
 
+    def _refresh_footer_stats(self):
+        """Update footer labels from live catalog and cache metrics."""
+        from src.utils.paths import get_data_dir
+        from src.utils.cache_metrics import compute_total_cache_mb
+
+        try:
+            n_wells = len(self.cache.get_well_coordinates(get_data_dir() / "well_coordinates.json"))
+            self.cache_info_label.setText(f"缓存 {compute_total_cache_mb():.0f} MB")
+            idx = self.stack.currentIndex()
+            if idx == 0 and getattr(self, "map_page", None):
+                self.header_sub.setText(f"{n_wells} 口井 · EPSG:4326")
+            elif idx == 6:
+                self.header_sub.setText(f"{n_wells} datasets")
+        except Exception:
+            pass
+
+    def _on_global_search(self):
+        """Header search: jump to well log when name matches catalog."""
+        from src.data.well_registry import list_wells
+
+        query = self.search_bar.text().strip()
+        if not query:
+            return
+        for name in list_wells():
+            if query.lower() in name.lower():
+                self.well_log_page.load_well(name)
+                self._switch_page(2)
+                return
+
+    def _stop_page_threads(self, page):
+        if page is None:
+            return
+        if hasattr(page, "cleanup"):
+            try:
+                page.cleanup()
+            except Exception:
+                pass
+        for attr in ("_worker", "_load_thread", "_pred_thread", "_thread"):
+            t = getattr(page, attr, None)
+            if t is not None and hasattr(t, "isRunning"):
+                try:
+                    if t.isRunning():
+                        if hasattr(t, "quit"):
+                            t.quit()
+                        if not t.wait(1500):
+                            t.terminate()
+                            t.wait(500)
+                except RuntimeError:
+                    pass
+
     def closeEvent(self, event):
-        # Stop any background QThreads owned by pages to prevent
-        # "QThread: Destroyed while thread is still running" on shutdown.
-        for attr in ("_worker", "_load_thread", "_pred_thread"):
-            for page in (
-                getattr(self, "plots_page", None),
-                getattr(self, "well_log_page", None),
-                getattr(self, "cross_well_page", None),
-            ):
-                if page is None:
-                    continue
-                t = getattr(page, attr, None)
-                if t is not None and hasattr(t, "isRunning"):
-                    try:
-                        if t.isRunning():
-                            if hasattr(t, "quit"):
-                                t.quit()
-                            if not t.wait(1500):
-                                t.terminate()
-                                t.wait(500)
-                    except RuntimeError:
-                        pass
+        for page in (
+            getattr(self, "plots_page", None),
+            getattr(self, "well_log_page", None),
+            getattr(self, "cross_well_page", None),
+            getattr(self, "seismic_page", None),
+        ):
+            self._stop_page_threads(page)
         super().closeEvent(event)
 
     def _on_theme_preference(self, theme_label: str):
@@ -724,3 +834,4 @@ class MainWindow(QWidget):
     def _on_cache_cleared(self, mb_released: float):
         """Update status bar after cache clear."""
         self.status_text.setText(f"缓存已清理 · 释放 {mb_released:.1f} MB")
+        self._refresh_footer_stats()

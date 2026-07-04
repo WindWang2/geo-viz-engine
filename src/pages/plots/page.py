@@ -367,6 +367,13 @@ class PlotsPage(QWidget):
         self._worker.error.connect(self._on_interpolation_error)
         self._worker.start()
 
+    def cleanup(self):
+        """Stop interpolation worker when leaving this page."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.terminate()
+            self._worker.wait(1000)
+        self._worker = None
+
     def _on_interpolation_complete(self, grid_x, grid_y, grid_z):
         """Update the canvas plot bounds when background calculation thread finishes."""
         step = self.step_spin.value()

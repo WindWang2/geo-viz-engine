@@ -122,41 +122,17 @@ class SettingsPage(QWidget):
         self._bus.coordinate_format_changed.emit(fmt)
 
     def _on_clear_cache(self):
-        released = self._purge_cache_dir()
+        from src.utils.cache_metrics import purge_all_caches, compute_total_cache_mb
+
+        released = purge_all_caches()
         self.cache_size_label.setText(self._compute_cache_size_label())
-        self._bus.cache_cleared.emit(released)
+        self._bus.cache_cleared.emit(released if released else compute_total_cache_mb())
 
     # ------------------------------------------------------------------
-    def _cache_root(self) -> Path:
-        return Path.home() / ".cache" / "geoviz"
-
     def _compute_cache_size_label(self) -> str:
-        root = self._cache_root()
-        if not root.exists():
-            return "已用 0.0 MB"
-        total = 0
-        for dirpath, _dirs, files in os.walk(root):
-            for f in files:
-                try:
-                    total += os.path.getsize(os.path.join(dirpath, f))
-                except OSError:
-                    pass
-        mb = total / (1024 * 1024)
+        from src.utils.cache_metrics import compute_total_cache_mb
+
+        mb = compute_total_cache_mb()
         if mb >= 1024:
             return f"已用 {mb / 1024:.2f} GB"
         return f"已用 {mb:.1f} MB"
-
-    def _purge_cache_dir(self) -> float:
-        root = self._cache_root()
-        if not root.exists():
-            return 0.0
-        released = 0
-        for dirpath, _dirs, files in os.walk(root):
-            for f in files:
-                p = os.path.join(dirpath, f)
-                try:
-                    released += os.path.getsize(p)
-                    os.remove(p)
-                except OSError:
-                    pass
-        return released / (1024 * 1024)

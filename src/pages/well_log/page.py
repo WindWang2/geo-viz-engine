@@ -362,6 +362,11 @@ class WellLogPage(QWidget):
         self._pred_thread = None
         self._pred_worker = None
 
+    def cleanup(self):
+        """Stop background load/prediction threads when leaving this page."""
+        self._cleanup_load_thread()
+        self._cleanup_pred_thread()
+
     def load_well(self, well_name: str) -> bool:
         if well_name == self._current_well and self._qpainter_widget:
             return True

@@ -553,26 +553,24 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
 
     file_hash = hashlib.md5(f"{path.name}_{mtime}_{xml_mtime}_{well_name}_{PARSER_VERSION}".encode()).hexdigest()
     safe_well_name = "".join([c if c.isalnum() else "_" for c in (well_name or "unknown")])
-    cache_file = cache_dir / f"{safe_well_name}_{file_hash}.pkl"
-    
+    cache_file = cache_dir / f"{safe_well_name}_{file_hash}.json"
+
     if cache_file.exists():
         try:
-            import pickle
-            with open(cache_file, "rb") as f:
-                data = pickle.load(f)
-            if isinstance(data, WellLogData):
-                return data
-            elif isinstance(data, dict):
-                return WellLogData.model_validate(data)
+            with open(cache_file, encoding="utf-8") as f:
+                cached = json.load(f)
+            return WellLogData.model_validate(cached)
         except Exception as e:
             print(f"Failed to load cache for {well_name}: {e}")
-            
+
     # Clean up old caches for this well to prevent directory bloat
     try:
-        for ext in ["*.pkl", "*.json"]:
-            for old_cache in cache_dir.glob(f"{safe_well_name}_{ext}"):
-                if old_cache != cache_file:
-                    old_cache.unlink(missing_ok=True)
+        for old_cache in cache_dir.glob(f"{safe_well_name}_*.pkl"):
+            if old_cache != cache_file:
+                old_cache.unlink(missing_ok=True)
+        for old_cache in cache_dir.glob(f"{safe_well_name}_*.json"):
+            if old_cache != cache_file:
+                old_cache.unlink(missing_ok=True)
     except OSError:
         pass
             
@@ -586,11 +584,11 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
     else:
         data = load_well_log_laolong1(path, well_name)
         
-    # Save cache using high performance binary Pickle format
+    # Save cache as JSON (safe deserialization; Pydantic-validated on load)
     try:
-        import pickle
-        with open(cache_file, "wb") as f:
-            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        payload = data.model_dump() if hasattr(data, "model_dump") else data.dict()
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
     except Exception as e:
         print(f"Failed to save cache for {well_name}: {e}")
         

@@ -34,6 +34,7 @@ class ProjectPick(BaseModel):
     well_name: str
     depth: float
     formation: str
+    pick_group: str = ""
 
 
 class ProjectCorrelation(BaseModel):
@@ -82,18 +83,22 @@ class ProjectManager:
         return path_str
 
     def _expand_path(self, path_str: str | None) -> str | None:
-        """Convert a relative path back to an absolute path based on the project directory."""
+        """Convert a relative path back to an absolute path based on the project directory.
+
+        Rejects paths that escape the project directory (path traversal hardening).
+        """
         if not path_str:
             return None
         try:
             path = Path(path_str)
-            if path.is_absolute():
-                return path_str
             proj_dir = self.project_path.parent.resolve()
-            return (proj_dir / path).resolve().absolute().as_posix()
+            resolved = path.resolve() if path.is_absolute() else (proj_dir / path).resolve()
+            if not resolved.is_relative_to(proj_dir):
+                return None
+            return resolved.as_posix()
         except Exception:
             pass
-        return path_str
+        return None
 
     def save_project(self, project_data: ProjectSchema):
         """Save the project data to the .gvz JSON file, convert absolute paths to relative where possible."""
