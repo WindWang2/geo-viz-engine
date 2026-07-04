@@ -1,8 +1,17 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–31 COMPLETE (v0.19.0)
+## Project Status: Phase 1–32 COMPLETE (v0.20.0)
 
-### Session: 2026-07-04 (Phase 31 — Cross-Plot Analytics & Lithology Clustering v0.19.0 — COMPLETE)
+### Session: 2026-07-04 (Phase 32 — Single-Well Image Track & LAS File Parser v0.20.0 — COMPLETE)
+
+#### Completed Work:
+- **Phase 32 (Single-Well Image Track & LAS File Parser / v0.20.0)**:
+  - **LAS 2.0/3.0 File Parser (`las_parser.py`)**: Built standalone, robust LAS 2.0/3.0 parser for header blocks (`~V`, `~W`, `~C`) and ASCII matrix (`~A`), with automatic NULL sentinel value cleaning (`-999.25`, `-9999.0` -> `np.nan`).
+  - **Single-Well Image Track (`image_track.py`)**: Built `ImageTrack` inheriting from `BaseTrack`, supporting depth-mapped `CorePhotoSegment` (QPixmap scaling) and 2D FMI borehole pseudocolor matrix rendering.
+  - **Core Photo Magnifier Modal (`image_preview_dialog.py`)**: Built `ImagePreviewDialog` for inspecting high-resolution core photo segments with zoom/pan controls.
+  - **WellLogPage Toolbar Integration**: Integrated "📁 导入 LAS" toolbar action and non-blocking dialog behavior.
+  - **Verification**: Created `test_las_parser.py`, `test_image_track.py`, `test_image_preview_dialog.py`, `test_well_log_las_integration.py` (4/4 passed). Full test suite: 44/44 tests passed cleanly.
+
 
 #### Completed Work:
 - **Phase 31 (Cross-Plot Analytics & Lithology Clustering / v0.19.0)**:

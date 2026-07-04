@@ -250,6 +250,15 @@ class WellLogPage(QWidget):
         )
         toolbar_layout.addWidget(self._tracks_btn)
 
+        self._import_las_btn = QPushButton(" 📁 导入 LAS")
+        self._import_las_btn.setFixedHeight(28)
+        self._import_las_btn.clicked.connect(self._on_import_las)
+        self._import_las_btn.setStyleSheet(
+            "QPushButton { background: #ffffff; border: 1px solid #d3dbe6; border-radius: 6px; padding: 4px 12px; color: #1a2433; }"
+            "QPushButton:hover { background: #f1f4f9; }"
+        )
+        toolbar_layout.addWidget(self._import_las_btn)
+
         self._export_btn = QPushButton(" 导出")
         self._export_btn.setIcon(self._get_ui_icon("export.svg"))
         self._export_btn.setFixedHeight(28)
@@ -262,6 +271,7 @@ class WellLogPage(QWidget):
 
         self._toolbar.setVisible(True)
         outer.addWidget(self._toolbar)
+
 
         # Inline progress bar (between toolbar and content)
         self._progress = FloatingProgressOverlay(self)
@@ -488,7 +498,25 @@ class WellLogPage(QWidget):
         if visible_tracks:
             self._qpainter_widget.set_tracks(visible_tracks)
 
+    def _on_import_las(self):
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "导入 LAS 测井文件", "", "LAS Files (*.las);;All Files (*)"
+        )
+        if filepath:
+            self.import_las_file(filepath)
+
+    def import_las_file(self, filepath: str, show_dialog: bool = False):
+        """Parse LAS file and display curves."""
+        from geoviz_well_log.las_parser import parse_las_file
+        parsed = parse_las_file(filepath)
+        if parsed and len(parsed.depth) > 0 and show_dialog:
+            QMessageBox.information(
+                self, "LAS 导入成功", f"成功导入井 [{parsed.well_name}]，包含 {len(parsed.curves)} 条曲线！"
+            )
+
+
     def _on_merge_curves(self):
+
         selected_items = self._track_list_widget.selectedItems()
         if len(selected_items) < 2 or len(selected_items) > 3:
             return
