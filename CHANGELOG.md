@@ -4,7 +4,44 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.14.0] - 2026-06-01
+## [0.19.0] - 2026-07-04
+
+### Added
+- **交叉图分析与岩性聚类工具箱 (Phase 31)**：
+  - **`convex_hull.py`**: 基于 NumPy 向量化射线法 (Ray Casting) 实现毫秒级点在多边形内筛选，结合 `scipy.spatial.ConvexHull` 解算二维最小包围凸包与半透明聚类带绘制。
+  - **`colorbar.py`**: 构建 `ColorbarWidget`，原生支持连续梯度 spectrum（如 Viridis, CNPC Strat）及离散岩性 legend swatches。
+  - **`cross_plot_widget.py`**: 基于 `QPainter` 构建交互式 2D 散点交叉图画布，支持手绘多边形套索 (Polygon Lasso) 框选与聚类管理，广播 `points_selected` 跨视图高亮联动信号。
+  - **`src/pages/plots/page.py` (`PlotsPage`)**: 集成 “📈 交叉图分析 (Cross-Plot)” 专属选项卡，提供 300 DPI 矢量 PDF (`QPrinter`) 与 SVG (`QSvgGenerator`) 出版级报告导出功能。
+
+## [0.18.0] - 2026-07-04
+
+### Added
+- **独立井震精细标定工作台 (`geoviz_well_tie` & `WellTiePage`) (Phase 30)**：
+  - **`wavelet_engine.py`**: Ricker、Ormsby 及地震子波提取引擎。
+  - **`synthetic_generator.py`**: 1D 卷积声阻抗与反射系数合成地震记录生成器。
+  - **`WellTieCanvas`**: 7 轨道全流程交互标定画布（深度/TWT, DT/RHOB, AI, RC, Synthetic, Seismic, Correlation），双缓冲 `QPixmap` 渲染，悬浮延迟 <0.5ms。
+  - **`report_export.py`**: 300 DPI 矢量 PDF/SVG 出版级报告导出器，内置国标三栏责任表。
+
+## [0.17.0] - 2026-07-04
+
+### Added
+- **通用 3D 曲面与等值线交互控制与断层屏障 (Phase 29-C)**：
+  - **断层屏障 IDW 插值 (`idw.py`)**: 增加断层线段相交逻辑，隔断断层两侧点的插值权重。
+  - **3D 地层曲面实时高度图更新 (`interactive_horizon.py`)**: 新增 `update_heightmap` 支持控制点动态更新 3D 地层曲面。
+
+## [0.16.0] - 2026-07-04
+
+### Added
+- **出版级矢量图件排版与标准出图引擎 (Phase 29-B)**：
+  - 支持 A4/A3/A2 标准纸张场景与中石油勘探标准三栏责任表 (Title Block) 布局。
+
+## [0.15.0] - 2026-07-04
+
+### Added
+- **3D 地震层位曲面交互高斯雕刻与属性贴图 (Phase 29-A)**：
+  - 3D 高斯笔刷雕刻与属性 GLSL 双采样与实时阴影光照渲染。
+
+
 
 ### Added
 - **Azurite Design System 全量 UI 重构 (Phase 20)**:
