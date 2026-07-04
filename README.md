@@ -236,6 +236,26 @@ python scripts/build.py
 
 ---
 
+## Documentation / 开发文档
+
+GeoViz Engine provides deep technical documentation structured using the [Diataxis](https://diataxis.fr/) framework:
+
+### Tutorials (Learning-oriented)
+- [Well Log Image Track Tutorial](docs/tutorial-well-log-image-track.md) (coming soon)
+
+### How-To Guides (Task-oriented)
+- [How to import LAS data](docs/howto-import-las-data.md)
+- [How to add image tracks](docs/howto-add-image-tracks.md)
+
+### Reference (Information-oriented)
+- [LAS Parser Reference](docs/reference-las-parser.md)
+- [Image Track Reference](docs/reference-image-track.md)
+
+### Explanation (Understanding-oriented)
+- [Understanding LAS Null Handling](docs/explanation-las-null-handling.md)
+
+---
+
 ## Project Structure / 项目结构
 
 ```
