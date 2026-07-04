@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-07-04
+
+### Added
+- **单井图像道与 LAS 2.0/3.0 文件解析器 (Phase 32)**：
+  - **`las_parser.py` (`LASParser`)**: 基于 `lasio` 构建，支持 LAS 2.0/3.0 测井曲线文件解析、-999.25 缺失值自动清洗、深度域对齐与 Header 元数据提取。
+  - **`image_track.py` (`ImageTrack`)**: 基于 `QPainter` 构建单井图像道，支持 Core Photo 井道图像按深度段连续平铺渲染、透明度与平滑插值调节。
+  - **`core_photo_magnifier_dialog.py` (`CorePhotoMagnifierDialog`)**: 交互式岩心照片放大镜弹窗，支持 ROI 区域实时高倍率放大对比与像素/深度标尺测量。
+  - **Diataxis 架构文档套件**: 编写 `howto-import-las-data.md`、`howto-add-image-tracks.md`、`reference-las-parser.md`、`reference-image-track.md` 与 `explanation-las-null-handling.md` 指南与参考文档。
+
 ## [0.19.0] - 2026-07-04
 
 ### Added
