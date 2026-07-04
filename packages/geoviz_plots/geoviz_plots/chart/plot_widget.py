@@ -58,12 +58,48 @@ class PlotWidget(QWidget):
         self.selected_point = None  # (series_name, index)
         self.highlighted_points = {}  # series_name -> set(index)
         
+        self._kdtree = None
+        self._tree_metadata = [] # List of (series_name, local_index, x_val, y_val)
+
+    def _rebuild_kdtree(self):
+        """Build a spatial index of all points for fast snapping."""
+        import numpy as np
+        try:
+            from scipy.spatial import KDTree
+        except ImportError:
+            self._kdtree = None
+            return
+
+        points = []
+        metadata = []
+        
+        for s in self.series_list:
+            if not s.visible or len(s.x) == 0:
+                continue
+            
+            mask = ~np.isnan(s.x) & ~np.isnan(s.y)
+            sx = s.x[mask]
+            sy = s.y[mask]
+            indices = np.where(mask)[0]
+            
+            for i in range(len(sx)):
+                points.append([sx[i], sy[i]])
+                metadata.append((s.name, int(indices[i]), float(sx[i]), float(sy[i])))
+        
+        if points:
+            self._kdtree = KDTree(np.array(points))
+            self._tree_metadata = metadata
+        else:
+            self._kdtree = None
+            self._tree_metadata = []
+        
         # Downsampling threshold
         self.downsample_threshold = 2000
 
     def add_series(self, series):
         """Add a data series (LineSeries or ScatterSeries) to the plot."""
         self.series_list.append(series)
+        self._rebuild_kdtree()
         self.update()
 
     def clear(self):
@@ -260,22 +296,42 @@ class PlotWidget(QWidget):
         closest_dist = 15.0  # Activation radius in pixels
         closest_pt = None  # (series, index, x, y)
         
-        for s in self.series_list:
-            if not s.visible or len(s.x) == 0:
-                continue
-                
-            # Efficient spatial bounds check
-            mask = ~np.isnan(s.x) & ~np.isnan(s.y)
-            sx = s.x[mask]
-            sy = s.y[mask]
-            indices = np.where(mask)[0]
+        if self._kdtree is not None:
+            # 1. Map mouse to data space
+            mx_data, my_data = self.pixel_to_data(mouse_pos.x(), mouse_pos.y())
             
-            for idx, x_val, y_val in zip(indices, sx, sy):
+            # 2. Query nearest neighbors in data space
+            # Since aspect ratio might be unequal, we find 10 neighbors and check screen dist
+            dists, indices = self._kdtree.query([mx_data, my_data], k=min(10, len(self._tree_metadata)))
+            
+            if isinstance(indices, (int, np.integer)):
+                indices = [indices]
+                
+            for idx in indices:
+                if idx >= len(self._tree_metadata): continue
+                s_name, local_idx, x_val, y_val = self._tree_metadata[idx]
                 px, py = self.data_to_pixel(x_val, y_val)
                 dist = math.hypot(mouse_pos.x() - px, mouse_pos.y() - py)
                 if dist < closest_dist:
                     closest_dist = dist
-                    closest_pt = (s.name, idx, x_val, y_val)
+                    closest_pt = (s_name, local_idx, x_val, y_val)
+        else:
+            # Fallback to slow loop if tree not available
+            for s in self.series_list:
+                if not s.visible or len(s.x) == 0:
+                    continue
+                    
+                mask = ~np.isnan(s.x) & ~np.isnan(s.y)
+                sx = s.x[mask]
+                sy = s.y[mask]
+                indices = np.where(mask)[0]
+                
+                for idx, x_val, y_val in zip(indices, sx, sy):
+                    px, py = self.data_to_pixel(x_val, y_val)
+                    dist = math.hypot(mouse_pos.x() - px, mouse_pos.y() - py)
+                    if dist < closest_dist:
+                        closest_dist = dist
+                        closest_pt = (s.name, idx, x_val, y_val)
                     
         if closest_pt:
             s_name, idx, x_val, y_val = closest_pt
@@ -302,11 +358,12 @@ class PlotWidget(QWidget):
 
     def export_pdf(self, filepath: str):
         """Export the plot to a clean vector PDF file."""
+        from PySide6.QtGui import QPageSize
         printer = QPrinter(QPrinter.HighResolution)
         printer.setOutputFormat(QPrinter.PdfFormat)
-        printer.setOutputFile(filepath)
-        printer.setPageSize(QPrinter.A4)
-        
+        printer.setOutputFileName(filepath)
+        printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+
         # Use full page dimensions
         page_rect = printer.pageRect(QPrinter.DevicePixel)
         

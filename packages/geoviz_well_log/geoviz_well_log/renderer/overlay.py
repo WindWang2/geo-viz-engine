@@ -94,12 +94,11 @@ class CrosshairOverlay:
                             break
         return rows
 
-    def paint_overlay(self, painter: QPainter, rect: QRectF, scroll_offset: float = 0.0):
+    def paint_overlay(self, painter: QPainter, rect: QRectF):
         if self._cursor_y is None:
             return
-        # cursor_y is canvas-relative; convert to viewport-relative for rendering
-        cursor_viewport_y = self._cursor_y - scroll_offset
-        if cursor_viewport_y < rect.top() or cursor_viewport_y > rect.bottom():
+        cursor_y = self._cursor_y
+        if cursor_y < rect.top() or cursor_y > rect.bottom():
             return
 
         painter.save()
@@ -108,11 +107,11 @@ class CrosshairOverlay:
         # Dashed horizontal line across full width
         pen = QPen(QColor("#ef4444"), 1, Qt.PenStyle.DashLine)
         painter.setPen(pen)
-        painter.drawLine(int(rect.left()), int(cursor_viewport_y),
-                         int(rect.right()), int(cursor_viewport_y))
+        painter.drawLine(int(rect.left()), int(cursor_y),
+                         int(rect.right()), int(cursor_y))
 
         # Semi-transparent info panel
-        depth = self.depth_at_y(self._cursor_y)
+        depth = self.depth_at_y(cursor_y)
         rows = self._collect_values(depth)
 
         font = QFont()
@@ -131,15 +130,18 @@ class CrosshairOverlay:
         panel_w = max_w
 
         # Position: follow mouse cursor
-        cursor_canvas = self._canvas.mapFromGlobal(QCursor.pos())
-        cursor_x = cursor_canvas.x() - scroll_offset if scroll_offset else cursor_canvas.x()
+        cursor_pos = self._canvas.mapFromGlobal(QCursor.pos())
+        # Convert canvas coordinates to viewport/overlay widget coordinates
+        # (canvas may be horizontally scrolled inside QScrollArea)
+        canvas_offset = self._canvas.pos()
+        cursor_x = float(cursor_pos.x()) + canvas_offset.x()
         px = cursor_x + 16
-        py = cursor_viewport_y - panel_h - 8
-        # Keep panel within canvas bounds
+        py = cursor_y - panel_h - 8
+        # Keep panel within bounds
         if px + panel_w > rect.right():
             px = cursor_x - panel_w - 8
         if py < rect.top():
-            py = cursor_viewport_y + 8
+            py = cursor_y + 8
         px = max(rect.left(), min(px, rect.right() - panel_w))
 
         panel_rect = QRectF(px, py, panel_w, panel_h)

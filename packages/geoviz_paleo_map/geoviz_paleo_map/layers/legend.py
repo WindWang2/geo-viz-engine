@@ -4,6 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
+from geoviz_paleo_map.label_policy import chrome_font_size
 from geoviz_paleo_map.layers.base import PaleoLayer
 from geoviz_paleo_map.style import FaciesStyleResolver, boundary_pen
 from geoviz_paleo_map.viewport import PaleoMapViewport
@@ -31,21 +32,33 @@ class LegendLayer(PaleoLayer):
     def set_facies(self, facies_names: set[str]) -> None:
         self.facies_names = set(facies_names)
 
-    def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-        font = QFont("Sans Serif", 8)
-        painter.setFont(font)
-        metrics = painter.fontMetrics()
-
-        # 1. Compute box height: title row + per-facies rows + separator + 4 fixed rows
+    def _box_geometry(self, viewport: PaleoMapViewport) -> tuple[float, float, float, float, float]:
+        """Return (x0, y0, box_w, box_h, row_h) for the legend panel."""
+        font_px = chrome_font_size(viewport.width, viewport.height, 8)
+        row_h = max(ROW_H, font_px + 8)
         facies_count = len(self.facies_names)
         fixed_rows = 4  # confirmed, inferred, fault, well
         box_w = 140
-        box_h = PADDING * 2 + ROW_H * (1 + facies_count) + 6 + ROW_H * fixed_rows
-        
+        box_h = PADDING * 2 + row_h * (1 + facies_count) + 6 + row_h * fixed_rows
         x0 = viewport.width - box_w - 12
         y0 = viewport.height - box_h - 12
+        return x0, y0, box_w, box_h, row_h
+
+    def reserved_rect(self, viewport: PaleoMapViewport) -> "QRectF":
+        """Screen rect this legend occupies, for label collision avoidance."""
+        x0, y0, box_w, box_h, _ = self._box_geometry(viewport)
+        return QRectF(x0, y0, box_w, box_h)
+
+    def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        font_px = chrome_font_size(viewport.width, viewport.height, 8)
+        font = QFont("Sans Serif", font_px)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+
+        # 1. Box geometry (shared with reserved_rect)
+        x0, y0, box_w, box_h, row_h = self._box_geometry(viewport)
 
         # 2. Background
         painter.setPen(QPen(BORDER_COLOR, 1))
@@ -60,7 +73,7 @@ class LegendLayer(PaleoLayer):
         painter.drawText(QPointF(x0 + PADDING, y0 + PADDING + 12), "图例")
         painter.setFont(font)
 
-        y = y0 + PADDING + ROW_H + 12
+        y = y0 + PADDING + row_h + 12
 
         # 4. Facies swatches
         painter.setPen(QPen(TEXT_COLOR, 0))
@@ -73,7 +86,7 @@ class LegendLayer(PaleoLayer):
             painter.drawRect(QRectF(sw_x, sw_y, SWATCH_W, SWATCH_H))
             painter.setPen(QPen(TEXT_COLOR, 0))
             painter.drawText(QPointF(sw_x + SWATCH_W + 6, y), name)
-            y += ROW_H
+            y += row_h
 
         # 5. Separator
         painter.setPen(QPen(QColor("#e2e8f0"), 1))
@@ -92,7 +105,7 @@ class LegendLayer(PaleoLayer):
                              QPointF(x0 + PADDING + SWATCH_W, y - 4))
             painter.setPen(QPen(TEXT_COLOR, 0))
             painter.drawText(QPointF(x0 + PADDING + SWATCH_W + 6, y), label)
-            y += ROW_H
+            y += row_h
 
         # 7. Well dot
         painter.setPen(QPen(QColor("#ffffff"), 1.5))

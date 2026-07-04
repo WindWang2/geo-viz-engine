@@ -122,16 +122,23 @@ class CrossWellScene(QGraphicsScene):
         return len(self._well_items)
 
     def clear_all(self):
-        for item in list(self._well_items.values()):
-            self.removeItem(item)
-        for band in self._bands[:]:
-            self.removeItem(band)
+        """Clear all wells, correlation bands, and temporary data from the scene."""
+        # Use QGraphicsScene.clear() to properly delete all QGraphicsItem objects
+        super().clear()
+        
         self._well_items.clear()
         self._well_order.clear()
         self._bands.clear()
         self._formation_data.clear()
         self._manual_link_picks.clear()
         self._manual_link_active = False
+        
+        # Re-add persistent items
+        self._ruler = DepthRulerItem()
+        self.addItem(self._ruler)
+        self._ruler.setPos(0, 0)
+        
+        self.update()
         self._update_scene_rect()
 
     def update_well_tracks(self, well_name: str, tracks: list):

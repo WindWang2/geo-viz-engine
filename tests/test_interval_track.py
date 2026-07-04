@@ -61,3 +61,24 @@ def test_interval_track_empty_intervals(qtbot):
     painter = QPainter(pm)
     track.paint_content(painter, QRectF(0, 0, 80, 800))
     painter.end()
+
+
+def test_interval_track_computes_one_label_policy_per_paint(qtbot, monkeypatch):
+    from geoviz_well_log.renderer.label_layout import LabelPolicy
+
+    calls = []
+
+    def fake_policy(rect, depth_span, interval_heights):
+        calls.append((depth_span, list(interval_heights)))
+        return LabelPolicy(font_px=13, max_lines=1, min_label_height=14)
+
+    monkeypatch.setattr("geoviz_well_log.renderer.interval_track.compute_label_policy", fake_policy)
+    track = IntervalTrack(intervals=_make_intervals(), label="System", width=80)
+    qtbot.addWidget(track)
+    track.set_depth_range(0, 300)
+    pm = QPixmap(80, 800)
+    painter = QPainter(pm)
+    track.paint_content(painter, QRectF(0, 0, 80, 800))
+    painter.end()
+
+    assert calls == [(300, [pytest.approx(800 / 3)] * 3)]

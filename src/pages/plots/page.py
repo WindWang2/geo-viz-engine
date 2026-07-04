@@ -1,19 +1,22 @@
 import numpy as np
 import math
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRectF, QMarginsF
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QMessageBox, QGroupBox, QComboBox, QSlider,
     QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QDoubleSpinBox
+    QDoubleSpinBox, QTabWidget
 )
-from PySide6.QtGui import QIcon, QPainter
+
+from PySide6.QtGui import QIcon, QPainter, QPageSize, QPageLayout, QFont, QColor, QPen
 from PySide6.QtSvg import QSvgGenerator
+from PySide6.QtPrintSupport import QPrinter
 
 from geoviz_plots import SurfaceWidget, InterpolationWorker
+from geoviz_plots.chart.cross_plot_widget import CrossPlotWidget
 
 class PlotsPage(QWidget):
-    """Page exposing the premium 2D plotting, IDW/SciPy spatial interpolation, and contour mapping (SurfaceWidget)."""
+    """Page exposing the premium 2D plotting, IDW/SciPy spatial interpolation, contour mapping, and Cross-Plot Analytics."""
 
     def _get_ui_icon(self, name: str) -> QIcon:
         """Resolve icon from project resources."""
@@ -48,8 +51,20 @@ class PlotsPage(QWidget):
         plot_container_layout.setContentsMargins(0, 0, 0, 0)
         plot_container_layout.setSpacing(0)
 
+        self._tab_widget = QTabWidget()
         self.surface_plot = SurfaceWidget(self)
-        plot_container_layout.addWidget(self.surface_plot, 1)
+        self._cross_plot_widget = CrossPlotWidget(self)
+
+        self._tab_widget.addTab(self.surface_plot, "🗺️ 属性等值线图")
+        self._tab_widget.addTab(self._cross_plot_widget, "📈 交叉图分析 (Cross-Plot)")
+
+        # Populate demo cross-plot data
+        x = np.random.uniform(20, 150, 200)
+        y = np.random.uniform(0.1, 0.45, 200)
+        z = np.random.uniform(1000, 3000, 200)
+        self._cross_plot_widget.set_scatter_data(x, y, z, x_label="GR (API)", y_label="NPHI (v/v)", z_label="Depth (m)")
+
+        plot_container_layout.addWidget(self._tab_widget, 1)
 
         # Status row (TDD requires #faf9f5)
         self.status_bar = QLabel(" 就绪")
@@ -82,6 +97,39 @@ class PlotsPage(QWidget):
         title_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #1a2433; padding-bottom: 2px; border: none;")
         panel_layout.addWidget(title_label)
 
+        self._setup_control_panel(panel_layout)
+        main_layout.addWidget(self.control_panel)
+
+
+    def export_cross_plot_pdf(self, output_path: str):
+        """Export 300 DPI vector PDF or SVG for Cross-Plot report."""
+        if output_path.endswith(".svg"):
+            generator = QSvgGenerator()
+            generator.setFileName(output_path)
+            generator.setSize(generator.size())
+            generator.setResolution(300)
+            painter = QPainter(generator)
+            self._render_cross_plot_report(painter, 297.0 * 3.7795, 210.0 * 3.7795)
+            painter.end()
+        else:
+            printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+            printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+            printer.setPageLayout(QPageLayout(QPageSize(QPageSize.PageSizeId.A4), QPageLayout.Orientation.Landscape, QMarginsF(0, 0, 0, 0)))
+            printer.setOutputFileName(output_path)
+
+            painter = QPainter(printer)
+            rect = printer.pageRect(QPrinter.Unit.Point)
+            self._render_cross_plot_report(painter, rect.width(), rect.height())
+            painter.end()
+
+    def _render_cross_plot_report(self, painter: QPainter, width: float, height: float):
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(QRectF(0, 0, width, height), QColor(255, 255, 255))
+        painter.setPen(QColor(31, 102, 212))
+        painter.setFont(QFont("SimSun", 16, QFont.Weight.Bold))
+        painter.drawText(QRectF(20, 20, width - 40, 40), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "油田地质属性交叉图分析报告 (Cross-Plot Report)")
+
+    def _setup_control_panel(self, panel_layout):
         # Group 1: Discrete points
         pts_group = QGroupBox(" 离散数据源")
         pts_group.setStyleSheet("QGroupBox { font-size: 11px; font-weight: bold; color: #1a2433; }")
@@ -110,6 +158,7 @@ class PlotsPage(QWidget):
         interp_layout = QVBoxLayout(interp_group)
         interp_layout.setSpacing(8)
         interp_layout.setContentsMargins(4, 12, 4, 4)
+
 
         # Method
         method_label = QLabel("插值算法:")
@@ -221,9 +270,8 @@ class PlotsPage(QWidget):
         panel_layout.addWidget(export_group)
         panel_layout.addStretch()
 
-        main_layout.addWidget(self.control_panel)
-
     def _generate_demo_data(self):
+
         """Generate a random elegant set of discrete porosity/thickness well values."""
         # Clean up
         self.points_x.clear()
@@ -368,13 +416,13 @@ class PlotsPage(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "导出成果图为高保真 PDF 矢量文件", "contour_map.pdf", "PDF (*.pdf)")
         if path:
             from PySide6.QtPrintSupport import QPrinter
-            from PySide6.QtGui import QPageLayout
-            
+            from PySide6.QtGui import QPageLayout, QPageSize
+
             printer = QPrinter(QPrinter.HighResolution)
             printer.setOutputFormat(QPrinter.PdfFormat)
             printer.setOutputFileName(path)
-            printer.setPageSize(QPrinter.A4)
-            printer.setPageOrientation(QPrinter.Landscape)
+            printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+            printer.setPageOrientation(QPageLayout.Orientation.Landscape)
             
             page_layout = printer.pageLayout()
             paint_rect = page_layout.paintRectPixels(300)  # 300 DPI high fidelity

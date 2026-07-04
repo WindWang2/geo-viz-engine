@@ -11,7 +11,7 @@ from PySide6.QtGui import QBrush, QColor, QPen
 
 from geoviz_well_log.renderer.pattern_engine import PatternEngine
 
-from geoviz_paleo_map.models import FaciesStyle
+from geoviz_paleo_map.models import FaciesStyle, VectorPattern
 
 
 DEFAULT_BASE_COLOR = QColor("#d9d4c8")
@@ -139,6 +139,41 @@ class FaciesStyleResolver:
         style = FaciesStyle(base_color=base, brush=brush, pattern_id=pattern_id)
         self._cache[facies_name] = style
         return style
+
+    def get_adaptive_brush(self, facies_name: str, scale: float) -> QBrush:
+        """Return a QBrush with transformed pattern size based on viewport scale.
+        Grains scale slower than the map (sqrt of scale) to maintain readability.
+        """
+        import math
+        from PySide6.QtGui import QTransform
+        style = self.resolve(facies_name)
+        if style.brush.style() == Qt.BrushStyle.SolidPattern:
+            return style.brush
+
+        brush = QBrush(style.brush)
+        # Adaptive scaling: grains scale by sqrt(scale)
+        # If scale=4 (zoomed in), grains are 2x larger than base.
+        # If scale=0.25 (zoomed out), grains are 0.5x smaller than base.
+        grain_scale = math.sqrt(max(1e-6, scale))
+        t = QTransform()
+        t.scale(grain_scale, grain_scale)
+        brush.setTransform(t)
+        return brush
+
+    def get_vector_pattern(self, facies_name: str) -> VectorPattern | None:
+        """Return a VectorPattern for crisp vector tiling, or None if no pattern."""
+        style = self.resolve(facies_name)
+        if style.pattern_id is None:
+            return None
+        picture = self._engine.get_picture(style.pattern_id)
+        if picture is None:
+            return None
+        return VectorPattern(
+            picture=picture,
+            base_color=style.base_color,
+            alpha=0.4,
+            tile_size=float(self._engine._tile_size),
+        )
 
 
 

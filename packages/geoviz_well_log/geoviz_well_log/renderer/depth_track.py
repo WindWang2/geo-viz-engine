@@ -35,7 +35,7 @@ class DepthTrack(BaseTrack):
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        painter.setClipRect(rect)
+        painter.setClipRect(rect.adjusted(-2, -2, 2, 2))
 
         # Horizontal grid lines (ECharts splitLine parity)
         self.paint_grid(painter, rect)

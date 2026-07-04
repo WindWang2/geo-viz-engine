@@ -32,9 +32,13 @@ def test_paleo_map_page_split_layout(page):
     assert isinstance(page.export_map_btn, QPushButton)
 
 def test_paleo_map_page_overlays(page):
-    # Verify floating toolbar (zoomIn, zoomOut, fit) on the map canvas area
-    assert hasattr(page, "float_tb")
-    assert isinstance(page.float_tb, QFrame)
+    # Verify zoom controls (zoomIn, zoomOut, fit) moved to right sidebar
+    assert hasattr(page, "btn_zoom_in")
+    assert hasattr(page, "btn_zoom_out")
+    assert hasattr(page, "btn_fit")
+    assert isinstance(page.btn_zoom_in, QPushButton)
+    assert isinstance(page.btn_zoom_out, QPushButton)
+    assert isinstance(page.btn_fit, QPushButton)
 
 def test_paleo_map_page_legend_update(page):
     # Populate map view with a feature and verify _update_facies_legend is safe and functions correctly

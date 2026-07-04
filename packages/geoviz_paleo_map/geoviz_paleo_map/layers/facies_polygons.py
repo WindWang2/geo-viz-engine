@@ -8,6 +8,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
 from geoviz_paleo_map.layers.base import PaleoLayer
+from geoviz_paleo_map.models import VectorPattern
 from geoviz_paleo_map.projection import lnglat_to_world
 from geoviz_paleo_map.style import FaciesStyleResolver, boundary_pen
 from geoviz_paleo_map.viewport import PaleoMapViewport
@@ -23,6 +24,7 @@ class _Item:
     bbox: tuple[float, float, float, float]  # min_x, min_y, max_x, max_y
     boundary_kind: str | None
     cache_key: str = ""
+    polygons: list = None  # list[np.ndarray] of ring coords in world space (for RDP simplify)
 
     def __post_init__(self):
         if not self.cache_key:
@@ -218,36 +220,65 @@ class FaciesPolygonsLayer(PaleoLayer):
                     facies_name: str,
                     feature_id: str,
                     boundary_kind: str | None) -> _Item | None:
+        import numpy as np
+        from geoviz_paleo_map.projection import lnglat_to_world
         path = QPainterPath()
         min_x = float("inf"); min_y = float("inf")
         max_x = float("-inf"); max_y = float("-inf")
+        pts_array: list = []
         for ring in poly:
             if not ring:
                 continue
-            pts: list[QPointF] = []
-            for lng, lat in ring:
-                x, y = lnglat_to_world(lng, lat)
-                pts.append(QPointF(x, y))
-                if x < min_x: min_x = x
-                if x > max_x: max_x = x
-                if y < min_y: min_y = y
-                if y > max_y: max_y = y
-            if not pts:
-                continue
-            path.moveTo(pts[0])
-            for p in pts[1:]:
-                path.lineTo(p)
+            ring_world = np.array([lnglat_to_world(p[0], p[1]) for p in ring])
+            pts_array.append(ring_world)
+            xs = ring_world[:, 0]; ys = ring_world[:, 1]
+            min_x = min(min_x, xs.min()); max_x = max(max_x, xs.max())
+            min_y = min(min_y, ys.min()); max_y = max(max_y, ys.max())
+            path.moveTo(QPointF(ring_world[0, 0], ring_world[0, 1]))
+            for i in range(1, len(ring_world)):
+                path.lineTo(QPointF(ring_world[i, 0], ring_world[i, 1]))
             path.closeSubpath()
         if path.isEmpty():
             return None
         path.setFillRule(Qt.FillRule.OddEvenFill)
         return _Item(facies_name=facies_name, feature_id=feature_id, path=path,
                       bbox=(min_x, min_y, max_x, max_y),
-                      boundary_kind=boundary_kind)
+                      boundary_kind=boundary_kind,
+                      polygons=pts_array)
 
     @staticmethod
     def _bbox_overlaps(a, b) -> bool:
         return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+    def _draw_vector_fill(self, painter: QPainter, screen_path: QPainterPath,
+                          vp: VectorPattern, viewport_scale: float,
+                          opacity: float = 1.0) -> None:
+        """Fill a screen-space path with a tiled vector pattern.
+
+        The tile grows with the square root of the viewport scale so the grain
+        stays visually stable across zoom levels, clipped to the path.
+        """
+        import math
+        painter.fillPath(screen_path, vp.base_color)
+        painter.save()
+        painter.setClipPath(screen_path, Qt.ClipOperation.IntersectClip)
+        grain_scale = math.sqrt(max(1e-06, viewport_scale))
+        tile = max(2, vp.tile_size * grain_scale)
+        pic_scale = tile / 32
+        painter.setOpacity(vp.alpha * opacity)
+        bbox = screen_path.boundingRect()
+        start_x = int(bbox.left() / tile) * tile
+        start_y = int(bbox.top() / tile) * tile
+        end_x = int(bbox.right()) + int(tile)
+        end_y = int(bbox.bottom()) + int(tile)
+        for y in range(int(start_y), end_y, int(tile)):
+            for x in range(int(start_x), end_x, int(tile)):
+                painter.save()
+                painter.translate(x, y)
+                painter.scale(pic_scale, pic_scale)
+                vp.picture.play(painter)
+                painter.restore()
+        painter.restore()
 
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
         vp_bbox = viewport.world_bbox()
@@ -271,19 +302,31 @@ class FaciesPolygonsLayer(PaleoLayer):
         # 3. Draw visible polygons FILLS ONLY (screen-space paths)
         has_selection = self._selected_id is not None
         for (facies_name, boundary_kind), items in groups.items():
-            style = self._resolver.resolve(facies_name)
-            painter.setPen(QPen(Qt.PenStyle.NoPen))
-            for item in items:
-                screen_path = self._screen_cache.get_or_build(
-                    item.cache_key, item.path, viewport)
-                if has_selection and item.feature_id != self._selected_id:
-                    painter.setOpacity(0.6)
-                    painter.setBrush(style.brush)
-                    painter.drawPath(screen_path)
-                    painter.setOpacity(1.0)
-                else:
-                    painter.setBrush(style.brush)
-                    painter.drawPath(screen_path)
+            vp = self._resolver.get_vector_pattern(facies_name)
+            if vp is not None:
+                # Tiled vector-pattern fill (grain stable across zoom)
+                for item in items:
+                    screen_path = self._screen_cache.get_or_build(
+                        item.cache_key, item.path, viewport, item.polygons)
+                    if has_selection and item.feature_id != self._selected_id:
+                        opacity = 0.6
+                    else:
+                        opacity = 1.0
+                    self._draw_vector_fill(painter, screen_path, vp, viewport.scale, opacity)
+            else:
+                # Flat / composite brush fill
+                brush = self._resolver.get_adaptive_brush(facies_name, viewport.scale)
+                painter.setPen(QPen(Qt.PenStyle.NoPen))
+                painter.setBrush(brush)
+                for item in items:
+                    screen_path = self._screen_cache.get_or_build(
+                        item.cache_key, item.path, viewport, item.polygons)
+                    if has_selection and item.feature_id != self._selected_id:
+                        painter.setOpacity(0.6)
+                        painter.drawPath(screen_path)
+                        painter.setOpacity(1.0)
+                    else:
+                        painter.drawPath(screen_path)
 
         # 3b. Draw selection glow
         if has_selection:
@@ -294,7 +337,7 @@ class FaciesPolygonsLayer(PaleoLayer):
                     painter.setPen(glow_pen)
                     painter.setBrush(Qt.BrushStyle.NoBrush)
                     screen_path = self._screen_cache.get_or_build(
-                        item.cache_key, item.path, viewport)
+                        item.cache_key, item.path, viewport, item.polygons)
                     painter.drawPath(screen_path)
                     break
 
@@ -334,6 +377,8 @@ class FaciesPolygonsLayer(PaleoLayer):
                 for border_item in visible_borders:
                     active_lock = None
                     active_lock_depth = 0
+                    locked_geometry = False
+                    locked_feature_id = None
                     if self._hierarchy is not None and self._locked_ids:
                         node = self._hierarchy.get_node(border_item.feature_id)
                         if node is not None:
@@ -342,6 +387,8 @@ class FaciesPolygonsLayer(PaleoLayer):
                             for f in chain:
                                 if f.id in self._locked_ids:
                                     active_lock = self._locked_ids[f.id]
+                                    locked_geometry = True
+                                    locked_feature_id = f.id
                                     break
 
                     levels = ["facies", "sub_facies", "micro_facies"]
@@ -361,7 +408,20 @@ class FaciesPolygonsLayer(PaleoLayer):
 
                     screen_border = self._screen_cache.get_or_build(
                         border_item.cache_key, border_item.path, viewport)
-                    if is_faded:
+                    # Highlight the locked feature's OWN boundary (bold + red),
+                    # whatever its level (相/亚相/微相) — match the border drawn
+                    # for the locked feature itself, not only the top facies level.
+                    is_locked_border = (locked_geometry
+                                        and border_item.feature_id == locked_feature_id
+                                        and not is_faded)
+                    if is_locked_border:
+                        painter.drawPath(screen_border)
+                        locked_pen = QPen(QColor("#dc2626"), max(3.0, pen.widthF() + 1.4))
+                        locked_pen.setCosmetic(True)
+                        painter.setPen(locked_pen)
+                        painter.drawPath(screen_border)
+                        painter.setPen(pen)
+                    elif is_faded:
                         faded_pen = QPen(pen)
                         color = faded_pen.color()
                         color.setAlpha(45)
@@ -382,11 +442,21 @@ class FaciesPolygonsLayer(PaleoLayer):
                     pen = boundary_pen(boundary_kind)
                 pen.setCosmetic(True)
                 painter.setPen(pen)
-                painter.setBrush(style.brush)
-                for item in items:
-                    screen_path = self._screen_cache.get_or_build(
-                        item.cache_key, item.path, viewport)
-                    painter.drawPath(screen_path)
+                vp = self._resolver.get_vector_pattern(facies_name)
+                if vp is not None:
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    for item in items:
+                        screen_path = self._screen_cache.get_or_build(
+                            item.cache_key, item.path, viewport)
+                        self._draw_vector_fill(painter, screen_path, vp, viewport.scale)
+                        painter.setPen(pen)
+                        painter.drawPath(screen_path)
+                else:
+                    painter.setBrush(style.brush)
+                    for item in items:
+                        screen_path = self._screen_cache.get_or_build(
+                            item.cache_key, item.path, viewport)
+                        painter.drawPath(screen_path)
 
         painter.restore()
 

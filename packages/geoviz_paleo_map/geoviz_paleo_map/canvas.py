@@ -43,7 +43,7 @@ class PaleoMapCanvas(QWidget):
         self.setMouseTracking(True)
         self._press_pos: QPointF | None = None
 
-        self._engine = pattern_engine or PatternEngine()
+        self._engine = pattern_engine or PatternEngine(tile_size=10)
         self._resolver = FaciesStyleResolver(self._engine)
 
         self._viewport = PaleoMapViewport(
@@ -312,6 +312,19 @@ class PaleoMapCanvas(QWidget):
         self._cached_zoom = z
         return last
 
+    def _sync_chrome_rects(self, viewport) -> None:
+        """Feed chrome (legend/arrow/scale bar) footprints to region-label layers
+        so labels avoid drawing under decorations."""
+        rects = []
+        for layer in self._layers:
+            if getattr(layer, "is_chrome", False):
+                r = layer.reserved_rect(viewport)
+                if r is not None:
+                    rects.append(r)
+        for layer in self._layers:
+            if isinstance(layer, RegionLabelsLayer):
+                layer.chrome_rects = rects
+
     def paintEvent(self, event):
         painter = QPainter(self)
         try:
@@ -321,6 +334,7 @@ class PaleoMapCanvas(QWidget):
                     self._current_active_level = current_level
                     self._update_active_layers()
 
+            self._sync_chrome_rects(self._viewport)
             for layer, cache in zip(self._layers, self._layer_caches):
                 if cache is None:
                     layer.paint(painter, self._viewport)
@@ -424,6 +438,14 @@ class PaleoMapCanvas(QWidget):
         for root in self._hierarchy.roots:
             self._collect_visible_features(root, active_level, visible_features, active_locked_ids=active_locked_ids)
 
+        polygon_features = list(visible_features)
+        visible_ids = {feature.id for feature in polygon_features}
+        for fid in self._locked_ids:
+            node = self._hierarchy.get_node(fid)
+            if node is not None and node.feature.level == "facies" and fid not in visible_ids:
+                polygon_features.append(node.feature)
+                visible_ids.add(fid)
+
         feats = [
             {"type": "Feature", "properties": {
                 "facies": ff.facies_name,
@@ -432,7 +454,7 @@ class PaleoMapCanvas(QWidget):
                 "boundary_type": None,
                 "level": ff.level,
             }, "geometry": ff.geometry}
-            for ff in visible_features
+            for ff in polygon_features
         ]
 
         pens = {

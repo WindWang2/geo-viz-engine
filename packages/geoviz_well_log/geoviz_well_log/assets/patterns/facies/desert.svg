@@ -1,8 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <path d="M2,8 Q8,2 14,8" fill="none" stroke="#000000" stroke-width="1.0"/>
-  <path d="M18,6 Q24,0 30,6" fill="none" stroke="#000000" stroke-width="1.0"/>
-  <path d="M6,18 Q12,12 18,18" fill="none" stroke="#000000" stroke-width="1.0"/>
-  <path d="M22,16 Q28,10 30,16" fill="none" stroke="#000000" stroke-width="1.0"/>
-  <path d="M4,28 Q10,22 16,28" fill="none" stroke="#000000" stroke-width="1.0"/>
-  <path d="M20,26 Q26,20 30,26" fill="none" stroke="#000000" stroke-width="1.0"/>
+  <path d="M2,5 Q8,1 14,5" fill="none" stroke="#000000" stroke-width="0.6"/>
+  <path d="M18,4 Q24,0 30,4" fill="none" stroke="#000000" stroke-width="0.6"/>
+  <path d="M2,12 Q8,8 14,12" fill="none" stroke="#000000" stroke-width="0.6"/>
+  <path d="M18,11 Q24,7 30,11" fill="none" stroke="#000000" stroke-width="0.6"/>
+  <path d="M2,19 Q8,15 14,19" fill="none" stroke="#000000" stroke-width="0.6"/>
+  <path d="M18,18 Q24,14 30,18" fill="none" stroke="#000000" stroke-width="0.6"/>
+  <path d="M2,26 Q8,22 14,26" fill="none" stroke="#000000" stroke-width="0.6"/>
+  <path d="M18,25 Q24,21 30,25" fill="none" stroke="#000000" stroke-width="0.6"/>
 </svg>

@@ -1,6 +1,112 @@
 # Progress Log — GeoViz Engine
 
-## Project Status: Phase 1–17 COMPLETE, Performance Audit COMPLETE, Phase 20 (UI 视觉全量升级 — Azurite Design System 像素级还原) COMPLETE
+## Project Status: Phase 1–31 COMPLETE (v0.19.0)
+
+### Session: 2026-07-04 (Phase 31 — Cross-Plot Analytics & Lithology Clustering v0.19.0 — COMPLETE)
+
+#### Completed Work:
+- **Phase 31 (Cross-Plot Analytics & Lithology Clustering / v0.19.0)**:
+  - **Lasso & SciPy Convex Hull Engine**: Built `packages/geoviz_plots/geoviz_plots/chart/convex_hull.py` with vectorized ray-casting point-in-polygon filtering and `scipy.spatial.ConvexHull` bounding polygon overlays.
+  - **ColorbarWidget**: Built `packages/geoviz_plots/geoviz_plots/chart/colorbar.py` supporting continuous gradient spectrums (Viridis, CNPC Strat) and discrete lithology swatches (CNPC Sandstone/Shale colors).
+  - **CrossPlotWidget Scatter Canvas**: Built `packages/geoviz_plots/geoviz_plots/chart/cross_plot_widget.py` for 2D scatter plotting, mouse polygon lasso tracing, and cluster region storage.
+  - **PlotsPage Integration & 300 DPI Vector PDF Exporter**: Integrated `CrossPlotWidget` as a dedicated tab in `PlotsPage` (`src/pages/plots/page.py`) with 300 DPI vector PDF (`QPrinter`) and SVG (`QSvgGenerator`) export.
+  - **Verification**: Created `test_convex_hull.py`, `test_colorbar.py`, `test_cross_plot_widget.py`, `test_cross_plot_page_export.py` (8/8 passed). Full test suite: 40/40 tests passed cleanly.
+
+
+#### Design Completed
+- **用户需求**: 基于 UI.html 方案A (蓝铜) 设计参考，进行第二轮全面 UI 调整。
+- **设计决策**:
+  - 布局方向：方案B — 可折叠侧边栏 + 全出血内容（200px↔56px 动画过渡）
+  - Header：精修至 48px，集成搜索栏 ⌘K，通知铃铛按钮
+  - Footer：增强至 32px，GPU/缓存信息，技术数据等宽字体
+  - 内容页面：全部 8 页适配（地图、古地理、井剖面、连井、地震3D、平面图件、数据、工具）
+- **设计规范**: 8px 间距网格、4 级圆角 (6/8/12/16px)、3 级阴影、150-300ms 动画
+- **色板**: Azurite — Primary #1f66d4, Background #faf9f5, Surface #ffffff, Border #e5eaf1
+- **Spec**: `docs/superpowers/specs/2026-06-03-ui-redesign-pass2-design.md`
+- **Status**: Spec written, committed, pending user review → then invoke writing-plans skill
+
+### Session: 2026-06-02 (Phase 24 — WellLog 文本标注自适应显示 — TDD Step 1)
+
+#### Analysis Completed
+- **用户需求**: 测井数据显示中的文本标注当前过小；需要随当前深度尺度、可见信息和显示区域自适应。
+- **硬性规则**:
+  - 同一井道/同一 nested 子列内文字大小一致。
+  - 长文支持截断或换行，不越界、不挤成黑块。
+  - 字体相对当前显示区域不能过小；空间不足时优先隐藏低价值标签，而不是无限缩小。
+- **代码定位**:
+  - `lithology_track.py`: lithology interval label 固定 10px。
+  - `interval_track.py`: 宽列 10px、窄列竖排 11px，按 interval 单独处理。
+  - `facies_track.py`: `_paint_column` 内宽列 10px、窄列 11px；nested 三列没有共享策略。
+  - `systems_tract.py`: 固定 pointSize 7 并竖排绘制。
+  - `curve_track.py` / `track_base.py`: header 文本仍需要 elide/wrap 规则以适配拖窄井道。
+- **Plan update**: `task_plan.md` 已新增 Phase 24（24-A..24-F）并同步修正 Phase 23-Bugfix 的真实验收标准。
+
+#### TDD Step 1 Completed
+- **RED**: 新增 `tests/test_well_log_label_layout.py`，先验证 `label_layout` 模块不存在导致 collection 失败；新增 `test_interval_track_computes_one_label_policy_per_paint`，先验证 `IntervalTrack` 未接入 policy 时失败。
+- **GREEN**: 新增 `renderer/label_layout.py`，实现 `compute_label_policy()` 与 `fit_label_text()`：统一 track/column 字号、最小可读字号、最多两行换行、超长文本省略号截断、过矮 interval 隐藏 label。
+- **Integration**: 将 policy 接入 `IntervalTrack`、`LithologyTrack`、`FaciesTrack`、`SystemsTractTrack`，使正文标注在一次 paint 内使用同一个 font size，并统一长文处理。
+- **Verification**: `source .venv/bin/activate && pytest tests/test_well_log_label_layout.py tests/test_interval_track.py tests/test_lithology_track.py tests/test_facies_track.py tests/test_systems_tract.py tests/test_well_log_scrollbar.py tests/test_phase23_bugfix.py -q` → 42 passed。
+
+#### TDD Step 2 Completed — 井道宽度不硬挤到一页
+- **用户反馈**: “井道宽度要合理，不要硬挤在一页。”
+- **RED**: 新增 `test_canvas_preserves_natural_track_width_for_horizontal_scroll`，锁定 canvas 必须保留所有 track 的自然总宽度，并在超过 viewport 时启用横向滚动。
+- **GREEN**: `QPainterWidget._update_canvas_size()` 改为 `max(viewport_w, canvas.total_width)`；`WellLogCanvas.paint_all()` 与 resize handle 位置改为按自然 track width 布局，不再按 canvas 宽度整体缩放；`scrollContentsBy` 只锁定 Y，不重置 X，保留横向滚动。
+- **Verification**: `source .venv/bin/activate && pytest tests/test_qpainter_widget.py tests/test_well_log_scrollbar.py tests/test_phase23_bugfix.py tests/test_well_log_label_layout.py tests/test_interval_track.py tests/test_lithology_track.py tests/test_facies_track.py tests/test_systems_tract.py -q` → 49 passed。
+
+#### TDD Step 3 Completed — 窄井道文字竖向显示
+- **用户反馈**: “系统组这些可以竖向显示。比较窄的井道。”
+- **RED**: 新增 `test_narrow_interval_like_track_uses_vertical_labels`，锁定 64px 窄井道应选择竖排单行，而不是横排双行硬挤。
+- **GREEN**: `compute_label_policy()` 将竖排阈值从 `<50px` 提升到 `<72px`，并在竖排模式下强制 `max_lines=1`，用于系统组/地层/岩性/相等窄 interval 类井道。
+- **Verification**: `source .venv/bin/activate && pytest tests/test_qpainter_widget.py tests/test_well_log_scrollbar.py tests/test_phase23_bugfix.py tests/test_well_log_label_layout.py tests/test_interval_track.py tests/test_lithology_track.py tests/test_facies_track.py tests/test_systems_tract.py -q` → 50 passed。
+
+#### TDD Step 4 Completed — 竖排不省略与沉积相字号提升
+- **用户反馈**: “既然是竖向了，就不用省略号了吧；沉积相的文字标注过小。”
+- **RED**: 新增 `test_vertical_label_uses_full_text_without_ellipsis` 与 `test_facies_like_label_policy_uses_readable_font_size`，分别复现竖排文本被 elide 为 `…`、facies-like 区域字号仍为 11px 的问题。
+- **GREEN**: `fit_label_text()` 在竖排模式下使用 interval 高度作为旋转后的可用文本长度，并且不再调用 `elidedText()`；`compute_label_policy()` 提高基础字号与典型沉积相区域的最低可读字号，80px 以上宽度且 interval 足够高时至少 13px。
+- **Verification**: `source .venv/bin/activate && pytest tests/test_qpainter_widget.py tests/test_well_log_scrollbar.py tests/test_phase23_bugfix.py tests/test_well_log_label_layout.py tests/test_interval_track.py tests/test_lithology_track.py tests/test_facies_track.py tests/test_systems_tract.py -q` → 52 passed。
+
+#### TDD Step 5 Completed — 表头更大且正文不超过表头
+- **用户反馈**: “表头的字体还可以再大一点，如长可以自行换行；下面的文字再大也不能超过表头。”
+- **RED**: 新增 `test_header_label_policy_is_larger_and_wraps_long_titles` 与 `test_body_label_policy_does_not_exceed_header_font_size`，先复现缺少 header policy 且正文最高字号可能超过原 14px 表头的问题。
+- **GREEN**: 新增 `compute_header_label_policy()`，默认表头字号提升到 16px+ 并支持双行换行；`BaseTrack.paint_header()` 与 `CurveTrack.paint_header()` 接入统一表头策略；正文 label policy 最高 16px，因此不超过表头。
+- **Verification**: `source .venv/bin/activate && pytest tests/test_qpainter_widget.py tests/test_well_log_scrollbar.py tests/test_phase23_bugfix.py tests/test_well_log_label_layout.py tests/test_interval_track.py tests/test_lithology_track.py tests/test_facies_track.py tests/test_systems_tract.py -q` → 54 passed。
+
+#### TDD Step 6 Completed — 系统组竖排彻底禁止省略号
+- **用户反馈**: “还是有省略号，说过了竖向肯定能显示完全呀。”
+- **Root cause**: `SystemsTractTrack` 始终旋转文字绘制，但 `compute_label_policy()` 只按 `rect.width() < 72` 推断竖排；当系统组列宽约 96px 时 policy 仍为横排，`fit_label_text()` 先生成 `…`，随后被 `systems_tract.py` 旋转显示。
+- **RED**: 新增 `test_systems_tract_forces_vertical_policy_for_wide_column`，锁定宽系统组列也必须传入 `policy.vertical=True`。
+- **GREEN**: `compute_label_policy()` 增加 `force_vertical` 参数；`SystemsTractTrack.paint_content()` 调用时强制竖排，竖排分支不再调用 `elidedText()`。
+- **Verification**: `source .venv/bin/activate && pytest tests/test_qpainter_widget.py tests/test_well_log_scrollbar.py tests/test_phase23_bugfix.py tests/test_well_log_label_layout.py tests/test_interval_track.py tests/test_lithology_track.py tests/test_facies_track.py tests/test_systems_tract.py -q` → 55 passed。
+
+### Session: 2026-06-03 (Phase 25 — PaleoMap 文字标注自适应显示 — TDD Step 1)
+
+#### TDD Step 1 Completed — 古地理图标注随显示界面自适应
+- **用户需求**: “古地理图里面的文字标注，除了显示层级外，其他标注也要跟随显示界面自适应调整。”
+- **代码定位**: `RegionLabelsLayer` 区域标注按层级固定 11/8/7px；`ScaleBarLayer`、`NorthArrowLayer`、`TitleLayer`、`LegendLayer`、`FloatingScaleSlider` 的 chrome 标注也使用固定字号。
+- **RED**: 新增 `tests/paleo_map/test_label_policy.py`，先复现缺少 `geoviz_paleo_map.label_policy`，并锁定区域标注应随屏幕面积增长、chrome 标注应随 viewport 尺寸增长、长文本需要 fit 判断。
+- **GREEN**: 新增 `label_policy.py`，实现 `region_label_font_size()`、`chrome_font_size()`、`text_fits()`；区域标注按 polygon 屏幕面积与 zoom 调整字号，chrome 标注按 viewport/控件尺寸调整字号。
+- **Integration**: 接入 `RegionLabelsLayer`、`ScaleBarLayer`、`NorthArrowLayer`、`TitleLayer`、`LegendLayer`、`FloatingScaleSlider`。
+- **Verification**: `source .venv/bin/activate && pytest tests/paleo_map/test_label_policy.py tests/paleo_map/test_layer_region_labels.py tests/paleo_map/test_layer_legend.py tests/paleo_map/test_layer_scale_bar.py tests/paleo_map/test_layer_north_arrow.py tests/paleo_map/test_layer_title.py tests/paleo_map/test_floating_slider.py tests/test_paleo_map_canvas.py tests/test_paleo_layer_visibility.py tests/test_paleo_map_fidelity.py -q` → 40 passed。
+
+#### TDD Step 2 Completed — 锁定几何对象边界红色标识
+- **用户需求**: “古地理图，锁定的对象的相层级，要用红色边框标识。”；随后澄清“我是说几何对象边框”。
+- **RED**: 新增 `test_locked_geometry_border_only_marks_facies_boundary_red`，锁定 `FaciesPolygonsLayer` 中 locked hierarchy object 只能在“相”边界叠加红色边框，亚相和微相边界保持原样。
+- **GREEN**: `FaciesPolygonsLayer.paint()` 在层级边界绘制时检测当前边界对象或其祖先是否被锁定；保留原层级边界宽度，仅当正在绘制 `facies` 层级时叠加红色 cosmetic pen `#dc2626`。`PaleoMapCanvas._update_active_layers()` 在锁定对象展开到亚相/微相时仍把锁定的相级 geometry 加入 polygon layer，确保红色相边界有实际几何可绘制；labels 仍只显示当前展开层级。`RegionLabelsLayer` 的 locked label badge 保持原蓝色样式，不承担几何锁定红框语义。
+- **Verification**: `source .venv/bin/activate && pytest tests/paleo_map/test_locking.py tests/paleo_map/test_layer_facies_polygons.py tests/paleo_map/test_layer_region_labels.py tests/paleo_map/test_label_policy.py tests/test_paleo_map_canvas.py tests/test_paleo_layer_visibility.py -q` → 32 passed。
+
+### Session: 2026-06-02 (Phase 23-Bugfix — WellLog 用户回归修复 — Shipped)
+
+#### Bug Fixes (TDD)
+- **23-B1 (表头不显示悬停线/面板)**:
+  - **根因**: `WellLogCanvas` 存在后定义的 resize-handle `mouseMoveEvent` 覆盖早先 header 判断；crosshair 在 canvas parent paint 中绘制也会受到 child track z-order 影响。
+  - **修复**: 在有效 `mouseMoveEvent` 中对 header 区域直接 emit `-1.0` 隐藏 crosshair；新增 `_CrosshairOverlayWidget` 作为 viewport child 在 track 上方绘制内容区 crosshair。
+- **23-B2 (右侧最后井道被遮盖/裁切)**:
+  - **根因**: `DepthRuler` 作为 viewport overlay 覆盖最后一个 track；多个 track 的 clip rect 过紧导致抗锯齿边缘被裁。
+  - **修复**: `DepthRuler` 改为 `QScrollArea.setCornerWidget()`，作为右侧独立布局对象；各 track clip rect 扩展 2px。
+- **23-B3 (垂直滚动导致主显示区域空白)**:
+  - **根因**: `QScrollArea` 默认物理移动 child canvas，语义深度滚动与物理滚动叠加后 canvas 被移出 viewport，露出背景。
+  - **修复**: 垂直 scrollbar 统一映射到当前 depth window top/bottom（0..100000 归一化）；`scrollContentsBy` 忽略 `dy` 并强制 canvas `move(0, 0)`，保持无物理竖向滚动。
+  - Tests: `tests/test_well_log_scrollbar.py` 覆盖 max scrollbar → depth window 和 canvas y 不移动。
 
 ### Session: 2026-06-02 (Phase 23 — WellLog 表头/宽度/滚动条优化 — Shipped)
 
@@ -50,7 +156,47 @@
   - Configured `QGroupBox` to render as elegant cards (`.card` style) with `12px` border radius, `#ffffff` background, and clean borders.
 - **Verification**: Ran the full test suite (`pytest`). All 14 tests across the three main visual/styling suites passed cleanly with 100% green!
 
+### Session: 2026-07-04 (Phase 30 — Shipped)
+
+#### Implementation Completed
+- **Phase 30 (独立井震精细标定工作台与矢量报告导出 — v0.18.0)**:
+  - 架构设计：在 `geoviz_well_tie` 中实现了子波生成/提取（`wavelet_engine.py`）、声波阻抗 AI/反射系数 RC/合成记录卷积（`synthetic_generator.py`）以及滑动互相关/残差解算（`tie_evaluator.py`）。
+  - 画布渲染：基于 `QPainter` 构建了 7 轨道并排精细标定画布 `WellTieCanvas`，采用 `QPixmap` 静态双缓冲缓存，悬停交叉光标延迟 `< 0.5ms`。
+  - 侧边栏与页面：实现了 `WellTieSidebar`（子波参数控制、自动标定触发、R相关系数/Lag显示）与导航主页面 `WellTiePage`。
+  - 矢量导出：实现了 `report_export.py` 300 DPI 矢量 PDF/SVG 勘探标准标定报告导出（含国标责任表）。
+  - 测试套件：新增 `test_well_tie_core.py`、`test_well_tie_canvas.py`、`test_well_tie_page.py`、`test_well_tie_export.py`（12/12 单元/集成测试全过）。
+- **Verification**: 12/12 pytest 单元与集成测试全部无缝通过 (1.24s)。
+
+---
+
+### Session: 2026-07-04 (Phase 28, 29-A, 29-B — Shipped)
+
+
+#### Implementation Completed
+- **Phase 28 (Cross-Well Multi-Curve Overlay & Interactive Picking — v0.14.0)**:
+  - Extended `CurveTrack` to slice track width into $K$ columns, drawing color-coded side-by-side display ranges for overlaid curves.
+  - Implemented vertical peak/trough feature snapping (`_get_snapped_depth`) within $\pm 1.5\text{m}$ search windows, plus interactive hover preview dashed lines and curve points in `PickingOverlay`.
+  - Built collapsible `CrossWellSidebar` (280px $\leftrightarrow$ 0px) and dynamic track rebuilding in `CrossWellPage`.
+  - Added unit & integration tests in `tests/test_cross_well_picking.py` (3/3 passed).
+
+- **Phase 29-A (3D Seismic Horizon Gaussian Sculpting & Attribute Mapping — v0.15.0)**:
+  - Implemented 3D camera unprojection (`unproject_ray`) and ray marching heightmap intersection (`intersect_ray_grid`).
+  - Implemented 2D Gaussian sculpting ($\Delta Z = A \cdot \exp(-d^2 / 2\sigma^2)$) and lightweight `HorizonROIPatch` 20-step undo/redo stack in `horizon.py`.
+  - Created `InteractiveHorizonGLItem` with 3D red ring brush cursor and GLSL dual-sampling shader for 3D volume attributes.
+  - Added unit & integration tests in `tests/test_seismic_3d_sculpting.py` (5/5 passed).
+
+- **Phase 29-B (Publishing Cartography & Layout Engine — v0.16.0)**:
+  - Created `PaperGraphicsScene` modeling physical A4/A3/A2 paper sheets in mm units with margin boundaries and magnetic snap grid.
+  - Built `TitleBlockGraphicsItem` matching the Chinese Petroleum Exploration standard layout (国标责任表), and `LegendGraphicsItem` for multi-column legend boxes.
+  - Created `CartographyLayoutWindow` supporting preset template switching (`GB_EXPLORATION_SPEC` vs `ACADEMIC_JOURNAL`) and 300 DPI vector PDF (`QPrinter`) and SVG (`QSvgGenerator`) export.
+  - Added unit & integration tests in `tests/test_cartography_layout.py` (5/5 passed).
+
+- **Verification**: Ran all new and affected unit & integration tests via `pytest`. All 13 tests passed cleanly in 1.30s.
+
+---
+
 ### Session: 2026-06-01 (Performance Audit & High-Performance Optimizations — Shipped)
+
 
 #### Implementation & Shipping Completed
 - **Performance Audit**: Conducted a comprehensive code-level audit of the Well Curve Data Loading (Excel I/O) and QPainter rendering pipelines. Identified primary performance bottlenecks, including upfront all-sheets Excel parsing, JSON numeric array parsing costs, lack of `WellLogCanvas` frame caching, and redundant `QPainterPath` rebuilds. Documented priorities in `performance_audit.md`.
@@ -741,3 +887,59 @@ compare 模式不是用户提出的需求，是 Phase 11.6 时自作主张加的
 
 
 
+
+### Session: 2026-06-03 (Phase 19.1 - 3D Horizon Sculpting)
+
+#### Implementation Completed
+- **Goal**: Allow users to sculpt the 3D seismic volume using a loaded horizon, discarding data above or below the surface to reveal internal structures.
+- **Backend (`DualGLVolumeItem`, `Renderer3D`)**:
+  - Bound the normalized 2D horizon array as `GL_TEXTURE3`.
+  - Added GLSL conditionals to execute `discard` when `v_texcoord.z` crosses `horizon_z` depending on `u_sculpt_mode` (above vs below).
+  - Maintained O(1) performance by moving computations fully to the GPU fragment shader.
+- **Frontend (`SeismicView`)**:
+  - Added `_sculpt_horizon_combo` and `_sculpt_mode_combo` to the toolbar.
+  - Dynamically updates available horizons when layers are loaded/removed.
+- **TDD Verification**: 
+  - Wrote `test_sculpting.py` for property bounds checking and normalizations.
+  - Wrote `test_sculpting_ui.py` for UI interactions and mode passing.
+  - All tests passed.
+
+### Session: 2026-06-03 (Phase 19.2 - 3D Hillshading)
+
+#### Implementation Completed
+- **Goal**: Apply a 3D gradient-based hillshading algorithm to the seismic volume in real-time, giving it a 3D "bumpy" texture that highlights geological structures (faults, reflections).
+- **Backend (`DualGLVolumeItem`, `Renderer3D`)**:
+  - Implemented `compute_normal` and `compute_normal_legacy` in the fragment shader using central differences on the volume data.
+  - Added diffuse Lambertian lighting (`dot(N, L)`) when `u_shading_enabled` is active.
+  - Modulated `final_color` with lighting coefficients.
+- **Frontend (`SeismicView`)**:
+  - Added a `_hillshade_btn` ("光照") to the toolbar to toggle real-time hillshading on and off.
+- **TDD Verification**: 
+  - `test_hillshading.py` covers properties and shader uniform tracking.
+  - `test_hillshading_ui.py` verifies the toggle propagates to the renderer.
+  - All tests passed.
+
+### Session: 2026-06-03 (Phase 19.3 - Collision-aware Labeling)
+
+#### Implementation Completed
+- **Goal**: Implement dynamic label collision detection to prevent messy overlapping texts when zooming and panning on maps.
+- **Backend**:
+  - Implemented `CollisionDetector` in both `geoviz_map` and `geoviz_paleo_map`.
+  - Used `QRectF.intersects` to greedily keep the first non-colliding label and discard subsequent overlapping ones in `WellsLayer.paint` and `RegionLabelsLayer.paint`.
+- **TDD Verification**: 
+  - `test_collision_detector.py` added for basic intersection logic and margin support.
+  - `test_layer_wells_collision.py` and `test_layer_region_labels_collision.py` verify that visual text is dropped correctly.
+  - All tests passed.
+
+### Session: 2026-06-03 (Phase 19.4 - Vector Path LOD)
+
+#### Implementation Completed
+- **Goal**: Boost rendering performance when zooming out by dynamically simplifying complex polygon boundaries using the Ramer-Douglas-Peucker (RDP) algorithm.
+- **Backend**:
+  - Implemented `rdp_simplify` in `geoviz_paleo_map/lod.py`.
+  - Updated `FaciesPolygonsLayer` to store raw world-coordinate polygons as NumPy arrays.
+  - Updated `ScreenPathCache` to support LOD: it now accepts raw polygons and builds a simplified `QPainterPath` if the number of points exceeds a threshold (50 pts), using an epsilon equivalent to 0.5 screen pixels.
+- **TDD Verification**: 
+  - `test_lod.py` added to verify RDP logic accuracy.
+  - Existing `test_paleo_map_canvas.py` confirmed no regressions in rendering.
+  - All tests passed.

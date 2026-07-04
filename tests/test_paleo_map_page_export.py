@@ -133,6 +133,29 @@ def test_figure_title_falls_back_when_no_period(qtbot):
     assert "古地理" in title
 
 
+def test_figure_title_reflects_active_facies_level(qtbot):
+    """Title must use the level actually rendered (相/亚相/微相), from _resolve_level."""
+    page = _make_page(qtbot)
+    page._current_period = "K1"
+
+    page.map_view._resolve_level = lambda: "micro_facies"
+    assert page._figure_title() == "K1 古地理微相图"
+
+    page.map_view._resolve_level = lambda: "sub_facies"
+    assert page._figure_title() == "K1 古地理亚相图"
+
+    page.map_view._resolve_level = lambda: "facies"
+    assert page._figure_title() == "K1 古地理相图"
+
+
+def test_figure_title_defaults_to_facies_word(qtbot):
+    """Unknown/empty level falls back to the generic 相 wording."""
+    page = _make_page(qtbot)
+    page._current_period = "K1"
+    page.map_view._resolve_level = lambda: ""
+    assert page._figure_title() == "K1 古地理相图"
+
+
 def test_export_pdf_real_run_produces_nonempty_file(qtbot, tmp_path, monkeypatch):
     """End-to-end: actual export_professional_figure run produces a real PDF."""
     page = _make_page(qtbot)
@@ -144,3 +167,51 @@ def test_export_pdf_real_run_produces_nonempty_file(qtbot, tmp_path, monkeypatch
     page._export_pdf()
     assert out_pdf.exists()
     assert out_pdf.stat().st_size > 1000, "PDF should be non-trivial size"
+
+
+def test_do_export_threads_page_options(qtbot, tmp_path, monkeypatch):
+    """_do_export must forward page_size/orientation/dpi to the figure builder."""
+    page = _make_page(qtbot)
+    out = tmp_path / "out.pdf"
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *a, **kw: (str(out), "PDF (*.pdf)"),
+    )
+    captured = {}
+
+    def fake_export(canvas, path, fmt, *, title, page_size="A4",
+                    orientation="landscape", dpi=300, **kw):
+        captured.update(fmt=fmt, page_size=page_size,
+                        orientation=orientation, dpi=dpi)
+
+    monkeypatch.setattr(
+        "geoviz_paleo_map.export_professional.export_professional_figure",
+        fake_export,
+    )
+    page._do_export("pdf", page_size="A3", orientation="portrait", dpi=600)
+    assert captured == {"fmt": "pdf", "page_size": "A3",
+                        "orientation": "portrait", "dpi": 600}
+
+
+def test_do_export_defaults_when_called_directly(qtbot, tmp_path, monkeypatch):
+    """_export_pdf() (no args) still exports with A4/landscape/300 defaults."""
+    page = _make_page(qtbot)
+    out = tmp_path / "out.pdf"
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *a, **kw: (str(out), "PDF (*.pdf)"),
+    )
+    captured = {}
+
+    def fake_export(canvas, path, fmt, *, title, page_size="A4",
+                    orientation="landscape", dpi=300, **kw):
+        captured.update(fmt=fmt, page_size=page_size,
+                        orientation=orientation, dpi=dpi)
+
+    monkeypatch.setattr(
+        "geoviz_paleo_map.export_professional.export_professional_figure",
+        fake_export,
+    )
+    page._export_pdf()
+    assert captured == {"fmt": "pdf", "page_size": "A4",
+                        "orientation": "landscape", "dpi": 300}

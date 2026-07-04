@@ -33,6 +33,11 @@ class PickingOverlay(QWidget):
         self._depth_domain = "MD"
         self._seismic_tie: SeismicTie | None = None
 
+        self._parent_canvas = parent
+        self._hover_well_idx: int | None = None
+        self._hover_snapped_depth: float | None = None
+        self._active_curve: str = "GR"
+
     def set_models(self, tops: FormationTopsModel, picks: HorizonPicksModel, widget: CrossWellWidget):
         self._tops_model = tops
         self._picks_model = picks
@@ -46,6 +51,12 @@ class PickingOverlay(QWidget):
 
     def set_hover(self, pick_id: str | None):
         self._hover_pick_id = pick_id
+        self.update()
+
+    def set_hover_snapped(self, well_idx: int | None, depth: float | None, curve_name: str):
+        self._hover_well_idx = well_idx
+        self._hover_snapped_depth = depth
+        self._active_curve = curve_name
         self.update()
 
     def set_depth_domain(self, domain: str):
@@ -63,9 +74,52 @@ class PickingOverlay(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self._paint_tops(painter)
         self._paint_ties(painter)
+        self._paint_hover_snap(painter)
         if self._depth_domain == "TWT" and self._seismic_tie is not None:
             self._paint_twt_axis(painter)
         painter.end()
+
+    def _paint_hover_snap(self, painter: QPainter):
+        if self._hover_well_idx is None or self._hover_snapped_depth is None or not self._active_curve:
+            return
+        
+        i = self._hover_well_idx
+        if i >= len(self._widget._canvases) or i >= len(self._widget._well_names):
+            return
+            
+        canvas = self._widget._canvases[i]
+        overlay = self._widget._overlay
+        left = overlay._canvas_left(canvas)
+        right = overlay._canvas_right(canvas)
+        y = overlay.depth_to_y(canvas, self._hover_snapped_depth)
+        
+        # 1. Draw horizontal snapped preview line
+        pen = QPen(QColor(31, 102, 212, 180), 1.0, Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(left, y), QPointF(right, y))
+        
+        # 2. Draw highlighted dot on the active curve line
+        if self._parent_canvas is not None:
+            curve_data = self._parent_canvas._extract_curve(canvas, preferred=(self._active_curve,))
+            if curve_data is not None:
+                depths, values = curve_data
+                idx = np.argmin(np.abs(depths - self._hover_snapped_depth))
+                val = values[idx]
+                
+                from geoviz_well_log.renderer.curve_track import CurveTrack
+                for track in canvas.tracks:
+                    if isinstance(track, CurveTrack):
+                        for curve in track._curves:
+                            if curve.name.upper() == self._active_curve.upper():
+                                track_x = track.mapTo(self._widget, QPointF(0, 0)).x()
+                                track_rect = QRectF(track_x, 0, track.width(), canvas.height())
+                                x = track._value_to_x(val, curve.display_range, track_rect)
+                                
+                                painter.setBrush(QColor(31, 102, 212))
+                                painter.setPen(QPen(Qt.GlobalColor.white, 1.5))
+                                painter.drawEllipse(QPointF(x, y), 4.5, 4.5)
+                                break
+
 
     def _paint_tops(self, painter: QPainter):
         overlay = self._widget._overlay
@@ -140,12 +194,15 @@ class _PickEventFilter(QObject):
     """Event filter that intercepts mouse events in pick mode."""
 
     def __init__(self, canvas: CrossWellCanvas):
-        super().__init__(canvas)
         self._canvas = canvas
+        super().__init__(canvas)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if not hasattr(self, "_canvas") or self._canvas is None:
+            return False
         if not self._canvas._pick_mode:
             return False
+
 
         if event.type() == QEvent.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:
@@ -183,6 +240,15 @@ class CrossWellCanvas(QWidget):
         self._pick_mode = False
         self._active_formation: str | None = None
         self._active_pick_id: str | None = None
+        self._active_curve = "GR"
+        self._snap_type = "none"
+        self._snap_window_m = 1.5
+        self._curve_groups = {
+            "AC/GR": ["AC", "GR"],
+            "RT/RXO": ["RT", "RXO"]
+        }
+        self._hover_well_idx = None
+        self._hover_snapped_depth = None
         self._event_filter = _PickEventFilter(self)
         self._widget.installEventFilter(self._event_filter)
 
@@ -225,10 +291,84 @@ class CrossWellCanvas(QWidget):
             Qt.CursorShape.CrossCursor if value else Qt.CursorShape.ArrowCursor
         )
 
+    @property
+    def active_formation(self) -> str | None:
+        return self._active_formation
+
+    @active_formation.setter
+    def active_formation(self, value: str | None):
+        self._active_formation = value
+
+    @property
+    def active_curve(self) -> str:
+        return self._active_curve
+
+    @active_curve.setter
+    def active_curve(self, value: str):
+        self._active_curve = value
+        self._overlay.set_hover_snapped(self._hover_well_idx, self._hover_snapped_depth, value)
+
+    @property
+    def snap_type(self) -> str:
+        return self._snap_type
+
+    @snap_type.setter
+    def snap_type(self, value: str):
+        self._snap_type = value
+
+    @property
+    def snap_window_m(self) -> float:
+        return self._snap_window_m
+
+    @snap_window_m.setter
+    def snap_window_m(self, value: float):
+        self._snap_window_m = value
+
+    @property
+    def curve_groups(self) -> dict[str, list[str]]:
+        return self._curve_groups
+
+    @curve_groups.setter
+    def curve_groups(self, value: dict[str, list[str]]):
+        self._curve_groups = value
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._overlay.setGeometry(self.rect())
         self._overlay.raise_()
+
+
+    def _get_snapped_depth(self, canvas: WellLogCanvas, clicked_depth: float) -> float:
+        if self._snap_type == "none" or not self._active_curve:
+            return clicked_depth
+
+        # Extract depths and values of the active curve for the targeted well
+        curve_data = self._extract_curve(canvas, preferred=(self._active_curve.upper(),))
+        if curve_data is None:
+            return clicked_depth
+
+        depths, values = curve_data  # numpy arrays
+        
+        # Filter points within search window [clicked_depth - window, clicked_depth + window]
+        mask = (depths >= clicked_depth - self._snap_window_m) & (depths <= clicked_depth + self._snap_window_m)
+        if not np.any(mask):
+            return clicked_depth
+            
+        window_depths = depths[mask]
+        window_values = values[mask]
+
+        if len(window_values) == 0:
+            return clicked_depth
+
+        # Find index of extremum
+        if self._snap_type == "max":
+            idx = np.argmax(window_values)
+        elif self._snap_type == "min":
+            idx = np.argmin(window_values)
+        else:
+            return clicked_depth
+
+        return float(window_depths[idx])
 
     def _handle_pick_click(self, event) -> bool:
         pos = event.pos()
@@ -248,6 +388,9 @@ class CrossWellCanvas(QWidget):
         depth = CrossWellWidget._y_to_depth(canvas, local_pos.y())
         if depth is None:
             return False
+
+        # Snap the depth using current settings
+        depth = self._get_snapped_depth(canvas, depth)
 
         modifiers = event.modifiers()
         if modifiers & Qt.KeyboardModifier.ShiftModifier and self._active_pick_id:
@@ -272,11 +415,28 @@ class CrossWellCanvas(QWidget):
 
     def _handle_pick_hover(self, event) -> bool:
         pos = event.pos()
+        canvas, well_idx = self._canvas_at(pos)
+        if canvas is not None:
+            local_pos = canvas.mapFrom(self._widget, pos)
+            raw_depth = CrossWellWidget._y_to_depth(canvas, local_pos.y())
+            if raw_depth is not None:
+                self._hover_well_idx = well_idx
+                self._hover_snapped_depth = self._get_snapped_depth(canvas, raw_depth)
+            else:
+                self._hover_well_idx = None
+                self._hover_snapped_depth = None
+        else:
+            self._hover_well_idx = None
+            self._hover_snapped_depth = None
+            
+        self._overlay.set_hover_snapped(self._hover_well_idx, self._hover_snapped_depth, self._active_curve)
+
         pick = self._pick_at(pos)
         new_hover = pick.pick_id if pick else None
         if new_hover != self._overlay._hover_pick_id:
             self._overlay.set_hover(new_hover)
         return False
+
 
     def _canvas_at(self, pos) -> tuple[WellLogCanvas | None, int]:
         for i, canvas in enumerate(self._widget._canvases):

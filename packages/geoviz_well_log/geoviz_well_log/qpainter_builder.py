@@ -65,23 +65,27 @@ def _intervals_to_lithology(items: list[IntervalItem]) -> list[LithologyInterval
     ]
 
 
-def build_qpainter_tracks(data: WellLogData) -> list[BaseTrack]:
+def build_qpainter_tracks(data: WellLogData, merge_groups: list[tuple[list[str], str]] | None = None) -> list[BaseTrack]:
     """Convert WellLogData into QPainter track objects for WellLogCanvas.
 
     Creates tracks only for non-empty data sections.
-    Curves are merged according to _MERGE_GROUPS for ECharts visual parity.
+    Curves are merged according to merge_groups for ECharts visual parity.
     Order: depth -> curves -> interval columns -> lithology -> facies -> systems tract.
     """
+    if merge_groups is None:
+        merge_groups = _MERGE_GROUPS
+
     tracks: list[BaseTrack] = []
 
     # 1. Depth track (always)
     tracks.append(DepthTrack(top_depth=data.top_depth, bottom_depth=data.bottom_depth, width=60, label="深度"))
 
-    # 2. Curve tracks — merge according to _MERGE_GROUPS
+    # 2. Curve tracks — merge according to merge_groups
     curve_map = {c.name: c for c in data.curves}
     used: set[str] = set()
 
-    for names, label in _MERGE_GROUPS:
+    for names, label in merge_groups:
+
         available = [curve_map[n] for n in names if n in curve_map]
         if not available:
             continue

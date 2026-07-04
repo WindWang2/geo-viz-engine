@@ -4,6 +4,8 @@ from PySide6.QtCore import QRectF, Qt, QSizeF, Signal, QPointF
 from PySide6.QtGui import QPainter, QFont, QColor, QPen
 from PySide6.QtWidgets import QWidget
 
+from .label_layout import compute_header_label_policy, fit_label_text
+
 # Azurite Design System constants
 ECHARTS_BORDER = "#94a3b8"
 ECHARTS_GRID = "#cbd5e1"
@@ -132,11 +134,13 @@ class BaseTrack(QWidget):
         """Render track header (label)."""
         painter.save()
         painter.setPen(QColor(ECHARTS_TEXT))
+        policy = compute_header_label_policy(rect)
         font = QFont()
-        font.setPixelSize(14)
+        font.setPixelSize(policy.font_px)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._label)
+        lines = fit_label_text(self._label, rect.adjusted(4, 2, -4, -2), policy, painter.fontMetrics())
+        painter.drawText(rect.adjusted(4, 2, -4, -2), Qt.AlignmentFlag.AlignCenter, "\n".join(lines))
         painter.restore()
 
     def export_render(self, painter: QPainter, full_rect: QRectF,

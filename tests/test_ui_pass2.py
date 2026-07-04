@@ -65,19 +65,29 @@ def test_sidebar_default_width_is_200(window):
     assert window.sidebar.width() == 200
 
 
+def _wait_for_anim(anim, qtbot, timeout=500):
+    """Drive a QPropertyAnimation to completion in headless test environments."""
+    if anim is None:
+        return
+    # Fast-forward the animation clock
+    anim.setCurrentTime(anim.duration())
+    # Then let the event loop flush any pending updates
+    qtbot.wait(50)
+
+
 def test_sidebar_can_collapse_to_56(window, qtbot):
     """Sidebar should collapse to 56px when toggle is clicked."""
     window._toggle_sidebar()
-    qtbot.wait(300)
+    _wait_for_anim(window._sidebar_anim, qtbot)
     assert window.sidebar.maximumWidth() == 56
 
 
 def test_sidebar_can_expand_back_to_200(window, qtbot):
     """Sidebar should expand back to 200px when toggle is clicked again."""
     window._toggle_sidebar()
-    qtbot.wait(300)
+    _wait_for_anim(window._sidebar_anim, qtbot)
     window._toggle_sidebar()
-    qtbot.wait(300)
+    _wait_for_anim(window._sidebar_anim, qtbot)
     assert window.sidebar.maximumWidth() == 200
 
 

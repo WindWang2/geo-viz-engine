@@ -49,6 +49,9 @@ class SurfaceWidget(QWidget):
     - SVG/PDF vector exports.
     """
     view_changed = Signal(float, float, float, float)  # xmin, xmax, ymin, ymax
+    contour_selected = Signal(float)  # selected isoline level
+    control_points_changed = Signal(list)  # updated list of control points
+    grid_updated = Signal(object, object, object)  # grid_x, grid_y, grid_z
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -61,6 +64,13 @@ class SurfaceWidget(QWidget):
         self.grid_z = None
         self.levels = []
         self.colormap_name = "viridis"
+
+        # Control Points & Fault Barriers
+        self.control_points = []
+        self.fault_polylines = []
+        self.selected_cp_idx = None
+        self.selected_contour_level = None
+        self.is_dragging_cp = False
         
         # Viewport boundaries
         self.view_xmin = 0.0
@@ -86,6 +96,30 @@ class SurfaceWidget(QWidget):
         self.last_mouse_pos = None
         self.hover_pos = None
 
+    def set_control_points(self, points: list):
+        """Set scattered control points list: [{"id": str, "x": float, "y": float, "z": float}, ...]."""
+        self.control_points = list(points)
+        self.update()
+
+    def add_control_point(self, x: float, y: float, z: float, point_id: str = None):
+        """Add a single control point."""
+        if point_id is None:
+            point_id = f"cp_{len(self.control_points) + 1}"
+        self.control_points.append({"id": point_id, "x": float(x), "y": float(y), "z": float(z)})
+        self.control_points_changed.emit(self.control_points)
+        self.update()
+
+    def set_fault_polylines(self, polylines: list):
+        """Set fault barrier polylines."""
+        self.fault_polylines = list(polylines)
+        self.update()
+
+    def select_contour_level(self, level: float):
+        """Select and highlight a specific contour level."""
+        self.selected_contour_level = float(level)
+        self.contour_selected.emit(self.selected_contour_level)
+        self.update()
+
     def set_grid_data(self, grid_x, grid_y, grid_z, levels, colormap: str = "viridis"):
         """Bind spatial grid coordinates, Z matrix values, contour levels, and colormap selection."""
         self.grid_x = np.asarray(grid_x, dtype=np.float64)
@@ -94,6 +128,7 @@ class SurfaceWidget(QWidget):
         self.levels = sorted(levels)
         self.colormap_name = colormap if colormap in COLORMAPS else "viridis"
         self.update()
+
 
     def autofit(self):
         """Auto-scale the viewport to fit the grid data boundary dimensions exactly."""
@@ -284,11 +319,12 @@ class SurfaceWidget(QWidget):
 
     def export_pdf(self, filepath: str):
         """Export the surface map to a PDF vector file."""
+        from PySide6.QtGui import QPageSize
         printer = QPrinter(QPrinter.HighResolution)
         printer.setOutputFormat(QPrinter.PdfFormat)
-        printer.setOutputFile(filepath)
-        printer.setPageSize(QPrinter.A4)
-        
+        printer.setOutputFileName(filepath)
+        printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+
         page_rect = printer.pageRect(QPrinter.DevicePixel)
         
         painter = QPainter(printer)

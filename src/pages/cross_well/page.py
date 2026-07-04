@@ -15,6 +15,8 @@ from geoviz_well_log.renderer.canvas import WellLogCanvas
 from geoviz_cross_well import CrossWellCanvas, export_cross_well_report
 from src.data.well_registry import list_wells, get_well_data
 from src.utils.floating_progress import FloatingProgressOverlay
+from src.pages.cross_well.sidebar import CrossWellSidebar
+
 
 
 class _WellSelectDialog(QDialog):
@@ -363,12 +365,40 @@ class CrossWellPage(QWidget):
         self._update_status()
         outer.addWidget(self._status)
 
-        # --- CrossWellCanvas ---
+        # --- CrossWellCanvas & Sidebar ---
         self._canvas = CrossWellCanvas()
         self._cross_well = self._canvas.widget  # underlying CrossWellWidget
         self._canvas.picks_model.picks_changed.connect(self._update_status)
-        outer.addWidget(self._canvas, 1)
+        
+        self._sidebar = CrossWellSidebar(self)
+        self._sidebar_collapsed = False
+        
+        self._toggle_sidebar_btn = QPushButton("▶")
+        self._toggle_sidebar_btn.setFixedWidth(12)
+        self._toggle_sidebar_btn.setStyleSheet(
+            "QPushButton { background: #faf9f5; border-left: 1px solid #e5eaf1; border-right: 1px solid #e5eaf1; color: #586878; font-size: 10px; font-weight: bold; border-radius: 0; padding: 0; }"
+            "QPushButton:hover { background: #f1f4f9; color: #1f66d4; }"
+        )
+        self._toggle_sidebar_btn.clicked.connect(self._toggle_sidebar)
+
+        self._mid_widget = QWidget()
+        self._mid_layout = QHBoxLayout(self._mid_widget)
+        self._mid_layout.setContentsMargins(0, 0, 0, 0)
+        self._mid_layout.setSpacing(0)
+        
+        self._mid_layout.addWidget(self._canvas, 1)
+        self._mid_layout.addWidget(self._toggle_sidebar_btn)
+        self._mid_layout.addWidget(self._sidebar)
+        
+        outer.addWidget(self._mid_widget, 1)
         self._scroll = None
+
+        # Connect sidebar signals
+        self._sidebar.horizon_changed.connect(self._on_sidebar_horizon_changed)
+        self._sidebar.curve_changed.connect(self._on_sidebar_curve_changed)
+        self._sidebar.snapping_changed.connect(self._on_sidebar_snapping_changed)
+        self._sidebar.curve_groups_changed.connect(self._on_sidebar_curve_groups_changed)
+        self._sidebar.dtw_triggered.connect(self._on_dtw_propagate)
 
         # --- Empty state ---
         self._placeholder = QWidget()
@@ -400,18 +430,18 @@ class CrossWellPage(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         if self._scroll is None:
-            layout = self.layout()
-            layout.removeWidget(self._canvas)
+            self._mid_layout.removeWidget(self._canvas)
             self._scroll = QScrollArea()
             self._scroll.setWidgetResizable(True)
             self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
             self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             self._scroll.setStyleSheet("QScrollArea { background: #ffffff; border: none; }")
-            layout.insertWidget(layout.count() - 1, self._scroll, 1)
+            self._mid_layout.insertWidget(0, self._scroll, 1)
             self._scroll.show()
             self._scroll.setWidget(self._canvas)
             self._canvas.show()
             self._scroll.viewport().installEventFilter(self)
+
 
     def eventFilter(self, obj, event):
         if obj is not None and event is not None and event.type() == QEvent.Type.Wheel and self._scroll is not None:
@@ -553,16 +583,29 @@ class CrossWellPage(QWidget):
 
     def _on_load_finished(self, results: list):
         self._add_btn.setEnabled(True)
+        merge_list = []
+        for label, names in self._canvas.curve_groups.items():
+            merge_list.append((names, label))
+
         for well_name, data in results:
             self._well_data_cache[well_name] = data
-            all_tracks = build_qpainter_tracks(data)
+            all_tracks = build_qpainter_tracks(data, merge_groups=merge_list)
             all_labels = [t.label for t in all_tracks]
 
             if self._selected_labels is None:
                 self._all_track_labels = all_labels
                 self._selected_labels = self._default_labels(all_labels)
 
-            filtered = self._filter_tracks(all_tracks, self._selected_labels)
+            # Smart filter
+            filtered = []
+            for t in all_tracks:
+                if t.label in self._selected_labels:
+                    filtered.append(t)
+                else:
+                    parts = t.label.split("/")
+                    if any(p in self._selected_labels for p in parts):
+                        filtered.append(t)
+
             canvas = WellLogCanvas()
             canvas.set_tracks(filtered)
             self._cross_well.add_canvas(canvas, well_name)
@@ -570,7 +613,38 @@ class CrossWellPage(QWidget):
             if data.intervals and data.intervals.formation:
                 self._cross_well.set_formation_data(well_name, data.intervals.formation)
 
+        # Update available curves in the sidebar
+        curves = set()
+        for d in self._well_data_cache.values():
+            for c in d.curves:
+                curves.add(c.name)
+        self._sidebar.set_available_curves(list(curves))
+
+        # Update horizons in the sidebar
+        horizons = set()
+        for p in self._canvas.picks_model.all_picks():
+            horizons.add(p.formation_name)
+        for d in self._well_data_cache.values():
+            if d.intervals and d.intervals.formation:
+                for item in d.intervals.formation:
+                    horizons.add(item.name)
+        if not horizons:
+            horizons.add("Horizon-1")
+        self._sidebar.set_horizons(list(horizons))
+
+        # Sync active state from sidebar
+        self._canvas.active_formation = self._sidebar._hz_combo.currentText().strip()
+        self._canvas.active_curve = self._sidebar._curve_combo.currentText().strip()
+        snap_type = "none"
+        if self._sidebar._snap_max_rdo.isChecked():
+            snap_type = "max"
+        elif self._sidebar._snap_min_rdo.isChecked():
+            snap_type = "min"
+        self._canvas.snap_type = snap_type
+        self._canvas.snap_window_m = self._sidebar._window_spin.value()
+
         self._update_status()
+
 
     @staticmethod
     def _default_labels(all_labels: list[str]) -> list[str]:
@@ -616,16 +690,33 @@ class CrossWellPage(QWidget):
         self._rebuild_canvases()
 
     def _rebuild_canvases(self):
+        merge_list = []
+        for label, names in self._canvas.curve_groups.items():
+            merge_list.append((names, label))
+
         for canvas, well_name in zip(
             self._cross_well._canvases, self._cross_well._well_names
         ):
             if well_name not in self._well_data_cache:
                 continue
             data = self._well_data_cache[well_name]
-            all_tracks = build_qpainter_tracks(data)
-            filtered = self._filter_tracks(all_tracks, self._selected_labels)
+            all_tracks = build_qpainter_tracks(data, merge_groups=merge_list)
+            
+            # Smart filter
+            filtered = []
+            for t in all_tracks:
+                if self._selected_labels is None:
+                    filtered.append(t)
+                elif t.label in self._selected_labels:
+                    filtered.append(t)
+                else:
+                    parts = t.label.split("/")
+                    if any(p in self._selected_labels for p in parts):
+                        filtered.append(t)
+
             canvas.set_tracks(filtered)
             canvas.update()
+
 
     def _on_auto_link(self):
         self._cross_well.auto_link()
@@ -818,3 +909,32 @@ class CrossWellPage(QWidget):
             )
 
         menu.exec(event.globalPos())
+
+    def _toggle_sidebar(self):
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        target_w = 0 if self._sidebar_collapsed else 280
+        
+        self._sidebar_anim = QPropertyAnimation(self._sidebar, b"maximumWidth")
+        self._sidebar_anim.setDuration(200)
+        self._sidebar_anim.setStartValue(self._sidebar.width())
+        self._sidebar_anim.setEndValue(target_w)
+        self._sidebar_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._sidebar_anim.start()
+        
+        self._toggle_sidebar_btn.setText("◀" if self._sidebar_collapsed else "▶")
+
+    def _on_sidebar_horizon_changed(self, name: str):
+        self._canvas.active_formation = name
+
+    def _on_sidebar_curve_changed(self, curve_name: str):
+        self._canvas.active_curve = curve_name
+
+    def _on_sidebar_snapping_changed(self, snap_type: str, snap_window: float):
+        self._canvas.snap_type = snap_type
+        self._canvas.snap_window_m = snap_window
+
+    def _on_sidebar_curve_groups_changed(self, new_groups: dict):
+        self._canvas.curve_groups = new_groups
+        self._rebuild_canvases()
+

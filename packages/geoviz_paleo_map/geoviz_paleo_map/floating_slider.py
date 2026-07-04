@@ -6,6 +6,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush
 from PySide6.QtWidgets import QWidget
 
+from geoviz_paleo_map.label_policy import chrome_font_size
+
 # 96 DPI: 1 pixel = 0.02646 cm
 _CM_PER_PX = 0.02646
 
@@ -223,7 +225,7 @@ class FloatingScaleSlider(QWidget):
 
         # 5. Zone Labels centered in colored segments + threshold division lines
         p.setPen(QPen(QColor("#475569"), 1.0))
-        font = QFont("Sans Serif", 7)
+        font = QFont("Sans Serif", chrome_font_size(self.width(), self.height(), 7))
         p.setFont(font)
         
         # Segment boundaries
@@ -246,7 +248,7 @@ class FloatingScaleSlider(QWidget):
 
         # 6. Tick marks with 1:XXX labels
         p.setPen(QPen(QColor("#94a3b8"), 1))
-        tick_font = QFont("Sans Serif", 6)
+        tick_font = QFont("Sans Serif", chrome_font_size(self.width(), self.height(), 6))
         p.setFont(tick_font)
         tick_y = bar_top + bar_h + 3
         for den, lbl in self._scale_ticks:
@@ -267,7 +269,7 @@ class FloatingScaleSlider(QWidget):
         current_den = self._zoom_to_scale_den(self._zoom)
         scale_text = self._fmt_scale(current_den)
         p.setPen(QColor("#1e40af"))
-        bold = QFont("Sans Serif", 8)
+        bold = QFont("Sans Serif", chrome_font_size(self.width(), self.height(), 8))
         bold.setBold(True)
         p.setFont(bold)
         tw = p.fontMetrics().horizontalAdvance(scale_text)

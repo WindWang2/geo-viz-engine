@@ -9,7 +9,9 @@ def nice_number(value: float, round_flag: bool) -> float:
     """
     if value == 0.0:
         return 0.0
-        
+
+    sign = -1 if value < 0 else 1
+    value = abs(value)
     exponent = math.floor(math.log10(value))
     fraction = value / (10 ** exponent)
     
@@ -32,7 +34,7 @@ def nice_number(value: float, round_flag: bool) -> float:
         else:
             nice_fraction = 10.0
             
-    return nice_fraction * (10 ** exponent)
+    return sign * nice_fraction * (10 ** exponent)
 
 def calculate_ticks(vmin: float, vmax: float, max_ticks: int) -> tuple[list[float], float]:
     """Calculate nice tick intervals and a list of ticks for a given range.

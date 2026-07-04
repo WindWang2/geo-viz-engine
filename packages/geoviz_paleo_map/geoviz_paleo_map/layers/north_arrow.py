@@ -1,7 +1,8 @@
 """NorthArrowLayer — triangle + N letter in the top-right corner."""
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 
+from geoviz_paleo_map.label_policy import chrome_font_size
 from geoviz_paleo_map.layers.base import PaleoLayer
 from geoviz_paleo_map.viewport import PaleoMapViewport
 
@@ -11,6 +12,13 @@ ARROW_COLOR = QColor("#334155")
 
 class NorthArrowLayer(PaleoLayer):
     is_chrome = True
+
+    def reserved_rect(self, viewport: PaleoMapViewport) -> QRectF:
+        """Screen rect this arrow occupies, for label collision avoidance."""
+        x0 = viewport.width - 46
+        y0 = 50
+        # triangle (30 wide) + N label below ≈ 46px tall
+        return QRectF(x0 + 6, y0 - 4, 22, 50)
 
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -28,7 +36,7 @@ class NorthArrowLayer(PaleoLayer):
         painter.drawPolygon(polygon)
         # "N" at (15, 30)
         painter.setPen(QPen(ARROW_COLOR, 0))
-        font = QFont("Sans Serif", 9)
+        font = QFont("Sans Serif", chrome_font_size(viewport.width, viewport.height, 9))
         font.setBold(True)
         painter.setFont(font)
         metrics = painter.fontMetrics()

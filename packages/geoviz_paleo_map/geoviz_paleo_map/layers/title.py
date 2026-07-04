@@ -2,6 +2,7 @@
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
+from geoviz_paleo_map.label_policy import chrome_font_size
 from geoviz_paleo_map.layers.base import PaleoLayer
 from geoviz_paleo_map.viewport import PaleoMapViewport
 
@@ -23,7 +24,7 @@ class TitleLayer(PaleoLayer):
         if not self.text:
             return
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-        font = QFont("Sans Serif", 12)
+        font = QFont("Sans Serif", chrome_font_size(viewport.width, viewport.height, 12))
         font.setBold(True)
         painter.setFont(font)
         metrics = painter.fontMetrics()

@@ -76,3 +76,25 @@ def test_systems_tract_empty(qtbot):
     painter = QPainter(pm)
     track.paint_content(painter, QRectF(0, 0, 60, 800))
     painter.end()
+
+
+def test_systems_tract_forces_vertical_policy_for_wide_column(qtbot, monkeypatch):
+    captured = []
+
+    def fake_fit_label_text(text, rect, policy, metrics):
+        captured.append((text, policy.vertical))
+        return [text]
+
+    monkeypatch.setattr("geoviz_well_log.renderer.systems_tract.fit_label_text", fake_fit_label_text)
+    track = SystemsTractTrack(
+        intervals=[IntervalItem(top=0, bottom=100, name="下寒统沉积体系域")],
+        width=96,
+    )
+    qtbot.addWidget(track)
+    track.set_depth_range(0, 100)
+    pm = QPixmap(96, 800)
+    painter = QPainter(pm)
+    track.paint_content(painter, QRectF(0, 0, 96, 800))
+    painter.end()
+
+    assert captured == [("下寒统沉积体系域", True)]

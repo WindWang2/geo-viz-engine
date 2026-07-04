@@ -1,5 +1,5 @@
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtCore import Qt, QSize, QEasingCurve
+from PySide6.QtGui import QIcon, QPixmap, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QPushButton,
@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QLabel,
     QFrame,
+    QWidgetAction,
 )
 
 from src.data.cache import DataCache
@@ -128,7 +129,7 @@ class HeaderToolButton(QPushButton):
     def __init__(self, icon_name: str, parent=None):
         super().__init__(parent)
         self.tool_key = icon_name
-        self.setFixedSize(32, 32)
+        self.setFixedSize(30, 30)
         icon_path = _get_icon_path(f"ui/{icon_name}.svg")
         self.setIcon(QIcon(icon_path))
         self.setIconSize(QSize(17, 17))
@@ -288,7 +289,24 @@ class MainWindow(QWidget):
         """)
         search_icon_path = _get_icon_path("ui/search.svg")
         self.search_bar.addAction(QIcon(search_icon_path), QLineEdit.ActionPosition.LeadingPosition)
+
+        # Ctrl+K hint badge (trailing action)
+        hint = QLabel(" Ctrl+K ")
+        hint.setStyleSheet(
+            "color: #cbd5e1; font-size: 10px; border: 1px solid #e5eaf1;"
+            " border-radius: 4px; background: transparent;"
+        )
+        hint.setFixedSize(48, 18)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint_action = QWidgetAction(self.search_bar)
+        hint_action.setDefaultWidget(hint)
+        self.search_bar.addAction(hint_action, QLineEdit.ActionPosition.TrailingPosition)
+
         header_layout.addWidget(self.search_bar)
+
+        # Global Ctrl+K shortcut to focus search bar
+        self._search_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._search_shortcut.activated.connect(lambda: self.search_bar.setFocus())
 
         # Notification bell
         self.notification_bell_btn = HeaderToolButton("bell")
@@ -526,6 +544,10 @@ class MainWindow(QWidget):
             self._sidebar_collapsed = False
             self._toggle_sidebar()
 
+        # Ctrl+B keyboard shortcut to toggle sidebar
+        self._sidebar_shortcut = QShortcut(QKeySequence("Ctrl+B"), self)
+        self._sidebar_shortcut.activated.connect(self._toggle_sidebar)
+
     def _switch_page(self, index: int):
         # 1. Cleanup current page if needed (stop threads, free GPU)
         current = self.stack.currentWidget()
@@ -542,23 +564,29 @@ class MainWindow(QWidget):
         self._update_header_and_footer(index)
 
     def _toggle_sidebar(self):
-        from PySide6.QtCore import QSettings
+        from PySide6.QtCore import QPropertyAnimation, QSettings
 
         self._sidebar_collapsed = not self._sidebar_collapsed
-        w = self._sidebar_width_collapsed if self._sidebar_collapsed else self._sidebar_width_expanded
-        self.sidebar.setFixedWidth(w)
+        target_w = self._sidebar_width_collapsed if self._sidebar_collapsed else self._sidebar_width_expanded
 
+        # Animate width
+        self._sidebar_anim = QPropertyAnimation(self.sidebar, b"maximumWidth")
+        self._sidebar_anim.setDuration(200)
+        self._sidebar_anim.setStartValue(self.sidebar.width())
+        self._sidebar_anim.setEndValue(target_w)
+        self._sidebar_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._sidebar_anim.start()
+
+        # Update button text/width immediately
         for btn in self.sidebar_buttons:
             if self._sidebar_collapsed:
                 btn.setText("")
                 btn.setFixedWidth(44)
             else:
-                # Restore text from tooltip (nav_key label)
                 tooltip = btn.toolTip()
                 btn.setText(" " + tooltip)
                 btn.setFixedWidth(160)
 
-        # Also handle settings button
         if hasattr(self, 'settings_btn'):
             if self._sidebar_collapsed:
                 self.settings_btn.setText("")

@@ -43,6 +43,11 @@ class RegionLabelsLayer(PaleoLayer):
         self._font_size = font_size
         self._locked_ids = locked_ids or set()
         self._items: list[_LabelItem] = []
+        self.visible_labels: list[str] = []
+        # Screen rects occupied by chrome (legend/north arrow/scale bar). The
+        # canvas/export populates this before paint so labels steer clear of
+        # decorations. Reserved each frame because chrome anchors to viewport size.
+        self.chrome_rects: list[QRectF] = []
         for feat in features:
             geom = feat.get("geometry") or {}
             gtype = geom.get("type")
@@ -85,12 +90,24 @@ class RegionLabelsLayer(PaleoLayer):
         if not self.visible:
             return
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-        
+
+        from geoviz_paleo_map.collision import CollisionDetector
+        cd = CollisionDetector(margin=2.0)
+        # Pre-register chrome footprints so labels never collide with the
+        # legend / north arrow / scale bar (decoration-priority placement).
+        for rect in self.chrome_rects:
+            cd.try_add(rect)
+        visible_labels = []
+
         default_sizes = {"facies": 11, "sub_facies": 8, "micro_facies": 7}
-        
+        # Dynamic zoom scaling: base zoom=4 (scale=8), text grows with sqrt(scale)
+        import math
+        zoom_factor = max(0.5, min(3.0, math.sqrt(viewport.scale / 8.0)))
+
         for item in self._items:
             # Resolve font size dynamically based on its hierarchy level, falling back to self._font_size
             lvl_size = default_sizes.get(item.level, self._font_size)
+            lvl_size = int(lvl_size * zoom_factor)
             
             font = QFont("Sans Serif", lvl_size)
             font.setBold(True)
@@ -111,6 +128,16 @@ class RegionLabelsLayer(PaleoLayer):
                 continue
             screen = viewport.world_to_screen(*item.centroid_world)
             style = self._resolver.resolve(item.facies_name)
+            
+            badge_rect = QRectF(
+                screen.x() - text_w / 2 - 6,
+                screen.y() - text_h / 2 - 2,
+                text_w + 12,
+                text_h + 4
+            )
+            if not cd.try_add(badge_rect):
+                continue
+            visible_labels.append(item.text)
             
             if item.is_locked:
                 # Premium rounded rectangle badge container for locked labels
@@ -151,5 +178,6 @@ class RegionLabelsLayer(PaleoLayer):
                 painter.drawText(QPointF(screen.x() - text_w / 2,
                                          screen.y() + metrics.ascent() / 2),
                                  display_text)
+        self.visible_labels = visible_labels
 
 

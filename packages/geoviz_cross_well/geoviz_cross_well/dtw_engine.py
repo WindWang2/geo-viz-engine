@@ -4,15 +4,12 @@ from dataclasses import dataclass
 from typing import Callable
 
 import numpy as np
-from scipy.spatial.distance import cdist
-
 
 @dataclass
 class DTWResult:
     suggested_depth: float
     cost: float
     confidence: float
-
 
 class DTWEngine:
     def correlate(
@@ -29,82 +26,90 @@ class DTWEngine:
             return DTWResult(suggested_depth=0.0, cost=1.0, confidence=0.0)
 
         n, m = len(ref_curve), len(target_curve)
-        # Default band radius bounded to keep typical 1k-sample DTW under ~0.1s
-        # while still allowing generous warping (25% of the longer curve).
         if band_radius is None:
             band_radius = max(20, max(n, m) // 4)
 
-        ref_2d = ref_curve.reshape(-1, 1)
-        tgt_2d = target_curve.reshape(-1, 1)
-        dist = cdist(ref_2d, tgt_2d, metric="euclidean")
+        # Compact cost matrix: row i, column j maps to cost_compact[i, j - (i - band_radius)]
+        # width = 2 * band_radius + 1
+        width = 2 * band_radius + 1
+        cost_compact = np.full((n, width), np.inf)
+        
+        def get_compact_idx(i, j):
+            return j - (i - band_radius)
 
-        cost_matrix = np.full((n, m), np.inf)
-        cost_matrix[0, 0] = dist[0, 0]
+        # Initialize (0,0)
+        # i=0, j=0 => idx = 0 - (0 - band_radius) = band_radius
+        start_idx = get_compact_idx(0, 0)
+        cost_compact[0, start_idx] = np.abs(ref_curve[0] - target_curve[0])
+        
+        # Cumulative first row
+        for j in range(1, min(m, band_radius + 1)):
+            idx = get_compact_idx(0, j)
+            cost_compact[0, idx] = cost_compact[0, idx-1] + np.abs(ref_curve[0] - target_curve[j])
 
-        # Vectorized row-by-row Sakoe-Chiba banded DTW.
-        # For each row i, we compute the band slice [j_start:j_end].
-        # The vertical+diagonal predecessors (cost[i-1, j] and cost[i-1, j-1])
-        # are independent of intra-row order, so we evaluate them with a single
-        # numpy min. The horizontal predecessor (cost[i, j-1]) is a serial
-        # chain along j, so we sweep it once in a tight scalar Python loop —
-        # but with no list-building or tuple-min per cell.
         progress_step = max(1, n // 20)
-        for i in range(n):
+        for i in range(1, n):
             j_start = max(0, i - band_radius)
             j_end = min(m, i + band_radius + 1)
-            if j_end <= j_start:
-                continue
-            row_dist = dist[i, j_start:j_end]
-
-            if i == 0:
-                # First row: cumulative left-only chain after (0,0) seed.
-                # cost[0, j] = dist[0, 0] + sum(dist[0, 1:j+1])
-                if j_start == 0:
-                    cost_matrix[0, 0:j_end] = np.cumsum(row_dist)
-                # i==0 and j_start>0 is unreachable (band_radius>=0)
-            else:
-                prev_row = cost_matrix[i - 1, j_start:j_end]
-                # Diagonal predecessor cost[i-1, j-1] — shift right by 1.
-                if j_start > 0:
-                    diag = cost_matrix[i - 1, j_start - 1:j_end - 1]
-                else:
-                    diag = np.empty_like(prev_row)
-                    diag[0] = np.inf
-                    diag[1:] = cost_matrix[i - 1, 0:j_end - 1]
-                vbase = np.minimum(prev_row, diag) + row_dist
-
-                # Horizontal serial sweep
-                out = cost_matrix[i, j_start:j_end]
-                prev_h = np.inf
-                for k in range(j_end - j_start):
-                    h_candidate = prev_h + row_dist[k]
-                    v = vbase[k]
-                    cur = v if v < h_candidate else h_candidate
-                    out[k] = cur
-                    prev_h = cur
+            
+            # Vectorized distance for this row's band
+            row_dist = np.abs(ref_curve[i] - target_curve[j_start:j_end])
+            
+            for j in range(j_start, j_end):
+                idx = get_compact_idx(i, j)
+                
+                # Predecessors
+                # 1. Vertical (i-1, j)
+                v_idx = get_compact_idx(i-1, j)
+                v_cost = cost_compact[i-1, v_idx] if 0 <= v_idx < width else np.inf
+                
+                # 2. Diagonal (i-1, j-1)
+                d_idx = get_compact_idx(i-1, j-1)
+                d_cost = cost_compact[i-1, d_idx] if 0 <= d_idx < width else np.inf
+                
+                # 3. Horizontal (i, j-1)
+                h_idx = get_compact_idx(i, j-1)
+                h_cost = cost_compact[i, h_idx] if 0 <= h_idx < width else np.inf
+                
+                min_prev = min(v_cost, d_cost, h_cost)
+                if min_prev != np.inf:
+                    cost_compact[i, idx] = min_prev + row_dist[j - j_start]
 
             if progress_callback is not None and (i % progress_step == 0 or i == n - 1):
                 progress_callback(i + 1, n)
 
+        # Backtrace
         i, j = n - 1, m - 1
         path: list[tuple[int, int]] = [(i, j)]
+        total_dist = 0.0
+        
         while i > 0 or j > 0:
             candidates = []
+            # Diag
             if i > 0 and j > 0:
-                candidates.append((cost_matrix[i - 1, j - 1], i - 1, j - 1))
+                idx = get_compact_idx(i-1, j-1)
+                if 0 <= idx < width: candidates.append((cost_compact[i-1, idx], i-1, j-1))
+            # Vert
             if i > 0:
-                candidates.append((cost_matrix[i - 1, j], i - 1, j))
+                idx = get_compact_idx(i-1, j)
+                if 0 <= idx < width: candidates.append((cost_compact[i-1, idx], i-1, j))
+            # Horiz
             if j > 0:
-                candidates.append((cost_matrix[i, j - 1], i, j - 1))
-            if not candidates:
-                break
-            _, ni, nj = min(candidates, key=lambda x: x[0])
+                idx = get_compact_idx(i, j-1)
+                if 0 <= idx < width: candidates.append((cost_compact[i, idx], i, j-1))
+            
+            if not candidates: break
+            c_val, ni, nj = min(candidates, key=lambda x: x[0])
+            if c_val == np.inf: break
+            
+            total_dist += np.abs(ref_curve[i] - target_curve[j]) # distance of current step
             i, j = ni, nj
             path.append((i, j))
-
+            
+        total_dist += np.abs(ref_curve[0] - target_curve[0]) # distance of start
         path.reverse()
-        total_cost = sum(dist[pi, pj] for pi, pj in path)
-        normalized_cost = total_cost / len(path)
+        
+        normalized_cost = total_dist / len(path)
 
         if ref_depth is None:
             ref_idx = n // 2
@@ -115,11 +120,15 @@ class DTWEngine:
         if target_indices:
             matched_target_idx = int(np.median(target_indices))
         else:
-            matched_target_idx = path[min(ref_idx, len(path) - 1)][1]
+            # find closest i in path
+            closest_p_idx = np.argmin([abs(pi - ref_idx) for pi, pj in path])
+            matched_target_idx = path[closest_p_idx][1]
+            
         suggested_depth = float(target_depths[matched_target_idx])
 
-        max_possible = float(np.max(dist)) if dist.size > 0 else 1.0
-        norm_cost = min(normalized_cost / max_possible, 1.0) if max_possible > 0 else 0.0
+        # Confidence calculation
+        max_diff = np.max(np.abs(ref_curve)) + np.max(np.abs(target_curve))
+        norm_cost = min(normalized_cost / max(1e-6, max_diff), 1.0)
 
         return DTWResult(
             suggested_depth=suggested_depth,

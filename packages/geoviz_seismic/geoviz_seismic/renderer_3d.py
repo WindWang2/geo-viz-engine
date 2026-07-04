@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 
 import pyqtgraph.opengl as gl
 from PySide6.QtGui import QVector3D
-from PySide6 import QtGui, QtOpenGL
+from PySide6 import QtGui
 from pyqtgraph.opengl import shaders
 from OpenGL import GL
 
@@ -21,6 +21,22 @@ from .gpu_ops import (
 )
 
 logger = logging.getLogger(__name__)
+
+def compute_normal_map(data: np.ndarray) -> np.ndarray:
+    """Vectorized CPU-based normal map calculation from 3D volume gradient."""
+    # Gradient in [z, y, x] order for numpy array [ni, nx, nt] (conventionally)
+    # But seismic data is often [il, xl, t]
+    dz, dy, dx = np.gradient(data)
+    
+    # Pack into normal vector and normalize
+    # Flip gradients to get normal pointing 'up' from reflections
+    N = np.stack([-dx, -dy, -dz], axis=-1)
+    norm = np.linalg.norm(N, axis=-1, keepdims=True)
+    norm[norm == 0] = 1.0
+    N /= norm
+    
+    # Map from [-1, 1] to [0, 255] for uint8 storage
+    return ((N + 1.0) * 127.5).astype(np.uint8)
 
 def normalize_volume_to_uint8(data: np.ndarray) -> np.ndarray:
     """Normalize raw float or other data to 0-255 uint8 range for texture mapping."""
@@ -38,7 +54,7 @@ class DualGLVolumeItem(gl.GLVolumeItem):
     using a single 3D texture and dynamic colormapping in a custom GLSL shader.
     Saves 50% GPU memory and speeds up colormap/opacity changes to O(1) time.
     """
-    def __init__(self, data, sliceDensity=3, smooth=True, glOptions='translucent', parentItem=None):
+    def __init__(self, data, normal_data=None, sliceDensity=3, smooth=True, glOptions='translucent', parentItem=None):
         super().__init__(data, sliceDensity=sliceDensity, smooth=smooth, glOptions=glOptions, parentItem=parentItem)
         self._primary_visible = True
         self._overlay_visible = True
@@ -50,8 +66,38 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         self._primary_cmap_tex = None
         self._overlay_cmap_tex = None
         
+        self._normal_data = normal_data
+        self._normal_tex = None
+        self._normal_needs_upload = (normal_data is not None)
+        
         self._cmap_needs_upload = False
         self._customShaderProgram = None
+
+        # Sculpting state
+        self._sculpting_enabled = False
+        self._sculpting_mode = "above"
+        self._sculpt_horizon_data = None
+        self._sculpt_horizon_tex = None
+        self._sculpt_needs_upload = False
+
+        # Shading state
+        self._shading_enabled = False
+        self._shading_light_dir = (1.0, 1.0, 1.0)
+        self._shading_needs_upload = False
+
+    def setShading(self, enabled: bool, light_dir=(1.0, 1.0, 1.0)):
+        self._shading_enabled = enabled
+        self._shading_light_dir = light_dir
+        self._shading_needs_upload = True
+        self.update()
+
+    def setSculpting(self, enabled: bool, horizon_z_norm: np.ndarray = None, mode: str = "above"):
+        self._sculpting_enabled = enabled
+        if horizon_z_norm is not None:
+            self._sculpt_horizon_data = horizon_z_norm
+            self._sculpt_needs_upload = True
+        self._sculpting_mode = mode
+        self.update()
 
     def setColormaps(self, primary_lut: np.ndarray, overlay_lut: np.ndarray):
         """Set the 256x4 uint8 colormap LUTs."""
@@ -107,6 +153,48 @@ class DualGLVolumeItem(gl.GLVolumeItem):
             
         self._cmap_needs_upload = False
 
+
+    def _uploadHorizonTexture(self):
+        ctx = QtGui.QOpenGLContext.currentContext()
+        if ctx is None or self._sculpt_horizon_data is None:
+            return
+            
+        if self._sculpt_horizon_tex is None:
+            self._sculpt_horizon_tex = GL.glGenTextures(1)
+            
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._sculpt_horizon_tex)
+        filt = GL.GL_LINEAR if self.smooth else GL.GL_NEAREST
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, filt)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, filt)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+        
+        h, w = self._sculpt_horizon_data.shape
+        # We upload a single channel float32 texture
+        data = np.ascontiguousarray(self._sculpt_horizon_data)
+        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_R32F, w, h, 0, GL.GL_RED, GL.GL_FLOAT, data)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        self._sculpt_needs_upload = False
+
+    def _uploadNormalTexture(self):
+        if self._normal_data is None:
+            return
+        if self._normal_tex is None:
+            self._normal_tex = GL.glGenTextures(1)
+            
+        GL.glBindTexture(GL.GL_TEXTURE_3D, self._normal_tex)
+        filt = GL.GL_LINEAR if self.smooth else GL.GL_NEAREST
+        GL.glTexParameteri(GL.GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, filt)
+        GL.glTexParameteri(GL.GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, filt)
+        GL.glTexParameteri(GL.GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+        GL.glTexParameteri(GL.GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+        GL.glTexParameteri(GL.GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_R, GL.GL_CLAMP_TO_EDGE)
+        
+        h, w, d = self._normal_data.shape[:3]
+        GL.glTexImage3D(GL.GL_TEXTURE_3D, 0, GL.GL_RGB8, w, h, d, 0, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, self._normal_data)
+        GL.glBindTexture(GL.GL_TEXTURE_3D, 0)
+        self._normal_needs_upload = False
+
     def getCustomShaderProgram(self):
         if self._customShaderProgram is not None:
             return self._customShaderProgram
@@ -135,15 +223,42 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                 uniform sampler3D u_texture;
                 uniform sampler2D u_cmap_primary;
                 uniform sampler2D u_cmap_overlay;
+                uniform sampler2D u_horizon_texture;
+                uniform sampler3D u_normal_texture;
                 
                 uniform float u_overlay_opacity;
                 uniform int u_overlay_visible;
                 uniform int u_primary_visible;
                 
+                uniform int u_sculpting_enabled;
+                uniform int u_sculpt_mode;
+                
+                uniform int u_shading_enabled;
+                uniform vec3 u_light_dir;
+                uniform vec3 u_resolution;
+                
+                vec3 compute_normal(vec3 texcoord, sampler3D tex) {
+                    return texture(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
+                }
+                
+                vec3 compute_normal_legacy(vec3 texcoord, sampler3D tex) {
+                    return texture3D(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
+                }
+                
                 in vec3 v_texcoord;
                 out vec4 fragColor;
                 
                 void main() {
+                    if (u_sculpting_enabled == 1) {
+                        float hz = texture(u_horizon_texture, v_texcoord.xy).r;
+                        if (hz > 0.0 && hz < 1.0) {
+                            if (u_sculpt_mode == 0 && v_texcoord.z > hz) {
+                                discard;
+                            } else if (u_sculpt_mode == 1 && v_texcoord.z < hz) {
+                                discard;
+                            }
+                        }
+                    }
                     vec4 vals = texture(u_texture, v_texcoord);
                     
                     vec4 color_primary = texture(u_cmap_primary, vec2(vals.r, 0.5));
@@ -162,6 +277,12 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                             final_color.rgb = color_overlay.rgb;
                             final_color.a = alpha;
                         }
+                    }
+                    if (u_shading_enabled == 1) {
+                        vec3 N = compute_normal(v_texcoord, u_texture);
+                        vec3 L = normalize(u_light_dir);
+                        float diff = max(dot(N, L), 0.0);
+                        final_color.rgb *= (0.3 + 0.7 * diff);
                     }
                     fragColor = final_color;
                 }
@@ -185,10 +306,38 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                 uniform sampler3D u_texture;
                 uniform sampler2D u_cmap_primary;
                 uniform sampler2D u_cmap_overlay;
+                uniform sampler2D u_horizon_texture;
+                uniform sampler3D u_normal_texture;
+                
                 uniform float u_overlay_opacity;
                 uniform int u_overlay_visible;
                 uniform int u_primary_visible;
+                
+                uniform int u_sculpting_enabled;
+                uniform int u_sculpt_mode;
+                
+                uniform int u_shading_enabled;
+                uniform vec3 u_light_dir;
+                uniform vec3 u_resolution;
+                
+                vec3 compute_normal(vec3 texcoord, sampler3D tex) {
+                    return texture(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
+                }
+                
+                vec3 compute_normal_legacy(vec3 texcoord, sampler3D tex) {
+                    return texture3D(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
+                }
                 void main() {
+                    if (u_sculpting_enabled == 1) {
+                        float hz = texture(u_horizon_texture, v_texcoord.xy).r;
+                        if (hz > 0.0 && hz < 1.0) {
+                            if (u_sculpt_mode == 0 && v_texcoord.z > hz) {
+                                discard;
+                            } else if (u_sculpt_mode == 1 && v_texcoord.z < hz) {
+                                discard;
+                            }
+                        }
+                    }
                     vec4 vals = texture3D(u_texture, v_texcoord);
                     vec4 color_primary = texture2D(u_cmap_primary, vec2(vals.r, 0.5));
                     vec4 color_overlay = texture2D(u_cmap_overlay, vec2(vals.g, 0.5));
@@ -205,6 +354,12 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                             final_color.rgb = color_overlay.rgb;
                             final_color.a = alpha;
                         }
+                    }
+                    if (u_shading_enabled == 1) {
+                        vec3 N = compute_normal_legacy(v_texcoord, u_texture);
+                        vec3 L = normalize(u_light_dir);
+                        float diff = max(dot(N, L), 0.0);
+                        final_color.rgb *= (0.3 + 0.7 * diff);
                     }
                     gl_FragColor = final_color;
                 }
@@ -226,15 +381,42 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                 uniform sampler3D u_texture;
                 uniform sampler2D u_cmap_primary;
                 uniform sampler2D u_cmap_overlay;
+                uniform sampler2D u_horizon_texture;
+                uniform sampler3D u_normal_texture;
                 
                 uniform float u_overlay_opacity;
                 uniform int u_overlay_visible;
                 uniform int u_primary_visible;
                 
+                uniform int u_sculpting_enabled;
+                uniform int u_sculpt_mode;
+                
+                uniform int u_shading_enabled;
+                uniform vec3 u_light_dir;
+                uniform vec3 u_resolution;
+                
+                vec3 compute_normal(vec3 texcoord, sampler3D tex) {
+                    return texture(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
+                }
+                
+                vec3 compute_normal_legacy(vec3 texcoord, sampler3D tex) {
+                    return texture3D(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
+                }
+                
                 in vec3 v_texcoord;
                 out vec4 fragColor;
                 
                 void main() {
+                    if (u_sculpting_enabled == 1) {
+                        float hz = texture(u_horizon_texture, v_texcoord.xy).r;
+                        if (hz > 0.0 && hz < 1.0) {
+                            if (u_sculpt_mode == 0 && v_texcoord.z > hz) {
+                                discard;
+                            } else if (u_sculpt_mode == 1 && v_texcoord.z < hz) {
+                                discard;
+                            }
+                        }
+                    }
                     vec4 vals = texture(u_texture, v_texcoord);
                     
                     vec4 color_primary = texture(u_cmap_primary, vec2(vals.r, 0.5));
@@ -254,6 +436,12 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                             final_color.a = alpha;
                         }
                     }
+                    if (u_shading_enabled == 1) {
+                        vec3 N = compute_normal(v_texcoord, u_texture);
+                        vec3 L = normalize(u_light_dir);
+                        float diff = max(dot(N, L), 0.0);
+                        final_color.rgb *= (0.3 + 0.7 * diff);
+                    }
                     fragColor = final_color;
                 }
                 """
@@ -272,10 +460,38 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                 uniform sampler3D u_texture;
                 uniform sampler2D u_cmap_primary;
                 uniform sampler2D u_cmap_overlay;
+                uniform sampler2D u_horizon_texture;
+                uniform sampler3D u_normal_texture;
+                
                 uniform float u_overlay_opacity;
                 uniform int u_overlay_visible;
                 uniform int u_primary_visible;
+                
+                uniform int u_sculpting_enabled;
+                uniform int u_sculpt_mode;
+                
+                uniform int u_shading_enabled;
+                uniform vec3 u_light_dir;
+                uniform vec3 u_resolution;
+                
+                vec3 compute_normal(vec3 texcoord, sampler3D tex) {
+                    return texture(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
+                }
+                
+                vec3 compute_normal_legacy(vec3 texcoord, sampler3D tex) {
+                    return texture3D(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
+                }
                 void main() {
+                    if (u_sculpting_enabled == 1) {
+                        float hz = texture(u_horizon_texture, v_texcoord.xy).r;
+                        if (hz > 0.0 && hz < 1.0) {
+                            if (u_sculpt_mode == 0 && v_texcoord.z > hz) {
+                                discard;
+                            } else if (u_sculpt_mode == 1 && v_texcoord.z < hz) {
+                                discard;
+                            }
+                        }
+                    }
                     vec4 vals = texture3D(u_texture, v_texcoord);
                     vec4 color_primary = texture2D(u_cmap_primary, vec2(vals.r, 0.5));
                     vec4 color_overlay = texture2D(u_cmap_overlay, vec2(vals.g, 0.5));
@@ -292,6 +508,12 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                             final_color.rgb = color_overlay.rgb;
                             final_color.a = alpha;
                         }
+                    }
+                    if (u_shading_enabled == 1) {
+                        vec3 N = compute_normal_legacy(v_texcoord, u_texture);
+                        vec3 L = normalize(u_light_dir);
+                        float diff = max(dot(N, L), 0.0);
+                        final_color.rgb *= (0.3 + 0.7 * diff);
                     }
                     gl_FragColor = final_color;
                 }
@@ -318,6 +540,12 @@ class DualGLVolumeItem(gl.GLVolumeItem):
             
         if self._cmap_needs_upload:
             self._uploadColormaps()
+            
+        if self._sculpt_needs_upload:
+            self._uploadHorizonTexture()
+            
+        if self._normal_needs_upload:
+            self._uploadNormalTexture()
 
         self.setupGLState()
 
@@ -356,6 +584,16 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         if self._overlay_cmap_tex is not None:
             GL.glActiveTexture(GL.GL_TEXTURE2)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self._overlay_cmap_tex)
+            
+        # Bind horizon texture to unit 3
+        if self._sculpt_horizon_tex is not None and self._sculpting_enabled:
+            GL.glActiveTexture(GL.GL_TEXTURE3)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, self._sculpt_horizon_tex)
+            
+        # Bind normal texture to unit 4
+        if self._normal_tex is not None:
+            GL.glActiveTexture(GL.GL_TEXTURE4)
+            GL.glBindTexture(GL.GL_TEXTURE_3D, self._normal_tex)
 
         for loc in enabled_locs:
             GL.glEnableVertexAttribArray(loc)
@@ -374,6 +612,30 @@ class DualGLVolumeItem(gl.GLVolumeItem):
             
             loc_cmap_over = GL.glGetUniformLocation(program, "u_cmap_overlay")
             GL.glUniform1i(loc_cmap_over, 2)
+            
+            loc_horiz_tex = GL.glGetUniformLocation(program, "u_horizon_texture")
+            GL.glUniform1i(loc_horiz_tex, 3)
+            
+            loc_norm_tex = GL.glGetUniformLocation(program, "u_normal_texture")
+            GL.glUniform1i(loc_norm_tex, 4)
+            
+            loc_sculpt_en = GL.glGetUniformLocation(program, "u_sculpting_enabled")
+            GL.glUniform1i(loc_sculpt_en, 1 if self._sculpting_enabled else 0)
+            
+            loc_sculpt_mode = GL.glGetUniformLocation(program, "u_sculpt_mode")
+            mode_val = 0 if self._sculpting_mode == "below" else 1
+            GL.glUniform1i(loc_sculpt_mode, mode_val)
+            
+            loc_shading_en = GL.glGetUniformLocation(program, "u_shading_enabled")
+            GL.glUniform1i(loc_shading_en, 1 if self._shading_enabled else 0)
+            
+            loc_light_dir = GL.glGetUniformLocation(program, "u_light_dir")
+            GL.glUniform3f(loc_light_dir, *self._shading_light_dir)
+            
+            # pass volume resolution for gradient calculation
+            loc_res = GL.glGetUniformLocation(program, "u_resolution")
+            h, w, d = self.data.shape[:3]
+            GL.glUniform3f(loc_res, w, h, d)
             
             # Set visibility and opacity uniforms
             loc_opacity = GL.glGetUniformLocation(program, "u_overlay_opacity")
@@ -400,6 +662,14 @@ class DualGLVolumeItem(gl.GLVolumeItem):
             GL.glActiveTexture(GL.GL_TEXTURE2)
             GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
             
+        if self._sculpt_horizon_tex is not None:
+            GL.glActiveTexture(GL.GL_TEXTURE3)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+            
+        if self._normal_tex is not None:
+            GL.glActiveTexture(GL.GL_TEXTURE4)
+            GL.glBindTexture(GL.GL_TEXTURE_3D, 0)
+            
         GL.glActiveTexture(GL.GL_TEXTURE0)
 
     def clean(self):
@@ -418,6 +688,18 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                 except Exception:
                     pass
                 self._overlay_cmap_tex = None
+            if self._sculpt_horizon_tex is not None:
+                try:
+                    GL.glDeleteTextures([self._sculpt_horizon_tex])
+                except Exception:
+                    pass
+                self._sculpt_horizon_tex = None
+            if self._normal_tex is not None:
+                try:
+                    GL.glDeleteTextures([self._normal_tex])
+                except Exception:
+                    pass
+                self._normal_tex = None
 
 
 class Renderer3D(QWidget):
@@ -458,6 +740,10 @@ class Renderer3D(QWidget):
         self._overlay_opacity = 0.5
         self._overlay_visible = True
         self._overlay_volume_visual = None
+        
+        self._sculpt_surface = None
+        self._sculpt_mode = "above"
+        self._shading_enabled = False
 
         self._init_pyqtgraph(layout)
         self._plotter = True  # Keeps state parity with external API expectations
@@ -550,6 +836,26 @@ class Renderer3D(QWidget):
                 self._overlay_volume_visual.hide()
         self._view.update()
 
+    def set_hillshading(self, enabled: bool):
+        self._shading_enabled = enabled
+        if self._volume_visual is not None and isinstance(self._volume_visual, DualGLVolumeItem):
+            self._volume_visual.setShading(enabled)
+
+    def set_sculpting_surface(self, surface_z: np.ndarray | None, mode: str = "above"):
+        self._sculpt_surface = surface_z
+        self._sculpt_mode = mode
+        if self._volume_visual is not None and isinstance(self._volume_visual, DualGLVolumeItem):
+            if surface_z is not None and self._volume_data_cpu is not None:
+                nt = self._volume_data_cpu.shape[2]
+                norm_surface = surface_z / max(1, nt - 1)
+            else:
+                norm_surface = None
+            self._volume_visual.setSculpting(
+                surface_z is not None, 
+                norm_surface, 
+                mode
+            )
+
     def load_volume(self, data: np.ndarray, origin=(0, 0, 0),
                     spacing=(1, 1, 1)):
         """Load volume into renderer, automatically syncing to GPU if available."""
@@ -593,25 +899,7 @@ class Renderer3D(QWidget):
         self._opacity_mode = getattr(self, "_opacity_mode", "sharp")
 
         # 1. 3D Volume Item (Hidden by default, shown when mode="volume")
-        try:
-            cmap_data = ColormapManager.get_colormap(self._cmap_name).copy()
-            alpha_curve = self._build_alpha_curve(self._opacity_mode, len(cmap_data))
-            cmap_data[:, 3] = alpha_curve.astype(np.uint8)
-            vol_data = self._volume_data_gpu if self._volume_data_gpu is not None else data
-            
-            # Using downsampled data for volume rendering to avoid GPU VRAM crash on huge datasets
-            # Slices remain 1x1x1 resolution, volume is purely visual
-            from .gpu_ops import apply_colormap_gpu
-            vol_rgba = apply_colormap_gpu(vol_data[::2, ::2, ::2], cmap_data)
-            
-            # sliceDensity=3 makes the raycaster cast more rays, making it look dense and solid
-            self._volume_visual = gl.GLVolumeItem(vol_rgba, sliceDensity=3, smooth=True)
-            self._volume_visual.scale(si*2, sx*2, st*2)
-            self._view.addItem(self._volume_visual)
-            if self._mode != "volume":
-                self._volume_visual.hide()
-        except Exception as e:
-            logger.warning(f"GLVolumeItem preparation failed: {e}")
+        self._rebuild_volume_visual()
 
         # 2. Bounding Box & labeled Axis setup
         self._create_bbox(ni, nx, nt, spacing)
@@ -709,7 +997,20 @@ class Renderer3D(QWidget):
             return
         self._cmap_name = cmap_name
         self._update_slice_planes()
-        if self._mode == "volume":
+        
+        # Optimize: If volume rendering is active, update colormaps in-place instead of rebuilding
+        if self._mode == "volume" and isinstance(self._volume_visual, DualGLVolumeItem):
+            from .colormap import ColormapManager
+            cmap_data_primary = ColormapManager.get_colormap(self._cmap_name).copy()
+            alpha_curve_primary = self._build_alpha_curve(self._opacity_mode, len(cmap_data_primary))
+            cmap_data_primary[:, 3] = alpha_curve_primary.astype(np.uint8)
+
+            cmap_data_overlay = ColormapManager.get_colormap(self._overlay_cmap_name).copy()
+            alpha_curve_overlay = self._build_alpha_curve("sharp", len(cmap_data_overlay))
+            cmap_data_overlay[:, 3] = alpha_curve_overlay.astype(np.uint8)
+            
+            self._volume_visual.setColormaps(cmap_data_primary, cmap_data_overlay)
+        elif self._mode == "volume":
             self._rebuild_volume_visual()
 
     @staticmethod
@@ -729,7 +1030,9 @@ class Renderer3D(QWidget):
     def set_opacity_mode(self, mode: str):
         """Set the opacity transfer function and rebuild volume visual."""
         self._opacity_mode = mode
-        if self._loaded and self._volume_visual is not None:
+        if self._loaded and isinstance(self._volume_visual, DualGLVolumeItem):
+            self.set_colormap(self._cmap_name) # Reuse the optimized colormap update logic
+        elif self._loaded and self._volume_visual is not None:
             self._rebuild_volume_visual()
 
     def _rebuild_volume_visual(self):
@@ -750,11 +1053,14 @@ class Renderer3D(QWidget):
             return
 
         try:
-            # Downsample and normalize primary volume data
+                        # Downsample and normalize primary volume data
             primary_data = self._volume_data_cpu[::2, ::2, ::2]
             primary_normalized = normalize_volume_to_uint8(primary_data)
+            
+            # Pre-compute normals for hillshading (Phase 2 Audit Task 2)
+            normal_data = compute_normal_map(primary_data)
 
-            # Downsample and normalize overlay volume data if available
+            # Downsample and normalize overlay volume data if available if available
             if self._overlay_volume_data_cpu is not None:
                 overlay_data = self._overlay_volume_data_cpu[::2, ::2, ::2]
                 overlay_normalized = normalize_volume_to_uint8(overlay_data)
@@ -778,10 +1084,21 @@ class Renderer3D(QWidget):
 
             # Instantiate our high-performance custom DualGLVolumeItem
             si, sx, st = self._volume_spacing
-            self._volume_visual = DualGLVolumeItem(vol_data_combined, sliceDensity=3, smooth=True)
+            self._volume_visual = DualGLVolumeItem(vol_data_combined, normal_data=normal_data, sliceDensity=3, smooth=True)
             self._volume_visual.setColormaps(cmap_data_primary, cmap_data_overlay)
             self._volume_visual.setOverlayOpacity(self._overlay_opacity)
             self._volume_visual.setOverlayVisible(self._overlay_visible)
+            if self._sculpt_surface is not None and self._volume_data_cpu is not None:
+                nt = self._volume_data_cpu.shape[2]
+                norm_surface = self._sculpt_surface / max(1, nt - 1)
+            else:
+                norm_surface = None
+            self._volume_visual.setSculpting(
+                self._sculpt_surface is not None,
+                norm_surface,
+                self._sculpt_mode
+            )
+            self._volume_visual.setShading(self._shading_enabled)
             self._volume_visual.scale(si * 2, sx * 2, st * 2)
 
             self._view.addItem(self._volume_visual)

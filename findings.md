@@ -556,6 +556,24 @@ A systematic performance audit was conducted across the data loading (Excel I/O)
 - **Event Throttling**: Sync signals trigger immediate global updates.
   - *Decision*: Coalesce cross-well overlays and canvas synchronizations to a 60 FPS maximum threshold (16ms throttling).
 
+## WellLog 文本标注自适应机制分析 (2026-06-02)
+
+### 1. 当前问题
+- `LithologyTrack`、`IntervalTrack`、`FaciesTrack`、`SystemsTractTrack` 都在各自绘制函数中硬编码小字号（约 7–11px），没有根据当前可见深度范围、track 宽度和 interval 高度动态计算。
+- 字号决策散落在每个 interval 的绘制循环内，导致同一井道在不同 track 实现、横排/竖排、nested facies 子列之间缺少统一规则。
+- 长文本直接 `drawText` 到矩形中，没有统一的 `elidedText`、两行 wrap 或“不足空间则隐藏”的策略，容易出现文字过小、截断不可控或越界。
+
+### 2. 自适应策略决策
+- 字体策略应以“track/column 一次 paint”为单位计算，而不是每个 interval 单独决定；这样才能保证同井道/同子列字号一致。
+- 输入应包括：content rect 高度、track/column 宽度、当前 `depth_span`、可见 interval 的像素高度分布、label 文本长度。
+- 输出应包括：统一 `font_px`、横排/竖排方向、最多行数、截断策略和最小可绘制高度。
+- 当 interval 空间不足时，正确做法是隐藏该 label 或只显示更短文本，而不是把字号继续缩到不可读。
+
+### 3. 实现边界
+- 优先覆盖数据标注 track：`lithology_track.py`、`interval_track.py`、`facies_track.py`、`systems_tract.py`。
+- `CurveTrack.paint_header` 和 `BaseTrack.paint_header` 属于表头文字，不直接受 interval 高度控制，但拖拽井道宽度时同样需要 elide/wrap 策略。
+- 自适应 label 计算必须在 zoom、Ctrl+drag pan、垂直 scrollbar depth pan、track resize 后自然重算；这些动作都会触发现有 paint/depth-range 更新链路，不需要额外全局状态。
+
 ## UI Redesign: Azurite Design System (2026-06-01)
 
 A complete UI overhaul has been initiated based on the "Azurite" (蓝铜) design system.
@@ -589,4 +607,42 @@ A complete UI overhaul has been initiated based on the "Azurite" (蓝铜) design
   - Secondary/Stroke: `#586878` (Neutral Slate)
   - Selected states: `#e9effa` (Light Blue)
 
+---
 
+## Phase 28: Cross-Well Multi-Curve Overlay & Interactive Picking (2026-07-04)
+
+### 1. Multi-Scale Header Partitioning
+- In `CurveTrack.paint_content`, track width $W$ is sliced into $K$ equal columns for $K$ overlaid curves.
+- Color-coded display ranges (`lo` at top, `hi` at bottom) are rendered using each curve's assigned color, eliminating reading ambiguity when curves overlay.
+
+### 2. Feature Peak/Trough Snapping
+- `CrossWellCanvas._get_snapped_depth()` searches within a vertical window $\pm \text{snap\_window\_m}$ (default 1.5m) around clicked depth.
+- `PickingOverlay` renders real-time dashed preview lines and highlighted curve dots at the snapped coordinate.
+
+---
+
+## Phase 29-A: 3D Seismic Horizon Gaussian Sculpting & Attribute Mapping (2026-07-04)
+
+### 1. 3D Raycasting & Ray-Grid Intersection
+- Unprojecting NDC coordinates through the inverse MVP matrix yields a 3D ray $(O, D)$.
+- Ray marching over $Z = H(X, Y)$ heightmaps safely locates the 3D surface intersection point.
+
+### 2. NumPy Vectorized Gaussian Deformation & ROI Patch
+- Gaussian elevation adjustments $\Delta Z = A \cdot \exp(-d^2 / 2\sigma^2)$ operate fully in NumPy vectorized views.
+- `HorizonROIPatch` stores 2D bounding boxes $(min\_i, max\_i, min\_j, max\_j)$ for 20-step undo/redo history, saving >95% memory compared to full grid cloning.
+
+---
+
+## Phase 30: 独立井震精细标定工作台与矢量报告导出 (2026-07-04)
+
+### 1. 7 轨道高性能画图缓存 (`WellTieCanvas`)
+- 实现了深度/TWT轴、DT/RHOB、阻抗 AI、反射系数 RC、合成记录、实际地震道和互相关/残差 7 轨道并排渲染。
+- `QPixmap` 静态双缓冲解算将背景网格与轨道线条一次性缓存，鼠标悬停与光标滑过延迟 `< 0.5ms`。
+
+### 2. 子波与合成记录解算 (`geoviz_well_tie`)
+- 封装 `wavelet_engine.py`（Ricker、Ormsby 及基于自相关与窗函数的统计子波提取）。
+- 封装 `synthetic_generator.py`（波阻抗 $AI = V_p \times \rho$ $\rightarrow$ 反射系数 $RC$ $\rightarrow$ 1D 卷积合成地震道）。
+- 封装 `report_export.py`，支持一键生成 300 DPI 矢量 PDF/SVG 勘探标准井震标定报告（包含三栏国标责任表）。
+
+
+```

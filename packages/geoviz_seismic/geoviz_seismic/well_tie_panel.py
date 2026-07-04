@@ -41,6 +41,7 @@ class WellTiePanel(QWidget):
     """
 
     synthetic_changed = Signal(object, object)
+    auto_tie_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -129,6 +130,7 @@ class WellTiePanel(QWidget):
 
         self._auto_tie_btn = QPushButton("Auto-Tie (互相关)")
         self._auto_tie_btn.setStyleSheet(_STYLE_BTN)
+        self._auto_tie_btn.clicked.connect(self._on_auto_tie)
         tie_layout.addWidget(self._auto_tie_btn)
 
         self._cc_label = QLabel("CC: --")
@@ -200,7 +202,6 @@ class WellTiePanel(QWidget):
             )
 
         self._synthetic = synth
-        t_max = float(mid_cal.twt[-1])
         self._synthetic_twt = np.arange(len(synth), dtype=np.float64) * dt_ms
 
         self._shift_samples = None
@@ -220,6 +221,12 @@ class WellTiePanel(QWidget):
         self._correlation_coeff = cc
         self._cc_label.setText(f"CC: {cc:.3f}")
         self._shift_label.setText(f"Shift: {shift} samples")
+
+    def _on_auto_tie(self):
+        """Handle auto-tie button click. Emits signal for SeismicView to provide trace."""
+        if self._synthetic is None:
+            return
+        self.auto_tie_requested.emit()
 
     def _on_generate(self):
         self.generate_synthetic(dt_ms=4.0)

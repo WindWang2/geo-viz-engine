@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
+from geoviz_paleo_map.label_policy import chrome_font_size
 from geoviz_paleo_map.layers.base import PaleoLayer
 from geoviz_paleo_map.viewport import PaleoMapViewport
 
@@ -28,6 +29,13 @@ def _smooth_scale_km(extent_km: float) -> float:
 
 class ScaleBarLayer(PaleoLayer):
     is_chrome = True
+
+    def reserved_rect(self, viewport: PaleoMapViewport) -> QRectF:
+        """Screen rect this scale bar occupies, for label collision avoidance."""
+        x0 = 16.0
+        y0 = viewport.height - 24.0
+        # Reserve the widest possible bar + the label row beneath it.
+        return QRectF(x0 - 4, y0 - 8, BAR_MAX_PX + 8, 30)
 
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -58,7 +66,7 @@ class ScaleBarLayer(PaleoLayer):
         painter.drawLine(QPointF(x0 + bar_px, y0 - 4),
                          QPointF(x0 + bar_px, y0 + 4))
 
-        font = QFont("Sans Serif", 8)
+        font = QFont("Sans Serif", chrome_font_size(viewport.width, viewport.height, 8))
         painter.setFont(font)
         painter.setPen(QPen(BAR_COLOR, 0))
         metrics = painter.fontMetrics()

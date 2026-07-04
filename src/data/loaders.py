@@ -349,14 +349,13 @@ def load_well_log_converted(path: Path, well_name: str | None = None) -> WellLog
                     elif "CAL" in c_str.upper(): color = "#d97706"
                     
                     rng = get_display_range(vals, c_str)
-                    curves.append(CurveData(
-                        name=c_str, depth=depths, values=vals,
-                        color=color, display_range=rng
-                    ))
-                    
                     line_style = "solid"
                     if any(k in c_str.upper() for k in ("RXO", "RS", "LLS", "AC", "DT")):
                         line_style = "dashed"
+                    curves.append(CurveData(
+                        name=c_str, depth=depths, values=vals,
+                        color=color, display_range=rng, line_style=line_style
+                    ))
             except Exception as e:
                 print(f"Error processing sheet {s}: {e}")
                 

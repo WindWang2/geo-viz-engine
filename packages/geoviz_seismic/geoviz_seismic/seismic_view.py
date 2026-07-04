@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, Slot
-from PySide6.QtGui import QIcon, QColor
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QPushButton, QComboBox, QLabel, QFileDialog, QToolBar,
@@ -207,6 +207,21 @@ class SeismicView(QWidget):
             target / max(nx, 1),
             target / max(nt, 1),
         )
+
+    def cleanup(self):
+        """Stop background workers and cleanup GPU resources before page switch."""
+        if hasattr(self, '_segy_worker') and self._segy_worker is not None:
+            if self._segy_worker.isRunning():
+                self._segy_worker.requestInterruption()
+                self._segy_worker.wait(500)
+        
+        if hasattr(self, '_synth_worker') and self._synth_worker is not None:
+            if self._synth_worker.isRunning():
+                self._synth_worker.requestInterruption()
+                self._synth_worker.wait(500)
+        
+        # Optionally free 3D textures if they are huge
+        # self._renderer_3d.clean()
 
     def load_demo(self, data: np.ndarray):
         """Load a synthetic or pre-computed 3-D volume for quick demo."""
@@ -437,6 +452,19 @@ class SeismicView(QWidget):
         self._opacity_combo.addItems(["透明度: 锐利", "透明度: 线性", "透明度: S曲线", "透明度: 阈值"])
         self._opacity_combo.currentIndexChanged.connect(self._on_opacity_changed)
 
+        self._hillshade_btn = QPushButton(" 光照")
+        self._hillshade_btn.setCheckable(True)
+        self._hillshade_btn.setIcon(self._get_ui_icon("layers.svg")) # reusing icon for now
+        self._hillshade_btn.toggled.connect(self._on_hillshade_toggled)
+
+        self._sculpt_horizon_combo = QComboBox()
+        self._sculpt_horizon_combo.addItem("无")
+        self._sculpt_horizon_combo.currentTextChanged.connect(self._on_sculpt_changed)
+        
+        self._sculpt_mode_combo = QComboBox()
+        self._sculpt_mode_combo.addItems(["保留下部", "保留上部"])
+        self._sculpt_mode_combo.currentTextChanged.connect(self._on_sculpt_changed)
+
         self._clip_spin = QDoubleSpinBox()
         self._clip_spin.setRange(50.0, 99.9)
         self._clip_spin.setValue(99.0)
@@ -586,12 +614,17 @@ class SeismicView(QWidget):
         bar2.addWidget(QLabel(" 3D模式:"))
         bar2.addWidget(self._3d_mode_combo)
         bar2.addWidget(self._opacity_combo)
+        bar2.addWidget(self._hillshade_btn)
         bar2.addWidget(QLabel(" 剖面:"))
         bar2.addWidget(self._slice_type_combo)
         bar2.addWidget(QLabel(" 显示:"))
         bar2.addWidget(self._mode_combo)
         bar2.addWidget(QLabel(" 色标:"))
         bar2.addWidget(self._cmap_combo)
+        bar2.addSeparator()
+        bar2.addWidget(QLabel(" 雕刻:"))
+        bar2.addWidget(self._sculpt_horizon_combo)
+        bar2.addWidget(self._sculpt_mode_combo)
         bar2.addSeparator()
         bar2.addWidget(QLabel(" 裁剪:"))
         bar2.addWidget(self._clip_spin)
@@ -1012,11 +1045,15 @@ class SeismicView(QWidget):
         idx = len(self._horizon_grids) % len(colors)
         self._horizon_grids[name] = filled
         self._renderer_3d.add_horizon(filled, name=name, color=colors[idx])
+        self._sculpt_horizon_combo.addItem(name)
         self._readout_label.setText(f"已加载层位: {name} ({len(self._horizon_grids)} 个)")
 
     def _remove_horizon(self, name: str):
         self._horizon_grids.pop(name, None)
         self._renderer_3d.remove_horizon(name)
+        idx = self._sculpt_horizon_combo.findText(name)
+        if idx >= 0:
+            self._sculpt_horizon_combo.removeItem(idx)
         self._readout_label.setText(f"已移除层位: {name}")
 
     def _show_horizon_list(self):
@@ -1061,6 +1098,15 @@ class SeismicView(QWidget):
         # Trigger an immediate slice read / render
         self._on_slice_changed(slice_type, position)
 
+    def _on_sculpt_changed(self, _=None):
+        horizon_name = self._sculpt_horizon_combo.currentText()
+        if horizon_name == "无" or horizon_name not in self._horizon_grids:
+            self._renderer_3d.set_sculpting_surface(None)
+        else:
+            mode_text = self._sculpt_mode_combo.currentText()
+            mode = "above" if mode_text == "保留上部" else "below"
+            self._renderer_3d.set_sculpting_surface(self._horizon_grids[horizon_name], mode)
+
     def _on_clip_changed(self, value: float):
         for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
             pw._vd.set_clip_percentile(value)
@@ -1069,6 +1115,9 @@ class SeismicView(QWidget):
         modes = ["sharp", "linear", "sigmoid", "threshold"]
         if 0 <= index < len(modes):
             self._renderer_3d.set_opacity_mode(modes[index])
+
+    def _on_hillshade_toggled(self, checked: bool):
+        self._renderer_3d.set_hillshading(checked)
 
     def _on_attr_changed(self, index: int):
         # Toggle RGB channel selectors visibility

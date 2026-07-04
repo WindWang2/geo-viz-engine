@@ -20,6 +20,7 @@ class ConnectionOverlay(QWidget):
         self.setAutoFillBackground(False)
         self._canvases: list[WellLogCanvas] = []
         self._links: list = []
+        self._well_names: list[str] = []
 
     def set_canvases(self, canvases: list[WellLogCanvas], well_names: list[str] | None = None):
         self._canvases = list(canvases)

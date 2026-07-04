@@ -4,6 +4,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QBrush
 
 from ..models import IntervalItem
+from .label_layout import compute_label_policy, fit_label_text
 from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
 
 _PASTEL_PALETTE = [
@@ -30,29 +31,29 @@ class IntervalTrack(BaseTrack):
 
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()
-        painter.setClipRect(rect)
+        painter.setClipRect(rect.adjusted(-2, -2, 2, 2))
 
         # Horizontal grid lines (ECharts splitLine parity)
         self.paint_grid(painter, rect)
 
         font = QFont()
         font.setBold(True)
-        # will be set per-text-orientation below
-        painter.setFont(font)
-
+        interval_rects: list[tuple[int, IntervalItem, QRectF]] = []
         for i, interval in enumerate(self._intervals):
             y_top = self._depth_to_y(interval.top, rect)
             y_bottom = self._depth_to_y(interval.bottom, rect)
-
-            # Skip intervals outside visible range
             if y_bottom < rect.top() or y_top > rect.bottom():
                 continue
-
-            # Clamp to rect
             y_top = max(y_top, rect.top())
             y_bottom = min(y_bottom, rect.bottom())
+            interval_rects.append((i, interval, QRectF(rect.left(), y_top, rect.width(), y_bottom - y_top)))
 
-            interval_rect = QRectF(rect.left(), y_top, rect.width(), y_bottom - y_top)
+        policy = compute_label_policy(rect, self.depth_span, [r.height() for _, _, r in interval_rects])
+        font.setPixelSize(policy.font_px)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+
+        for i, interval, interval_rect in interval_rects:
             color = self._get_color(i, interval.name)
 
             painter.fillRect(interval_rect, QBrush(color))
@@ -65,21 +66,18 @@ class IntervalTrack(BaseTrack):
             painter.setPen(QPen(QColor(ECHARTS_TEXT), 1))
             text_rect = QRectF(interval_rect.left() + 2, interval_rect.top() + 1,
                                interval_rect.width() - 4, interval_rect.height() - 2)
-            if interval_rect.height() > 14:
-                if rect.width() < 50:
-                    font.setPixelSize(11)
-                    painter.setFont(font)
+            lines = fit_label_text(interval.name, text_rect, policy, metrics)
+            if lines:
+                if policy.vertical:
                     painter.save()
                     painter.translate(text_rect.center())
                     painter.rotate(-90)
                     rotated = QRectF(-text_rect.height() / 2, -text_rect.width() / 2,
                                      text_rect.height(), text_rect.width())
-                    painter.drawText(rotated, Qt.AlignmentFlag.AlignCenter, interval.name)
+                    painter.drawText(rotated, Qt.AlignmentFlag.AlignCenter, lines[0])
                     painter.restore()
                 else:
-                    font.setPixelSize(10)
-                    painter.setFont(font)
-                    painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, interval.name)
+                    painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "\n".join(lines))
 
         painter.setClipping(False)
         painter.setPen(QPen(QColor(ECHARTS_BORDER), 1))

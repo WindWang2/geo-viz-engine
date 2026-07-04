@@ -129,3 +129,18 @@ def test_curve_track_path_caching(qtbot):
     _, path3 = track._path_cache[curve.name]
     assert path1 is not path3
 
+
+def test_curve_track_multi_scale_rendering(qtbot):
+    from geoviz_well_log.renderer.curve_track import CurveTrack
+    c1 = CurveData(name="GR", unit="API", depth=[0, 100], values=[10, 150], display_range=(0.0, 150.0), color="green")
+    c2 = CurveData(name="AC", unit="us/ft", depth=[0, 100], values=[40, 140], display_range=(40.0, 140.0), color="blue")
+    track = CurveTrack(curves=[c1, c2], label="GR/AC", width=150)
+    qtbot.addWidget(track)
+    track.set_depth_range(0, 100)
+    pm = QPixmap(150, 800)
+    painter = QPainter(pm)
+    track.paint_content(painter, QRectF(0, 0, 150, 800))
+    painter.end()
+    assert len(track._curves) == 2
+
+

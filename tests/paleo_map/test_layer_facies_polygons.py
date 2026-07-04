@@ -216,4 +216,113 @@ def test_locked_borders_enforced_at_shallow_active_level():
     assert 1.0 not in widths3
 
 
+def test_locked_geometry_border_only_marks_facies_boundary_red():
+    from geoviz_paleo_map.hierarchy import FaciesHierarchy, FaciesFeature, FaciesNode
+    img, vp, resolver = _setup()
+    f1 = FaciesFeature(id="f1", facies_name="砂岩", display_name="f", level="facies", period="P", parent_id=None, geometry=SAND_FEATURE["geometry"])
+    f2 = FaciesFeature(id="f2", facies_name="粉砂岩", display_name="sf", level="sub_facies", parent_id="f1", period="P", geometry=SAND_FEATURE["geometry"])
+    f3 = FaciesFeature(id="f3", facies_name="细粉砂岩", display_name="mf", level="micro_facies", parent_id="f2", period="P", geometry=SAND_FEATURE["geometry"])
+    hier = FaciesHierarchy(roots=[FaciesNode(f1)], by_id={"f1": FaciesNode(f1), "f2": FaciesNode(f2), "f3": FaciesNode(f3)})
+    hier._by_id["f1"].children.append(hier._by_id["f2"])
+    hier._by_id["f2"].children.append(hier._by_id["f3"])
+
+    class MockPainter:
+        def __init__(self):
+            self.drawn_pens = []
+            self.current_pen = None
+            self._render_hints = {}
+        def setRenderHint(self, hint, on):
+            self._render_hints[hint] = on
+        def save(self): pass
+        def translate(self, x, y): pass
+        def scale(self, sx, sy): pass
+        def restore(self): pass
+        def setPen(self, pen):
+            self.current_pen = pen
+        def setBrush(self, brush): pass
+        def drawPath(self, path):
+            from PySide6.QtCore import Qt
+            if self.current_pen is not None and self.current_pen.style() != Qt.PenStyle.NoPen:
+                from PySide6.QtGui import QPen
+                self.drawn_pens.append(QPen(self.current_pen))
+
+    layer = FaciesPolygonsLayer([SAND_FEATURE], resolver, hierarchy=hier, active_level="facies", locked_ids={"f1": "micro_facies"})
+    painter = MockPainter()
+    layer.paint(painter, vp)
+
+    red_pens = [pen for pen in painter.drawn_pens if pen.color().red() > 180 and pen.color().green() < 80 and pen.color().blue() < 80]
+    assert len(red_pens) == 1
+    assert red_pens[0].widthF() > 2.0
+
+
+def _make_mock_painter_cls():
+    class MockPainter:
+        def __init__(self):
+            self.drawn_pens = []
+            self.current_pen = None
+            self._render_hints = {}
+        def setRenderHint(self, hint, on):
+            self._render_hints[hint] = on
+        def save(self): pass
+        def translate(self, x, y): pass
+        def scale(self, sx, sy): pass
+        def restore(self): pass
+        def setPen(self, pen):
+            self.current_pen = pen
+        def setBrush(self, brush): pass
+        def drawPath(self, path):
+            from PySide6.QtCore import Qt
+            if self.current_pen is not None and self.current_pen.style() != Qt.PenStyle.NoPen:
+                from PySide6.QtGui import QPen
+                self.drawn_pens.append(QPen(self.current_pen))
+    return MockPainter
+
+
+def _three_level_hier():
+    from geoviz_paleo_map.hierarchy import FaciesHierarchy, FaciesFeature, FaciesNode
+    f1 = FaciesFeature(id="f1", facies_name="砂岩", display_name="f", level="facies", period="P", parent_id=None, geometry=SAND_FEATURE["geometry"])
+    f2 = FaciesFeature(id="f2", facies_name="粉砂岩", display_name="sf", level="sub_facies", parent_id="f1", period="P", geometry=SAND_FEATURE["geometry"])
+    f3 = FaciesFeature(id="f3", facies_name="细粉砂岩", display_name="mf", level="micro_facies", parent_id="f2", period="P", geometry=SAND_FEATURE["geometry"])
+    hier = FaciesHierarchy(roots=[FaciesNode(f1)], by_id={"f1": FaciesNode(f1), "f2": FaciesNode(f2), "f3": FaciesNode(f3)})
+    hier._by_id["f1"].children.append(hier._by_id["f2"])
+    hier._by_id["f2"].children.append(hier._by_id["f3"])
+    return hier
+
+
+def _red_pens(painter):
+    return [pen for pen in painter.drawn_pens
+            if pen.color().red() > 180 and pen.color().green() < 80 and pen.color().blue() < 80]
+
+
+def test_locked_sub_facies_boundary_marked_red(qtbot):
+    """Locking a 亚相 feature must mark ITS boundary red+bold, not only 相."""
+    img, vp, resolver = _setup()
+    hier = _three_level_hier()
+    # Display expanded to sub_facies, lock applied to the sub_facies feature f2.
+    layer = FaciesPolygonsLayer([SAND_FEATURE], resolver, hierarchy=hier,
+                                active_level="sub_facies", locked_ids={"f2": "sub_facies"})
+    MockPainter = _make_mock_painter_cls()
+    painter = MockPainter()
+    layer.paint(painter, vp)
+
+    red = _red_pens(painter)
+    assert len(red) == 1, "locked sub_facies boundary should be drawn red exactly once"
+    assert red[0].widthF() > 2.0, "locked boundary should be bold"
+
+
+def test_locked_micro_facies_boundary_marked_red(qtbot):
+    """Locking a 微相 feature must mark ITS boundary red+bold."""
+    img, vp, resolver = _setup()
+    hier = _three_level_hier()
+    layer = FaciesPolygonsLayer([SAND_FEATURE], resolver, hierarchy=hier,
+                                active_level="micro_facies", locked_ids={"f3": "micro_facies"})
+    MockPainter = _make_mock_painter_cls()
+    painter = MockPainter()
+    layer.paint(painter, vp)
+
+    red = _red_pens(painter)
+    assert len(red) == 1, "locked micro_facies boundary should be drawn red exactly once"
+    assert red[0].widthF() > 2.0
+
+
 

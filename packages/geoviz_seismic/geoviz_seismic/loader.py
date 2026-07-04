@@ -83,10 +83,11 @@ class SeismicLoader:
                          time.monotonic() - t0, data.shape)
             return data
         except (KeyError, ValueError) as e:
+            ilines = self._f.ilines if self._f else []
             raise ValueError(
                 f"Failed to read inline {iline} from {self._path}: "
                 f"{e}. Inline may be out of range "
-                f"(available: {f.ilines[0]}-{f.ilines[-1]})."
+                f"(available: {ilines[0] if len(ilines) > 0 else '?'}-{ilines[-1] if len(ilines) > 0 else '?'})."
             ) from e
 
     def read_crossline(self, xline: int) -> np.ndarray:
@@ -99,10 +100,11 @@ class SeismicLoader:
                          time.monotonic() - t0, data.shape)
             return data
         except (KeyError, ValueError) as e:
+            xlines = self._f.xlines if self._f else []
             raise ValueError(
                 f"Failed to read crossline {xline} from {self._path}: "
                 f"{e}. Crossline may be out of range "
-                f"(available: {f.xlines[0]}-{f.xlines[-1]})."
+                f"(available: {xlines[0] if len(xlines) > 0 else '?'}-{xlines[-1] if len(xlines) > 0 else '?'})."
             ) from e
 
     def read_timeslice(self, sample_idx: int) -> np.ndarray:
@@ -260,8 +262,6 @@ class SeismicLoader:
             return self._f
         else:
             # Last resort: assume square grid and open unstructured
-            import math
-            sqrt_n = math.isqrt(n_traces)
             logger.warning("Could not auto-detect geometry. Falling back to unstructured mode (%d traces).", n_traces)
             self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=True)
             return self._f

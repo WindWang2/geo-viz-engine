@@ -5,6 +5,8 @@ from PySide6.QtCore import Qt
 from geoviz_well_log import (
     WellLogCanvas, DepthTrack, CurveTrack, CurveData,
 )
+from geoviz_well_log.renderer.interval_track import IntervalTrack
+from geoviz_well_log.models import IntervalItem
 from src.pages.well_log.qpainter_widget import QPainterWidget
 
 
@@ -66,3 +68,28 @@ def test_set_tracks_empty(qtbot):
     widget.set_tracks([])
     assert len(widget.canvas.tracks) == 0
     widget.reset_view()
+
+
+def test_canvas_preserves_natural_track_width_for_horizontal_scroll(qtbot):
+    widget = QPainterWidget()
+    qtbot.addWidget(widget)
+    widget.resize(360, 600)
+    widget.show()
+    qtbot.waitExposed(widget)
+    tracks = [
+        DepthTrack(top_depth=0, bottom_depth=100, width=60),
+        *[
+            IntervalTrack(
+                intervals=[IntervalItem(top=0, bottom=100, name=f"Track {i}")],
+                label=f"T{i}",
+                width=120,
+            )
+            for i in range(6)
+        ],
+    ]
+
+    widget.set_tracks(tracks)
+
+    assert widget.canvas.minimumWidth() == sum(t.width for t in tracks)
+    assert widget.canvas.width() >= sum(t.width for t in tracks)
+    assert widget.horizontalScrollBar().maximum() > 0

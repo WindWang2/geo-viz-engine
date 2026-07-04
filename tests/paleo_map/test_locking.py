@@ -58,6 +58,42 @@ def test_locking_behavior(qtbot):
     assert "facies_a" not in visible_ids_unlocked
 
 
+def test_locked_facies_border_stays_visible_when_lock_expands_to_micro_facies(qtbot):
+    from geoviz_paleo_map.layers.facies_polygons import FaciesPolygonsLayer
+
+    features = [
+        {
+            "type": "Feature",
+            "properties": {"id": "facies_a", "name": "相A", "facies": "砂岩", "level": "facies"},
+            "geometry": {"type": "Polygon", "coordinates": [[[10, 10], [12, 10], [12, 12], [10, 12], [10, 10]]]}
+        },
+        {
+            "type": "Feature",
+            "properties": {"id": "sub_b", "name": "亚相B", "facies": "砂岩", "level": "sub_facies", "parent_id": "facies_a"},
+            "geometry": {"type": "Polygon", "coordinates": [[[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]]}
+        },
+        {
+            "type": "Feature",
+            "properties": {"id": "micro_c", "name": "微相C", "facies": "砂岩", "level": "micro_facies", "parent_id": "sub_b"},
+            "geometry": {"type": "Polygon", "coordinates": [[[10, 10], [10.5, 10], [10.5, 10.5], [10, 10.5], [10, 10]]]}
+        }
+    ]
+
+    canvas = PaleoMapCanvas()
+    canvas.resize(1200, 800)
+    qtbot.addWidget(canvas)
+    hier = FaciesHierarchy.from_features(features)
+    canvas.load_hierarchy(hier, "测试时期")
+
+    canvas.toggle_lock("facies_a")
+    canvas.update_lock_level("facies_a", "micro_facies")
+    canvas._update_active_layers()
+
+    layer = next(layer for layer in canvas._layers if isinstance(layer, FaciesPolygonsLayer))
+    assert any(item.feature_id == "micro_c" for item in layer._items)
+    assert any(item.feature_id == "facies_a" for item in layer._items)
+
+
 def test_combobox_lock_level_and_distinct_labels(qtbot):
     from geoviz_paleo_map.layers.region_labels import RegionLabelsLayer
     from geoviz_paleo_map.layers.facies_polygons import FaciesPolygonsLayer
@@ -100,7 +136,7 @@ def test_combobox_lock_level_and_distinct_labels(qtbot):
     canvas._update_active_layers()
     visible_ids_locked = {item.feature_id for layer in canvas._layers if isinstance(layer, FaciesPolygonsLayer) for item in layer._items}
     assert "sub_b" in visible_ids_locked
-    assert "facies_a" not in visible_ids_locked
+    assert "facies_a" in visible_ids_locked
 
     labels_layer2 = next(layer for layer in canvas._layers if isinstance(layer, RegionLabelsLayer))
     assert any(item.is_locked and item.feature_id == "sub_b" and item.level == "sub_facies" for item in labels_layer2._items)

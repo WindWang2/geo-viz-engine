@@ -4,7 +4,7 @@ import os
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal, QSize
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QIcon
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QPushButton,
     QFileDialog, QStackedWidget, QMessageBox, QComboBox,
     QSplitter, QDialog, QRadioButton, QButtonGroup, QDialogButtonBox,
     QFrame, QCheckBox, QScrollArea, QAbstractButton
@@ -227,32 +227,6 @@ class PaleoMapPage(QWidget):
         map_view_layout.addWidget(self.map_view)
         content_layout.addWidget(self.map_view_container, 1)
 
-        # Floating Toolbar Overlay (top-right of canvas container)
-        self.float_tb = QFrame(self.map_view_container)
-        self.float_tb.setStyleSheet(
-            "QFrame { background: rgba(255, 255, 255, 0.95); border: 1px solid #e5eaf1; border-radius: 8px; }"
-        )
-        tb_layout_float = QVBoxLayout(self.float_tb)
-        tb_layout_float.setContentsMargins(6, 6, 6, 6)
-        tb_layout_float.setSpacing(6)
-
-        self.btn_zoom_in = QPushButton("＋")
-        self.btn_zoom_out = QPushButton("－")
-        self.btn_fit = QPushButton("⛶")
-        
-        tb_btn_style = (
-            "QPushButton { border: none; background: transparent; color: #586878; font-size: 14px; min-width: 28px; min-height: 28px; border-radius: 4px; }"
-            "QPushButton:hover { background: #f1f4f9; color: #1f66d4; }"
-        )
-        for btn in [self.btn_zoom_in, self.btn_zoom_out, self.btn_fit]:
-            btn.setStyleSheet(tb_btn_style)
-            tb_layout_float.addWidget(btn)
-
-        # Wire floating actions
-        self.btn_zoom_in.clicked.connect(lambda: self.map_view.set_zoom(self.map_view.zoom * 1.2))
-        self.btn_zoom_out.clicked.connect(lambda: self.map_view.set_zoom(self.map_view.zoom / 1.2))
-        self.btn_fit.clicked.connect(lambda: self.map_view.fit_viewport_to_data())
-
         # 3. Right Sidebar Frame (230px wide)
         self.right_sidebar = QFrame()
         self.right_sidebar.setFixedWidth(230)
@@ -262,6 +236,32 @@ class PaleoMapPage(QWidget):
         sidebar_layout = QVBoxLayout(self.right_sidebar)
         sidebar_layout.setContentsMargins(16, 16, 16, 16)
         sidebar_layout.setSpacing(16)
+
+        # Zoom controls toolbar (moved from floating overlay to sidebar)
+        zoom_bar = QWidget()
+        zoom_bar_layout = QHBoxLayout(zoom_bar)
+        zoom_bar_layout.setContentsMargins(0, 0, 0, 0)
+        zoom_bar_layout.setSpacing(4)
+
+        self.btn_zoom_in = QPushButton("＋")
+        self.btn_zoom_out = QPushButton("－")
+        self.btn_fit = QPushButton("⟲")
+
+        tb_btn_style = (
+            "QPushButton { border: 1px solid #d3dbe6; background: #ffffff; color: #586878; "
+            "font-size: 13px; min-width: 32px; min-height: 28px; border-radius: 4px; }"
+            "QPushButton:hover { background: #f1f4f9; color: #1f66d4; border-color: #1f66d4; }"
+        )
+        for btn in [self.btn_zoom_in, self.btn_zoom_out, self.btn_fit]:
+            btn.setStyleSheet(tb_btn_style)
+            zoom_bar_layout.addWidget(btn)
+        zoom_bar_layout.addStretch()
+
+        self.btn_zoom_in.clicked.connect(lambda: self.map_view.set_zoom(self.map_view.zoom * 1.2))
+        self.btn_zoom_out.clicked.connect(lambda: self.map_view.set_zoom(self.map_view.zoom / 1.2))
+        self.btn_fit.clicked.connect(lambda: self.map_view.fit_viewport_to_data())
+
+        sidebar_layout.addWidget(zoom_bar)
 
         # Section 1: Legend Title
         self.legend_title = QLabel("沉积相图例")
@@ -338,14 +338,6 @@ class PaleoMapPage(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Position floating toolbar in top-right corner of map canvas area
-        if hasattr(self, "float_tb") and self.map_view.width() > 100:
-            self.float_tb.setGeometry(
-                self.map_view_container.width() - 44 - 16,
-                16,
-                44,
-                112
-            )
 
     # --- Period Management ---
 
@@ -558,82 +550,125 @@ class PaleoMapPage(QWidget):
     # --- Export ---
 
     def _on_export_clicked(self):
+        fmt, page_size, orientation, dpi = self._export_dialog()
+        if fmt is None:
+            return
+        self._do_export(fmt, page_size, orientation, dpi)
+
+    def _export_dialog(self):
+        """Show the export dialog.
+
+        Returns (fmt|None, page_size, orientation, dpi). ``fmt`` is None when
+        the user cancelled.
+        """
         dialog = QDialog(self)
         dialog.setWindowTitle("导出地图")
-        layout = QVBoxLayout(dialog)
+        dialog.setStyleSheet(
+            "QDialog { background: #ffffff; }"
+            "QLabel { color: #1a2433; }"
+            "QRadioButton { color: #1a2433; padding: 2px 0; }"
+        )
+        outer = QVBoxLayout(dialog)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setSpacing(10)
 
+        outer.addWidget(QLabel("导出格式"))
+        fmt_row = QHBoxLayout()
         group = QButtonGroup(dialog)
-        rb_svg = QRadioButton("SVG (嵌入栅格)")
+        rb_svg = QRadioButton("SVG")
         rb_pdf = QRadioButton("PDF (矢量)")
         rb_png = QRadioButton("PNG (栅格)")
         rb_png.setChecked(True)
-        group.addButton(rb_svg)
-        group.addButton(rb_pdf)
-        group.addButton(rb_png)
-        layout.addWidget(rb_svg)
-        layout.addWidget(rb_pdf)
-        layout.addWidget(rb_png)
+        for rb in (rb_svg, rb_pdf, rb_png):
+            group.addButton(rb)
+            fmt_row.addWidget(rb)
+        fmt_row.addStretch()
+        outer.addLayout(fmt_row)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        page_combo = self._styled_combo(["A4", "A3", "A2"], "A4")
+        orient_combo = self._styled_combo(["横向", "纵向"], "横向")
+        dpi_combo = self._styled_combo(["150", "300", "600"], "300")
+        form.addRow("页面大小", page_combo)
+        form.addRow("方向", orient_combo)
+        form.addRow("分辨率 (DPI)", dpi_combo)
+        outer.addLayout(form)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
+        outer.addWidget(buttons)
 
         if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
+            return None, "A4", "landscape", 300
 
         if rb_svg.isChecked():
-            self._export_svg()
+            fmt = "svg"
         elif rb_pdf.isChecked():
-            self._export_pdf()
+            fmt = "pdf"
         else:
-            self._export_png()
+            fmt = "png"
+        orientation = "landscape" if orient_combo.currentText() == "横向" else "portrait"
+        dpi = int(dpi_combo.currentText())
+        return fmt, page_combo.currentText(), orientation, dpi
+
+    @staticmethod
+    def _styled_combo(items, default):
+        combo = QComboBox()
+        combo.addItems(items)
+        combo.setCurrentText(default)
+        combo.setStyleSheet(
+            "QComboBox { background: #ffffff; border: 1px solid #d3dbe6; "
+            "border-radius: 6px; padding: 4px 10px; color: #1a2433; min-width: 120px; }"
+            "QComboBox:focus { border: 1px solid #1f66d4; }"
+        )
+        return combo
+
+    def _do_export(self, fmt, page_size="A4", orientation="landscape", dpi=300):
+        """Run the file dialog and export through export_professional_figure."""
+        label = {"svg": "SVG", "pdf": "PDF", "png": "PNG"}.get(fmt, fmt.upper())
+        path, _ = QFileDialog.getSaveFileName(
+            self, f"导出 {label}", f"paleomap.{fmt}", f"{label} (*.{fmt})")
+        if not path:
+            return
+        if not path.lower().endswith(f".{fmt}"):
+            path += f".{fmt}"
+        from geoviz_paleo_map.export_professional import export_professional_figure
+        try:
+            export_professional_figure(
+                self.map_view, path, fmt,
+                title=self._figure_title(),
+                page_size=page_size, orientation=orientation, dpi=dpi,
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "导出失败", f"{label} 导出失败:\n{e}")
 
     def _export_svg(self):
-        path, _ = QFileDialog.getSaveFileName(self, "导出 SVG", "paleomap.svg", "SVG (*.svg)")
-        if not path:
-            return
-        if not path.lower().endswith(".svg"):
-            path += ".svg"
-        from geoviz_paleo_map.export_professional import export_professional_figure
-        try:
-            export_professional_figure(
-                self.map_view, path, "svg",
-                title=self._figure_title(),
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"SVG 导出失败:\n{e}")
+        self._do_export("svg")
 
     def _export_pdf(self):
-        path, _ = QFileDialog.getSaveFileName(self, "导出 PDF", "paleomap.pdf", "PDF (*.pdf)")
-        if not path:
-            return
-        if not path.lower().endswith(".pdf"):
-            path += ".pdf"
-        from geoviz_paleo_map.export_professional import export_professional_figure
-        try:
-            export_professional_figure(
-                self.map_view, path, "pdf",
-                title=self._figure_title(),
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"PDF 导出失败:\n{e}")
+        self._do_export("pdf")
 
     def _export_png(self):
-        path, _ = QFileDialog.getSaveFileName(self, "导出 PNG", "paleomap.png", "PNG (*.png)")
-        if not path:
-            return
-        if not path.lower().endswith(".png"):
-            path += ".png"
-        from geoviz_paleo_map.export_professional import export_professional_figure
-        try:
-            export_professional_figure(
-                self.map_view, path, "png",
-                title=self._figure_title(),
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"PNG 导出失败:\n{e}")
+        self._do_export("png")
 
     def _figure_title(self) -> str:
         period = self._current_period or "古地理图"
-        return f"{period} 古地理相图"
+        # Title reflects the level actually shown on the map (相 / 亚相 / 微相),
+        # whether that came from the lock dropdown or auto zoom-based switching.
+        level_word = self._active_level_word()
+        return f"{period} 古地理{level_word}图"
+
+    def _active_level_word(self) -> str:
+        """Chinese word for the facies level currently rendered on the map."""
+        level_words = {
+            "facies": "相",
+            "sub_facies": "亚相",
+            "micro_facies": "微相",
+        }
+        try:
+            level = self.map_view._resolve_level()
+        except Exception:
+            level = ""
+        return level_words.get(level, "相")

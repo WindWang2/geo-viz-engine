@@ -207,10 +207,6 @@ class WellLogCanvas(QOpenGLWidget):
             self._crosshair.paint_overlay(painter, QRectF(self.rect()))
         painter.end()
 
-    def mouseMoveEvent(self, event: QMouseEvent):
-        self.mouse_moved.emit(event.position().y())
-        super().mouseMoveEvent(event)
-
     def leaveEvent(self, event):
         self.mouse_moved.emit(-1.0)
         if not self._is_resizing:
@@ -279,7 +275,14 @@ class WellLogCanvas(QOpenGLWidget):
             self.setCursor(Qt.CursorShape.SplitHCursor)
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
-        self.mouse_moved.emit(event.position().y())
+        
+        # Hide crosshair when cursor is in the track header area
+        header_h = max((t.header_height for t in self.tracks), default=56)
+        y = event.position().y()
+        if y < header_h:
+            self.mouse_moved.emit(-1.0)
+        else:
+            self.mouse_moved.emit(float(y))
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):

@@ -128,8 +128,8 @@ class ChartEngine(QWidget):
         """
         Convenience method to render from a WellLogData model directly.
         """
-        from .utils import build_default_payload
-        payload = build_default_payload(data, offset)
+        from .payload_builder import build_tracks_from_data
+        payload = build_tracks_from_data(data)
         self.render_data(json.dumps(payload))
         
     def export_svg(self):

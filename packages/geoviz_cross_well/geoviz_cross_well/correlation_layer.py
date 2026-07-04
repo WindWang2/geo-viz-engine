@@ -19,7 +19,7 @@ def _depth_to_y(canvas, overlay: ConnectionOverlay, depth: float) -> float:
 
 
 def _formation_color(name: str) -> str:
-    return _FORMATION_PALETTE[hash(name) % len(_FORMATION_PALETTE)]
+    return _FORMATION_PALETTE[sum(ord(c) for c in name) % len(_FORMATION_PALETTE)]
 
 
 class CorrelationLayer:

@@ -9,6 +9,7 @@ from PySide6.QtGui import QPainter, QPen, QPainterPath, QColor, QFont
 from PySide6.QtWidgets import QWidget
 
 from ..models import CurveData, LineStyle
+from .label_layout import compute_header_label_policy, fit_label_text
 from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
 
 
@@ -100,17 +101,19 @@ class CurveTrack(BaseTrack):
         return pen
 
     def paint_header(self, painter: QPainter, rect: QRectF):
-        """Draw header with centered track name and compact curve legends."""
-        # Track name — centered at top
+        """Draw header with centered track name and curve legends with min/max."""
+        # Track name — centered at top, adaptive font with wrap
+        policy = compute_header_label_policy(rect)
         font = painter.font()
-        font.setPixelSize(14)
+        font.setPixelSize(policy.font_px)
         font.setBold(True)
         painter.setFont(font)
         painter.setPen(QColor(ECHARTS_TEXT))
-        name_rect = QRectF(rect.left(), rect.top() + 2, rect.width(), 18)
-        painter.drawText(name_rect, Qt.AlignmentFlag.AlignCenter, self._label)
+        name_rect = QRectF(rect.left(), rect.top() + 2, rect.width(), policy.font_px + 6)
+        lines = fit_label_text(self._label, name_rect.adjusted(4, 0, -4, 0), policy, painter.fontMetrics())
+        painter.drawText(name_rect.adjusted(4, 0, -4, 0), Qt.AlignmentFlag.AlignCenter, "\n".join(lines))
 
-        # Curve legends — compact layout, each row: [swatch] [name]
+        # Curve legends — each row: [swatch] name  min~max unit
         font.setPixelSize(10)
         font.setBold(False)
         painter.setFont(font)
@@ -126,16 +129,27 @@ class CurveTrack(BaseTrack):
             swatch_rect = QRectF(rect.left() + 6, y_offset + 4, 10, 5)
             painter.fillRect(swatch_rect, color)
 
-            # Curve name only (no range, no line style indicator)
+            # Compute min/max from curve values
+            vals = curve.values
+            if vals:
+                vmin = min(vals)
+                vmax = max(vals)
+                range_str = f"{vmin:.1f}~{vmax:.1f} {curve.unit}".strip()
+            else:
+                range_str = curve.unit
+
+            # Curve name + range
             painter.setPen(color)
+            label = f"{curve.name}  {range_str}"
             text_rect = QRectF(rect.left() + 20, y_offset, rect.width() - 24, row_height)
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, curve.name)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
             y_offset += row_height
 
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setClipRect(rect)
+        # Expand clip slightly so 1.5px antialiased pen at boundaries isn't truncated
+        painter.setClipRect(rect.adjusted(-2, -2, 2, 2))
 
         # Horizontal grid lines (ECharts splitLine parity)
         self.paint_grid(painter, rect)
@@ -198,18 +212,26 @@ class CurveTrack(BaseTrack):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
 
-        # Display range labels
+        # Display range labels (multi-scale side-by-side)
         if self._curves:
-            c = self._curves[0]
-            lo, hi = c.display_range
+            K = len(self._curves)
+            W = rect.width()
             font = QFont()
             font.setPixelSize(10)
             painter.setFont(font)
-            painter.setPen(QColor("#64748b"))
-            painter.drawText(QRectF(rect.left(), rect.top() + 2, rect.width(), 12),
-                             Qt.AlignmentFlag.AlignLeft, f"{lo}")
-            painter.drawText(QRectF(rect.left(), rect.bottom() - 14, rect.width(), 12),
-                             Qt.AlignmentFlag.AlignLeft, f"{hi}")
+            for i, curve in enumerate(self._curves):
+                lo, hi = curve.display_range
+                color = QColor(curve.color)
+                painter.setPen(color)
+                x_start = rect.left() + i * (W / K)
+                col_width = W / K
+                lo_str = f"{int(lo)}" if lo == int(lo) else f"{lo:.1f}"
+                hi_str = f"{int(hi)}" if hi == int(hi) else f"{hi:.1f}"
+                painter.drawText(QRectF(x_start + 2, rect.top() + 2, col_width - 4, 12),
+                                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, lo_str)
+                painter.drawText(QRectF(x_start + 2, rect.bottom() - 14, col_width - 4, 12),
+                                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, hi_str)
+
 
         # Border
         painter.setPen(QPen(QColor(ECHARTS_BORDER), 1))

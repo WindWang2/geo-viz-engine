@@ -5,6 +5,7 @@ from PySide6.QtGui import QPainter, QPen, QColor, QFont, QBrush
 
 from ..models import IntervalItem, FaciesData
 from ..pattern_map import FACIES_COLORS
+from .label_layout import compute_label_policy, fit_label_text
 from .pattern_engine import PatternEngine
 from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
 
@@ -27,12 +28,11 @@ class FaciesTrack(BaseTrack):
 
     def _paint_column(self, painter: QPainter, rect: QRectF, intervals: list[IntervalItem]):
         painter.save()
-        painter.setClipRect(rect)
+        painter.setClipRect(rect.adjusted(-2, -2, 2, 2))
 
         font = QFont()
         font.setBold(True)
-        painter.setFont(font)
-
+        interval_rects: list[tuple[IntervalItem, QRectF]] = []
         for iv in intervals:
             y_top = self._depth_to_y(iv.top, rect)
             y_bottom = self._depth_to_y(iv.bottom, rect)
@@ -40,7 +40,14 @@ class FaciesTrack(BaseTrack):
                 continue
             y_top = max(y_top, rect.top())
             y_bottom = min(y_bottom, rect.bottom())
-            iv_rect = QRectF(rect.left(), y_top, rect.width(), y_bottom - y_top)
+            interval_rects.append((iv, QRectF(rect.left(), y_top, rect.width(), y_bottom - y_top)))
+
+        policy = compute_label_policy(rect, self.depth_span, [r.height() for _, r in interval_rects])
+        font.setPixelSize(policy.font_px)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+
+        for iv, iv_rect in interval_rects:
 
             # Try SVG pattern fill first, fallback to color
             brush = self._pattern_engine.get_brush(iv.name)
@@ -55,25 +62,21 @@ class FaciesTrack(BaseTrack):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(iv_rect)
 
-            # Label (vertical for narrow columns)
-            if iv_rect.height() > 14:
-                painter.setPen(QPen(QColor(ECHARTS_TEXT), 1))
-                text_rect = QRectF(iv_rect.left() + 2, iv_rect.top() + 1,
-                                   iv_rect.width() - 4, iv_rect.height() - 2)
-                if rect.width() < 50:
-                    font.setPixelSize(11)
-                    painter.setFont(font)
+            painter.setPen(QPen(QColor(ECHARTS_TEXT), 1))
+            text_rect = QRectF(iv_rect.left() + 2, iv_rect.top() + 1,
+                               iv_rect.width() - 4, iv_rect.height() - 2)
+            lines = fit_label_text(iv.name, text_rect, policy, metrics)
+            if lines:
+                if policy.vertical:
                     painter.save()
                     painter.translate(text_rect.center())
                     painter.rotate(-90)
                     rotated = QRectF(-text_rect.height() / 2, -text_rect.width() / 2,
                                      text_rect.height(), text_rect.width())
-                    painter.drawText(rotated, Qt.AlignmentFlag.AlignCenter, iv.name)
+                    painter.drawText(rotated, Qt.AlignmentFlag.AlignCenter, lines[0])
                     painter.restore()
                 else:
-                    font.setPixelSize(10)
-                    painter.setFont(font)
-                    painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, iv.name)
+                    painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "\n".join(lines))
 
         painter.setClipping(False)
         painter.setPen(QPen(QColor(ECHARTS_BORDER), 1))

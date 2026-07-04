@@ -39,7 +39,7 @@ class FormationTop:
 
     def __post_init__(self):
         if not self.color:
-            self.color = _FORMATION_PALETTE[hash(self.formation_name) % len(_FORMATION_PALETTE)]
+            self.color = _FORMATION_PALETTE[sum(ord(c) for c in self.formation_name) % len(_FORMATION_PALETTE)]
 
 
 class FormationTopsModel(QObject):

@@ -69,26 +69,6 @@ def export_pdf(widget, file_path: str | Path) -> None:
     painter.end()
 
 
-def export_svg(widget, file_path: str | Path) -> None:
-    """Export the canvas widget as SVG (raster embedded in SVG wrapper)."""
-    import base64
-    import io
-
-    pixmap = widget.grab()
-    buffer = io.BytesIO()
-    pixmap.save(buffer, "PNG")
-    b64 = base64.b64encode(buffer.getvalue()).decode()
-    svg = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" '
-        f'width="{pixmap.width()}" height="{pixmap.height()}">'
-        f'<image href="data:image/png;base64,{b64}" '
-        f'width="{pixmap.width()}" height="{pixmap.height()}"/>'
-        f'</svg>'
-    )
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(svg)
-
-
 def export_vector_svg(canvas, file_path: str | Path, target_rect: QRectF | None = None) -> None:
     """Export the canvas as a true vector SVG using QSvgGenerator.
 
