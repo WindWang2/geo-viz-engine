@@ -31,7 +31,7 @@ class SeismicView(QWidget):
     selection, and horizon overlays.
     """
 
-    def __init__(self, parent=None, path: str | None = None):
+    def __init__(self, parent=None, path: str | None = None, auto_load: bool = True):
         super().__init__(parent)
         self._loader: SeismicLoader | None = None
         self._segy_path: str | None = None
@@ -181,7 +181,7 @@ class SeismicView(QWidget):
         # Auto-load: SEGY file if path given, else synthetic demo (async)
         if path is not None:
             self.load_segy_async(path)
-        else:
+        elif auto_load:
             self._profile_il.set_overlay_text("生成合成数据...")
             self._synth_worker = SyntheticWorker(self)
             self._synth_worker.done.connect(self._on_synthetic_ready)
