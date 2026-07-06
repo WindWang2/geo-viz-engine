@@ -779,6 +779,9 @@ class Renderer3D(QWidget):
         self._il_slider = self._make_slider(cl, "Inline", "#e53e3e")
         self._xl_slider = self._make_slider(cl, "Xline", "#38a169")
         self._t_slider = self._make_slider(cl, "Time", "#3182ce")
+        self._il_slider.valueChanged.connect(lambda v: self._on_slider("inline", v))
+        self._xl_slider.valueChanged.connect(lambda v: self._on_slider("crossline", v))
+        self._t_slider.valueChanged.connect(lambda v: self._on_slider("time", v))
         layout.addWidget(ctrl, 0)
 
         # Visual item placeholders
@@ -915,28 +918,16 @@ class Renderer3D(QWidget):
         self._view.update()
 
     def _setup_sliders(self, ni, nx, nt):
-        self._il_slider.setRange(0, ni - 1)
-        self._il_slider.setValue(self._il_pos)
-        self._il_slider._val_label.setText(str(self._il_pos))
-        
-        self._xl_slider.setRange(0, nx - 1)
-        self._xl_slider.setValue(self._xl_pos)
-        self._xl_slider._val_label.setText(str(self._xl_pos))
-        
-        self._t_slider.setRange(0, nt - 1)
-        self._t_slider.setValue(self._t_pos)
-        self._t_slider._val_label.setText(str(self._t_pos))
-
-        # Block multiple reconnections
-        for s in [self._il_slider, self._xl_slider, self._t_slider]:
-            try:
-                s.valueChanged.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-                
-        self._il_slider.valueChanged.connect(lambda v: self._on_slider("inline", v))
-        self._xl_slider.valueChanged.connect(lambda v: self._on_slider("crossline", v))
-        self._t_slider.valueChanged.connect(lambda v: self._on_slider("time", v))
+        for slider, position, maximum in (
+            (self._il_slider, self._il_pos, ni - 1),
+            (self._xl_slider, self._xl_pos, nx - 1),
+            (self._t_slider, self._t_pos, nt - 1),
+        ):
+            was_blocked = slider.blockSignals(True)
+            slider.setRange(0, maximum)
+            slider.setValue(position)
+            slider._val_label.setText(str(position))
+            slider.blockSignals(was_blocked)
 
     def add_horizon(self, horizon_data: np.ndarray, origin=(0, 0, 0),
                     spacing=(1, 1), name: str = "horizon", color=(1.0, 0.9, 0.2, 0.6)):

@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import warnings
 from PySide6.QtCore import Signal
 
 def test_renderer_3d_init(qtbot):
@@ -21,6 +22,25 @@ def test_renderer_3d_load_volume(qtbot):
     assert widget._loaded
     # Ensure basic visual items added to view
     assert len(widget._view.items) > 0
+
+def test_renderer_3d_load_volume_does_not_warn_on_slider_connections(qtbot):
+    from geoviz_seismic.renderer_3d import Renderer3D
+
+    widget = Renderer3D()
+    qtbot.addWidget(widget)
+    data = np.random.randn(10, 10, 10).astype(np.float32)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        widget.load_volume(data)
+        widget.load_volume(data)
+
+    disconnect_warnings = [
+        warning
+        for warning in caught
+        if "Failed to disconnect" in str(warning.message)
+    ]
+    assert disconnect_warnings == []
 
 def test_renderer_3d_signals():
     """Verify Renderer3D class exposes the expected signal."""
@@ -112,4 +132,3 @@ def test_dual_gl_volume_item_unit(qtbot):
     assert item._primary_cmap_lut is primary_lut
     assert item._overlay_cmap_lut is overlay_lut
     assert item._cmap_needs_upload is True
-
