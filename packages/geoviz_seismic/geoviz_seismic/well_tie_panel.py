@@ -178,12 +178,15 @@ class WellTiePanel(QWidget):
         if self._calibration is None or self._sonic is None:
             return
 
-        from geoviz_well_tie.synthetic import compute_reflectivity, generate_synthetic_twt
+        try:
+            from geoviz_well_tie.synthetic import compute_reflectivity, generate_synthetic_twt
+            from geoviz_well_tie.calibration import WellTieCalibration
+        except ImportError:
+            return
 
         rc = compute_reflectivity(self._sonic, self._density)
         mid_depths = (self._depths[:-1] + self._depths[1:]) / 2.0
         mid_twt = self._calibration.depth_to_twt(mid_depths)
-        from geoviz_well_tie.calibration import WellTieCalibration
         mid_cal = WellTieCalibration(mid_depths, np.asarray(mid_twt))
         rc_twt = mid_cal.resample_to_twt(rc, dt_ms=dt_ms)
 
@@ -215,7 +218,10 @@ class WellTiePanel(QWidget):
         if self._synthetic is None:
             return
 
-        from geoviz_well_tie.auto_tie import auto_tie_with_quality
+        try:
+            from geoviz_well_tie.auto_tie import auto_tie_with_quality
+        except ImportError:
+            return
         shift, cc = auto_tie_with_quality(seismic_trace, self._synthetic)
         self._shift_samples = shift
         self._correlation_coeff = cc

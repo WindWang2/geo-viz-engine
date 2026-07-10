@@ -22,10 +22,11 @@ dependencies = [
     "pydantic>=2.0",
     "pyqtgraph>=0.13",
     "PyOpenGL>=3.1.0",
-    "geoviz-well-tie",
 ]
 
 [project.optional-dependencies]
+# Well-tie panel features (synthetic / calibration); soft-imported at runtime.
+well-tie = ["geoviz-well-tie"]
 gpu = ["cupy-cuda13x; sys_platform == 'linux' or sys_platform == 'win32'"]
 
 [project.urls]

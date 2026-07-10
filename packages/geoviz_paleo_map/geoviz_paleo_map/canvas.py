@@ -7,7 +7,10 @@ from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QResizeEvent, QWheelEvent, QContextMenuEvent, QAction
 from PySide6.QtWidgets import QToolTip, QWidget, QMenu
 
-from geoviz_well_log.renderer.pattern_engine import PatternEngine
+try:
+    from geoviz_well_log.renderer.pattern_engine import PatternEngine
+except ImportError:  # optional: geoviz-well-log patterns extra
+    PatternEngine = None  # type: ignore[misc, assignment]
 
 from geoviz_paleo_map.hierarchy import FaciesHierarchy, FaciesNode, FaciesFeature
 from geoviz_paleo_map.layers.background import BackgroundLayer
@@ -37,13 +40,18 @@ class PaleoMapCanvas(QWidget):
     edit_mode_changed = Signal(bool)
     selection_changed = Signal(str)  # feature_id or ""
 
-    def __init__(self, pattern_engine: PatternEngine | None = None,
+    def __init__(self, pattern_engine=None,
                  parent: QWidget | None = None):
         super().__init__(parent)
         self.setMouseTracking(True)
         self._press_pos: QPointF | None = None
 
-        self._engine = pattern_engine or PatternEngine(tile_size=10)
+        if pattern_engine is not None:
+            self._engine = pattern_engine
+        elif PatternEngine is not None:
+            self._engine = PatternEngine(tile_size=10)
+        else:
+            self._engine = None
         self._resolver = FaciesStyleResolver(self._engine)
 
         self._viewport = PaleoMapViewport(

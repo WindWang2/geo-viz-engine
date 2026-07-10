@@ -5,7 +5,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from geoviz_well_tie.calibration import WellTieCalibration
+try:
+    from geoviz_well_tie.calibration import WellTieCalibration
+except ImportError:  # optional extra: well-tie
+    WellTieCalibration = None  # type: ignore[misc, assignment]
 
 
 @dataclass
@@ -13,19 +16,26 @@ class CheckshotTable:
     well_name: str
     depths_m: np.ndarray
     twt_ms: np.ndarray
-    _calibration: WellTieCalibration = field(init=False, repr=False)
+    _calibration: object = field(init=False, repr=False)
 
     def __post_init__(self):
-        self._calibration = WellTieCalibration(self.depths_m, self.twt_ms)
+        if WellTieCalibration is None:
+            self._calibration = None
+        else:
+            self._calibration = WellTieCalibration(self.depths_m, self.twt_ms)
 
     @property
-    def calibration(self) -> WellTieCalibration:
+    def calibration(self):
         return self._calibration
 
     def interpolate_twt(self, depth: float | np.ndarray) -> float | np.ndarray:
+        if self._calibration is None:
+            return np.interp(depth, self.depths_m, self.twt_ms)
         return self._calibration.depth_to_twt(depth)
 
     def interpolate_depth(self, twt: float | np.ndarray) -> float | np.ndarray:
+        if self._calibration is None:
+            return np.interp(twt, self.twt_ms, self.depths_m)
         return self._calibration.twt_to_depth(twt)
 
 

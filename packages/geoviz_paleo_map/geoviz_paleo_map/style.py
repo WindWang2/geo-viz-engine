@@ -9,7 +9,10 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QPen
 
-from geoviz_well_log.renderer.pattern_engine import PatternEngine
+try:
+    from geoviz_well_log.renderer.pattern_engine import PatternEngine
+except ImportError:  # optional extra: patterns / geoviz-well-log
+    PatternEngine = None  # type: ignore[misc, assignment]
 
 from geoviz_paleo_map.models import FaciesStyle, VectorPattern
 
@@ -108,13 +111,21 @@ FACIES_PATTERNS = {
 
 
 class FaciesStyleResolver:
-    def __init__(self, pattern_engine: PatternEngine):
+    def __init__(self, pattern_engine=None):
         self._engine = pattern_engine
         self._cache: dict[str, FaciesStyle] = {}
 
     def resolve(self, facies_name: str) -> FaciesStyle:
         if facies_name in self._cache:
             return self._cache[facies_name]
+        if self._engine is None:
+            style = FaciesStyle(
+                base_color=QColor(DEFAULT_BASE_COLOR),
+                brush=QBrush(QColor(DEFAULT_BASE_COLOR)),
+                pattern_id=None,
+            )
+            self._cache[facies_name] = style
+            return style
         base = self._engine.get_color_fuzzy(facies_name) or QColor(DEFAULT_BASE_COLOR)
         
         # Exact match or fuzzy fallback mapping lookup
@@ -162,6 +173,8 @@ class FaciesStyleResolver:
 
     def get_vector_pattern(self, facies_name: str) -> VectorPattern | None:
         """Return a VectorPattern for crisp vector tiling, or None if no pattern."""
+        if self._engine is None:
+            return None
         style = self.resolve(facies_name)
         if style.pattern_id is None:
             return None

@@ -9,11 +9,12 @@ requires-python = ">=3.10"
 dependencies = [
     "PySide6",
     "pydantic",
-    "geoviz-well-log",
     "geoviz-common",
 ]
 
 [project.optional-dependencies]
+# Facies PatternEngine + rock textures (soft-imported). Core canvas works with solid fills.
+patterns = ["geoviz-well-log"]
 dev = ["pytest", "pytest-qt"]
 
 [build-system]
