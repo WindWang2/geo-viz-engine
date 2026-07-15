@@ -2,11 +2,18 @@ from __future__ import annotations
 
 from weakref import WeakKeyDictionary
 
+from PySide6.QtCore import QCoreApplication, QThread
 from PySide6.QtWidgets import QWidget
 
 from .contracts import PreparedPreview, PreviewCapabilities, PreviewKind, PreviewOptions, PreviewRequest
 from .errors import ErrorCode, GeoVizError
 from .registry import PreviewBackend, PreviewRegistry
+
+
+def _require_ui_thread() -> None:
+    application = QCoreApplication.instance()
+    if application is None or QThread.currentThread() is not application.thread():
+        raise GeoVizError(ErrorCode.RENDER_ERROR, "Qt 控件操作必须在 UI 线程执行")
 
 
 class GeoVizEngine:
@@ -16,7 +23,25 @@ class GeoVizEngine:
 
     @classmethod
     def default(cls) -> "GeoVizEngine":
-        return cls()
+        from .previews.dat import (
+            HorizonSurfaceBackend,
+            TimeDepthBackend,
+            WellStratificationBackend,
+            XYScatterBackend,
+        )
+        from .previews.seismic import SeismicPreviewBackend
+        from .previews.well_log import WellLogPreviewBackend
+
+        return cls(
+            [
+                WellLogPreviewBackend(),
+                SeismicPreviewBackend(),
+                XYScatterBackend(),
+                TimeDepthBackend(),
+                HorizonSurfaceBackend(),
+                WellStratificationBackend(),
+            ]
+        )
 
     def supports(self, request: PreviewRequest) -> bool:
         try:
@@ -34,15 +59,18 @@ class GeoVizEngine:
         return self._registry.backend_for_request(request).prepare(request, options)
 
     def create_widget(self, kind: PreviewKind, parent: QWidget | None = None) -> QWidget:
+        _require_ui_thread()
         backend = self._registry.backend_for_kind(kind)
         widget = backend.create_widget(parent)
         self._widget_kinds[widget] = kind
         return widget
 
     def render(self, widget: QWidget, preview: PreparedPreview) -> None:
+        _require_ui_thread()
         self._registry.backend_for_kind(preview.kind).render(widget, preview)
 
     def release(self, widget: QWidget) -> None:
+        _require_ui_thread()
         kind = self._widget_kinds[widget]
         self._registry.backend_for_kind(kind).release(widget)
         del self._widget_kinds[widget]
