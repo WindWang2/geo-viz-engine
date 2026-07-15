@@ -544,6 +544,44 @@ def _iter_valid_well_tops(path: str):
         yield FormationTop(well_name, formation_name, depth_m)
 
 
+def _formation_chains(
+    tops: tuple[FormationTop, ...],
+) -> tuple[tuple[int, ...], ...]:
+    wells = tuple(sorted({top.well_name for top in tops}))
+    indices_by_well: dict[str, list[int]] = {well: [] for well in wells}
+    for index, top in enumerate(tops):
+        indices_by_well[top.well_name].append(index)
+
+    positions_by_formation: dict[str, list[tuple[int, int]]] = {}
+    for well_index, well_name in enumerate(wells):
+        seen_in_well = set()
+        for top_index in indices_by_well[well_name]:
+            formation = tops[top_index].formation_name
+            if formation in seen_in_well:
+                continue
+            seen_in_well.add(formation)
+            positions_by_formation.setdefault(formation, []).append(
+                (well_index, top_index)
+            )
+
+    runs = []
+    for formation, positions in positions_by_formation.items():
+        run = [positions[0]]
+        for position in positions[1:]:
+            if position[0] == run[-1][0] + 1:
+                run.append(position)
+                continue
+            if len(run) >= 2:
+                runs.append((formation, run[0][0], tuple(item[1] for item in run)))
+            run = [position]
+        if len(run) >= 2:
+            runs.append((formation, run[0][0], tuple(item[1] for item in run)))
+
+    # Connection efficiency (k - 1) / k increases monotonically with run length.
+    runs.sort(key=lambda item: (-len(item[2]), item[0], item[1]))
+    return tuple(item[2] for item in runs)
+
+
 def _topology_aware_indices(
     tops: tuple[FormationTop, ...], limit: int
 ) -> tuple[int, ...]:
@@ -552,67 +590,15 @@ def _topology_aware_indices(
     if limit < 2:
         return tuple(int(index) for index in representative_indices(len(tops), limit))
 
-    wells = tuple(sorted({top.well_name for top in tops}))
-    first_index_by_key: dict[tuple[str, str], int] = {}
-    formations_by_well: dict[str, set[str]] = {well: set() for well in wells}
-    for index, top in enumerate(tops):
-        first_index_by_key.setdefault((top.well_name, top.formation_name), index)
-        formations_by_well[top.well_name].add(top.formation_name)
-
-    edge_buckets = []
-    for pair_index, (left_well, right_well) in enumerate(zip(wells, wells[1:])):
-        shared = sorted(
-            formations_by_well[left_well] & formations_by_well[right_well]
-        )
-        if shared:
-            rotation = pair_index % len(shared)
-            shared = shared[rotation:] + shared[:rotation]
-        edge_buckets.append(
-            tuple(
-                (
-                    first_index_by_key[(left_well, formation)],
-                    first_index_by_key[(right_well, formation)],
-                )
-                for formation in shared
-            )
-        )
-
-    max_edges = max((len(bucket) for bucket in edge_buckets), default=0)
-    edges = []
-    for formation_round in range(max_edges):
-        for bucket in edge_buckets:
-            if formation_round >= len(bucket):
-                continue
-            edges.append(bucket[formation_round])
-
     selected: set[int] = set()
-    while len(selected) < limit:
-        covered = {
-            edge_index
-            for edge_index, endpoints in enumerate(edges)
-            if set(endpoints) <= selected
-        }
-        best = None
-        for edge_index, endpoints in enumerate(edges):
-            if edge_index in covered:
-                continue
-            additions = set(endpoints) - selected
-            cost = len(additions)
-            if cost == 0 or len(selected) + cost > limit:
-                continue
-            trial = selected | additions
-            benefit = sum(
-                candidate_index not in covered and set(candidate) <= trial
-                for candidate_index, candidate in enumerate(edges)
-            )
-            score = (cost, -benefit, edge_index)
-            if best is None or score < best[0]:
-                best = (score, additions)
-        if best is None:
+    remaining_budget = limit
+    for chain in _formation_chains(tops):
+        if remaining_budget < 2:
             break
-        selected.update(best[1])
+        selected_count = min(len(chain), remaining_budget)
+        selected.update(chain[:selected_count])
+        remaining_budget -= selected_count
 
-    remaining_budget = limit - len(selected)
     if remaining_budget:
         remaining = [index for index in range(len(tops)) if index not in selected]
         sampled_positions = representative_indices(len(remaining), remaining_budget)

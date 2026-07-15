@@ -390,6 +390,50 @@ def test_backend_caps_tops_at_50k_representative_rows(tmp_path: Path):
     assert preview.payload[-1].depth_m == 50_004.0
 
 
+def test_formation_chains_are_non_overlapping_runs_sorted_by_efficiency():
+    from geoviz.previews.dat import _formation_chains
+
+    tops = (
+        FormationTop("W1", "A", 1000.0),
+        FormationTop("W1", "B", 1010.0),
+        FormationTop("W2", "A", 1020.0),
+        FormationTop("W2", "B", 1030.0),
+        FormationTop("W3", "A", 1040.0),
+        FormationTop("W3", "B", 1050.0),
+        FormationTop("W4", "C", 1060.0),
+        FormationTop("W5", "A", 1070.0),
+        FormationTop("W6", "A", 1080.0),
+    )
+
+    assert _formation_chains(tops) == (
+        (0, 2, 4),
+        (1, 3, 5),
+        (7, 8),
+    )
+
+
+def test_many_distinct_shared_formations_stay_bounded_and_connected(tmp_path: Path):
+    formation_count = 25_001
+    path = tmp_path / "many-shared-formations.dat"
+    path.write_text(
+        WELL_TOPS_HEADER
+        + "".join(
+            f"{well} F{formation:05d} {1000 + formation} 0 0 0 0 0\n"
+            for well in ("W1", "W2")
+            for formation in range(formation_count)
+        ),
+        encoding="utf-8",
+    )
+
+    preview = WellStratificationBackend().prepare(
+        _request(path), PreviewOptions(max_points=50_000)
+    )
+    selected = {(top.well_name, top.formation_name) for top in preview.payload}
+
+    assert len(preview.payload) == 50_000
+    assert {("W1", "F00000"), ("W2", "F00000")} <= selected
+
+
 def test_low_limit_preserves_a_connector_for_grouped_well_rows(well_tops_path: Path):
     preview = WellStratificationBackend().prepare(
         _request(well_tops_path), PreviewOptions(max_points=2)
