@@ -95,7 +95,7 @@ def inspect_las_file(path: str) -> LASPreviewHeader:
     row_count = 0
     depth_index = 0
 
-    with open(path, "r", encoding="utf-8", errors="ignore") as stream:
+    with open(path, "r", encoding="utf-8", errors="replace") as stream:
         for raw_line in stream:
             line = raw_line.strip()
             if not line or line.startswith("#"):
@@ -177,7 +177,7 @@ def read_sampled_ascii(
     last_values: dict[int, float] = {}
     last_sampled_index = -1
 
-    with open(path, "r", encoding="utf-8", errors="ignore") as stream:
+    with open(path, "r", encoding="utf-8", errors="replace") as stream:
         for raw_line in stream:
             line = raw_line.strip()
             if not line or line.startswith("#"):

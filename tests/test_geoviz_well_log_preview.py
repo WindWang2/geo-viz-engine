@@ -53,6 +53,30 @@ def bounded_las(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.fixture
+def damaged_binary_las(tmp_path: Path) -> Path:
+    path = tmp_path / "damaged-binary.las"
+    path.write_bytes(
+        b"~vErSiOn InFoRmAtIoN\n"
+        b"  vErS  .  2.0 : standard\n"
+        b"~wElL InFoRmAtIoN\n"
+        b"  wElL  .   BYTE-WELL   : well name\n"
+        b"  nUlL  .   -99999      : null value\n"
+        b"~cUrVe InFoRmAtIoN\n"
+        b"  dEpTh   .   M    : depth\n"
+        b"  gR      .   API  : gamma ray\n"
+        b"  allnull .   V/V  : empty curve\n"
+        b"~aScIi\n"
+        b"1000 10 -99999\n"
+        b"10\xff01 11 -99999\n"
+        b"1002 12\xff0 -99999\n"
+        b"1003 13\n"
+        b"NOPE 14 -99999\n"
+        b"1005 15 -99999\n"
+    )
+    return path
+
+
 def _request(path: Path, *, semantic_type: str = "well_log", format: str = "las") -> PreviewRequest:
     return PreviewRequest("well-1", str(path), semantic_type, format, "Bounded well")
 
@@ -95,6 +119,46 @@ def test_read_sampled_ascii_keeps_unique_endpoints_at_minimum_capacity(bounded_l
 def test_load_las_preview_rejects_capacity_that_cannot_keep_both_endpoints(bounded_las: Path):
     with pytest.raises(ValueError, match="at least two samples"):
         load_las_preview(str(bounded_las), max_samples=1)
+
+
+def test_invalid_bytes_in_depth_reject_row_consistently_in_both_passes(
+    damaged_binary_las: Path,
+):
+    header = inspect_las_file(str(damaged_binary_las))
+
+    depth, _ = read_sampled_ascii(
+        str(damaged_binary_las), header, (), stride=1, max_samples=header.row_count
+    )
+
+    assert header.row_count == 3
+    assert depth.tolist() == [1_000.0, 1_002.0, 1_005.0]
+    assert depth.size == header.row_count
+
+
+def test_invalid_bytes_in_selected_curve_become_nan_without_dropping_row(
+    damaged_binary_las: Path,
+):
+    data = load_las_preview(str(damaged_binary_las), max_samples=10)
+
+    assert data.curves[0].depth == [1_000.0, 1_002.0, 1_005.0]
+    assert data.curves[0].values[0] == 10.0
+    assert np.isnan(data.curves[0].values[1])
+    assert data.curves[0].values[2] == 15.0
+    assert data.curves[0].display_range == (10.0, 15.0)
+
+
+def test_mixed_case_headers_bad_rows_and_all_null_curve_fallback(
+    damaged_binary_las: Path,
+):
+    data = load_las_preview(str(damaged_binary_las), max_samples=10)
+
+    assert data.well_name == "BYTE-WELL"
+    assert [(curve.name, curve.unit) for curve in data.curves] == [
+        ("gR", "API"),
+        ("allnull", "V/V"),
+    ]
+    assert all(np.isnan(value) for value in data.curves[1].values)
+    assert data.curves[1].display_range == (0.0, 100.0)
 
 
 @pytest.mark.parametrize(
