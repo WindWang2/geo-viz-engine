@@ -544,25 +544,68 @@ def _iter_valid_well_tops(path: str):
         yield FormationTop(well_name, formation_name, depth_m)
 
 
+def _topology_aware_indices(
+    tops: tuple[FormationTop, ...], limit: int
+) -> tuple[int, ...]:
+    if len(tops) <= limit:
+        return tuple(range(len(tops)))
+    if limit < 2:
+        return tuple(int(index) for index in representative_indices(len(tops), limit))
+
+    wells = tuple(sorted({top.well_name for top in tops}))
+    first_index_by_key: dict[tuple[str, str], int] = {}
+    formations_by_well: dict[str, set[str]] = {well: set() for well in wells}
+    for index, top in enumerate(tops):
+        first_index_by_key.setdefault((top.well_name, top.formation_name), index)
+        formations_by_well[top.well_name].add(top.formation_name)
+
+    edge_buckets = []
+    for pair_index, (left_well, right_well) in enumerate(zip(wells, wells[1:])):
+        shared = sorted(
+            formations_by_well[left_well] & formations_by_well[right_well]
+        )
+        if shared:
+            rotation = pair_index % len(shared)
+            shared = shared[rotation:] + shared[:rotation]
+        edge_buckets.append(
+            tuple(
+                (
+                    first_index_by_key[(left_well, formation)],
+                    first_index_by_key[(right_well, formation)],
+                )
+                for formation in shared
+            )
+        )
+
+    selected: set[int] = set()
+    max_edges = max((len(bucket) for bucket in edge_buckets), default=0)
+    for formation_round in range(max_edges):
+        for bucket in edge_buckets:
+            if formation_round >= len(bucket):
+                continue
+            endpoints = set(bucket[formation_round])
+            if len(selected | endpoints) <= limit:
+                selected.update(endpoints)
+
+    remaining_budget = limit - len(selected)
+    if remaining_budget:
+        remaining = [index for index in range(len(tops)) if index not in selected]
+        sampled_positions = representative_indices(len(remaining), remaining_budget)
+        selected.update(remaining[int(position)] for position in sampled_positions)
+    return tuple(sorted(selected))
+
+
 def _well_stratification_payload(
     path: str, options: PreviewOptions
 ) -> tuple[FormationTop, ...]:
     header = _read_header(path)
     if not _has_exact_well_tops_schema(header):
         raise _DatSchemaError("missing exact SMI WellTops schema")
-    valid_count = sum(1 for _ in _iter_valid_well_tops(path))
-    if valid_count == 0:
+    tops = tuple(_iter_valid_well_tops(path))
+    if not tops:
         raise _DatSchemaError("no valid well-top rows")
-    indices = representative_indices(valid_count, _sample_limit(options))
-    selected = []
-    selected_position = 0
-    for valid_index, top in enumerate(_iter_valid_well_tops(path)):
-        if selected_position < len(indices) and valid_index == indices[selected_position]:
-            selected.append(top)
-            selected_position += 1
-    if selected_position != len(indices):
-        raise _DatSchemaError("row count changed while reading")
-    return tuple(selected)
+    indices = _topology_aware_indices(tops, _sample_limit(options))
+    return tuple(tops[index] for index in indices)
 
 
 class XYScatterBackend:

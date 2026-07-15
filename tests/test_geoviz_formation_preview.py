@@ -4,6 +4,8 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QMouseEvent, QPixmap, QWheelEvent
 
 from geoviz import (
     ErrorCode,
@@ -28,11 +30,13 @@ def well_tops_path(tmp_path: Path) -> Path:
     path = tmp_path / "tops.dat"
     path.write_text(
         WELL_TOPS_HEADER
-        + "B-2 Gamma 1300 0 0 0 0 0\n"
-        + "A-1 Alpha 1000 0 0 0 0 0\n"
-        + "A-1 Beta bad-md 0 0 0 0 0\n"
-        + "B-2 Alpha 1200 0 0 0 0 0\n"
-        + "A-1 Gamma 1100 0 0 0 0 0\n",
+        + "W1 A 1000 0 0 0 0 0\n"
+        + "W1 B 1100 0 0 0 0 0\n"
+        + "W1 broken bad-md 0 0 0 0 0\n"
+        + "W1 C 1200 0 0 0 0 0\n"
+        + "W2 A 1050 0 0 0 0 0\n"
+        + "W2 B 1150 0 0 0 0 0\n"
+        + "W2 C 1250 0 0 0 0 0\n",
         encoding="utf-8",
     )
     return path
@@ -75,6 +79,181 @@ def test_widget_clear_resets_all_preview_state(qtbot):
     assert widget.well_names == ()
     assert widget.full_depth_range == (0.0, 1.0)
     assert widget.view_depth_range == (0.0, 1.0)
+
+
+def _render(widget: FormationTopsPreviewWidget) -> None:
+    widget.resize(500, 300)
+    widget.render(QPixmap(widget.size()))
+
+
+def _wheel(widget: FormationTopsPreviewWidget, y: float, delta: int) -> None:
+    event = QWheelEvent(
+        QPointF(250.0, y),
+        QPointF(250.0, y),
+        QPoint(),
+        QPoint(0, delta),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    widget.wheelEvent(event)
+
+
+def _mouse_event(
+    event_type: QEvent.Type,
+    position: QPointF,
+    button: Qt.MouseButton,
+    buttons: Qt.MouseButton,
+) -> QMouseEvent:
+    return QMouseEvent(
+        event_type,
+        position,
+        position,
+        button,
+        buttons,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def test_wheel_and_drag_are_clamped_to_full_depth_range(qtbot):
+    widget = FormationTopsPreviewWidget()
+    qtbot.addWidget(widget)
+    widget.set_tops(
+        (FormationTop("W1", "A", 1000.0), FormationTop("W2", "A", 1300.0))
+    )
+    _render(widget)
+
+    _wheel(widget, 150.0, 120)
+    assert widget.view_depth_range[1] - widget.view_depth_range[0] < 300.0
+
+    press = _mouse_event(
+        QEvent.Type.MouseButtonPress,
+        QPointF(250.0, 150.0),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+    )
+    move = _mouse_event(
+        QEvent.Type.MouseMove,
+        QPointF(250.0, 10_000.0),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.LeftButton,
+    )
+    release = _mouse_event(
+        QEvent.Type.MouseButtonRelease,
+        QPointF(250.0, 10_000.0),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+    )
+    widget.mousePressEvent(press)
+    widget.mouseMoveEvent(move)
+    widget.mouseReleaseEvent(release)
+    assert widget.full_depth_range[0] <= widget.view_depth_range[0]
+    assert widget.view_depth_range[1] <= widget.full_depth_range[1]
+
+    for _ in range(8):
+        _wheel(widget, 150.0, -120)
+    assert widget.view_depth_range == widget.full_depth_range
+
+
+def test_single_depth_interactions_keep_a_stable_zero_span(qtbot):
+    widget = FormationTopsPreviewWidget()
+    qtbot.addWidget(widget)
+    widget.set_tops((FormationTop("W1", "A", 1000.0),))
+
+    _wheel(widget, 150.0, 120)
+    widget.mousePressEvent(
+        _mouse_event(
+            QEvent.Type.MouseButtonPress,
+            QPointF(250.0, 150.0),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+        )
+    )
+    widget.mouseMoveEvent(
+        _mouse_event(
+            QEvent.Type.MouseMove,
+            QPointF(250.0, 250.0),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+        )
+    )
+
+    assert widget.view_depth_range == (1000.0, 1000.0)
+
+
+def test_hover_is_cleared_on_leave_data_replace_and_clear(qtbot):
+    widget = FormationTopsPreviewWidget()
+    qtbot.addWidget(widget)
+    first = FormationTop("W1", "A", 1000.0)
+    widget.set_tops((first, FormationTop("W2", "A", 1100.0)))
+    _render(widget)
+    emitted = []
+    widget.hovered_top_changed.connect(lambda *payload: emitted.append(payload))
+
+    point = widget._visible_top_points[0][1]
+    widget.mouseMoveEvent(
+        _mouse_event(
+            QEvent.Type.MouseMove,
+            point,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+        )
+    )
+    assert emitted[-1] == ("W1", "A", 1000.0)
+
+    widget.leaveEvent(QEvent(QEvent.Type.Leave))
+    assert emitted[-1][0:2] == ("", "")
+    assert emitted[-1][2] != emitted[-1][2]
+
+    _render(widget)
+    point = widget._visible_top_points[0][1]
+    widget.mouseMoveEvent(
+        _mouse_event(
+            QEvent.Type.MouseMove,
+            point,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+        )
+    )
+    widget.set_tops((FormationTop("W3", "B", 1200.0),))
+    assert emitted[-1][0:2] == ("", "")
+
+    _render(widget)
+    point = widget._visible_top_points[0][1]
+    widget.mouseMoveEvent(
+        _mouse_event(
+            QEvent.Type.MouseMove,
+            point,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+        )
+    )
+    widget.clear()
+    assert emitted[-1][0:2] == ("", "")
+    assert widget._drag_start_y is None
+    assert widget._drag_start_range == (0.0, 1.0)
+    assert widget.cursor().shape() is Qt.CursorShape.ArrowCursor
+
+
+def test_set_tops_preindexes_connectors_and_paint_caches_visible_points(qtbot):
+    widget = FormationTopsPreviewWidget()
+    qtbot.addWidget(widget)
+    tops = tuple(
+        FormationTop(well, formation, depth + offset)
+        for well, offset in (("W1", 0.0), ("W2", 25.0))
+        for formation, depth in (("A", 1000.0), ("B", 1100.0), ("C", 1200.0))
+    )
+
+    widget.set_tops(tops)
+
+    assert tuple(widget._tops_by_well) == ("W1", "W2")
+    assert tuple(widget._tops_by_formation) == ("A", "B", "C")
+    assert len(widget._connectors) == 3
+    assert widget._visible_top_points == ()
+
+    _render(widget)
+    assert len(widget._visible_top_points) == len(tops)
 
 
 @pytest.mark.parametrize(
@@ -126,12 +305,14 @@ def test_backend_prepares_immutable_tops_and_ignores_bad_md(well_tops_path: Path
 
     assert preview.kind is PreviewKind.FORMATION_TOPS
     assert preview.payload == (
-        FormationTop("B-2", "Gamma", 1300.0),
-        FormationTop("A-1", "Alpha", 1000.0),
-        FormationTop("B-2", "Alpha", 1200.0),
-        FormationTop("A-1", "Gamma", 1100.0),
+        FormationTop("W1", "A", 1000.0),
+        FormationTop("W1", "B", 1100.0),
+        FormationTop("W1", "C", 1200.0),
+        FormationTop("W2", "A", 1050.0),
+        FormationTop("W2", "B", 1150.0),
+        FormationTop("W2", "C", 1250.0),
     )
-    assert preview.summary_rows == (("层位点", "4"), ("井数", "2"))
+    assert preview.summary_rows == (("层位点", "6"), ("井数", "2"))
     assert preview.estimated_bytes == sum(
         len(top.well_name.encode("utf-8"))
         + len(top.formation_name.encode("utf-8"))
@@ -178,6 +359,50 @@ def test_backend_caps_tops_at_50k_representative_rows(tmp_path: Path):
     assert preview.payload[-1].depth_m == 50_004.0
 
 
+def test_low_limit_preserves_a_connector_for_grouped_well_rows(well_tops_path: Path):
+    preview = WellStratificationBackend().prepare(
+        _request(well_tops_path), PreviewOptions(max_points=2)
+    )
+
+    assert len(preview.payload) == 2
+    assert {top.well_name for top in preview.payload} == {"W1", "W2"}
+    assert len({top.formation_name for top in preview.payload}) == 1
+
+
+def test_limit_one_has_deterministic_representative_without_promising_topology(
+    well_tops_path: Path,
+):
+    preview = WellStratificationBackend().prepare(
+        _request(well_tops_path), PreviewOptions(max_points=1)
+    )
+
+    assert preview.payload == (FormationTop("W1", "A", 1000.0),)
+
+
+def test_topology_sampling_rotates_fairly_across_well_pairs_and_formations(
+    tmp_path: Path,
+):
+    path = tmp_path / "three-wells.dat"
+    path.write_text(
+        WELL_TOPS_HEADER
+        + "".join(
+            f"{well} {formation} {base_depth + offset} 0 0 0 0 0\n"
+            for well, offset in (("W1", 0), ("W2", 10), ("W3", 20))
+            for formation, base_depth in (("A", 1000), ("B", 1100), ("C", 1200))
+        ),
+        encoding="utf-8",
+    )
+
+    preview = WellStratificationBackend().prepare(
+        _request(path), PreviewOptions(max_points=4)
+    )
+    selected = {(top.well_name, top.formation_name) for top in preview.payload}
+
+    assert len(preview.payload) == 4
+    assert {("W1", "A"), ("W2", "A")} <= selected
+    assert {("W2", "B"), ("W3", "B")} <= selected
+
+
 def test_backend_renders_releases_and_declares_interactions(qtbot, well_tops_path: Path):
     engine = GeoVizEngine.default()
     request = _request(well_tops_path)
@@ -190,5 +415,18 @@ def test_backend_renders_releases_and_declares_interactions(qtbot, well_tops_pat
     assert engine.capabilities(request).interactions == ("zoom", "pan", "hover")
     assert widget.tops == preview.payload
 
+    _render(widget)
+    emitted = []
+    widget.hovered_top_changed.connect(lambda *payload: emitted.append(payload))
+    widget.mouseMoveEvent(
+        _mouse_event(
+            QEvent.Type.MouseMove,
+            widget._visible_top_points[0][1],
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+        )
+    )
+
     engine.release(widget)
     assert widget.tops == ()
+    assert emitted[-1][0:2] == ("", "")
