@@ -1690,16 +1690,17 @@ class Renderer3D(QWidget):
             self._t_slider._val_label.setText(str(value))
             self._t_pos = value
 
-        self._update_slice_planes()
-
+        # 3D slice planes rebuilt in the debounced handler (SeismicView._apply_pending_slice)
         if value >= 0:
             self.slice_changed.emit(slice_type, value)
 
     def set_position_external(self, slice_type: str, position: int):
         """Set a slice position from an external source (toolbar slider, etc.).
 
-        Updates the internal state, syncs the 3D slider with blockSignals,
-        and triggers slice plane update + signal emission.
+        Updates the internal state and syncs the 3D slider, but does NOT
+        rebuild slice planes here -- that's expensive and happens on every
+        slider tick. The caller's slice_changed handler debounces the
+        actual 3D + 2D render.
         """
         if not self._loaded:
             return
@@ -1717,7 +1718,7 @@ class Renderer3D(QWidget):
         slider._val_label.setText(str(position))
         slider.blockSignals(False)
         setattr(self, attr, position)
-        self._update_slice_planes()
+        # 3D slice planes rebuilt in the debounced handler, not here.
         self.slice_changed.emit(slice_type, position)
 
     def set_horizon_picks(self, points: list[tuple[float, float, float]]):

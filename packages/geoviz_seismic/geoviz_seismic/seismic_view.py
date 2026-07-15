@@ -145,8 +145,9 @@ class SeismicView(QWidget):
         self._pending_slice: tuple[str, int] | None = None
         self._slice_timer = QTimer(self)
         self._slice_timer.setSingleShot(True)
-        # With GPU slicing, we can reduce this from 200ms to near-instant (10ms)
-        self._slice_timer.setInterval(10)
+        # Debounce: 80ms coalesces rapid slider drags into one render.
+        # Was 10ms (effectively no debounce -> laggy on time slices).
+        self._slice_timer.setInterval(80)
         self._slice_timer.timeout.connect(self._apply_pending_slice)
 
         self._renderer_3d.slice_changed.connect(self._on_slice_changed)
@@ -817,9 +818,11 @@ class SeismicView(QWidget):
             self._update_tb_slider_label(slice_type, position)
 
     def _on_tb_slider_changed(self, slice_type: str, value: int):
-        """Toolbar slider changed: update 3D slider and render."""
+        """Toolbar slider changed: update label + debounce 3D scene + 2D profile."""
         self._update_tb_slider_label(slice_type, value)
-        # Sync 3D slider
+        # Update 3D position state (cheap) without rebuilding slice planes yet.
+        # The slice_changed signal triggers _on_slice_changed which debounces
+        # both the 2D profile update and the 3D scene rebuild.
         self._renderer_3d.set_position_external(slice_type, value)
 
     def _update_tb_slider_label(self, slice_type: str, position: int):
@@ -884,6 +887,9 @@ class SeismicView(QWidget):
         self._pending_slice = None
         if self._meta is None:
             return
+
+        # Rebuild 3D slice planes (debounced -- was running on every tick before)
+        self._renderer_3d._update_slice_planes()
 
         # Demo mode: slice from cached volume data directly
         if self._loader is None:
