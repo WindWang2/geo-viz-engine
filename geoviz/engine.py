@@ -23,25 +23,44 @@ class GeoVizEngine:
 
     @classmethod
     def default(cls) -> "GeoVizEngine":
-        from .previews.dat import (
-            HorizonSurfaceBackend,
-            TimeDepthBackend,
-            WellStratificationBackend,
-            XYScatterBackend,
-        )
-        from .previews.seismic import SeismicPreviewBackend
-        from .previews.well_log import WellLogPreviewBackend
+        import importlib
 
-        return cls(
-            [
-                WellLogPreviewBackend(),
-                SeismicPreviewBackend(),
-                XYScatterBackend(),
-                TimeDepthBackend(),
-                HorizonSurfaceBackend(),
-                WellStratificationBackend(),
-            ]
-        )
+        preview_package = f"{__package__}.previews"
+
+        def optional_module(name: str):
+            module_name = f"{preview_package}.{name}"
+            try:
+                return importlib.import_module(module_name)
+            except ModuleNotFoundError as error:
+                if error.name in {preview_package, module_name}:
+                    return None
+                raise
+
+        backend_types = []
+
+        well_log = optional_module("well_log")
+        if well_log is not None:
+            backend_types.append(getattr(well_log, "WellLogPreviewBackend"))
+
+        seismic = optional_module("seismic")
+        if seismic is not None:
+            backend_types.append(getattr(seismic, "SeismicPreviewBackend"))
+
+        dat = optional_module("dat")
+        if dat is not None:
+            backend_types.extend(
+                [
+                    getattr(dat, "XYScatterBackend"),
+                    getattr(dat, "TimeDepthBackend"),
+                    getattr(dat, "HorizonSurfaceBackend"),
+                ]
+            )
+            try:
+                backend_types.append(getattr(dat, "WellStratificationBackend"))
+            except AttributeError:
+                pass
+
+        return cls([backend_type() for backend_type in backend_types])
 
     def supports(self, request: PreviewRequest) -> bool:
         try:

@@ -104,46 +104,131 @@ def test_engine_rejects_ui_lifecycle_calls_from_worker(qtbot):
     engine.release(widget)
 
 
-def test_default_factory_constructs_backends_in_deterministic_order(monkeypatch):
+def _backend_type(name, created):
+    class Backend:
+        def __init__(self):
+            self.name = name
+            created.append(self)
+
+    Backend.__name__ = name
+    return Backend
+
+
+def _install_preview_modules(monkeypatch, available, *, include_well_stratification=False):
     created = []
-
-    def backend_type(name):
-        class Backend:
-            def __init__(self):
-                created.append(name)
-
-        Backend.__name__ = name
-        return Backend
-
     previews = ModuleType("geoviz.previews")
     previews.__path__ = []
-    well_log = ModuleType("geoviz.previews.well_log")
-    seismic = ModuleType("geoviz.previews.seismic")
-    dat = ModuleType("geoviz.previews.dat")
-    well_log.WellLogPreviewBackend = backend_type("WellLogPreviewBackend")
-    seismic.SeismicPreviewBackend = backend_type("SeismicPreviewBackend")
-    for name in (
-        "XYScatterBackend",
-        "TimeDepthBackend",
-        "HorizonSurfaceBackend",
-        "WellStratificationBackend",
-    ):
-        setattr(dat, name, backend_type(name))
     monkeypatch.setitem(sys.modules, "geoviz.previews", previews)
-    monkeypatch.setitem(sys.modules, "geoviz.previews.well_log", well_log)
-    monkeypatch.setitem(sys.modules, "geoviz.previews.seismic", seismic)
-    monkeypatch.setitem(sys.modules, "geoviz.previews.dat", dat)
 
-    GeoVizEngine.default()
+    if "well_log" in available:
+        well_log = ModuleType("geoviz.previews.well_log")
+        well_log.WellLogPreviewBackend = _backend_type("WellLogPreviewBackend", created)
+        monkeypatch.setitem(sys.modules, "geoviz.previews.well_log", well_log)
 
-    assert created == [
-        "WellLogPreviewBackend",
-        "SeismicPreviewBackend",
-        "XYScatterBackend",
-        "TimeDepthBackend",
-        "HorizonSurfaceBackend",
-        "WellStratificationBackend",
-    ]
+    if "seismic" in available:
+        seismic = ModuleType("geoviz.previews.seismic")
+        seismic.SeismicPreviewBackend = _backend_type("SeismicPreviewBackend", created)
+        monkeypatch.setitem(sys.modules, "geoviz.previews.seismic", seismic)
+
+    if "dat" in available:
+        dat = ModuleType("geoviz.previews.dat")
+        names = ["XYScatterBackend", "TimeDepthBackend", "HorizonSurfaceBackend"]
+        if include_well_stratification:
+            names.append("WellStratificationBackend")
+        for name in names:
+            setattr(dat, name, _backend_type(name, created))
+        monkeypatch.setitem(sys.modules, "geoviz.previews.dat", dat)
+
+    return created
+
+
+def test_default_factory_is_callable_before_preview_modules_exist(tmp_path: Path):
+    engine = GeoVizEngine.default()
+    request = PreviewRequest("r1", str(tmp_path / "wells.dat"), "well_head", "dat")
+
+    assert engine._registry._backends == []
+    assert not engine.supports(request)
+
+
+@pytest.mark.parametrize(
+    ("available", "include_well_stratification", "expected_names"),
+    [
+        (("well_log",), False, ["WellLogPreviewBackend"]),
+        (("well_log", "seismic"), False, ["WellLogPreviewBackend", "SeismicPreviewBackend"]),
+        (
+            ("well_log", "seismic", "dat"),
+            False,
+            [
+                "WellLogPreviewBackend",
+                "SeismicPreviewBackend",
+                "XYScatterBackend",
+                "TimeDepthBackend",
+                "HorizonSurfaceBackend",
+            ],
+        ),
+        (
+            ("well_log", "seismic", "dat"),
+            True,
+            [
+                "WellLogPreviewBackend",
+                "SeismicPreviewBackend",
+                "XYScatterBackend",
+                "TimeDepthBackend",
+                "HorizonSurfaceBackend",
+                "WellStratificationBackend",
+            ],
+        ),
+    ],
+)
+def test_default_factory_accumulates_available_backends_in_final_order(
+    monkeypatch, available, include_well_stratification, expected_names
+):
+    created = _install_preview_modules(
+        monkeypatch,
+        available,
+        include_well_stratification=include_well_stratification,
+    )
+
+    engine = GeoVizEngine.default()
+
+    assert engine._registry._backends == created
+    assert [backend.name for backend in engine._registry._backends] == expected_names
+
+
+@pytest.mark.parametrize(
+    ("module_name", "required_name"),
+    [
+        ("well_log", "WellLogPreviewBackend"),
+        ("seismic", "SeismicPreviewBackend"),
+        ("dat", "XYScatterBackend"),
+        ("dat", "TimeDepthBackend"),
+        ("dat", "HorizonSurfaceBackend"),
+    ],
+)
+def test_default_factory_rejects_missing_required_backend_class(monkeypatch, module_name, required_name):
+    created = _install_preview_modules(monkeypatch, (module_name,))
+    module = sys.modules[f"geoviz.previews.{module_name}"]
+    delattr(module, required_name)
+
+    with pytest.raises(AttributeError, match=required_name):
+        GeoVizEngine.default()
+
+    assert created == []
+
+
+def test_default_factory_does_not_hide_internal_dependency_errors(monkeypatch):
+    real_import_module = importlib.import_module
+
+    def import_module(name):
+        if name == "geoviz.previews.well_log":
+            raise ModuleNotFoundError("No module named 'lasio'", name="lasio")
+        return real_import_module(name)
+
+    monkeypatch.setattr(importlib, "import_module", import_module)
+
+    with pytest.raises(ModuleNotFoundError) as caught:
+        GeoVizEngine.default()
+    assert caught.value.name == "lasio"
 
 
 def test_import_geoviz_succeeds_without_optional_packages(tmp_path: Path):
