@@ -129,6 +129,18 @@ class SurfaceWidget(QWidget):
         self.colormap_name = colormap if colormap in COLORMAPS else "viridis"
         self.update()
 
+    def clear(self) -> None:
+        self.grid_x = None
+        self.grid_y = None
+        self.grid_z = None
+        self.levels = []
+        self.control_points = []
+        self.fault_polylines = []
+        self.selected_contour_level = None
+        self.view_xmin, self.view_xmax = 0.0, 1.0
+        self.view_ymin, self.view_ymax = 0.0, 1.0
+        self.update()
+
 
     def autofit(self):
         """Auto-scale the viewport to fit the grid data boundary dimensions exactly."""
