@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import subprocess
 import sys
+import textwrap
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -155,10 +157,37 @@ def test_prepare_never_exceeds_hard_512_axis_cap(monkeypatch, tmp_path: Path):
     assert all(max(item.data.shape) <= 512 for item in preview.payload.slices.values())
 
 
-def test_widget_switches_stable_slice_modes_without_importing_renderer_3d(
-    qtbot, small_segy_path
-):
-    assert "geoviz_seismic.renderer_3d" not in sys.modules
+def test_slice_preview_imports_do_not_load_renderer_3d_in_fresh_interpreter(tmp_path: Path):
+    script = textwrap.dedent(
+        """
+        import sys
+
+        assert "geoviz_seismic.renderer_3d" not in sys.modules
+        from geoviz import GeoVizEngine
+        from geoviz_seismic import SeismicPreviewPayload, SeismicPreviewWidget
+        from geoviz.previews.seismic import SeismicPreviewBackend
+
+        engine = GeoVizEngine.default()
+        assert engine is not None
+        assert SeismicPreviewBackend is not None
+        assert SeismicPreviewPayload is not None
+        assert SeismicPreviewWidget is not None
+        assert "geoviz_seismic.renderer_3d" not in sys.modules
+        """
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_widget_switches_stable_slice_modes(qtbot, small_segy_path):
     preview = GeoVizEngine.default().prepare(
         _request(small_segy_path), PreviewOptions(max_slice_axis=16)
     )
@@ -184,7 +213,6 @@ def test_widget_switches_stable_slice_modes_without_importing_renderer_3d(
     combo.setCurrentIndex(combo.findData("time"))
     assert profile._current_data is preview.payload.slices["time"].data
     assert profile._current_slice_info is preview.payload.slices["time"].info
-    assert "geoviz_seismic.renderer_3d" not in sys.modules
 
     engine.release(widget)
     assert widget._slices == {}

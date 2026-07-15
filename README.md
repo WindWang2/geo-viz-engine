@@ -206,6 +206,74 @@ GeoViz Engine 是一款基于 **PySide6 + QPainter + pyqtgraph** 的单进程地
 
 ---
 
+## GeoViz public package
+
+Install the top-level package once; it declares the renderer packages required by
+the facade, so consumers do not install the individual `geoviz-*` packages:
+
+```bash
+python -m pip install geo-viz-engine
+```
+
+For a source checkout, the equivalent editable installation is
+`python -m pip install -e .`. The supported named imports for local previews are:
+
+```python
+from geoviz import (
+    ErrorCode,
+    GeoVizEngine,
+    GeoVizError,
+    PreparedPreview,
+    PreviewCapabilities,
+    PreviewKind,
+    PreviewOptions,
+    PreviewRegistry,
+    PreviewRequest,
+)
+```
+
+`GeoVizEngine.supports()`, `capabilities()`, and `prepare()` do not create Qt
+objects and may run on a worker thread. Widget creation and rendering must occur
+on the Qt UI thread; `create_widget()`, `render()`, and `release()` reject calls
+from any other thread with `ErrorCode.RENDER_ERROR`.
+
+`PreviewOptions.local()` applies these exact preview limits:
+
+| Limit | Value |
+|---|---:|
+| LAS curves | 12 |
+| Depth samples per LAS curve | 2,000 |
+| Maximum axis of each SEGY slice | 512 |
+| DAT points / formation tops | 50,000 |
+| Horizon surface grid axis | 256 |
+
+Public errors are raised as `GeoVizError` with one stable `ErrorCode` value:
+
+| Code | Meaning |
+|---|---|
+| `unsupported` | No backend accepts the request |
+| `invalid_data` | The file does not match the declared data schema |
+| `dependency_missing` | An optional runtime dependency is unavailable |
+| `io_error` | The source file cannot be read |
+| `resource_limit` | Preparing the preview would exceed a resource bound |
+| `render_error` | A widget lifecycle or render operation failed |
+
+Minimal preparation example:
+
+```python
+from geoviz import GeoVizEngine, PreviewOptions, PreviewRequest
+
+engine = GeoVizEngine.default()
+request = PreviewRequest("well-1", "/data/A1.Las", "well_log", "las", "A1")
+if engine.supports(request):
+    prepared = engine.prepare(request, PreviewOptions.local())
+```
+
+The returned `PreparedPreview` is bounded data only. Create and render its widget
+later on the Qt UI thread.
+
+---
+
 ## Quick Start / 快速开始
 
 ### 前置条件
