@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -16,6 +17,22 @@ from geoviz_seismic.loader import SeismicLoader
 from geoviz_seismic.models import SeismicVolumeMeta
 from geoviz_seismic.profile_widget import ProfileWidget
 from geoviz.previews.seismic import downsample_2d
+
+
+ENGINE_ROOT = Path(__file__).resolve().parents[1]
+LOCAL_PACKAGE_ROOTS = (
+    ENGINE_ROOT,
+    *(ENGINE_ROOT / "packages" / name for name in (
+        "geoviz_common",
+        "geoviz_cross_well",
+        "geoviz_map",
+        "geoviz_paleo_map",
+        "geoviz_plots",
+        "geoviz_seismic",
+        "geoviz_well_log",
+        "geoviz_well_tie",
+    )),
+)
 
 
 def _request(path: str | Path, *, semantic_type: str = "seismic", format: str = "sgy"):
@@ -157,12 +174,19 @@ def test_prepare_never_exceeds_hard_512_axis_cap(monkeypatch, tmp_path: Path):
     assert all(max(item.data.shape) <= 512 for item in preview.payload.slices.values())
 
 
-def test_slice_preview_imports_do_not_load_renderer_3d_in_fresh_interpreter(tmp_path: Path):
+def _run_slice_preview_import_check(tmp_path: Path, *, env=None):
     script = textwrap.dedent(
         """
         import sys
+        from pathlib import Path
+
+        expected_checkout = Path(sys.argv[1]).resolve()
 
         assert "geoviz_seismic.renderer_3d" not in sys.modules
+        import geoviz
+        import geoviz_seismic
+        assert Path(geoviz.__file__).resolve().is_relative_to(expected_checkout)
+        assert Path(geoviz_seismic.__file__).resolve().is_relative_to(expected_checkout)
         from geoviz import GeoVizEngine
         from geoviz_seismic import SeismicPreviewPayload, SeismicPreviewWidget
         from geoviz.previews.seismic import SeismicPreviewBackend
@@ -173,18 +197,73 @@ def test_slice_preview_imports_do_not_load_renderer_3d_in_fresh_interpreter(tmp_
         assert SeismicPreviewPayload is not None
         assert SeismicPreviewWidget is not None
         assert "geoviz_seismic.renderer_3d" not in sys.modules
+        print(geoviz.__file__)
+        print(geoviz_seismic.__file__)
         """
     )
+    child_env = (os.environ if env is None else env).copy()
+    inherited_pythonpath = child_env.get("PYTHONPATH", "")
+    child_env["PYTHONPATH"] = os.pathsep.join(
+        [
+            *(str(path) for path in LOCAL_PACKAGE_ROOTS),
+            *([inherited_pythonpath] if inherited_pythonpath else []),
+        ]
+    )
 
-    result = subprocess.run(
-        [sys.executable, "-c", script],
+    return subprocess.run(
+        [sys.executable, "-c", script, str(ENGINE_ROOT)],
         cwd=tmp_path,
+        env=child_env,
         capture_output=True,
         text=True,
         check=False,
     )
 
+
+def test_slice_preview_imports_do_not_load_renderer_3d_in_fresh_interpreter(tmp_path: Path):
+    result = _run_slice_preview_import_check(tmp_path)
+
     assert result.returncode == 0, result.stderr
+    module_paths = result.stdout.splitlines()
+    assert len(module_paths) == 2
+    assert all(
+        Path(line).resolve().is_relative_to(ENGINE_ROOT) for line in module_paths
+    )
+
+
+def test_slice_preview_import_check_rejects_wrong_pythonpath(tmp_path: Path):
+    fake_root = tmp_path / "wrong-checkout"
+    fake_geoviz = fake_root / "geoviz"
+    fake_previews = fake_geoviz / "previews"
+    fake_seismic = fake_root / "geoviz_seismic"
+    fake_previews.mkdir(parents=True)
+    fake_seismic.mkdir(parents=True)
+    fake_geoviz.joinpath("__init__.py").write_text(
+        "class GeoVizEngine:\n"
+        "    @classmethod\n"
+        "    def default(cls):\n"
+        "        return cls()\n",
+        encoding="utf-8",
+    )
+    fake_previews.joinpath("__init__.py").write_text("", encoding="utf-8")
+    fake_previews.joinpath("seismic.py").write_text(
+        "SeismicPreviewBackend = object()\n", encoding="utf-8"
+    )
+    fake_seismic.joinpath("__init__.py").write_text(
+        "SeismicPreviewPayload = object()\nSeismicPreviewWidget = object()\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(fake_root)
+
+    result = _run_slice_preview_import_check(tmp_path, env=env)
+
+    assert result.returncode == 0, result.stderr
+    module_paths = result.stdout.splitlines()
+    assert len(module_paths) == 2
+    assert all(
+        Path(line).resolve().is_relative_to(ENGINE_ROOT) for line in module_paths
+    )
 
 
 def test_widget_switches_stable_slice_modes(qtbot, small_segy_path):
