@@ -142,7 +142,19 @@ def _install_preview_modules(monkeypatch, available, *, include_well_stratificat
     return created
 
 
-def test_default_factory_is_callable_before_preview_modules_exist(tmp_path: Path):
+def test_default_factory_is_callable_before_preview_modules_exist(monkeypatch, tmp_path: Path):
+    real_import_module = importlib.import_module
+
+    def import_module(name):
+        if name in {
+            "geoviz.previews.well_log",
+            "geoviz.previews.seismic",
+            "geoviz.previews.dat",
+        }:
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+        return real_import_module(name)
+
+    monkeypatch.setattr(importlib, "import_module", import_module)
     engine = GeoVizEngine.default()
     request = PreviewRequest("r1", str(tmp_path / "wells.dat"), "well_head", "dat")
 

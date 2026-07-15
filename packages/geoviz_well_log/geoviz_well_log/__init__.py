@@ -52,6 +52,16 @@ from .renderer import (
 # Track builder
 from .qpainter_builder import build_qpainter_tracks
 
+# Bounded LAS preview loader
+from .las_preview import (
+    LASCurveHeader,
+    LASPreviewHeader,
+    curve_data_from_arrays,
+    inspect_las_file,
+    load_las_preview,
+    read_sampled_ascii,
+)
+
 # Vector export
 from .export_qpainter import export_svg, export_pdf, export_png
 
@@ -94,6 +104,13 @@ __all__ = [
     "DepthRuler",
     # Builder
     "build_qpainter_tracks",
+    # LAS preview
+    "LASCurveHeader",
+    "LASPreviewHeader",
+    "curve_data_from_arrays",
+    "inspect_las_file",
+    "load_las_preview",
+    "read_sampled_ascii",
     # Export
     "export_svg",
     "export_pdf",
