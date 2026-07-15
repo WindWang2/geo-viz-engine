@@ -27,6 +27,8 @@ _TIME_DEPTH_MARKER = "TimeDepth File From SMI"
 _MAX_POINTS = 50_000
 _MAX_SURFACE_AXIS = 256
 _MAX_IDW_POINT_CELLS = 8_000_000
+_MAX_HEADER_LINES = 256
+_MAX_HEADER_CHARS = 64 * 1_024
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,7 @@ def _normalized_semantic_type(request: PreviewRequest) -> str:
 
 def _read_header(path: str) -> tuple[str, ...]:
     header = []
+    header_chars = 0
     with open(path, "r", encoding="utf-8-sig") as stream:
         for raw_line in stream:
             line = raw_line.strip()
@@ -73,19 +76,26 @@ def _read_header(path: str) -> tuple[str, ...]:
                 continue
             if not line.startswith("#"):
                 break
-            header.append(line)
+            header_chars = _retain_header_line(header, header_chars, line)
     return tuple(header)
 
 
 def _header_tokens(line: str) -> tuple[str, ...]:
-    try:
-        return tuple(shlex.split(line.lstrip("#").strip()))
-    except ValueError as error:
-        raise _DatSchemaError(str(error)) from error
+    if line.count('"') % 2:
+        raise _DatSchemaError("unclosed double quote in header")
+    return tuple(line.lstrip("#").strip().split())
+
+
+def _retain_header_line(header: list[str], header_chars: int, line: str) -> int:
+    if len(header) >= _MAX_HEADER_LINES or header_chars + len(line) > _MAX_HEADER_CHARS:
+        return header_chars
+    header.append(line)
+    return header_chars + len(line)
 
 
 def _normalized_column(column: str) -> str:
-    return "".join(character for character in column.casefold() if character.isalnum())
+    column = column.casefold().replace("'", "prime")
+    return "".join(character for character in column if character.isalnum())
 
 
 def _column_mapping(
@@ -95,25 +105,27 @@ def _column_mapping(
     allowed_extras: frozenset[str] = frozenset(),
     row_width: int | None = None,
 ) -> dict[str, int] | None:
-    if not header:
-        return None
-    tokens = _header_tokens(header[-1])
-    if row_width is not None and len(tokens) != row_width:
-        return None
-    normalized = tuple(_normalized_column(token) for token in tokens)
     allowed_columns = allowed_extras.union(*(names for names in aliases.values()))
-    if not normalized or any(column not in allowed_columns for column in normalized):
+    candidates = []
+    for line in header:
+        tokens = _header_tokens(line)
+        if row_width is not None and len(tokens) != row_width:
+            continue
+        normalized = tuple(_normalized_column(token) for token in tokens)
+        if not normalized or any(column not in allowed_columns for column in normalized):
+            continue
+        mapping = {}
+        for registered_name, accepted_names in aliases.items():
+            matches = [
+                index for index, column in enumerate(normalized) if column in accepted_names
+            ]
+            if len(matches) == 1:
+                mapping[registered_name] = matches[0]
+        if len(mapping) == len(aliases) and len(set(mapping.values())) == len(mapping):
+            candidates.append(mapping)
+    if not candidates or any(candidate != candidates[0] for candidate in candidates[1:]):
         return None
-    mapping = {}
-    for registered_name, accepted_names in aliases.items():
-        matches = [
-            index for index, column in enumerate(normalized) if column in accepted_names
-        ]
-        if len(matches) == 1:
-            mapping[registered_name] = matches[0]
-    if len(mapping) == len(aliases) and len(set(mapping.values())) == len(mapping):
-        return mapping
-    return None
+    return candidates[0]
 
 
 _WELL_HEAD_COLUMNS = {
@@ -121,18 +133,135 @@ _WELL_HEAD_COLUMNS = {
     "x": frozenset({"x"}),
     "y": frozenset({"y"}),
 }
-_WELL_HEAD_EXTRA_COLUMNS = frozenset({"datum", "elevation", "gl", "kb", "td", "uwi"})
-_HORIZON_COLUMNS = {
-    "x": frozenset({"x"}),
-    "y": frozenset({"y"}),
-    "z": frozenset({"z"}),
-}
-_HORIZON_EXTRA_COLUMNS = frozenset({"crossline", "iline", "inline", "xline"})
+_WELL_HEAD_EXTRA_COLUMNS = frozenset(
+    {
+        "bottomx",
+        "bottomy",
+        "datum",
+        "elevation",
+        "gl",
+        "kb",
+        "td",
+        "totaldepth",
+        "uwi",
+        "welltype",
+    }
+)
 _TIME_DEPTH_COLUMNS = {
     "depth": frozenset({"depth"}),
     "time": frozenset({"timems"}),
 }
 _TIME_DEPTH_EXTRA_COLUMNS = frozenset({"name", "velocity", "well", "wellname"})
+_SMI_TIME_DEPTH_FIELDS = frozenset({"time", "tvdss", "tvd", "md", "tvdprime", "well"})
+_DEPTH_FIELD_PRIORITY = ("md", "tvd", "tvdss", "tvdprime")
+_MILLISECOND_UNITS = frozenset({"ms", "msec", "millisecond", "milliseconds"})
+_LENGTH_UNITS = frozenset({"m", "meter", "meters", "ft", "feet"})
+
+
+def _horizon_field_mapping(header: tuple[str, ...], row_width: int) -> dict[str, int]:
+    mapping = {}
+    used_indices = set()
+    for line in header:
+        tokens = _header_tokens(line)
+        if len(tokens) < 3 or tokens[0].casefold() != "field:":
+            continue
+        try:
+            index = int(tokens[1]) - 1
+        except ValueError as error:
+            raise _DatSchemaError("invalid horizon field index") from error
+        name = _normalized_column(tokens[2])
+        if name not in {"x", "y", "z"}:
+            continue
+        if name in mapping or index in used_indices or not 0 <= index < row_width:
+            raise _DatSchemaError("ambiguous horizon field mapping")
+        mapping[name] = index
+        used_indices.add(index)
+    if set(mapping) != {"x", "y", "z"}:
+        raise _DatSchemaError("missing horizon field mapping")
+    return mapping
+
+
+def _unit_declarations(header: tuple[str, ...]) -> dict[str, str]:
+    units = {}
+    for line in header:
+        tokens = _header_tokens(line)
+        if len(tokens) != 2 or not tokens[1].startswith("."):
+            continue
+        field = _normalized_column(tokens[0])
+        unit = _normalized_column(tokens[1].lstrip("."))
+        if field in units and units[field] != unit:
+            raise _DatSchemaError("conflicting field units")
+        units[field] = unit
+    return units
+
+
+def _registered_depth_type(header: tuple[str, ...]) -> str | None:
+    for line in header:
+        body = line.lstrip("#").strip()
+        if ":" not in body:
+            continue
+        key, value = body.split(":", 1)
+        if _normalized_column(key) not in {"depth", "depthtype"}:
+            continue
+        tokens = value.split()
+        if len(tokens) != 1:
+            raise _DatSchemaError("invalid depth type metadata")
+        return _normalized_column(tokens[0])
+    return None
+
+
+def _smi_time_depth_mapping(
+    header: tuple[str, ...], row_width: int
+) -> dict[str, int] | None:
+    if not any(_TIME_DEPTH_MARKER in line for line in header):
+        return None
+    candidates = []
+    for line in header:
+        tokens = _header_tokens(line)
+        if len(tokens) != row_width:
+            continue
+        fields = tuple(_normalized_column(token) for token in tokens)
+        if all(field in _SMI_TIME_DEPTH_FIELDS for field in fields) and fields.count("time") == 1:
+            candidates.append(fields)
+    if len(candidates) != 1:
+        raise _DatSchemaError("missing or ambiguous time-depth field declaration")
+
+    fields = candidates[0]
+    units = _unit_declarations(header)
+    if units.get("time") not in _MILLISECOND_UNITS:
+        raise _DatSchemaError("TIME is not registered in milliseconds")
+
+    requested_depth = _registered_depth_type(header)
+    if requested_depth is not None:
+        depth_fields = (requested_depth,)
+    else:
+        depth_fields = _DEPTH_FIELD_PRIORITY
+    depth_field = next(
+        (
+            field
+            for field in depth_fields
+            if field in fields and units.get(field) in _LENGTH_UNITS
+        ),
+        None,
+    )
+    if depth_field is None:
+        raise _DatSchemaError("no registered depth field")
+    return {"time": fields.index("time"), "depth": fields.index(depth_field)}
+
+
+def _time_depth_mapping(header: tuple[str, ...], row_width: int) -> dict[str, int]:
+    direct = _column_mapping(
+        header,
+        _TIME_DEPTH_COLUMNS,
+        allowed_extras=_TIME_DEPTH_EXTRA_COLUMNS,
+        row_width=row_width,
+    )
+    if direct is not None:
+        return direct
+    smi = _smi_time_depth_mapping(header, row_width)
+    if smi is None:
+        raise _DatSchemaError("missing registered depth/time columns")
+    return smi
 
 
 def supports_well_head(request: PreviewRequest, header: tuple[str, ...]) -> bool:
@@ -180,6 +309,7 @@ def _split_data_line(line: str) -> tuple[str, ...]:
 
 def _scan_dat(path: str) -> tuple[tuple[str, ...], int, int]:
     header = []
+    header_chars = 0
     row_count = 0
     row_width = 0
     with open(path, "r", encoding="utf-8-sig") as stream:
@@ -188,7 +318,7 @@ def _scan_dat(path: str) -> tuple[tuple[str, ...], int, int]:
             if not line:
                 continue
             if line.startswith("#"):
-                header.append(line)
+                header_chars = _retain_header_line(header, header_chars, line)
                 continue
             row = _split_data_line(line)
             if not row:
@@ -263,7 +393,9 @@ def _well_head_payload(path: str, options: PreviewOptions) -> XYPreviewPayload:
         _WELL_HEAD_COLUMNS,
         allowed_extras=_WELL_HEAD_EXTRA_COLUMNS,
         row_width=row_width,
-    ) or {"name": 0, "x": 1, "y": 2}
+    )
+    if mapping is None:
+        raise _DatSchemaError("missing well-head column declaration")
 
     def parse_row(row):
         name = _value_at(row, mapping["name"])
@@ -286,14 +418,7 @@ def _well_head_payload(path: str, options: PreviewOptions) -> XYPreviewPayload:
 
 def _time_depth_payload(path: str, options: PreviewOptions) -> TimeDepthPreviewPayload:
     header, row_count, row_width = _scan_dat(path)
-    mapping = _column_mapping(
-        header,
-        _TIME_DEPTH_COLUMNS,
-        allowed_extras=_TIME_DEPTH_EXTRA_COLUMNS,
-        row_width=row_width,
-    )
-    if mapping is None:
-        raise _DatSchemaError("missing registered depth/time columns")
+    mapping = _time_depth_mapping(header, row_width)
 
     def parse_row(row):
         return (
@@ -316,12 +441,7 @@ def _surface_payload(path: str, options: PreviewOptions) -> SurfacePreviewPayloa
     header, row_count, row_width = _scan_dat(path)
     if not any(_HORIZON_MARKER in line for line in header):
         raise _DatSchemaError("missing horizon marker")
-    mapping = _column_mapping(
-        header,
-        _HORIZON_COLUMNS,
-        allowed_extras=_HORIZON_EXTRA_COLUMNS,
-        row_width=row_width,
-    ) or {"x": 0, "y": 1, "z": 2}
+    mapping = _horizon_field_mapping(header, row_width)
 
     def parse_row(row):
         return (
@@ -335,6 +455,16 @@ def _surface_payload(path: str, options: PreviewOptions) -> SurfacePreviewPayloa
     source_x = np.asarray([row[0] for row in selected], dtype=np.float64)
     source_y = np.asarray([row[1] for row in selected], dtype=np.float64)
     source_z = np.asarray([row[2] for row in selected], dtype=np.float64)
+    xy = np.column_stack((source_x, source_y))
+    unique_xy = np.unique(xy, axis=0)
+    if (
+        len(source_x) < 3
+        or len(unique_xy) != len(source_x)
+        or len(np.unique(source_x)) < 2
+        or len(np.unique(source_y)) < 2
+        or np.linalg.matrix_rank(unique_xy - unique_xy.mean(axis=0)) < 2
+    ):
+        raise _DatSchemaError("insufficient independent horizon geometry")
     axis_limit = max(1, min(int(options.surface_grid_size), _MAX_SURFACE_AXIS))
     axis_size = min(axis_limit, max(2, math.ceil(math.sqrt(len(source_indices)))))
     grid_x = np.linspace(float(source_x.min()), float(source_x.max()), num=axis_size)
@@ -355,7 +485,13 @@ def _surface_payload(path: str, options: PreviewOptions) -> SurfacePreviewPayloa
     finite_z = grid_z[np.isfinite(grid_z)]
     if finite_z.size == 0:
         raise _DatSchemaError("surface interpolation produced no finite values")
-    levels_array = np.linspace(float(finite_z.min()), float(finite_z.max()), num=10)
+    level_min = float(finite_z.min())
+    level_max = float(finite_z.max())
+    if level_min == level_max:
+        epsilon = max(abs(level_min) * 1e-6, 1e-6)
+        level_min -= epsilon
+        level_max += epsilon
+    levels_array = np.linspace(level_min, level_max, num=10)
     return SurfacePreviewPayload(
         grid_x=np.ascontiguousarray(grid_x, dtype=np.float64),
         grid_y=np.ascontiguousarray(grid_y, dtype=np.float64),

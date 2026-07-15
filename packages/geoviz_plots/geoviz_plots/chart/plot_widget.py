@@ -107,6 +107,8 @@ class PlotWidget(QWidget):
         self.series_list.clear()
         self.highlighted_points.clear()
         self.selected_point = None
+        self._tree_metadata.clear()
+        self._rebuild_kdtree()
         self.update()
 
     def autofit(self):
