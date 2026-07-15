@@ -256,6 +256,37 @@ def test_set_tops_preindexes_connectors_and_paint_caches_visible_points(qtbot):
     assert len(widget._visible_top_points) == len(tops)
 
 
+def test_connector_cache_uses_first_duplicate_formation_per_well(qtbot):
+    widget = FormationTopsPreviewWidget()
+    qtbot.addWidget(widget)
+    widget.set_tops(
+        (
+            FormationTop("W1", "A", 1000.0),
+            FormationTop("W1", "A", 1005.0),
+            FormationTop("W2", "A", 1100.0),
+        )
+    )
+
+    assert len(widget._connectors) == 1
+    _, left_top, right_top = widget._connectors[0]
+    assert (left_top.depth_m, right_top.depth_m) == (1000.0, 1100.0)
+
+
+def test_sparse_well_indexes_have_no_connectors(qtbot):
+    widget = FormationTopsPreviewWidget()
+    qtbot.addWidget(widget)
+    tops = tuple(
+        FormationTop(f"W{index:04d}", f"F{index:04d}", float(index))
+        for index in range(1_000)
+    )
+
+    widget.set_tops(tops)
+
+    assert len(widget._tops_by_well) == 1_000
+    assert len(widget._tops_by_formation) == 1_000
+    assert widget._connectors == ()
+
+
 @pytest.mark.parametrize(
     ("semantic_type", "format", "expected"),
     [
@@ -379,7 +410,7 @@ def test_limit_one_has_deterministic_representative_without_promising_topology(
     assert preview.payload == (FormationTop("W1", "A", 1000.0),)
 
 
-def test_topology_sampling_rotates_fairly_across_well_pairs_and_formations(
+def test_topology_sampling_extends_a_chain_across_three_wells(
     tmp_path: Path,
 ):
     path = tmp_path / "three-wells.dat"
@@ -400,7 +431,67 @@ def test_topology_sampling_rotates_fairly_across_well_pairs_and_formations(
 
     assert len(preview.payload) == 4
     assert {("W1", "A"), ("W2", "A")} <= selected
-    assert {("W2", "B"), ("W3", "B")} <= selected
+    assert {("W2", "A"), ("W3", "A")} <= selected
+
+
+def test_topology_sampling_covers_all_pairs_in_a_four_well_chain(tmp_path: Path):
+    path = tmp_path / "four-wells.dat"
+    path.write_text(
+        WELL_TOPS_HEADER
+        + "".join(
+            f"{well} {formation} {base_depth + offset} 0 0 0 0 0\n"
+            for well, offset in (
+                ("W1", 0),
+                ("W2", 10),
+                ("W3", 20),
+                ("W4", 30),
+            )
+            for formation, base_depth in (("A", 1000), ("B", 1100), ("C", 1200))
+        ),
+        encoding="utf-8",
+    )
+
+    preview = WellStratificationBackend().prepare(
+        _request(path), PreviewOptions(max_points=4)
+    )
+
+    assert len(preview.payload) == 4
+    assert {(top.well_name, top.formation_name) for top in preview.payload} == {
+        ("W1", "A"),
+        ("W2", "A"),
+        ("W3", "A"),
+        ("W4", "A"),
+    }
+
+
+@pytest.mark.parametrize(("limit", "expected_connectors"), [(3, 1), (4, 2)])
+def test_topology_sampling_handles_disconnected_chains_and_insufficient_budget(
+    tmp_path: Path, limit: int, expected_connectors: int
+):
+    path = tmp_path / f"disconnected-{limit}.dat"
+    path.write_text(
+        WELL_TOPS_HEADER
+        + "W1 A 1000 0 0 0 0 0\n"
+        + "W2 A 1010 0 0 0 0 0\n"
+        + "W3 B 1020 0 0 0 0 0\n"
+        + "W4 B 1030 0 0 0 0 0\n",
+        encoding="utf-8",
+    )
+
+    preview = WellStratificationBackend().prepare(
+        _request(path), PreviewOptions(max_points=limit)
+    )
+    selected = {(top.well_name, top.formation_name) for top in preview.payload}
+    connectors = sum(
+        endpoints <= selected
+        for endpoints in (
+            {("W1", "A"), ("W2", "A")},
+            {("W3", "B"), ("W4", "B")},
+        )
+    )
+
+    assert len(preview.payload) <= limit
+    assert connectors == expected_connectors
 
 
 def test_backend_renders_releases_and_declares_interactions(qtbot, well_tops_path: Path):

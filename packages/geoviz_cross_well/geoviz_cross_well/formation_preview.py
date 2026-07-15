@@ -93,26 +93,29 @@ class FormationTopsPreviewWidget(QWidget):
 
     def _build_indexes(self) -> None:
         tops_by_well = {well: [] for well in self._well_names}
-        tops_by_formation: dict[str, dict[str, FormationTop]] = {}
         for top in self._tops:
             tops_by_well[top.well_name].append(top)
-            tops_by_formation.setdefault(top.formation_name, {})[top.well_name] = top
         self._tops_by_well = {
             well: tuple(tops_by_well[well]) for well in self._well_names
         }
-        self._tops_by_formation = {
-            formation: tops_by_formation[formation]
-            for formation in sorted(tops_by_formation)
-        }
+
+        tops_by_formation: dict[str, dict[str, FormationTop]] = {}
+        last_seen: dict[str, tuple[int, FormationTop]] = {}
         connectors = []
-        for left_index, (left_well, right_well) in enumerate(
-            zip(self._well_names, self._well_names[1:])
-        ):
-            for by_well in self._tops_by_formation.values():
-                if left_well in by_well and right_well in by_well:
-                    connectors.append(
-                        (left_index, by_well[left_well], by_well[right_well])
-                    )
+        for well_index, well_name in enumerate(self._well_names):
+            seen_in_well = set()
+            for top in self._tops_by_well[well_name]:
+                if top.formation_name in seen_in_well:
+                    continue
+                seen_in_well.add(top.formation_name)
+                tops_by_formation.setdefault(top.formation_name, {})[
+                    well_name
+                ] = top
+                previous = last_seen.get(top.formation_name)
+                if previous is not None and previous[0] == well_index - 1:
+                    connectors.append((previous[0], previous[1], top))
+                last_seen[top.formation_name] = (well_index, top)
+        self._tops_by_formation = tops_by_formation
         self._connectors = tuple(connectors)
 
     def _plot_height(self) -> float:

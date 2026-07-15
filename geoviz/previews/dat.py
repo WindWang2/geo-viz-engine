@@ -577,15 +577,40 @@ def _topology_aware_indices(
             )
         )
 
-    selected: set[int] = set()
     max_edges = max((len(bucket) for bucket in edge_buckets), default=0)
+    edges = []
     for formation_round in range(max_edges):
         for bucket in edge_buckets:
             if formation_round >= len(bucket):
                 continue
-            endpoints = set(bucket[formation_round])
-            if len(selected | endpoints) <= limit:
-                selected.update(endpoints)
+            edges.append(bucket[formation_round])
+
+    selected: set[int] = set()
+    while len(selected) < limit:
+        covered = {
+            edge_index
+            for edge_index, endpoints in enumerate(edges)
+            if set(endpoints) <= selected
+        }
+        best = None
+        for edge_index, endpoints in enumerate(edges):
+            if edge_index in covered:
+                continue
+            additions = set(endpoints) - selected
+            cost = len(additions)
+            if cost == 0 or len(selected) + cost > limit:
+                continue
+            trial = selected | additions
+            benefit = sum(
+                candidate_index not in covered and set(candidate) <= trial
+                for candidate_index, candidate in enumerate(edges)
+            )
+            score = (cost, -benefit, edge_index)
+            if best is None or score < best[0]:
+                best = (score, additions)
+        if best is None:
+            break
+        selected.update(best[1])
 
     remaining_budget = limit - len(selected)
     if remaining_budget:
