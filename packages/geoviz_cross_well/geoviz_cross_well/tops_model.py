@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, Signal
 
@@ -30,7 +30,7 @@ def _assign_color(formation_name: str, existing: dict[str, str]) -> str:
     return _FORMATION_PALETTE[idx]
 
 
-@dataclass
+@dataclass(frozen=True)
 class FormationTop:
     well_name: str
     formation_name: str
@@ -39,7 +39,13 @@ class FormationTop:
 
     def __post_init__(self):
         if not self.color:
-            self.color = _FORMATION_PALETTE[sum(ord(c) for c in self.formation_name) % len(_FORMATION_PALETTE)]
+            object.__setattr__(
+                self,
+                "color",
+                _FORMATION_PALETTE[
+                    sum(ord(c) for c in self.formation_name) % len(_FORMATION_PALETTE)
+                ],
+            )
 
 
 class FormationTopsModel(QObject):
@@ -94,7 +100,8 @@ class FormationTopsModel(QObject):
     def add_top(self, top: FormationTop) -> None:
         color = _assign_color(top.formation_name, self._color_map)
         self._color_map.setdefault(top.formation_name, color)
-        top.color = color
+        if top.color != color:
+            top = FormationTop(top.well_name, top.formation_name, top.depth_m, color)
         self._tops.setdefault(top.well_name, []).append(top)
         self._tops[top.well_name].sort(key=lambda t: t.depth_m)
         self.tops_changed.emit()

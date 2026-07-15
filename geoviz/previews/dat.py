@@ -15,6 +15,7 @@ from geoviz_plots import (
     SurfaceWidget,
     interpolate_idw,
 )
+from geoviz_cross_well import FormationTop, FormationTopsPreviewWidget
 
 from ..contracts import PreparedPreview, PreviewCapabilities, PreviewKind, PreviewOptions, PreviewRequest
 from ..errors import ErrorCode, GeoVizError
@@ -24,6 +25,17 @@ _SCHEMA_ERROR = "DAT 数据结构与资源类型不匹配"
 _WELL_HEAD_MARKER = "WellHead File From SMI"
 _HORIZON_MARKER = "XYZInlineCrossline"
 _TIME_DEPTH_MARKER = "TimeDepth File From SMI"
+_WELL_TOPS_MARKER_LINE = "#WellTops File From SMI"
+_WELL_TOPS_COLUMNS = (
+    "WellName",
+    "Name",
+    "MD",
+    "X",
+    "Y",
+    "Z",
+    "TVD",
+    "Time(ms)",
+)
 _MAX_POINTS = 50_000
 _MAX_SURFACE_AXIS = 256
 _MAX_IDW_POINT_CELLS = 8_000_000
@@ -292,6 +304,22 @@ def supports_time_depth(request: PreviewRequest, header: tuple[str, ...]) -> boo
     ) is not None
 
 
+def _has_exact_well_tops_schema(header: tuple[str, ...]) -> bool:
+    if header.count(_WELL_TOPS_MARKER_LINE) != 1:
+        return False
+    return sum(_header_tokens(line) == _WELL_TOPS_COLUMNS for line in header) == 1
+
+
+def supports_well_stratification(
+    request: PreviewRequest, header: tuple[str, ...]
+) -> bool:
+    return (
+        request.normalized_format == "dat"
+        and _normalized_semantic_type(request) == "well_stratification"
+        and _has_exact_well_tops_schema(header)
+    )
+
+
 def _supports_with_header(request: PreviewRequest, predicate) -> bool:
     try:
         header = _read_header(request.path)
@@ -500,6 +528,43 @@ def _surface_payload(path: str, options: PreviewOptions) -> SurfacePreviewPayloa
     )
 
 
+def _iter_valid_well_tops(path: str):
+    for row in _iter_rows(path):
+        if len(row) != len(_WELL_TOPS_COLUMNS):
+            continue
+        well_name, formation_name = row[0], row[1]
+        if not well_name or not formation_name:
+            continue
+        try:
+            depth_m = float(row[2])
+        except ValueError:
+            continue
+        if not math.isfinite(depth_m):
+            continue
+        yield FormationTop(well_name, formation_name, depth_m)
+
+
+def _well_stratification_payload(
+    path: str, options: PreviewOptions
+) -> tuple[FormationTop, ...]:
+    header = _read_header(path)
+    if not _has_exact_well_tops_schema(header):
+        raise _DatSchemaError("missing exact SMI WellTops schema")
+    valid_count = sum(1 for _ in _iter_valid_well_tops(path))
+    if valid_count == 0:
+        raise _DatSchemaError("no valid well-top rows")
+    indices = representative_indices(valid_count, _sample_limit(options))
+    selected = []
+    selected_position = 0
+    for valid_index, top in enumerate(_iter_valid_well_tops(path)):
+        if selected_position < len(indices) and valid_index == indices[selected_position]:
+            selected.append(top)
+            selected_position += 1
+    if selected_position != len(indices):
+        raise _DatSchemaError("row count changed while reading")
+    return tuple(selected)
+
+
 class XYScatterBackend:
     kind = PreviewKind.XY_SCATTER
 
@@ -628,15 +693,66 @@ class HorizonSurfaceBackend:
         widget.clear()
 
 
+class WellStratificationBackend:
+    kind = PreviewKind.FORMATION_TOPS
+
+    def supports(self, request: PreviewRequest) -> bool:
+        return _supports_with_header(request, supports_well_stratification)
+
+    def capabilities(self, request: PreviewRequest) -> PreviewCapabilities:
+        return PreviewCapabilities(self.kind, ("zoom", "pan", "hover"))
+
+    def prepare(self, request: PreviewRequest, options: PreviewOptions) -> PreparedPreview:
+        try:
+            payload = _well_stratification_payload(request.path, options)
+        except (OSError, UnicodeError, _DatSchemaError) as error:
+            raise _prepare_error(error) from error
+        estimated_bytes = sum(
+            len(top.well_name.encode("utf-8"))
+            + len(top.formation_name.encode("utf-8"))
+            + len(top.color.encode("utf-8"))
+            + 8
+            for top in payload
+        )
+        return PreparedPreview(
+            kind=self.kind,
+            title=request.label or Path(request.path).stem,
+            payload=payload,
+            summary_rows=(
+                ("层位点", str(len(payload))),
+                ("井数", str(len({top.well_name for top in payload}))),
+            ),
+            estimated_bytes=estimated_bytes,
+        )
+
+    def create_widget(self, parent: QWidget | None = None) -> QWidget:
+        return FormationTopsPreviewWidget(parent)
+
+    def render(self, widget: QWidget, preview: PreparedPreview) -> None:
+        if not isinstance(widget, FormationTopsPreviewWidget) or not (
+            isinstance(preview.payload, tuple)
+            and all(isinstance(top, FormationTop) for top in preview.payload)
+        ):
+            raise GeoVizError(ErrorCode.RENDER_ERROR, "无法渲染井分层数据")
+        widget.set_tops(preview.payload)
+
+    def release(self, widget: QWidget) -> None:
+        if not isinstance(widget, FormationTopsPreviewWidget):
+            raise GeoVizError(ErrorCode.RENDER_ERROR, "无法释放井分层画布")
+        widget.clear()
+
+
 __all__ = [
     "HorizonSurfaceBackend",
     "SurfacePreviewPayload",
     "TimeDepthBackend",
     "TimeDepthPreviewPayload",
+    "WellStratificationBackend",
     "XYPreviewPayload",
     "XYScatterBackend",
     "representative_indices",
     "supports_horizon",
     "supports_time_depth",
     "supports_well_head",
+    "supports_well_stratification",
 ]

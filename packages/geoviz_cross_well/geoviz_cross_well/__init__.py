@@ -1,6 +1,7 @@
 """Cross-well correlation with formation tops, manual picking, and DTW auto-correlation."""
 
 from .tops_model import FormationTop, FormationTopsModel
+from .formation_preview import FormationTopsPreviewWidget
 from .picks_model import (
     HorizonPick,
     PicksUndoManager,
@@ -21,6 +22,7 @@ from .report_export import export_cross_well_report
 __all__ = [
     "FormationTop",
     "FormationTopsModel",
+    "FormationTopsPreviewWidget",
     "HorizonPick",
     "PicksUndoManager",
     "PickCommand",

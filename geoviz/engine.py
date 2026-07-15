@@ -55,10 +55,7 @@ class GeoVizEngine:
                     getattr(dat, "HorizonSurfaceBackend"),
                 ]
             )
-            try:
-                backend_types.append(getattr(dat, "WellStratificationBackend"))
-            except AttributeError:
-                pass
+            backend_types.append(getattr(dat, "WellStratificationBackend"))
 
         return cls([backend_type() for backend_type in backend_types])
 
