@@ -119,6 +119,8 @@ def _install_preview_modules(monkeypatch, available, *, include_well_stratificat
     previews = ModuleType("geoviz.previews")
     previews.__path__ = []
     monkeypatch.setitem(sys.modules, "geoviz.previews", previews)
+    for name in ("well_log", "seismic", "dat"):
+        monkeypatch.delitem(sys.modules, f"geoviz.previews.{name}", raising=False)
 
     if "well_log" in available:
         well_log = ModuleType("geoviz.previews.well_log")

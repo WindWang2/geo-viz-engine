@@ -14,8 +14,7 @@ from .models import SeismicVolumeMeta, SliceInfo, HorizonData, BinGridGeometry
 from .profile_vd import ProfileVD
 from .profile_wiggle import ProfileWiggle
 from .profile_widget import ProfileWidget
-from .renderer_3d import Renderer3D
-from .seismic_view import SeismicView
+from .preview_widget import SeismicPreviewPayload, SeismicPreviewWidget, SeismicSlice
 from . import attributes
 from . import attribute_pipeline
 
@@ -28,6 +27,9 @@ __all__ = [
     "ProfileVD",
     "ProfileWiggle",
     "ProfileWidget",
+    "SeismicPreviewPayload",
+    "SeismicPreviewWidget",
+    "SeismicSlice",
     "Renderer3D",
     "SeismicCache",
     "SeismicLoader",
@@ -40,3 +42,15 @@ __all__ = [
     "attribute_pipeline",
     "extract_along_horizon",
 ]
+
+
+def __getattr__(name: str):
+    if name == "Renderer3D":
+        from .renderer_3d import Renderer3D
+
+        return Renderer3D
+    if name == "SeismicView":
+        from .seismic_view import SeismicView
+
+        return SeismicView
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
