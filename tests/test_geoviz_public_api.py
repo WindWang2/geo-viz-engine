@@ -57,7 +57,7 @@ def test_default_engine_exposes_all_local_preview_capabilities(
                 "sgy", str(tmp_path / "cube.sgy"), "seismic", "sgy", "Cube"
             ),
             geoviz.PreviewKind.SEISMIC_2D,
-            ("slice_switch", "zoom", "pan"),
+            ("slice_switch", "slice_scrub", "zoom", "pan"),
         ),
         (
             geoviz.PreviewRequest(

@@ -9,14 +9,15 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PySide6.QtWidgets import QComboBox
+from PySide6.QtWidgets import QComboBox, QSlider
 
 from geoviz import ErrorCode, GeoVizEngine, GeoVizError, PreviewKind, PreviewOptions, PreviewRequest
 from geoviz_seismic import SeismicPreviewWidget, SeismicPreviewPayload, SeismicSlice
 from geoviz_seismic.loader import SeismicLoader
 from geoviz_seismic.models import SeismicVolumeMeta
 from geoviz_seismic.profile_widget import ProfileWidget
-from geoviz.previews.seismic import downsample_2d
+from geoviz_seismic.preview_widget import downsample_2d
+from geoviz.previews.seismic import downsample_2d as engine_downsample_2d
 
 
 ENGINE_ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +48,8 @@ def test_downsample_2d_bounds_each_axis_and_returns_float32_contiguous_array():
     assert sampled.shape == (342, 512)
     assert sampled.dtype == np.float32
     assert sampled.flags.c_contiguous
+    # Engine re-exports the same helper for public preview API.
+    assert engine_downsample_2d(data, 512).shape == sampled.shape
 
 
 def test_default_backend_supports_only_segy_seismic_requests(tmp_path: Path):
@@ -89,6 +92,10 @@ def test_prepare_reads_only_bounded_middle_slices_and_closes_loader(
     assert isinstance(payload, SeismicPreviewPayload)
     assert payload.initial_mode == "inline"
     assert tuple(payload.slices) == ("inline", "crossline", "time")
+    assert payload.source_path == str(small_segy_path)
+    assert payload.max_slice_axis == 8
+    assert set(payload.axes) == {"inline", "crossline", "time"}
+    assert payload.axes["inline"].count >= 1
     assert (True, True) in close_states
     assert preview.estimated_bytes == sum(item.data.nbytes for item in payload.slices.values())
 
@@ -297,3 +304,44 @@ def test_widget_switches_stable_slice_modes(qtbot, small_segy_path):
     assert widget._slices == {}
     assert profile._overlay.text() == "暂无地震切片"
     assert not profile._overlay.isHidden()
+
+
+def test_widget_position_slider_reloads_slice(qtbot, small_segy_path):
+    preview = GeoVizEngine.default().prepare(
+        _request(small_segy_path), PreviewOptions(max_slice_axis=16)
+    )
+    engine = GeoVizEngine.default()
+    widget = engine.create_widget(preview.kind)
+    qtbot.addWidget(widget)
+    assert isinstance(widget, SeismicPreviewWidget)
+
+    engine.render(widget, preview)
+    slider = widget.position_slider
+    assert isinstance(slider, QSlider)
+    assert slider.isEnabled()
+    assert slider.maximum() >= 1
+
+    axis = preview.payload.axes["inline"]
+    middle_index = axis.index_of(preview.payload.slices["inline"].info.position)
+    target_index = 0 if middle_index != 0 else min(1, axis.count - 1)
+    assert target_index != middle_index or axis.count == 1
+
+    if axis.count > 1:
+        middle_data = widget.profile._current_data
+        widget._reload_timer.setInterval(0)
+        slider.setValue(target_index)
+        # Process the zero-interval debounce timer.
+        qtbot.waitUntil(
+            lambda: int(widget.profile._current_slice_info.position)
+            == axis.position_at(target_index),
+            timeout=3000,
+        )
+        assert widget.profile._current_data is not None
+        # Position must change; data object may be a new array.
+        assert int(widget.profile._current_slice_info.position) == axis.position_at(
+            target_index
+        )
+        assert "Inline" in widget.position_label.text()
+
+    engine.release(widget)
+    assert not slider.isEnabled()

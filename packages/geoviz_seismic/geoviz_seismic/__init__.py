@@ -14,7 +14,12 @@ from .models import SeismicVolumeMeta, SliceInfo, HorizonData, BinGridGeometry
 from .profile_vd import ProfileVD
 from .profile_wiggle import ProfileWiggle
 from .profile_widget import ProfileWidget
-from .preview_widget import SeismicPreviewPayload, SeismicPreviewWidget, SeismicSlice
+from .preview_widget import (
+    SeismicAxisSpec,
+    SeismicPreviewPayload,
+    SeismicPreviewWidget,
+    SeismicSlice,
+)
 from . import attributes
 from . import attribute_pipeline
 
@@ -27,6 +32,7 @@ __all__ = [
     "ProfileVD",
     "ProfileWiggle",
     "ProfileWidget",
+    "SeismicAxisSpec",
     "SeismicPreviewPayload",
     "SeismicPreviewWidget",
     "SeismicSlice",

@@ -1,68 +1,32 @@
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
-import numpy as np
 from PySide6.QtWidgets import QWidget
 
 from geoviz_seismic.loader import SeismicLoader
-from geoviz_seismic.models import SeismicVolumeMeta, SliceInfo
+from geoviz_seismic.models import SeismicVolumeMeta
 from geoviz_seismic.preview_widget import (
     SeismicPreviewPayload,
     SeismicPreviewWidget,
     SeismicSlice,
+    axis_specs_from_meta,
+    downsample_2d,
+    load_preview_slice,
 )
 
 from ..contracts import PreparedPreview, PreviewCapabilities, PreviewKind, PreviewOptions, PreviewRequest
 from ..errors import ErrorCode, GeoVizError
 
 
-def downsample_2d(data: np.ndarray, limit: int) -> np.ndarray:
-    row_step = max(1, math.ceil(data.shape[0] / limit))
-    col_step = max(1, math.ceil(data.shape[1] / limit))
-    return np.ascontiguousarray(data[::row_step, ::col_step], dtype=np.float32)
-
-
-def _sample_steps(data: np.ndarray, limit: int) -> tuple[int, int]:
-    return (
-        max(1, math.ceil(data.shape[0] / limit)),
-        max(1, math.ceil(data.shape[1] / limit)),
-    )
-
-
-def _slice_info(
-    mode: str,
-    position: int,
-    display_data: np.ndarray,
-    meta: SeismicVolumeMeta,
-    row_step: int,
-    col_step: int,
-) -> SliceInfo:
-    if mode == "inline":
-        horizontal = meta.xline_start + np.arange(display_data.shape[1]) * meta.xline_step
-        vertical = meta.t0_ms + np.arange(display_data.shape[0]) * meta.dt_ms
-        horizontal_label, vertical_label = "Crossline", "Time (ms)"
-    elif mode == "crossline":
-        horizontal = meta.iline_start + np.arange(display_data.shape[1]) * meta.iline_step
-        vertical = meta.t0_ms + np.arange(display_data.shape[0]) * meta.dt_ms
-        horizontal_label, vertical_label = "Inline", "Time (ms)"
-    else:
-        horizontal = meta.iline_start + np.arange(display_data.shape[1]) * meta.iline_step
-        vertical = meta.xline_start + np.arange(display_data.shape[0]) * meta.xline_step
-        horizontal_label, vertical_label = "Inline", "Crossline"
-
-    return SliceInfo(
-        slice_type=mode,
-        position=position,
-        axis_h_label=horizontal_label,
-        axis_v_label=vertical_label,
-        axis_h_values=horizontal[::col_step].astype(float).tolist(),
-        axis_v_values=vertical[::row_step].astype(float).tolist(),
-    )
-
-
 def _prepare_slices(path: str, limit: int) -> tuple[SeismicPreviewPayload, SeismicVolumeMeta]:
+    """Open the SEGY once and read the three middle slices for initial preview."""
+    from geoviz_seismic.preview_widget import (
+        _read_raw_slice,
+        _sample_steps,
+        _slice_info,
+    )
+
     loader = SeismicLoader(path)
     try:
         meta = loader.inspect()
@@ -71,11 +35,14 @@ def _prepare_slices(path: str, limit: int) -> tuple[SeismicPreviewPayload, Seism
         middle_sample = meta.n_samples // 2
 
         raw_slices = {
-            "inline": (middle_inline, loader.read_inline(middle_inline).T),
-            "crossline": (middle_crossline, loader.read_crossline(middle_crossline).T),
-            "time": (middle_sample, loader.read_timeslice(middle_sample).T),
+            "inline": (middle_inline, _read_raw_slice(loader, "inline", middle_inline)),
+            "crossline": (
+                middle_crossline,
+                _read_raw_slice(loader, "crossline", middle_crossline),
+            ),
+            "time": (middle_sample, _read_raw_slice(loader, "time", middle_sample)),
         }
-        slices = {}
+        slices: dict[str, SeismicSlice] = {}
         for mode, (position, display_data) in raw_slices.items():
             row_step, col_step = _sample_steps(display_data, limit)
             slices[mode] = SeismicSlice(
@@ -89,7 +56,13 @@ def _prepare_slices(path: str, limit: int) -> tuple[SeismicPreviewPayload, Seism
                     col_step,
                 ),
             )
-        return SeismicPreviewPayload(slices=slices), meta
+        payload = SeismicPreviewPayload(
+            slices=slices,
+            source_path=str(path),
+            max_slice_axis=limit,
+            axes=axis_specs_from_meta(meta),
+        )
+        return payload, meta
     finally:
         loader.close()
 
@@ -107,7 +80,9 @@ class SeismicPreviewBackend:
         }
 
     def capabilities(self, request: PreviewRequest) -> PreviewCapabilities:
-        return PreviewCapabilities(self.kind, ("slice_switch", "zoom", "pan"))
+        return PreviewCapabilities(
+            self.kind, ("slice_switch", "slice_scrub", "zoom", "pan")
+        )
 
     def prepare(self, request: PreviewRequest, options: PreviewOptions) -> PreparedPreview:
         try:
@@ -134,7 +109,7 @@ class SeismicPreviewBackend:
             summary_rows=(
                 ("体尺寸", f"{meta.n_inlines} × {meta.n_crosslines} × {meta.n_samples}"),
                 ("采样间隔", f"{meta.dt_ms:g} ms"),
-                ("切片", "Inline / Crossline / Time"),
+                ("切片", "Inline / Crossline / Time · 可拖动滑条"),
             ),
             estimated_bytes=estimated_bytes,
         )
@@ -155,4 +130,4 @@ class SeismicPreviewBackend:
         widget.clear()
 
 
-__all__ = ["SeismicPreviewBackend", "downsample_2d"]
+__all__ = ["SeismicPreviewBackend", "downsample_2d", "load_preview_slice"]
