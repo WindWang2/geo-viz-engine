@@ -30,9 +30,18 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "ProfileWidget": ("geoviz_seismic", "ProfileWidget"),
     "SeismicLoader": ("geoviz_seismic.loader", "SeismicLoader"),
     "PaleoMapCanvas": ("geoviz_paleo_map", "PaleoMapCanvas"),
+    "export_professional_figure": ("geoviz_paleo_map", "export_professional_figure"),
     "CrossWellCanvas": ("geoviz_cross_well", "CrossWellCanvas"),
     "PlotWidget": ("geoviz_plots", "PlotWidget"),
     "SurfaceWidget": ("geoviz_plots", "SurfaceWidget"),
+    "interpolate_idw": ("geoviz_plots", "interpolate_idw"),
+    "interpolate_scipy": ("geoviz_plots", "interpolate_scipy"),
+    # Well-log interval models used when attaching facies/lithology tracks.
+    "FaciesData": ("geoviz_well_log.models", "FaciesData"),
+    "FaciesInterval": ("geoviz_well_log.models", "FaciesInterval"),
+    "IntervalItem": ("geoviz_well_log.models", "IntervalItem"),
+    "LithologyInterval": ("geoviz_well_log.models", "LithologyInterval"),
+    "WellIntervals": ("geoviz_well_log.models", "WellIntervals"),
 }
 
 
