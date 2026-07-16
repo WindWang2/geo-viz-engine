@@ -47,13 +47,16 @@ def _apply_curve_meta(curve: CurveData) -> CurveData:
     meta = CURVE_META.get(curve.name, {})
     if not meta:
         return curve
+    style = meta.get("style")
+    line_style = "dashed" if style == "dashed" else curve.line_style
     return CurveData(
         name=curve.name,
+        unit=curve.unit,
         depth=curve.depth,
         values=curve.values,
         display_range=curve.display_range,
         color=meta.get("color", curve.color),
-        line_style="dashed" if meta.get("style") == "dashed" else "solid",
+        line_style=line_style,
     )
 
 

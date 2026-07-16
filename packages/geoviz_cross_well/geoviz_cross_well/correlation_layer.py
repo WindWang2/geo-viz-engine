@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath
 from PySide6.QtWidgets import QWidget
 
@@ -55,7 +55,7 @@ class CorrelationLayer:
             is_hover = pick.pick_id == hover_pick_id
 
             if is_dtw:
-                pen = QPen(color, 1.5, QPainterPath.DashLine)
+                pen = QPen(color, 1.5, Qt.PenStyle.DashLine)
                 color.setAlpha(100)
             elif is_selected or is_hover:
                 pen = QPen(color, 3.0)
@@ -113,7 +113,7 @@ class CorrelationLayer:
             fill = QColor(color)
             fill.setAlpha(100)
             painter.setBrush(fill)
-            painter.setPen(QPen(color, 1.0, QPainterPath.DashLine))
+            painter.setPen(QPen(color, 1.0, Qt.PenStyle.DashLine))
         else:
             painter.setBrush(color)
             painter.setPen(QPen(color.darker(120), 1.5))

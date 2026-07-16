@@ -35,33 +35,68 @@ class MoveVertexCmd(EditCommand):
 
 
 class MovePolygonCmd(EditCommand):
-    """Move an entire polygon by a delta, storing old positions for undo."""
+    """Move an entire polygon by a delta, storing old positions for undo.
 
-    def __init__(self, feature_id: str, dx: float, dy: float,
-                 old_positions: list[tuple[float, float]]):
+    ``old_positions`` maps vertex_id → (x, y) for every vertex across all rings
+    (including holes). Indexing by vertex id avoids multi-ring corruption that
+    previously remapped hole vertices from the outer ring's index list.
+    """
+
+    def __init__(
+        self,
+        feature_id: str,
+        dx: float,
+        dy: float,
+        old_positions: dict[int, tuple[float, float]] | list[tuple[float, float]],
+    ):
         self.feature_id = feature_id
         self.dx = dx
         self.dy = dy
-        self.old_positions = old_positions
+        # Accept legacy list form (outer ring only, positional) for callers/tests.
+        if isinstance(old_positions, dict):
+            self.old_positions: dict[int, tuple[float, float]] = dict(old_positions)
+            self._legacy_list: list[tuple[float, float]] | None = None
+        else:
+            self.old_positions = {}
+            self._legacy_list = list(old_positions)
 
     def execute(self, model: TopologyModel) -> None:
         ref = model.get_feature(self.feature_id)
         if ref is None:
             return
+        positions = self._resolve_positions(ref)
         for ring in ref.rings:
-            for i, vid in enumerate(ring.vertex_ids):
-                ox, oy = self.old_positions[i] if i < len(self.old_positions) else (0, 0)
+            for vid in ring.vertex_ids:
+                pos = positions.get(vid)
+                if pos is None:
+                    continue
+                ox, oy = pos
                 model.move_vertex(vid, ox + self.dx, oy + self.dy)
 
     def undo(self, model: TopologyModel) -> None:
         ref = model.get_feature(self.feature_id)
         if ref is None:
             return
+        positions = self._resolve_positions(ref)
         for ring in ref.rings:
-            for i, vid in enumerate(ring.vertex_ids):
-                if i < len(self.old_positions):
-                    ox, oy = self.old_positions[i]
-                    model.move_vertex(vid, ox, oy)
+            for vid in ring.vertex_ids:
+                pos = positions.get(vid)
+                if pos is None:
+                    continue
+                ox, oy = pos
+                model.move_vertex(vid, ox, oy)
+
+    def _resolve_positions(self, ref) -> dict[int, tuple[float, float]]:
+        if self.old_positions:
+            return self.old_positions
+        # Legacy: list aligned to rings[0] only — never fall back to (0, 0).
+        if self._legacy_list is None or not ref.rings:
+            return {}
+        result: dict[int, tuple[float, float]] = {}
+        for i, vid in enumerate(ref.rings[0].vertex_ids):
+            if i < len(self._legacy_list):
+                result[vid] = self._legacy_list[i]
+        return result
 
 
 class InsertVertexCmd(EditCommand):

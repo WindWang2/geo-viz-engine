@@ -83,9 +83,11 @@ class WellTieCalibration:
         depths = np.asarray(depths_m, dtype=np.float64)
         sonic = np.asarray(sonic_us_m, dtype=np.float64)
         dz = np.diff(depths)
-        dt = dz * (sonic[:-1] + sonic[1:]) / 2.0  # trapezoidal integration
+        # Trapezoidal one-way time (µs) over each interval, then convert to
+        # two-way travel time in milliseconds: OWT_µs * 2 / 1000 = TWT_ms.
+        owt_us = dz * (sonic[:-1] + sonic[1:]) / 2.0
         twt = np.zeros_like(depths)
-        twt[1:] = np.cumsum(dt) / 1000.0  # µs → ms
+        twt[1:] = 2.0 * np.cumsum(owt_us) / 1000.0
         return cls(depths, twt)
 
     def to_td_pairs(self) -> dict[str, np.ndarray]:

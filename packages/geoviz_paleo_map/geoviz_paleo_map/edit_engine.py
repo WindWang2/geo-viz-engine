@@ -36,7 +36,7 @@ class EditEngine:
         self._selected_id: str | None = None
         self._drag_vertex_id: int | None = None
         self._drag_start_world: tuple[float, float] | None = None
-        self._drag_polygon_old_positions: list[tuple[float, float]] | None = None
+        self._drag_polygon_old_positions: dict[int, tuple[float, float]] | None = None
         self._drawing_vertices: list[tuple[float, float]] = []
         self._facies_layer: FaciesPolygonsLayer | None = None
 
@@ -88,10 +88,13 @@ class EditEngine:
                         self._drag_start_world = (wx, wy)
                         ref = self._model.get_feature(fid)
                         if ref and ref.rings:
-                            self._drag_polygon_old_positions = [
-                                (self._model.get_vertex(vid).x, self._model.get_vertex(vid).y)
-                                for vid in ref.rings[0].vertex_ids
-                            ]
+                            # Snapshot every ring (outer + holes) by vertex id.
+                            self._drag_polygon_old_positions = {}
+                            for ring in ref.rings:
+                                for vid in ring.vertex_ids:
+                                    v = self._model.get_vertex(vid)
+                                    if v is not None:
+                                        self._drag_polygon_old_positions[vid] = (v.x, v.y)
                     else:
                         self.select(fid)
                     return True
@@ -122,14 +125,17 @@ class EditEngine:
             dx = wx - self._drag_start_world[0]
             dy = wy - self._drag_start_world[1]
             ref = self._model.get_feature(self._selected_id) if self._selected_id else None
-            if ref:
+            positions = self._polygon_drag_positions(ref)
+            if ref and positions:
                 affected = set()
                 for ring in ref.rings:
-                    for i, vid in enumerate(ring.vertex_ids):
-                        if self._drag_polygon_old_positions and i < len(self._drag_polygon_old_positions):
-                            ox, oy = self._drag_polygon_old_positions[i]
-                            self._model.move_vertex(vid, ox + dx, oy + dy)
-                            affected.add(self._selected_id)
+                    for vid in ring.vertex_ids:
+                        pos = positions.get(vid)
+                        if pos is None:
+                            continue
+                        ox, oy = pos
+                        self._model.move_vertex(vid, ox + dx, oy + dy)
+                        affected.add(self._selected_id)
                 if self._facies_layer is not None:
                     self._facies_layer.rebuild_dirty_paths(affected)
             return True
@@ -152,18 +158,40 @@ class EditEngine:
                 if abs(v.x - old_x) > 1e-9 or abs(v.y - old_y) > 1e-9:
                     cmd = MoveVertexCmd(self._drag_vertex_id, old_x, old_y, v.x, v.y)
 
-        elif self._state == EditState.DRAGGING_POLYGON and self._drag_start_world and self._drag_polygon_old_positions:
-            wx, wy = viewport.screen_to_world(screen_pt)
-            dx = wx - self._drag_start_world[0]
-            dy = wy - self._drag_start_world[1]
-            if abs(dx) > 1e-9 or abs(dy) > 1e-9:
-                cmd = MovePolygonCmd(self._selected_id, dx, dy, self._drag_polygon_old_positions)
+        elif self._state == EditState.DRAGGING_POLYGON and self._drag_start_world:
+            ref = self._model.get_feature(self._selected_id) if self._model and self._selected_id else None
+            positions = self._polygon_drag_positions(ref)
+            if positions:
+                wx, wy = viewport.screen_to_world(screen_pt)
+                dx = wx - self._drag_start_world[0]
+                dy = wy - self._drag_start_world[1]
+                if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+                    cmd = MovePolygonCmd(self._selected_id, dx, dy, positions)
 
         self._state = EditState.IDLE
         self._drag_vertex_id = None
         self._drag_start_world = None
         self._drag_polygon_old_positions = None
         return cmd
+
+    def _polygon_drag_positions(self, ref) -> dict[int, tuple[float, float]]:
+        """Normalize drag snapshot to vertex_id → (x, y).
+
+        Accepts the modern dict form or a legacy list aligned to the outer ring
+        (kept for unit tests that still inject lists).
+        """
+        raw = self._drag_polygon_old_positions
+        if not raw or ref is None:
+            return {}
+        if isinstance(raw, dict):
+            return raw
+        result: dict[int, tuple[float, float]] = {}
+        if not ref.rings:
+            return result
+        for i, vid in enumerate(ref.rings[0].vertex_ids):
+            if i < len(raw):
+                result[vid] = raw[i]
+        return result
 
     def handle_double_click(self, screen_pt: QPointF,
                             viewport: PaleoMapViewport) -> EditCommand | None:

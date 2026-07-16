@@ -422,9 +422,11 @@ class SurfaceWidget(QWidget):
             painter.setFont(QFont("Arial", 8, QFont.Bold))
             font_metrics = QFontMetrics(painter.font())
             
-            for lv, lines in lines_dict.items():
-                # Alternate pen widths for major vs minor levels
-                is_major = abs(lv) % 2.0 == 0.0  # simple heuristic for major ticks
+            sorted_levels = sorted(lines_dict.keys())
+            major_every = 5  # every 5th contour level is major
+            for level_index, lv in enumerate(sorted_levels):
+                lines = lines_dict[lv]
+                is_major = level_index % major_every == 0
                 line_pen = QPen(self.contour_line_color, 1.2 if is_major else 0.6, Qt.SolidLine)
                 painter.setPen(line_pen)
                 painter.setBrush(Qt.NoBrush)
