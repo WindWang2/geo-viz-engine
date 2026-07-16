@@ -16,27 +16,35 @@ from .prepared_codec import (
 )
 from .registry import PreviewRegistry
 
-_COMPATIBILITY_EXPORTS = {
-    "WellLogCanvas": "geoviz_well_log",
-    "WellLogData": "geoviz_well_log",
-    "CurveData": "geoviz_well_log",
-    "build_qpainter_tracks": "geoviz_well_log",
-    "SeismicView": "geoviz_seismic",
-    "ProfileWidget": "geoviz_seismic",
-    "PaleoMapCanvas": "geoviz_paleo_map",
-    "CrossWellCanvas": "geoviz_cross_well",
-    "PlotWidget": "geoviz_plots",
-    "SurfaceWidget": "geoviz_plots",
+# name → (module, attribute) for lazy workbench-facing exports.
+_COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
+    "WellLogCanvas": ("geoviz_well_log", "WellLogCanvas"),
+    "WellLogData": ("geoviz_well_log", "WellLogData"),
+    "CurveData": ("geoviz_well_log", "CurveData"),
+    "build_qpainter_tracks": ("geoviz_well_log", "build_qpainter_tracks"),
+    "load_las_preview": ("geoviz_well_log.las_preview", "load_las_preview"),
+    "export_svg": ("geoviz_well_log", "export_svg"),
+    "export_pdf": ("geoviz_well_log", "export_pdf"),
+    "export_png": ("geoviz_well_log", "export_png"),
+    "SeismicView": ("geoviz_seismic", "SeismicView"),
+    "ProfileWidget": ("geoviz_seismic", "ProfileWidget"),
+    "SeismicLoader": ("geoviz_seismic.loader", "SeismicLoader"),
+    "PaleoMapCanvas": ("geoviz_paleo_map", "PaleoMapCanvas"),
+    "CrossWellCanvas": ("geoviz_cross_well", "CrossWellCanvas"),
+    "PlotWidget": ("geoviz_plots", "PlotWidget"),
+    "SurfaceWidget": ("geoviz_plots", "SurfaceWidget"),
 }
 
 
 def __getattr__(name: str):
-    module_name = _COMPATIBILITY_EXPORTS.get(name)
-    if module_name is None:
+    spec = _COMPATIBILITY_EXPORTS.get(name)
+    if spec is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = getattr(importlib.import_module(module_name), name)
+    module_name, attr = spec
+    value = getattr(importlib.import_module(module_name), attr)
     globals()[name] = value
     return value
+
 
 __all__ = [
     "ErrorCode",
@@ -51,5 +59,5 @@ __all__ = [
     "PAYLOAD_SCHEMA_VERSION",
     "decode_prepared_preview",
     "encode_prepared_preview",
-    *_COMPATIBILITY_EXPORTS,
+    *sorted(_COMPATIBILITY_EXPORTS),
 ]
