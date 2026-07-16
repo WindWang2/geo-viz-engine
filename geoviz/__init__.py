@@ -9,7 +9,11 @@ from .contracts import (
 )
 from .engine import GeoVizEngine
 from .errors import ErrorCode, GeoVizError
-from .prepared_codec import decode_prepared_preview, encode_prepared_preview
+from .prepared_codec import (
+    PAYLOAD_SCHEMA_VERSION,
+    decode_prepared_preview,
+    encode_prepared_preview,
+)
 from .registry import PreviewRegistry
 
 _COMPATIBILITY_EXPORTS = {
@@ -44,6 +48,7 @@ __all__ = [
     "PreviewOptions",
     "PreviewRegistry",
     "PreviewRequest",
+    "PAYLOAD_SCHEMA_VERSION",
     "decode_prepared_preview",
     "encode_prepared_preview",
     *_COMPATIBILITY_EXPORTS,
