@@ -214,7 +214,11 @@ class WellTiePanel(QWidget):
         self.synthetic_changed.emit(self._synthetic_twt, self._synthetic)
 
     def auto_tie(self, seismic_trace: np.ndarray):
-        """Run auto-tie against a seismic trace and update readout."""
+        """Run auto-tie against a seismic trace and update readout.
+
+        On success, re-emits ``synthetic_changed`` with TWT shifted by the
+        estimated lag so host views can redraw the aligned overlay.
+        """
         if self._synthetic is None:
             return
 
@@ -223,14 +227,24 @@ class WellTiePanel(QWidget):
         except ImportError:
             return
         shift, cc = auto_tie_with_quality(seismic_trace, self._synthetic)
-        self._shift_samples = shift
-        self._correlation_coeff = cc
+        self._shift_samples = int(shift)
+        self._correlation_coeff = float(cc)
         self._cc_label.setText(f"CC: {cc:.3f}")
         self._shift_label.setText(f"Shift: {shift} samples")
+
+        if self._synthetic_twt is not None:
+            twt = np.asarray(self._synthetic_twt, dtype=np.float64)
+            if len(twt) > 1:
+                dt = float(twt[1] - twt[0])
+            else:
+                dt = 4.0
+            # Positive shift = synthetic moves later (down) in time.
+            self.synthetic_changed.emit(twt + self._shift_samples * dt, self._synthetic)
 
     def _on_auto_tie(self):
         """Handle auto-tie button click. Emits signal for SeismicView to provide trace."""
         if self._synthetic is None:
+            self._cc_label.setText("CC: -- (先生成合成记录)")
             return
         self.auto_tie_requested.emit()
 

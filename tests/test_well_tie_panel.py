@@ -215,3 +215,35 @@ class TestSeismicViewWellTieIntegration:
         view._well_tie_btn.setChecked(True)
         panel2 = view._well_tie_panel
         assert panel1 is panel2  # same object, not recreated
+
+    def test_current_seismic_trace_from_demo_volume(self, view):
+        """current_seismic_trace returns 1-D samples at current IL/XL."""
+        trace = view.current_seismic_trace()
+        assert trace is not None
+        assert trace.ndim == 1
+        assert len(trace) == 50  # demo volume shape (30, 40, 50)
+
+    def test_auto_tie_signal_runs_against_current_trace(self, view):
+        """auto_tie_requested is connected: panel.auto_tie gets live seismic."""
+        view._well_tie_btn.setChecked(True)
+        panel = view._well_tie_panel
+        assert panel is not None
+        assert panel._calibration is not None  # demo logs seeded
+        panel.generate_synthetic(dt_ms=4.0)
+        assert panel._synthetic is not None
+
+        panel.auto_tie_requested.emit()
+        assert panel._shift_samples is not None
+        assert panel._correlation_coeff is not None
+        assert "CC:" in panel._cc_label.text()
+        assert "Shift:" in panel._shift_label.text()
+
+    def test_synthetic_changed_sets_profile_overlay(self, view):
+        """Generating synthetic injects wiggle overlay on IL/XL panels."""
+        view._well_tie_btn.setChecked(True)
+        panel = view._well_tie_panel
+        panel.generate_synthetic(dt_ms=4.0)
+        assert view._profile_il._vd._synthetic_overlay is not None
+        assert view._profile_xl._vd._synthetic_overlay is not None
+        ov = view._profile_il._vd._synthetic_overlay
+        assert len(ov["values"]) == len(panel._synthetic)

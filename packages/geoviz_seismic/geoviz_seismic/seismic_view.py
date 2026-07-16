@@ -1362,18 +1362,133 @@ class SeismicView(QWidget):
         for pw in (self._profile_il, self._profile_xl, self._profile_t):
             pw._vd.enable_annotation_mode(checked)
 
+    def current_seismic_trace(self) -> np.ndarray | None:
+        """Return the vertical seismic trace at the current IL/XL intersection.
+
+        Preference order:
+        1. In-memory volume (demo / downsampled SEGY)
+        2. ``SeismicLoader.read_trace`` when a SEGY file is open
+        3. Column from the cached inline slice
+        """
+        vol = getattr(self._renderer_3d, "_volume_data_cpu", None)
+        if vol is not None and getattr(vol, "ndim", 0) == 3:
+            il = int(getattr(self._renderer_3d, "_il_pos", vol.shape[0] // 2))
+            xl = int(getattr(self._renderer_3d, "_xl_pos", vol.shape[1] // 2))
+            il = max(0, min(il, vol.shape[0] - 1))
+            xl = max(0, min(xl, vol.shape[1] - 1))
+            return np.asarray(vol[il, xl, :], dtype=np.float64)
+
+        if self._loader is not None and self._meta is not None:
+            m = self._meta
+            df = self._ds_factor
+            il_idx = int(getattr(self._renderer_3d, "_il_pos", 0))
+            xl_idx = int(getattr(self._renderer_3d, "_xl_pos", 0))
+            iline = m.iline_start + il_idx * df[0] * m.iline_step
+            xline = m.xline_start + xl_idx * df[1] * m.xline_step
+            try:
+                return np.asarray(self._loader.read_trace(iline, xline), dtype=np.float64)
+            except Exception as exc:
+                self._log.warning("current_seismic_trace read_trace failed: %s", exc)
+
+        il_data = self._slice_data.get("inline")
+        if il_data is not None and getattr(il_data, "ndim", 0) == 2:
+            xl = int(getattr(self._renderer_3d, "_xl_pos", il_data.shape[1] // 2))
+            xl = max(0, min(xl, il_data.shape[1] - 1))
+            return np.asarray(il_data[:, xl], dtype=np.float64)
+        return None
+
+    def _seed_demo_well_logs_if_needed(self, panel) -> None:
+        """Provide synthetic sonic/density so Auto-Tie works without external LAS."""
+        if getattr(panel, "_calibration", None) is not None:
+            return
+        m = self._meta
+        n = int(m.n_samples) if m is not None else 100
+        n = max(n, 50)
+        depths = np.linspace(0.0, float(n) * 2.0, n)
+        # Gentle structure + one impedance contrast for reflectivity spikes.
+        phase = np.linspace(0.0, 6.0, n)
+        sonic = 200.0 + 20.0 * np.sin(phase)
+        density = 2.5 + 0.08 * np.sin(phase * 0.7)
+        lo, hi = n // 3, n // 2
+        sonic[lo:hi] -= 40.0
+        density[lo:hi] -= 0.2
+        try:
+            from geoviz_well_tie.calibration import WellTieCalibration
+        except ImportError:
+            self._log.warning("geoviz_well_tie not available; cannot seed well logs")
+            return
+        panel.set_calibration(WellTieCalibration.from_sonic(depths, sonic))
+        panel.set_well_logs(depths, sonic, density)
+
+    def _on_auto_tie_requested(self) -> None:
+        """Provide the current seismic trace to WellTiePanel.auto_tie()."""
+        panel = self._well_tie_panel
+        if panel is None:
+            return
+        trace = self.current_seismic_trace()
+        if trace is None or len(trace) == 0:
+            self._log.warning("Auto-Tie: no seismic trace at current IL/XL")
+            if hasattr(panel, "_cc_label"):
+                panel._cc_label.setText("CC: -- (无地震道)")
+            return
+        panel.auto_tie(trace)
+        self._log.info(
+            "Auto-Tie complete: shift=%s cc=%s",
+            getattr(panel, "_shift_samples", None),
+            getattr(panel, "_correlation_coeff", None),
+        )
+
+    def _on_synthetic_changed(self, twt, values) -> None:
+        """Draw synthetic seismogram overlay on IL/XL profile panels."""
+        if twt is None or values is None:
+            return
+        twt_arr = np.asarray(twt, dtype=np.float64)
+        val_arr = np.asarray(values, dtype=np.float32)
+        m = self._meta
+        xl_pos = int(getattr(self._renderer_3d, "_xl_pos", 0))
+        il_pos = int(getattr(self._renderer_3d, "_il_pos", 0))
+        if m is not None:
+            xl_coord = float(m.xline_start + xl_pos * m.xline_step)
+            il_coord = float(m.iline_start + il_pos * m.iline_step)
+        else:
+            xl_coord = float(xl_pos)
+            il_coord = float(il_pos)
+
+        # Inline section: horizontal axis is crossline; crossline section: inline.
+        self._profile_il._vd.set_synthetic_overlay(
+            h_position=xl_coord,
+            twt=twt_arr,
+            values=val_arr,
+            label="Synth",
+            color="#e53e3e",
+        )
+        self._profile_xl._vd.set_synthetic_overlay(
+            h_position=il_coord,
+            twt=twt_arr,
+            values=val_arr,
+            label="Synth",
+            color="#e53e3e",
+        )
+
     def _on_well_tie_toggled(self, checked: bool):
-        """Toggle the WellTiePanel visibility."""
+        """Toggle the WellTiePanel visibility and wire Auto-Tie / synthetic signals."""
         from .well_tie_panel import WellTiePanel
 
         if checked:
             if self._well_tie_panel is None:
                 self._well_tie_panel = WellTiePanel()
                 self._well_tie_panel.setMaximumWidth(320)
+                # Host supplies the live seismic trace; panel runs cross-correlation.
+                self._well_tie_panel.auto_tie_requested.connect(self._on_auto_tie_requested)
+                self._well_tie_panel.synthetic_changed.connect(self._on_synthetic_changed)
+                self._seed_demo_well_logs_if_needed(self._well_tie_panel)
                 # Insert into the main layout alongside the splitter
                 h_layout = self.layout().itemAt(2)
                 if h_layout and isinstance(h_layout, QHBoxLayout):
                     h_layout.insertWidget(0, self._well_tie_panel)
+            else:
+                # Re-seed only if still empty (e.g. first open before volume load).
+                self._seed_demo_well_logs_if_needed(self._well_tie_panel)
             self._well_tie_panel.show()
         else:
             if self._well_tie_panel is not None:
