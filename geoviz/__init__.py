@@ -36,6 +36,8 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "SurfaceWidget": ("geoviz_plots", "SurfaceWidget"),
     "interpolate_idw": ("geoviz_plots", "interpolate_idw"),
     "interpolate_scipy": ("geoviz_plots", "interpolate_scipy"),
+    "extract_contour_lines": ("geoviz_plots", "extract_contour_lines"),
+    "extract_filled_contours": ("geoviz_plots", "extract_filled_contours"),
     # Well-log interval models used when attaching facies/lithology tracks.
     "FaciesData": ("geoviz_well_log.models", "FaciesData"),
     "FaciesInterval": ("geoviz_well_log.models", "FaciesInterval"),
