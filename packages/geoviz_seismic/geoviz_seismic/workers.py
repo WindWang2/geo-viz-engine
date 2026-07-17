@@ -1,9 +1,102 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+import math
+import time
+
 import numpy as np
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QCoreApplication, QThread, Signal
 
 from .loader import SeismicLoader
+
+DEFAULT_MAX_PREVIEW_VOXELS = 128 * 128 * 128
+
+
+def downsample_factor_for_budget(
+    shape: tuple[int, int, int],
+    *,
+    max_voxels: int = DEFAULT_MAX_PREVIEW_VOXELS,
+) -> tuple[int, int, int]:
+    """Return near-isotropic integer strides whose output fits *max_voxels*."""
+    dims = tuple(max(1, int(value)) for value in shape)
+    budget = max(1, int(max_voxels))
+    if math.prod(dims) <= budget:
+        return (1, 1, 1)
+    scale = (math.prod(dims) / budget) ** (1.0 / 3.0)
+    factors = [max(1, int(math.floor(scale))) for _ in dims]
+
+    def output_voxels() -> int:
+        return math.prod(math.ceil(dim / factor) for dim, factor in zip(dims, factors))
+
+    while output_voxels() > budget:
+        axis = max(
+            range(3),
+            key=lambda index: math.ceil(dims[index] / factors[index]),
+        )
+        factors[axis] += 1
+    return tuple(factors)
+
+
+class _LoadInterrupted(RuntimeError):
+    pass
+
+
+class _WorkerCancellationToken:
+    def __init__(self, worker: QThread) -> None:
+        self._worker = worker
+
+    def raise_if_cancelled(self) -> None:
+        if self._worker.isInterruptionRequested():
+            raise _LoadInterrupted("SEGY load interrupted")
+
+
+@dataclass(frozen=True)
+class SeismicLoadResult:
+    generation: int
+    meta: object
+    volume: np.ndarray
+    raw_inline: np.ndarray
+    raw_crossline: np.ndarray
+    raw_timeslice: np.ndarray
+    path: str
+    downsample_factor: tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class SeismicLoadError:
+    generation: int
+    message: str
+
+
+_ACTIVE_WORKERS: set[QThread] = set()
+_SHUTDOWN_CONNECTED = False
+
+
+def _shutdown_background_workers(timeout_ms: int = 5_000) -> None:
+    """Cooperatively stop all retained workers within one shared deadline."""
+    workers = tuple(_ACTIVE_WORKERS)
+    for worker in workers:
+        if worker.isRunning():
+            worker.requestInterruption()
+    deadline = time.monotonic() + max(0, int(timeout_ms)) / 1000.0
+    for worker in workers:
+        if not worker.isRunning():
+            continue
+        remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+        if remaining_ms <= 0:
+            break
+        worker.wait(remaining_ms)
+
+
+def retain_background_worker(worker: QThread) -> None:
+    """Keep an unparented QThread alive until it actually stops."""
+    global _SHUTDOWN_CONNECTED
+    _ACTIVE_WORKERS.add(worker)
+    worker.finished.connect(lambda worker=worker: _ACTIVE_WORKERS.discard(worker))
+    app = QCoreApplication.instance()
+    if app is not None and not _SHUTDOWN_CONNECTED:
+        app.aboutToQuit.connect(_shutdown_background_workers)
+        _SHUTDOWN_CONNECTED = True
 
 
 def generate_synthetic(
@@ -46,28 +139,68 @@ class SyntheticWorker(QThread):
 class SegyLoadWorker(QThread):
     """Background thread for SEGY file loading."""
 
-    done = Signal(object)  # tuple: (meta, vol, raw, path)
-    error = Signal(str)
+    done = Signal(object)  # SeismicLoadResult
+    error = Signal(object)  # SeismicLoadError
 
-    def __init__(self, path: str, parent=None):
+    def __init__(
+        self,
+        path: str,
+        parent=None,
+        *,
+        generation: int = 0,
+        max_voxels: int = DEFAULT_MAX_PREVIEW_VOXELS,
+    ):
         super().__init__(parent)
         self._path = path
+        self._generation = int(generation)
+        self._max_voxels = max(1, int(max_voxels))
 
     def run(self):
+        loader = None
+        result = None
+        failure = None
+        token = _WorkerCancellationToken(self)
         try:
             loader = SeismicLoader(self._path)
             meta = loader.inspect()
-            vol = loader.get_volume_downsampled(factor=(4, 4, 2))
+            token.raise_if_cancelled()
+            factor = downsample_factor_for_budget(
+                (meta.n_inlines, meta.n_crosslines, meta.n_samples),
+                max_voxels=self._max_voxels,
+            )
+            vol = loader.get_volume_downsampled(
+                factor=factor,
+                cancellation_token=token,
+            )
             mid_il = meta.iline_start + (meta.n_inlines // 2) * meta.iline_step
             mid_xl = meta.xline_start + (meta.n_crosslines // 2) * meta.xline_step
             mid_t = meta.n_samples // 2  # index
 
+            token.raise_if_cancelled()
             raw_il = loader.read_inline(mid_il)
+            token.raise_if_cancelled()
             raw_xl = loader.read_crossline(mid_xl)
+            token.raise_if_cancelled()
             raw_t = loader.read_timeslice(mid_t)
-
-            # Close file handle on worker thread; main thread re-opens lazily
-            loader.close()
-            self.done.emit((meta, vol, raw_il, raw_xl, raw_t, self._path))
+            token.raise_if_cancelled()
+            result = SeismicLoadResult(
+                generation=self._generation,
+                meta=meta,
+                volume=vol,
+                raw_inline=raw_il,
+                raw_crossline=raw_xl,
+                raw_timeslice=raw_t,
+                path=self._path,
+                downsample_factor=factor,
+            )
+        except _LoadInterrupted:
+            pass
         except Exception as exc:
-            self.error.emit(str(exc))
+            failure = SeismicLoadError(self._generation, str(exc))
+        finally:
+            if loader is not None:
+                loader.close()
+        if result is not None:
+            self.done.emit(result)
+        elif failure is not None:
+            self.error.emit(failure)

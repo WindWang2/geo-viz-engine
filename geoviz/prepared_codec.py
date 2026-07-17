@@ -4,15 +4,26 @@ from typing import Any
 
 import numpy as np
 
-from geoviz_cross_well import FormationTop
-
 from .contracts import PreparedPreview, PreviewKind
-from .previews.dat import SurfacePreviewPayload, XYPreviewPayload
 
 PAYLOAD_SCHEMA_VERSION = 1
 CACHEABLE_KINDS = frozenset(
     {PreviewKind.XY_SCATTER, PreviewKind.SURFACE, PreviewKind.FORMATION_TOPS}
 )
+
+
+def _formation_top_type():
+    """Load the optional cross-well model only for formation-top payloads."""
+    from geoviz_cross_well import FormationTop
+
+    return FormationTop
+
+
+def _dat_payload_types():
+    """Load plotting-backed payload classes only when DAT caching is used."""
+    from .previews.dat import SurfacePreviewPayload, XYPreviewPayload
+
+    return SurfacePreviewPayload, XYPreviewPayload
 
 
 def encode_prepared_preview(
@@ -30,6 +41,7 @@ def encode_prepared_preview(
     }
     arrays: dict[str, np.ndarray] = {}
     if preview.kind is PreviewKind.XY_SCATTER:
+        _, XYPreviewPayload = _dat_payload_types()
         payload = preview.payload
         if not isinstance(payload, XYPreviewPayload):
             raise ValueError("XY_SCATTER payload type mismatch")
@@ -37,6 +49,7 @@ def encode_prepared_preview(
         arrays["x"] = np.asarray(payload.x)
         arrays["y"] = np.asarray(payload.y)
     elif preview.kind is PreviewKind.SURFACE:
+        SurfacePreviewPayload, _ = _dat_payload_types()
         payload = preview.payload
         if not isinstance(payload, SurfacePreviewPayload):
             raise ValueError("SURFACE payload type mismatch")
@@ -45,6 +58,7 @@ def encode_prepared_preview(
         arrays["grid_y"] = np.asarray(payload.grid_y)
         arrays["grid_z"] = np.asarray(payload.grid_z)
     else:  # FORMATION_TOPS
+        FormationTop = _formation_top_type()
         tops = preview.payload
         if not (
             isinstance(tops, tuple) and all(isinstance(t, FormationTop) for t in tops)
@@ -72,12 +86,14 @@ def decode_prepared_preview(
         raise ValueError(f"unsupported kind: {kind}")
     summary = tuple((str(a), str(b)) for a, b in meta.get("summary_rows", ()))
     if kind is PreviewKind.XY_SCATTER:
+        _, XYPreviewPayload = _dat_payload_types()
         payload = XYPreviewPayload(
             names=tuple(meta["names"]),
             x=np.asarray(arrays["x"]),
             y=np.asarray(arrays["y"]),
         )
     elif kind is PreviewKind.SURFACE:
+        SurfacePreviewPayload, _ = _dat_payload_types()
         payload = SurfacePreviewPayload(
             grid_x=np.asarray(arrays["grid_x"]),
             grid_y=np.asarray(arrays["grid_y"]),
@@ -85,6 +101,7 @@ def decode_prepared_preview(
             levels=tuple(float(x) for x in meta.get("levels", ())),
         )
     else:
+        FormationTop = _formation_top_type()
         payload = tuple(
             FormationTop(
                 row["well_name"],

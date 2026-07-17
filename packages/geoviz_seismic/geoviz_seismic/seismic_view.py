@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
@@ -16,7 +16,15 @@ from .loader import SeismicLoader
 from .horizon import HorizonParser
 from .cache import SeismicCache
 from .colorbar_widget import ColorbarWidget
-from .workers import SyntheticWorker, SegyLoadWorker
+from .workers import (
+    DEFAULT_MAX_PREVIEW_VOXELS,
+    SegyLoadWorker,
+    SeismicLoadError,
+    SeismicLoadResult,
+    SyntheticWorker,
+    downsample_factor_for_budget,
+    retain_background_worker,
+)
 from .dialogs.crossplot import CrossplotDialog
 from .dialogs.horizon_manager import HorizonManagerDialog
 from .models import SeismicVolumeMeta, SliceInfo
@@ -31,6 +39,8 @@ class SeismicView(QWidget):
     selection, and horizon overlays.
     """
 
+    segy_loaded = Signal(object)  # SeismicLoadResult
+
     def __init__(self, parent=None, path: str | None = None, auto_load: bool = True):
         super().__init__(parent)
         self._loader: SeismicLoader | None = None
@@ -40,6 +50,9 @@ class SeismicView(QWidget):
         self._horizon_grids: dict[str, np.ndarray] = {}
         self._ds_factor: tuple[int, int, int] = (1, 1, 1)
         self._log = logging.getLogger(__name__)
+        self._segy_generation = 0
+        self._segy_worker: SegyLoadWorker | None = None
+        self._segy_workers: set[SegyLoadWorker] = set()
 
         # Horizon picking state
         self._picked_points: list[tuple[float, float, float]] = []  # (il, xl, t)
@@ -184,7 +197,8 @@ class SeismicView(QWidget):
             self.load_segy_async(path)
         elif auto_load:
             self._profile_il.set_overlay_text("生成合成数据...")
-            self._synth_worker = SyntheticWorker(self)
+            self._synth_worker = SyntheticWorker()
+            retain_background_worker(self._synth_worker)
             self._synth_worker.done.connect(self._on_synthetic_ready)
             self._synth_worker.start()
 
@@ -212,15 +226,22 @@ class SeismicView(QWidget):
 
     def cleanup(self):
         """Stop background workers and cleanup GPU resources before page switch."""
-        if hasattr(self, '_segy_worker') and self._segy_worker is not None:
-            if self._segy_worker.isRunning():
-                self._segy_worker.requestInterruption()
-                self._segy_worker.wait(500)
-        
+        self.cancel_pending_segy_load()
+
         if hasattr(self, '_synth_worker') and self._synth_worker is not None:
             if self._synth_worker.isRunning():
                 self._synth_worker.requestInterruption()
-                self._synth_worker.wait(500)
+
+    def cancel_pending_segy_load(self) -> None:
+        """Invalidate SEGY callbacks and cooperatively stop active file loads."""
+        self._segy_generation += 1
+        self._segy_path = None
+        for worker in tuple(self._segy_workers):
+            if worker.isRunning():
+                worker.requestInterruption()
+        if self._loader is not None:
+            self._loader.close()
+            self._loader = None
 
     def get_project_state(self) -> dict:
         """Return seismic file path and view settings for .gvz persistence."""
@@ -260,6 +281,7 @@ class SeismicView(QWidget):
 
     def load_demo(self, data: np.ndarray):
         """Load a synthetic or pre-computed 3-D volume for quick demo."""
+        self.cancel_pending_segy_load()
         self._ds_factor = (1, 1, 1)
         
         # Clear existing polyline state
@@ -297,15 +319,22 @@ class SeismicView(QWidget):
 
     def load_segy(self, path: str):
         """Load a SEGY file synchronously (for backward compat)."""
+        self.cancel_pending_segy_load()
         self._segy_path = path
-        if self._loader is not None:
-            self._loader.close()
         self._loader = SeismicLoader(path)
         self._meta = self._loader.inspect()
         self._log.info("SEGY inspected: %s (%dx%dx%d)", path,
                        self._meta.n_inlines, self._meta.n_crosslines,
                        self._meta.n_samples)
         self._ds_factor = (1, 1, 1)
+        self._ds_factor = downsample_factor_for_budget(
+            (
+                self._meta.n_inlines,
+                self._meta.n_crosslines,
+                self._meta.n_samples,
+            ),
+            max_voxels=DEFAULT_MAX_PREVIEW_VOXELS,
+        )
         vol = self._loader.get_volume_downsampled(factor=self._ds_factor)
         self._log.info("Volume downsampled: shape=%s", vol.shape)
         self._renderer_3d.load_volume(vol)
@@ -326,17 +355,18 @@ class SeismicView(QWidget):
 
     def load_segy_async(self, path: str):
         """Load a SEGY file in a background thread."""
+        self.cancel_pending_segy_load()
+        generation = self._segy_generation
         self._segy_path = path
-        if self._loader is not None:
-            self._loader.close()
-        if hasattr(self, '_segy_worker') and self._segy_worker is not None and self._segy_worker.isRunning():
-            self._segy_worker.done.disconnect(self._on_segy_ready)
-            self._segy_worker.error.disconnect(self._on_segy_error)
         self._profile_il.set_overlay_text("加载 SEGY...")
-        self._segy_worker = SegyLoadWorker(path, self)
-        self._segy_worker.done.connect(self._on_segy_ready)
-        self._segy_worker.error.connect(self._on_segy_error)
-        self._segy_worker.start()
+        worker = SegyLoadWorker(path, generation=generation)
+        retain_background_worker(worker)
+        self._segy_workers.add(worker)
+        self._segy_worker = worker
+        worker.done.connect(self._on_segy_ready)
+        worker.error.connect(self._on_segy_error)
+        worker.finished.connect(self._on_segy_worker_finished)
+        worker.start()
 
     def load_overlay_volume(self, data: np.ndarray, colormap: str = "jet", opacity: float = 0.5):
         """Load an overlay attribute/property volume and display it superimposed."""
@@ -369,11 +399,17 @@ class SeismicView(QWidget):
         self._profile_il.set_overlay_text(None)
 
     @Slot(object)
-    def _on_segy_ready(self, result: tuple):
-        meta, vol, raw_il, raw_xl, raw_t, path = result
-        self._loader = SeismicLoader(path)
+    def _on_segy_ready(self, result: SeismicLoadResult):
+        if result.generation != self._segy_generation or result.path != self._segy_path:
+            return
+        meta = result.meta
+        vol = result.volume
+        raw_il = result.raw_inline
+        raw_xl = result.raw_crossline
+        raw_t = result.raw_timeslice
+        self._loader = SeismicLoader(result.path)
         self._meta = meta
-        self._ds_factor = (1, 1, 1)
+        self._ds_factor = result.downsample_factor
         
         # Clear existing polyline state
         self._profile_t.clear_polyline()
@@ -397,11 +433,23 @@ class SeismicView(QWidget):
         self._slice_label.setText(f"Loaded: IL:{mid_il} XL:{mid_xl} T:{mid_t}")
         self._profile_il.set_overlay_text(None)
         self._setup_toolbar_sliders()
+        self.segy_loaded.emit(result)
 
-    @Slot(str)
-    def _on_segy_error(self, msg: str):
-        self._log.error("SEGY load failed: %s", msg)
-        self._profile_il.set_overlay_text(f"加载失败: {msg}")
+    @Slot(object)
+    def _on_segy_error(self, error: SeismicLoadError):
+        if error.generation != self._segy_generation:
+            return
+        self._log.error("SEGY load failed: %s", error.message)
+        self._profile_il.set_overlay_text(f"加载失败: {error.message}")
+
+    @Slot()
+    def _on_segy_worker_finished(self):
+        worker = self.sender()
+        if isinstance(worker, SegyLoadWorker):
+            self._segy_workers.discard(worker)
+            if self._segy_worker is worker:
+                self._segy_worker = None
+            worker.deleteLater()
 
     # ------------------------------------------------------------------
     # Synthetic data generation

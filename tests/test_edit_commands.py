@@ -73,6 +73,48 @@ def test_move_polygon_cmd():
         assert abs(v.y - old_positions[idx][1]) < 1e-9
 
 
+def test_move_polygon_moves_hole_vertices_and_undoes_by_vertex_id():
+    model = TopologyBuilder.from_features(
+        [
+            {
+                "type": "Feature",
+                "properties": {"id": "with-hole"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[0, 0], [8, 0], [8, 8], [0, 8], [0, 0]],
+                        [[2, 2], [2, 4], [4, 4], [4, 2], [2, 2]],
+                    ],
+                },
+            }
+        ]
+    )
+    ref = model.get_feature("with-hole")
+    old_positions = {
+        vid: (model.get_vertex(vid).x, model.get_vertex(vid).y)
+        for ring in ref.rings
+        for vid in ring.vertex_ids
+    }
+
+    command = MovePolygonCmd("with-hole", 3.0, -2.0, old_positions)
+    command.execute(model)
+    for ring in ref.rings:
+        assert ring.vertex_ids[0] == ring.vertex_ids[-1]
+        for vid in set(ring.vertex_ids):
+            vertex = model.get_vertex(vid)
+            assert (vertex.x, vertex.y) == (
+                old_positions[vid][0] + 3.0,
+                old_positions[vid][1] - 2.0,
+            )
+
+    command.undo(model)
+    assert {
+        vid: (model.get_vertex(vid).x, model.get_vertex(vid).y)
+        for ring in ref.rings
+        for vid in ring.vertex_ids
+    } == old_positions
+
+
 def test_insert_vertex_cmd():
     model = _make_model_with_two_features()
     ref = model.get_feature("A")
@@ -108,6 +150,24 @@ def test_delete_vertex_cmd():
     cmd.undo(model)
     assert len(ref.rings[0].vertex_ids) == original_len
     assert vid_to_delete in ref.rings[0].vertex_ids
+
+
+def test_delete_first_vertex_keeps_ring_closed_and_undo_restores_identity():
+    model = _make_model_with_two_features()
+    ring = model.get_feature("A").rings[0]
+    original_ids = list(ring.vertex_ids)
+    first_id = original_ids[0]
+    vertex = model.get_vertex(first_id)
+    command = DeleteVertexCmd(first_id, vertex.x, vertex.y, "A", 0, 0)
+
+    command.execute(model)
+
+    assert ring.vertex_ids[0] == ring.vertex_ids[-1]
+    assert first_id not in ring.vertex_ids
+    assert len(ring.vertex_ids) == len(original_ids) - 1
+
+    command.undo(model)
+    assert ring.vertex_ids == original_ids
 
 
 def test_edit_attributes_cmd():

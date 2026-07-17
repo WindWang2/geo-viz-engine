@@ -31,6 +31,8 @@ class FeatureRef:
     parent_id: str | None
     source_file: str | None    # for hierarchy-aware save
     properties: dict           # original GeoJSON properties
+    geometry_type: str = "Polygon"
+    polygon_ring_counts: list[int] | None = None
 
 
 class TopologyModel:
@@ -61,11 +63,22 @@ class TopologyModel:
 
     def add_feature(self, feature_id: str, rings: list[RingRef],
                     level: str, parent_id: str | None,
-                    source_file: str | None, properties: dict) -> FeatureRef:
+                    source_file: str | None, properties: dict,
+                    geometry_type: str = "Polygon",
+                    polygon_ring_counts: list[int] | None = None) -> FeatureRef:
+        for ring in rings:
+            if ring.vertex_ids and ring.vertex_ids[0] != ring.vertex_ids[-1]:
+                ring.vertex_ids.append(ring.vertex_ids[0])
+        counts = list(polygon_ring_counts or [len(rings)])
+        if sum(counts) != len(rings) or any(count <= 0 for count in counts):
+            counts = [len(rings)]
+            geometry_type = "Polygon"
         ref = FeatureRef(
             feature_id=feature_id, rings=rings, level=level,
             parent_id=parent_id, source_file=source_file,
             properties=dict(properties),
+            geometry_type=geometry_type,
+            polygon_ring_counts=counts,
         )
         self._features[feature_id] = ref
         # Register vertex reverse index and edges
@@ -79,6 +92,18 @@ class TopologyModel:
                 self._edge_index.setdefault(edge, set()).add(feature_id)
         self._mark_feature_dirty(feature_id)
         return ref
+
+    def _rebuild_indexes(self) -> None:
+        """Rebuild reverse vertex/edge indexes after a ring identity mutation."""
+        self._edge_index.clear()
+        self._vertex_to_features.clear()
+        for feature_id, ref in self._features.items():
+            for ring in ref.rings:
+                for vertex_id in ring.vertex_ids:
+                    self._vertex_to_features.setdefault(vertex_id, set()).add(feature_id)
+                for first, second in zip(ring.vertex_ids, ring.vertex_ids[1:]):
+                    edge = (min(first, second), max(first, second))
+                    self._edge_index.setdefault(edge, set()).add(feature_id)
 
     def get_feature(self, feature_id: str) -> FeatureRef | None:
         return self._features.get(feature_id)
@@ -162,7 +187,15 @@ class TopologyModel:
                     coords.append(ring_coords)
             if not coords:
                 continue
-            geometry = {"type": "Polygon", "coordinates": coords}
+            if ref.geometry_type == "MultiPolygon":
+                polygons = []
+                offset = 0
+                for count in ref.polygon_ring_counts or []:
+                    polygons.append(coords[offset:offset + count])
+                    offset += count
+                geometry = {"type": "MultiPolygon", "coordinates": polygons}
+            else:
+                geometry = {"type": "Polygon", "coordinates": coords}
             feat = {
                 "type": "Feature",
                 "properties": dict(ref.properties),
@@ -198,9 +231,12 @@ class TopologyBuilder:
             if gtype == "Polygon":
                 # GeoJSON Polygon coords: list of rings
                 all_rings = geom["coordinates"]
+                polygon_ring_counts = [len(all_rings)]
             elif gtype == "MultiPolygon":
                 # GeoJSON MultiPolygon coords: list of polygons, each a list of rings
-                all_rings = [ring for poly in geom["coordinates"] for ring in poly]
+                polygons = geom["coordinates"]
+                polygon_ring_counts = [len(poly) for poly in polygons]
+                all_rings = [ring for poly in polygons for ring in poly]
             else:
                 continue
 
@@ -214,6 +250,8 @@ class TopologyBuilder:
                     parent_id=props.get("parent_id"),
                     source_file=source_file,
                     properties=props,
+                    geometry_type=gtype,
+                    polygon_ring_counts=polygon_ring_counts,
                 )
         return model
 
@@ -229,8 +267,11 @@ class TopologyBuilder:
             gtype = geom.get("type")
             if gtype == "Polygon":
                 all_rings = geom["coordinates"]
+                polygon_ring_counts = [len(all_rings)]
             elif gtype == "MultiPolygon":
-                all_rings = [ring for poly in geom["coordinates"] for ring in poly]
+                polygons = geom["coordinates"]
+                polygon_ring_counts = [len(poly) for poly in polygons]
+                all_rings = [ring for poly in polygons for ring in poly]
             else:
                 continue
 
@@ -252,6 +293,8 @@ class TopologyBuilder:
                     parent_id=ff.parent_id,
                     source_file=sf,
                     properties=props,
+                    geometry_type=gtype,
+                    polygon_ring_counts=polygon_ring_counts,
                 )
         return model
 
@@ -290,6 +333,8 @@ class TopologyBuilder:
                 vid = cls._find_or_create_vertex(model, x, y, grid)
                 vid_list.append(vid)
             if vid_list:
+                if vid_list[0] != vid_list[-1]:
+                    vid_list.append(vid_list[0])
                 rings.append(RingRef(vertex_ids=vid_list))
         return rings
 
@@ -301,3 +346,27 @@ def _walk_hierarchy(roots):
         node = stack.pop()
         yield node
         stack.extend(node.children)
+
+
+def validate_polygon_geometry(geometry_type: str, coordinates: list) -> list[dict[str, str]]:
+    """Validate a complete Polygon/MultiPolygon Shape in the engine core.
+
+    Ring-level diagnostics remain useful to editors, while this whole-geometry
+    check catches hole containment, nested-shell and part interaction errors.
+    """
+    if geometry_type not in {"Polygon", "MultiPolygon"}:
+        return [{"code": "unsupported_geometry", "message": "Expected Polygon or MultiPolygon"}]
+    try:
+        from shapely.geometry import shape
+        from shapely.validation import explain_validity
+    except ImportError:
+        return []
+    try:
+        geometry = shape({"type": geometry_type, "coordinates": coordinates})
+    except Exception as exc:
+        return [{"code": "invalid_shape", "message": f"Shape parse failed: {exc}"}]
+    if geometry.is_empty:
+        return [{"code": "empty_geometry", "message": "Geometry is empty"}]
+    if not geometry.is_valid:
+        return [{"code": "invalid_shape", "message": str(explain_validity(geometry))}]
+    return []

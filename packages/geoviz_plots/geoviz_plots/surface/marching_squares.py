@@ -2,7 +2,9 @@
 import numpy as np
 import contourpy
 
-def extract_contour_lines(grid_x, grid_y, grid_z, levels) -> dict[float, list[np.ndarray]]:
+def extract_contour_lines(
+    grid_x, grid_y, grid_z, levels, *, cancellation_token=None
+) -> dict[float, list[np.ndarray]]:
     """Extract vector contour lines for each level using contourpy.
     
     Handles NaNs automatically by converting to a masked array.
@@ -15,6 +17,8 @@ def extract_contour_lines(grid_x, grid_y, grid_z, levels) -> dict[float, list[np
     Returns:
         A dict mapping level (float) to a list of lines (each line is a 2D numpy array of points).
     """
+    if cancellation_token is not None:
+        cancellation_token.raise_if_cancelled()
     grid_x = np.asarray(grid_x, dtype=np.float64)
     grid_y = np.asarray(grid_y, dtype=np.float64)
     grid_z = np.asarray(grid_z, dtype=np.float64)
@@ -30,7 +34,11 @@ def extract_contour_lines(grid_x, grid_y, grid_z, levels) -> dict[float, list[np
     
     lines_dict = {}
     for lv in levels:
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
         lines_dict[float(lv)] = cg.lines(float(lv))
+    if cancellation_token is not None:
+        cancellation_token.raise_if_cancelled()
         
     return lines_dict
 

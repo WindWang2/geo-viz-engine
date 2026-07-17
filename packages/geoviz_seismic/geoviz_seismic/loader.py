@@ -29,6 +29,7 @@ class SeismicLoader:
         self._f: segyio.SegyFile | None = None
         self._meta: SeismicVolumeMeta | None = None
         self._downsampled: np.ndarray | None = None
+        self._downsample_factor: tuple[int, int, int] | None = None
 
     def inspect(self) -> SeismicVolumeMeta:
         """Read SEGY headers and return volume metadata.
@@ -156,7 +157,12 @@ class SeismicLoader:
                 f"Failed to read trace at ({iline}, {xline}) from {self._path}: {e}"
             ) from e
 
-    def get_volume_downsampled(self, factor: tuple[int, int, int] = (4, 4, 2)) -> np.ndarray:
+    def get_volume_downsampled(
+        self,
+        factor: tuple[int, int, int] = (4, 4, 2),
+        *,
+        cancellation_token=None,
+    ) -> np.ndarray:
         """Read the full volume with stride-based downsampling.
 
         Args:
@@ -166,8 +172,13 @@ class SeismicLoader:
         Returns:
             ``float32`` array of shape ``(n_il // fi, n_xl // fx, n_s // ft)``.
         """
-        if self._downsampled is not None:
+        factor = tuple(int(value) for value in factor)
+        if len(factor) != 3 or any(value < 1 for value in factor):
+            raise ValueError(f"downsample factor must contain three positive integers: {factor}")
+        if self._downsampled is not None and self._downsample_factor == factor:
             return self._downsampled
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
         meta = self.inspect()
         f = self._open()
         fi, fx, ft = factor
@@ -176,10 +187,15 @@ class SeismicLoader:
         t_indices = range(0, meta.n_samples, ft)
         vol = np.empty((len(il_indices), len(xl_indices), len(t_indices)), dtype=np.float32)
         for i, il_idx in enumerate(il_indices):
+            if cancellation_token is not None:
+                cancellation_token.raise_if_cancelled()
             il = int(f.ilines[il_idx])
             line = np.asarray(f.iline[il], dtype=np.float32)
             vol[i, :, :] = line[np.array(xl_indices)][:, np.array(t_indices)]
         self._downsampled = vol
+        self._downsample_factor = factor
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
         return vol
 
     def close(self):

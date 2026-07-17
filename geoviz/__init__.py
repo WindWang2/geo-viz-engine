@@ -9,6 +9,7 @@ from .contracts import (
 )
 from .engine import GeoVizEngine
 from .errors import ErrorCode, GeoVizError
+from .jobs import CancellationToken, JobCancelled
 from .prepared_codec import (
     PAYLOAD_SCHEMA_VERSION,
     decode_prepared_preview,
@@ -30,6 +31,7 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "ProfileWidget": ("geoviz_seismic", "ProfileWidget"),
     "SeismicLoader": ("geoviz_seismic.loader", "SeismicLoader"),
     "PaleoMapCanvas": ("geoviz_paleo_map", "PaleoMapCanvas"),
+    "validate_polygon_geometry": ("geoviz_paleo_map.topology", "validate_polygon_geometry"),
     "export_professional_figure": ("geoviz_paleo_map", "export_professional_figure"),
     "CrossWellCanvas": ("geoviz_cross_well", "CrossWellCanvas"),
     "WellTieCanvas": ("geoviz_well_tie.canvas", "WellTieCanvas"),
@@ -37,6 +39,15 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "SurfaceWidget": ("geoviz_plots", "SurfaceWidget"),
     "interpolate_idw": ("geoviz_plots", "interpolate_idw"),
     "interpolate_scipy": ("geoviz_plots", "interpolate_scipy"),
+    "azimuth_to_rad": ("geoviz_plots", "azimuth_to_rad"),
+    "directional_distance": ("geoviz_plots", "directional_distance"),
+    "directional_trend_grid": ("geoviz_plots", "directional_trend_grid"),
+    "directional_weights": ("geoviz_plots", "directional_weights"),
+    "rotate_to_uv": ("geoviz_plots", "rotate_to_uv"),
+    "trend_value_at": ("geoviz_plots", "trend_value_at"),
+    "compute_sand_ratio": ("geoviz_plots", "compute_sand_ratio"),
+    "median_absolute_deviation": ("geoviz_plots", "median_absolute_deviation"),
+    "modified_z_scores": ("geoviz_plots", "modified_z_scores"),
     "extract_contour_lines": ("geoviz_plots", "extract_contour_lines"),
     "extract_filled_contours": ("geoviz_plots", "extract_filled_contours"),
     # Well-log interval models used when attaching facies/lithology tracks.
@@ -62,6 +73,8 @@ __all__ = [
     "ErrorCode",
     "GeoVizEngine",
     "GeoVizError",
+    "CancellationToken",
+    "JobCancelled",
     "PreparedPreview",
     "PreviewCapabilities",
     "PreviewKind",

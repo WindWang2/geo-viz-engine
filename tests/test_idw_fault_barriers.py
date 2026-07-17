@@ -14,6 +14,48 @@ def test_segments_intersect():
     q1, q2 = (0.0, 1.0), (2.0, 1.0)
     assert segments_intersect(p1, p2, q1, q2) is False
 
+
+def test_segments_intersect_counts_endpoint_touch_and_collinear_overlap():
+    assert segments_intersect((0, 0), (2, 0), (2, 0), (2, 2))
+    assert segments_intersect((0, 0), (3, 0), (1, 0), (2, 0))
+
+
+def test_idw_filters_infinite_samples_and_chunks_equivalently():
+    x = np.array([0.0, 1.0, np.inf])
+    y = np.array([0.0, 1.0, 0.5])
+    z = np.array([0.0, 10.0, 999.0])
+    gx = np.linspace(0.0, 1.0, 9)
+    gy = np.linspace(0.0, 1.0, 7)
+
+    chunked = interpolate_idw(x, y, z, gx, gy, max_cells_per_chunk=5)
+    single = interpolate_idw(x, y, z, gx, gy, max_cells_per_chunk=10_000)
+
+    assert np.all(np.isfinite(chunked))
+    assert np.allclose(chunked, single)
+
+
+def test_idw_checks_cancellation_between_chunks():
+    from geoviz import JobCancelled
+
+    class CancelOnSecondCheckpoint:
+        calls = 0
+
+        def raise_if_cancelled(self):
+            self.calls += 1
+            if self.calls == 2:
+                raise JobCancelled("cancelled between chunks")
+
+    with pytest.raises(JobCancelled):
+        interpolate_idw(
+            np.array([0.0, 1.0]),
+            np.array([0.0, 1.0]),
+            np.array([1.0, 2.0]),
+            np.linspace(0.0, 1.0, 6),
+            np.linspace(0.0, 1.0, 4),
+            max_cells_per_chunk=2,
+            cancellation_token=CancelOnSecondCheckpoint(),
+        )
+
 def test_idw_without_faults():
     x = np.array([0.0, 10.0, 0.0, 10.0])
     y = np.array([0.0, 0.0, 10.0, 10.0])

@@ -188,69 +188,43 @@ class DeleteVertexCmd(EditCommand):
         self.feature_id = feature_id
         self.ring_index = ring_index
         self.remove_index = remove_index
+        self._before_ids: list[int] | None = None
 
     def execute(self, model: TopologyModel) -> None:
         ref = model.get_feature(self.feature_id)
         if ref is None or self.ring_index >= len(ref.rings):
             return
         ring = ref.rings[self.ring_index]
-        idx = ring.vertex_ids.index(self.vertex_id) if self.vertex_id in ring.vertex_ids else -1
-        if idx < 0:
+        ids = ring.vertex_ids
+        is_closed = len(ids) >= 2 and ids[0] == ids[-1]
+        logical_ids = list(ids[:-1] if is_closed else ids)
+        if len(logical_ids) <= 3 or self.vertex_id not in logical_ids:
             return
-        # Capture neighbors for edge cleanup
-        prev_vid = ring.vertex_ids[idx - 1] if idx > 0 else None
-        next_vid = ring.vertex_ids[idx + 1] if idx < len(ring.vertex_ids) - 1 else None
-        # Clean edges connecting deleted vertex to neighbors
-        for neighbor in [prev_vid, next_vid]:
-            if neighbor is not None:
-                edge = (min(self.vertex_id, neighbor), max(self.vertex_id, neighbor))
-                fids = model._edge_index.get(edge)
-                if fids:
-                    fids.discard(self.feature_id)
-                    if not fids:
-                        del model._edge_index[edge]
-        # Restore old edge between neighbors
-        if prev_vid is not None and next_vid is not None:
-            old_edge = (min(prev_vid, next_vid), max(prev_vid, next_vid))
-            model._edge_index.setdefault(old_edge, set()).add(self.feature_id)
-        # Remove vertex
-        ring.vertex_ids.remove(self.vertex_id)
-        vtf = model._vertex_to_features.get(self.vertex_id)
-        if vtf:
-            vtf.discard(self.feature_id)
-            if not vtf:
-                del model._vertex_to_features[self.vertex_id]
+        requested_index = self.remove_index
+        if requested_index == len(ids) - 1 and is_closed:
+            requested_index = 0
+        if not (
+            0 <= requested_index < len(logical_ids)
+            and logical_ids[requested_index] == self.vertex_id
+        ):
+            requested_index = logical_ids.index(self.vertex_id)
+        self._before_ids = list(ids)
+        del logical_ids[requested_index]
+        ring.vertex_ids[:] = [*logical_ids, logical_ids[0]]
+        model._rebuild_indexes()
+        model._mark_feature_dirty(self.feature_id)
         model.mark_dirty()
 
     def undo(self, model: TopologyModel) -> None:
         ref = model.get_feature(self.feature_id)
         if ref is None or self.ring_index >= len(ref.rings):
             return
+        if self._before_ids is None:
+            return
         ring = ref.rings[self.ring_index]
-        # Restore vertex if removed
-        if self.vertex_id not in model._vertices:
-            from geoviz_paleo_map.topology import TopologyVertex
-            model._vertices[self.vertex_id] = TopologyVertex(
-                x=self.x, y=self.y, id=self.vertex_id)
-        # Insert back at original position
-        ring.vertex_ids.insert(self.remove_index, self.vertex_id)
-        # Restore edges: remove the neighbor-to-neighbor edge, add edges to restored vertex
-        if self.remove_index > 0 and self.remove_index < len(ring.vertex_ids) - 1:
-            prev_vid = ring.vertex_ids[self.remove_index - 1]
-            next_vid = ring.vertex_ids[self.remove_index + 1]
-            # Remove the edge that was created between neighbors during execute
-            old_edge = (min(prev_vid, next_vid), max(prev_vid, next_vid))
-            fids = model._edge_index.get(old_edge)
-            if fids:
-                fids.discard(self.feature_id)
-                if not fids:
-                    del model._edge_index[old_edge]
-            # Restore edges to deleted vertex
-            for neighbor in [prev_vid, next_vid]:
-                edge = (min(self.vertex_id, neighbor), max(self.vertex_id, neighbor))
-                model._edge_index.setdefault(edge, set()).add(self.feature_id)
-        # Restore vertex_to_features
-        model._vertex_to_features.setdefault(self.vertex_id, set()).add(self.feature_id)
+        ring.vertex_ids[:] = self._before_ids
+        model._rebuild_indexes()
+        model._mark_feature_dirty(self.feature_id)
         model.mark_dirty()
 
 

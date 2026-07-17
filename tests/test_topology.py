@@ -230,6 +230,49 @@ def test_builder_multipolygon():
     assert len(ref.rings) == 2
 
 
+def test_builder_closes_open_polygon_ring():
+    model = TopologyBuilder.from_features(
+        [
+            {
+                "type": "Feature",
+                "properties": {"id": "open"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 2]]],
+                },
+            }
+        ]
+    )
+
+    ids = model.get_feature("open").rings[0].vertex_ids
+    assert ids[0] == ids[-1]
+    assert len(ids) == 5
+
+
+def test_multipolygon_roundtrip_preserves_part_and_hole_grouping():
+    coordinates = [
+        [
+            [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]],
+            [[1, 1], [1, 2], [2, 2], [2, 1], [1, 1]],
+        ],
+        [[[10, 10], [12, 10], [12, 12], [10, 12], [10, 10]]],
+    ]
+    model = TopologyBuilder.from_features(
+        [
+            {
+                "type": "Feature",
+                "properties": {"id": "grouped"},
+                "geometry": {"type": "MultiPolygon", "coordinates": coordinates},
+            }
+        ]
+    )
+
+    geometry = model.to_geojson()["features"][0]["geometry"]
+    assert geometry["type"] == "MultiPolygon"
+    assert [len(polygon) for polygon in geometry["coordinates"]] == [2, 1]
+    assert geometry["coordinates"] == coordinates
+
+
 def test_builder_from_hierarchy():
     """Build topology from FaciesHierarchy."""
     from geoviz_paleo_map.hierarchy import FaciesHierarchy, FaciesFeature, FaciesNode

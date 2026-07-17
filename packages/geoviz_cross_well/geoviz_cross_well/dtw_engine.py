@@ -51,29 +51,27 @@ class DTWEngine:
         for i in range(1, n):
             j_start = max(0, i - band_radius)
             j_end = min(m, i + band_radius + 1)
-            
-            # Vectorized distance for this row's band
+
+            # Recurrence for the current row:
+            #   c[j] = dist[j] + min(diagonal[j], vertical[j], c[j-1])
+            # The horizontal dependency is a min-plus prefix scan.  Rewriting
+            # it with cumulative distances lets NumPy evaluate the whole band
+            # without the former ~500k Python scalar loop for 1k samples.
+            current_idx = np.arange(j_start, j_end) - i + band_radius
+            diagonal = cost_compact[i - 1, current_idx]
+            vertical = np.full(diagonal.shape, np.inf, dtype=np.float64)
+            vertical_valid = current_idx + 1 < width
+            vertical[vertical_valid] = cost_compact[
+                i - 1, current_idx[vertical_valid] + 1
+            ]
+            base = np.minimum(diagonal, vertical)
             row_dist = np.abs(ref_curve[i] - target_curve[j_start:j_end])
-            
-            for j in range(j_start, j_end):
-                idx = get_compact_idx(i, j)
-                
-                # Predecessors
-                # 1. Vertical (i-1, j)
-                v_idx = get_compact_idx(i-1, j)
-                v_cost = cost_compact[i-1, v_idx] if 0 <= v_idx < width else np.inf
-                
-                # 2. Diagonal (i-1, j-1)
-                d_idx = get_compact_idx(i-1, j-1)
-                d_cost = cost_compact[i-1, d_idx] if 0 <= d_idx < width else np.inf
-                
-                # 3. Horizontal (i, j-1)
-                h_idx = get_compact_idx(i, j-1)
-                h_cost = cost_compact[i, h_idx] if 0 <= h_idx < width else np.inf
-                
-                min_prev = min(v_cost, d_cost, h_cost)
-                if min_prev != np.inf:
-                    cost_compact[i, idx] = min_prev + row_dist[j - j_start]
+            prefix = np.cumsum(row_dist, dtype=np.float64)
+            prefix_before = np.empty_like(prefix)
+            prefix_before[0] = 0.0
+            prefix_before[1:] = prefix[:-1]
+            row_cost = prefix + np.minimum.accumulate(base - prefix_before)
+            cost_compact[i, current_idx] = row_cost
 
             if progress_callback is not None and (i % progress_step == 0 or i == n - 1):
                 progress_callback(i + 1, n)

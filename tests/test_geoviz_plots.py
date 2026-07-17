@@ -225,6 +225,25 @@ def test_contour_extraction():
     assert isinstance(offsets, list)
 
 
+def test_contour_extraction_honours_cancellation_before_work():
+    class CancelledToken:
+        def raise_if_cancelled(self):
+            raise RuntimeError("cancelled checkpoint")
+
+    grid_x = np.linspace(0.0, 1.0, 4)
+    grid_y = np.linspace(0.0, 1.0, 4)
+    grid_z = np.add.outer(grid_y, grid_x)
+
+    with pytest.raises(RuntimeError, match="cancelled checkpoint"):
+        extract_contour_lines(
+            grid_x,
+            grid_y,
+            grid_z,
+            levels=[0.5],
+            cancellation_token=CancelledToken(),
+        )
+
+
 from geoviz_plots.surface.surface_widget import SurfaceWidget
 
 def test_surface_widget_basic(qtbot):
@@ -256,7 +275,6 @@ def test_surface_widget_basic(qtbot):
     dx, dy = widget.pixel_to_data(px, py)
     assert dx == pytest.approx(5.0)
     assert dy == pytest.approx(5.0)
-
 
 
 
