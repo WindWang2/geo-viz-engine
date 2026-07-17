@@ -32,6 +32,7 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "PaleoMapCanvas": ("geoviz_paleo_map", "PaleoMapCanvas"),
     "export_professional_figure": ("geoviz_paleo_map", "export_professional_figure"),
     "CrossWellCanvas": ("geoviz_cross_well", "CrossWellCanvas"),
+    "WellTieCanvas": ("geoviz_well_tie.canvas", "WellTieCanvas"),
     "PlotWidget": ("geoviz_plots", "PlotWidget"),
     "SurfaceWidget": ("geoviz_plots", "SurfaceWidget"),
     "interpolate_idw": ("geoviz_plots", "interpolate_idw"),
