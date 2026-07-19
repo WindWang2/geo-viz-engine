@@ -489,9 +489,10 @@ class SeismicView(QWidget):
         return QIcon()
 
     def _build_toolbar(self) -> QWidget:
-        # Two-row toolbar: 主操作 (row 1) | 视图与属性 (row 2)
+        # Three-row toolbar: 主操作 (row 1) | 视图 (row 2) | 属性与切片 (row 3)
         self._toolbar_row1 = QToolBar()
         self._toolbar_row2 = QToolBar()
+        self._toolbar_row3 = QToolBar()
         bar = self._toolbar_row1  # row 1 is primary actions (load/pick/tie)
 
         load_btn = QPushButton(" 加载 SEGY")
@@ -698,6 +699,7 @@ class SeismicView(QWidget):
         bar.addWidget(self._well_tie_btn)
 
         # ----- Row 2: 视图 | 属性 | 切片 -----
+        # ----- Row 2: 视图渲染设定 -----
         bar2 = self._toolbar_row2
         bar2.addWidget(QLabel(" 3D模式:"))
         bar2.addWidget(self._3d_mode_combo)
@@ -716,39 +718,43 @@ class SeismicView(QWidget):
         bar2.addSeparator()
         bar2.addWidget(QLabel(" 裁剪:"))
         bar2.addWidget(self._clip_spin)
-        bar2.addSeparator()
-        bar2.addWidget(QLabel(" 叠加:"))
-        bar2.addWidget(self._overlay_btn)
-        bar2.addWidget(self._overlay_cmap_combo)
-        bar2.addWidget(QLabel(" 不透明度:"))
-        bar2.addWidget(self._overlay_opacity_slider)
-        bar2.addWidget(QLabel(" 属性:"))
-        bar2.addWidget(self._attr_combo)
-        bar2.addWidget(self._rgb_r_label)
-        bar2.addWidget(self._rgb_r_combo)
-        bar2.addWidget(self._rgb_g_label)
-        bar2.addWidget(self._rgb_g_combo)
-        bar2.addWidget(self._rgb_b_label)
-        bar2.addWidget(self._rgb_b_combo)
-        bar2.addWidget(crossplot_btn)
-        bar2.addSeparator()
-        bar2.addWidget(QLabel(" IL:"))
-        bar2.addWidget(self._tb_il_label)
-        bar2.addWidget(self._tb_il_slider)
-        bar2.addWidget(QLabel(" XL:"))
-        bar2.addWidget(self._tb_xl_label)
-        bar2.addWidget(self._tb_xl_slider)
-        bar2.addWidget(QLabel(" T:"))
-        bar2.addWidget(self._tb_t_label)
-        bar2.addWidget(self._tb_t_slider)
 
-        # Container holding both rows
+        # ----- Row 3: 叠加、特征属性与切片滑动条 -----
+        bar3 = self._toolbar_row3
+        bar3.addWidget(QLabel(" 属性:"))
+        bar3.addWidget(self._attr_combo)
+        bar3.addWidget(self._rgb_r_label)
+        bar3.addWidget(self._rgb_r_combo)
+        bar3.addWidget(self._rgb_g_label)
+        bar3.addWidget(self._rgb_g_combo)
+        bar3.addWidget(self._rgb_b_label)
+        bar3.addWidget(self._rgb_b_combo)
+        bar3.addWidget(crossplot_btn)
+        bar3.addSeparator()
+        bar3.addWidget(QLabel(" 叠加:"))
+        bar3.addWidget(self._overlay_btn)
+        bar3.addWidget(self._overlay_cmap_combo)
+        bar3.addWidget(QLabel(" 不透明度:"))
+        bar3.addWidget(self._overlay_opacity_slider)
+        bar3.addSeparator()
+        bar3.addWidget(QLabel(" IL:"))
+        bar3.addWidget(self._tb_il_label)
+        bar3.addWidget(self._tb_il_slider)
+        bar3.addWidget(QLabel(" XL:"))
+        bar3.addWidget(self._tb_xl_label)
+        bar3.addWidget(self._tb_xl_slider)
+        bar3.addWidget(QLabel(" T:"))
+        bar3.addWidget(self._tb_t_label)
+        bar3.addWidget(self._tb_t_slider)
+
+        # Container holding three rows
         container = QWidget()
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
         container_layout.addWidget(self._toolbar_row1)
         container_layout.addWidget(self._toolbar_row2)
+        container_layout.addWidget(self._toolbar_row3)
         return container
 
     def _build_slice_info(self, slice_type: str, position: int,
