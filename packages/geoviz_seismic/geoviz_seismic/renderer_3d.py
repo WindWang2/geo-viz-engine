@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (
 import pyqtgraph.opengl as gl
 from PySide6.QtGui import QVector3D
 from PySide6 import QtGui
-from pyqtgraph.opengl import shaders
 from OpenGL import GL
+from OpenGL.GL import shaders as gl_shaders
 
 # Internal imports
 from .colormap import ColormapManager
@@ -241,10 +241,6 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                     return texture(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
                 }
                 
-                vec3 compute_normal_legacy(vec3 texcoord, sampler3D tex) {
-                    return texture3D(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
-                }
-                
                 in vec3 v_texcoord;
                 out vec4 fragColor;
                 
@@ -320,16 +316,12 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                 uniform vec3 u_light_dir;
                 uniform vec3 u_resolution;
                 
-                vec3 compute_normal(vec3 texcoord, sampler3D tex) {
-                    return texture(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
-                }
-                
                 vec3 compute_normal_legacy(vec3 texcoord, sampler3D tex) {
                     return texture3D(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
                 }
                 void main() {
                     if (u_sculpting_enabled == 1) {
-                        float hz = texture(u_horizon_texture, v_texcoord.xy).r;
+                        float hz = texture2D(u_horizon_texture, v_texcoord.xy).r;
                         if (hz > 0.0 && hz < 1.0) {
                             if (u_sculpt_mode == 0 && v_texcoord.z > hz) {
                                 discard;
@@ -397,10 +389,6 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                 
                 vec3 compute_normal(vec3 texcoord, sampler3D tex) {
                     return texture(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
-                }
-                
-                vec3 compute_normal_legacy(vec3 texcoord, sampler3D tex) {
-                    return texture3D(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
                 }
                 
                 in vec3 v_texcoord;
@@ -474,16 +462,12 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                 uniform vec3 u_light_dir;
                 uniform vec3 u_resolution;
                 
-                vec3 compute_normal(vec3 texcoord, sampler3D tex) {
-                    return texture(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
-                }
-                
                 vec3 compute_normal_legacy(vec3 texcoord, sampler3D tex) {
                     return texture3D(u_normal_texture, texcoord).rgb * 2.0 - 1.0;
                 }
                 void main() {
                     if (u_sculpting_enabled == 1) {
-                        float hz = texture(u_horizon_texture, v_texcoord.xy).r;
+                        float hz = texture2D(u_horizon_texture, v_texcoord.xy).r;
                         if (hz > 0.0 && hz < 1.0) {
                             if (u_sculpt_mode == 0 && v_texcoord.z > hz) {
                                 discard;
@@ -519,14 +503,15 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                 }
                 """
         
-        v_shader = shaders.compileShader([glsl_version, vertex_src], GL.GL_VERTEX_SHADER)
-        f_shader = shaders.compileShader([glsl_version, fragment_src], GL.GL_FRAGMENT_SHADER)
-        program = shaders.compileProgram(v_shader, f_shader)
+        v_shader = gl_shaders.compileShader([glsl_version, vertex_src], GL.GL_VERTEX_SHADER)
+        f_shader = gl_shaders.compileShader([glsl_version, fragment_src], GL.GL_FRAGMENT_SHADER)
+        program = gl_shaders.compileProgram(v_shader, f_shader)
         
         if glsl_version != "":
             GL.glBindAttribLocation(program, 0, "a_position")
             GL.glBindAttribLocation(program, 1, "a_texcoord")
             GL.glLinkProgram(program)
+            program.check_linked()
             
         self._customShaderProgram = program
         return program

@@ -26,6 +26,8 @@ class LASPreviewHeader:
     depth_index: int
     curves: tuple[LASCurveHeader, ...]
     row_count: int
+    wrapped: bool = False
+    delimiter: str = "SPACE"
 
     @property
     def non_depth_curves(self) -> tuple[LASCurveHeader, ...]:
@@ -34,6 +36,8 @@ class LASPreviewHeader:
 
 def _section_from_line(line: str) -> str:
     section = line[1:].strip().upper()
+    if section.startswith("V"):
+        return "VERSION"
     if section.startswith("W"):
         return "WELL"
     if section.startswith("C"):
@@ -73,6 +77,39 @@ def _is_null(value: float, null_value: float) -> bool:
     return math.isclose(value, null_value, rel_tol=0.0, abs_tol=1e-6)
 
 
+def _delimiter_name(value: str) -> str:
+    token = (value.split() or ["SPACE"])[0].strip("'\"").upper()
+    if token in {",", "COMMA"}:
+        return "COMMA"
+    if token in {"\\T", "TAB"}:
+        return "TAB"
+    return "SPACE"
+
+
+def _data_tokens(line: str, delimiter: str) -> list[str]:
+    if delimiter == "COMMA":
+        return [token.strip() for token in line.split(",")]
+    if delimiter == "TAB":
+        return [token.strip() for token in line.split("\t")]
+    return line.split()
+
+
+def _logical_rows(
+    tokens: list[str],
+    pending: list[str],
+    column_count: int,
+    wrapped: bool,
+) -> tuple[list[str], ...]:
+    if not wrapped:
+        return (tokens,)
+    pending.extend(tokens)
+    rows: list[list[str]] = []
+    while len(pending) >= column_count:
+        rows.append(pending[:column_count])
+        del pending[:column_count]
+    return tuple(rows)
+
+
 def _valid_depth(tokens: list[str], column_count: int, depth_index: int, null_value: float) -> float | None:
     if len(tokens) < column_count:
         return None
@@ -94,6 +131,9 @@ def inspect_las_file(path: str) -> LASPreviewHeader:
     curves: list[LASCurveHeader] = []
     row_count = 0
     depth_index = 0
+    wrapped = False
+    delimiter = "SPACE"
+    pending_tokens: list[str] = []
 
     with open(path, "r", encoding="utf-8", errors="replace") as stream:
         for raw_line in stream:
@@ -106,7 +146,16 @@ def inspect_las_file(path: str) -> LASPreviewHeader:
                     depth_index = _find_depth_index(curves)
                 continue
 
-            if section == "WELL":
+            if section == "VERSION":
+                item = _well_item(line)
+                if item is None:
+                    continue
+                mnemonic, value = item
+                if mnemonic == "WRAP":
+                    wrapped = value.split()[0].upper() in {"YES", "Y", "TRUE", "1"}
+                elif mnemonic == "DLM":
+                    delimiter = _delimiter_name(value)
+            elif section == "WELL":
                 item = _well_item(line)
                 if item is None:
                     continue
@@ -123,9 +172,20 @@ def inspect_las_file(path: str) -> LASPreviewHeader:
                 if curve is not None:
                     curves.append(curve)
             elif section == "ASCII" and curves:
-                tokens = line.split()
-                if _valid_depth(tokens, len(curves), depth_index, null_value) is not None:
-                    row_count += 1
+                tokens = _data_tokens(line, delimiter)
+                for row in _logical_rows(
+                    tokens,
+                    pending_tokens,
+                    len(curves),
+                    wrapped,
+                ):
+                    if _valid_depth(
+                        row,
+                        len(curves),
+                        depth_index,
+                        null_value,
+                    ) is not None:
+                        row_count += 1
 
     if not curves:
         raise ValueError("LAS contains no curve headers")
@@ -136,6 +196,8 @@ def inspect_las_file(path: str) -> LASPreviewHeader:
         depth_index=_find_depth_index(curves),
         curves=tuple(curves),
         row_count=row_count,
+        wrapped=wrapped,
+        delimiter=delimiter,
     )
 
 
@@ -176,6 +238,7 @@ def read_sampled_ascii(
     last_depth = math.nan
     last_values: dict[int, float] = {}
     last_sampled_index = -1
+    pending_tokens: list[str] = []
 
     with open(path, "r", encoding="utf-8", errors="replace") as stream:
         for raw_line in stream:
@@ -188,25 +251,40 @@ def read_sampled_ascii(
             if section != "ASCII":
                 continue
 
-            tokens = line.split()
-            depth = _valid_depth(tokens, len(header.curves), header.depth_index, header.null_value)
-            if depth is None:
-                continue
+            tokens = _data_tokens(line, header.delimiter)
+            for row in _logical_rows(
+                tokens,
+                pending_tokens,
+                len(header.curves),
+                header.wrapped,
+            ):
+                depth = _valid_depth(
+                    row,
+                    len(header.curves),
+                    header.depth_index,
+                    header.null_value,
+                )
+                if depth is None:
+                    continue
 
-            row_values = {
-                curve.index: _selected_value(tokens, curve.index, header.null_value)
-                for curve in selected
-            }
-            last_valid_index = valid_index
-            last_depth = depth
-            last_values = row_values
+                row_values = {
+                    curve.index: _selected_value(
+                        row,
+                        curve.index,
+                        header.null_value,
+                    )
+                    for curve in selected
+                }
+                last_valid_index = valid_index
+                last_depth = depth
+                last_values = row_values
 
-            if valid_index % stride == 0 and len(sampled_depths) < max_samples:
-                sampled_depths.append(depth)
-                for curve in selected:
-                    sampled_values[curve.index].append(row_values[curve.index])
-                last_sampled_index = valid_index
-            valid_index += 1
+                if valid_index % stride == 0 and len(sampled_depths) < max_samples:
+                    sampled_depths.append(depth)
+                    for curve in selected:
+                        sampled_values[curve.index].append(row_values[curve.index])
+                    last_sampled_index = valid_index
+                valid_index += 1
 
     if last_valid_index >= 0 and last_sampled_index != last_valid_index:
         if len(sampled_depths) < max_samples:

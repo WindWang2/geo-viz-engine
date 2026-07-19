@@ -532,6 +532,9 @@ class SeismicView(QWidget):
         self._3d_mode_combo = QComboBox()
         self._3d_mode_combo.addItems(["正交切片", "三维体"])
         self._3d_mode_combo.currentIndexChanged.connect(self._on_3d_mode_changed)
+        # Keep the first-load experience aligned with the interactive 3D host:
+        # show the volume instead of hiding it behind the orthogonal slice mode.
+        self._3d_mode_combo.setCurrentIndex(1)
 
         self._opacity_combo = QComboBox()
         self._opacity_combo.addItems(["透明度: 锐利", "透明度: 线性", "透明度: S曲线", "透明度: 阈值"])

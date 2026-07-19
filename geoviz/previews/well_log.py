@@ -3,8 +3,8 @@ from __future__ import annotations
 from PySide6.QtWidgets import QWidget
 
 from geoviz_well_log import (
-    WellLogCanvas,
     WellLogData,
+    WellLogView,
     build_qpainter_tracks,
     load_las_preview,
 )
@@ -60,16 +60,16 @@ class WellLogPreviewBackend:
         )
 
     def create_widget(self, parent: QWidget | None = None) -> QWidget:
-        return WellLogCanvas(parent)
+        return WellLogView(parent)
 
     def render(self, widget: QWidget, preview: PreparedPreview) -> None:
         payload = preview.payload
-        if not isinstance(widget, WellLogCanvas) or not isinstance(payload, WellLogData):
+        if not isinstance(widget, WellLogView) or not isinstance(payload, WellLogData):
             raise GeoVizError(ErrorCode.RENDER_ERROR, "无法渲染 LAS 测井数据")
         widget.set_tracks(build_qpainter_tracks(payload))
 
     def release(self, widget: QWidget) -> None:
-        if not isinstance(widget, WellLogCanvas):
+        if not isinstance(widget, WellLogView):
             raise GeoVizError(ErrorCode.RENDER_ERROR, "无法释放 LAS 测井画布")
         widget.set_tracks([])
 

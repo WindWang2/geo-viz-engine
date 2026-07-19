@@ -53,17 +53,19 @@ def test_seismic_view_init(qtbot):
 def test_seismic_view_load_demo(qtbot):
     from geoviz_seismic.seismic_view import SeismicView
 
-    view = SeismicView()
+    view = SeismicView(auto_load=False)
     qtbot.addWidget(view)
     data = np.random.randn(10, 15, 20).astype(np.float32)
     view.load_demo(data)
     assert view.is_ready()
+    assert view._3d_mode_combo.currentText() == "三维体"
+    assert view._renderer_3d._mode == "volume"
 
 
 def test_seismic_view_set_mode(qtbot):
     from geoviz_seismic.seismic_view import SeismicView
 
-    view = SeismicView()
+    view = SeismicView(auto_load=False)
     qtbot.addWidget(view)
     view.set_display_mode("wiggle")
     assert view.display_mode() == "wiggle"
@@ -80,7 +82,7 @@ def test_seismic_view_toolbar_split_into_two_rows(qtbot):
     from PySide6.QtWidgets import QToolBar
     from geoviz_seismic.seismic_view import SeismicView
 
-    view = SeismicView()
+    view = SeismicView(auto_load=False)
     qtbot.addWidget(view)
 
     # Both rows must exist and be QToolBars
@@ -109,7 +111,7 @@ def test_seismic_view_dual_volume_overlay(qtbot):
     """Verify that SeismicView adds UI controls for dual-volume overlays, connects them, and propagates changes."""
     from geoviz_seismic.seismic_view import SeismicView
 
-    view = SeismicView()
+    view = SeismicView(auto_load=False)
     qtbot.addWidget(view)
 
     # 1. Assert overlay UI controls exist and are placed on toolbar row 2
@@ -155,4 +157,3 @@ def test_seismic_view_dual_volume_overlay(qtbot):
 
     view._overlay_btn.setChecked(True)
     assert view._renderer_3d._overlay_volume_visual.visible() is True
-

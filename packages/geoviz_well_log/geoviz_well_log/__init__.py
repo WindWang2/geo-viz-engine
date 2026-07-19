@@ -51,6 +51,7 @@ from .renderer import (
 
 # Track builder
 from .qpainter_builder import build_qpainter_tracks
+from .well_log_view import WellLogView
 
 # Bounded LAS preview loader
 from .las_preview import (
@@ -104,6 +105,7 @@ __all__ = [
     "DepthRuler",
     # Builder
     "build_qpainter_tracks",
+    "WellLogView",
     # LAS preview
     "LASCurveHeader",
     "LASPreviewHeader",

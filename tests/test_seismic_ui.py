@@ -7,7 +7,7 @@ def app():
     return QApplication.instance() or QApplication([])
 
 def test_seismic_view_button_icons(app):
-    view = SeismicView()
+    view = SeismicView(auto_load=False)
     # Find the load button
     # Since it's a local variable in _build_toolbar, we might need to find children
     from PySide6.QtWidgets import QPushButton

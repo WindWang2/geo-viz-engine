@@ -132,3 +132,135 @@ def test_dual_gl_volume_item_unit(qtbot):
     assert item._primary_cmap_lut is primary_lut
     assert item._overlay_cmap_lut is overlay_lut
     assert item._cmap_needs_upload is True
+
+
+def test_dual_gl_volume_item_uses_pyopengl_compiler_and_clean_gles3_source(
+    monkeypatch,
+):
+    import geoviz_seismic.renderer_3d as renderer
+    from OpenGL.GL import shaders as pyopengl_shaders
+
+    compiler = getattr(renderer, "gl_shaders", None)
+    assert compiler is pyopengl_shaders
+
+    class FakeFormat:
+        @staticmethod
+        def version():
+            return (3, 2)
+
+    class FakeContext:
+        @staticmethod
+        def format():
+            return FakeFormat()
+
+        @staticmethod
+        def isOpenGLES():
+            return True
+
+    class FakeQOpenGLContext:
+        @staticmethod
+        def currentContext():
+            return FakeContext()
+
+    captured_sources = []
+
+    class FakeProgram(int):
+        def __new__(cls, value):
+            instance = super().__new__(cls, value)
+            instance.link_checks = 0
+            return instance
+
+        def check_linked(self):
+            self.link_checks += 1
+
+    class FakeCompiler:
+        program_calls = 0
+        program = FakeProgram(97)
+
+        @staticmethod
+        def compileShader(sources, shader_type):
+            captured_sources.append((tuple(sources), shader_type))
+            return len(captured_sources)
+
+        @classmethod
+        def compileProgram(cls, *_shaders):
+            cls.program_calls += 1
+            return cls.program
+
+    monkeypatch.setattr(renderer, "gl_shaders", FakeCompiler)
+    monkeypatch.setattr(renderer.QtGui, "QOpenGLContext", FakeQOpenGLContext)
+    monkeypatch.setattr(renderer.GL, "glBindAttribLocation", lambda *_args: None)
+    monkeypatch.setattr(renderer.GL, "glLinkProgram", lambda *_args: None)
+
+    item = renderer.DualGLVolumeItem(
+        np.zeros((4, 4, 4, 4), dtype=np.uint8)
+    )
+    first = item.getCustomShaderProgram()
+    second = item.getCustomShaderProgram()
+
+    fragment_source = "".join(captured_sources[1][0])
+    assert first == 97
+    assert second is first
+    assert len(captured_sources) == 2
+    assert FakeCompiler.program_calls == 1
+    assert first.link_checks == 1
+    assert "#version 300 es" in fragment_source
+    assert "texture3D(" not in fragment_source
+    assert "texture2D(" not in fragment_source
+
+
+@pytest.mark.parametrize(
+    ("is_gles", "version"),
+    [(True, (2, 0)), (False, (2, 1))],
+    ids=["gles2", "desktop-legacy"],
+)
+def test_dual_gl_volume_item_legacy_shaders_use_legacy_texture_functions(
+    monkeypatch,
+    is_gles,
+    version,
+):
+    import geoviz_seismic.renderer_3d as renderer
+
+    class FakeFormat:
+        @staticmethod
+        def version():
+            return version
+
+    class FakeContext:
+        @staticmethod
+        def format():
+            return FakeFormat()
+
+        @staticmethod
+        def isOpenGLES():
+            return is_gles
+
+    class FakeQOpenGLContext:
+        @staticmethod
+        def currentContext():
+            return FakeContext()
+
+    captured_sources = []
+
+    class FakeCompiler:
+        @staticmethod
+        def compileShader(sources, shader_type):
+            captured_sources.append((tuple(sources), shader_type))
+            return len(captured_sources)
+
+        @staticmethod
+        def compileProgram(*_shaders):
+            return object()
+
+    monkeypatch.setattr(renderer, "gl_shaders", FakeCompiler)
+    monkeypatch.setattr(renderer.QtGui, "QOpenGLContext", FakeQOpenGLContext)
+
+    item = renderer.DualGLVolumeItem(
+        np.zeros((4, 4, 4, 4), dtype=np.uint8)
+    )
+    item.getCustomShaderProgram()
+
+    fragment_source = "".join(captured_sources[1][0])
+    assert "texture3D(u_texture" in fragment_source
+    assert "texture2D(u_horizon_texture" in fragment_source
+    assert "texture(u_horizon_texture" not in fragment_source

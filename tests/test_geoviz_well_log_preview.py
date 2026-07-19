@@ -5,10 +5,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 
 from geoviz import ErrorCode, GeoVizEngine, GeoVizError, PreviewKind, PreviewOptions, PreviewRequest
 from geoviz_well_log import (
     WellLogCanvas,
+    WellLogView,
     inspect_las_file,
     load_las_preview,
     read_sampled_ascii,
@@ -162,6 +165,82 @@ def test_mixed_case_headers_bad_rows_and_all_null_curve_fallback(
 
 
 @pytest.mark.parametrize(
+    ("delimiter_name", "separator"),
+    [("COMMA", ","), ("TAB", "\t")],
+)
+def test_inspection_and_preview_support_las_declared_delimiters(
+    tmp_path: Path,
+    delimiter_name: str,
+    separator: str,
+):
+    path = tmp_path / f"delimited-{delimiter_name.lower()}.las"
+    path.write_text(
+        "\n".join(
+            [
+                "~VERSION INFORMATION",
+                " VERS. 2.0 : standard",
+                " WRAP. NO : one row per line",
+                f" DLM. {delimiter_name} : delimiter",
+                "~WELL INFORMATION",
+                " WELL. DLM-WELL : name",
+                " NULL. -999.25 : null",
+                "~CURVE INFORMATION",
+                " DEPT.M : depth",
+                " GR.API : gamma",
+                " RHOB.G/C3 : density",
+                "~ASCII",
+                separator.join(("1000", "10", "2.4")),
+                separator.join(("1001", "11", "2.5")),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    header = inspect_las_file(str(path))
+    data = load_las_preview(str(path), max_samples=10)
+
+    assert header.row_count == 2
+    assert data.well_name == "DLM-WELL"
+    assert data.curves[0].depth == [1000.0, 1001.0]
+    assert data.curves[0].values == [10.0, 11.0]
+
+
+def test_inspection_and_preview_support_wrapped_las_rows(tmp_path: Path):
+    path = tmp_path / "wrapped.las"
+    path.write_text(
+        "\n".join(
+            [
+                "~VERSION INFORMATION",
+                " VERS. 2.0 : standard",
+                " WRAP. YES : rows continue on following lines",
+                " DLM. SPACE : delimiter",
+                "~WELL INFORMATION",
+                " WELL. WRAPPED-WELL : name",
+                " NULL. -999.25 : null",
+                "~CURVE INFORMATION",
+                " DEPT.M : depth",
+                " GR.API : gamma",
+                " RHOB.G/C3 : density",
+                "~ASCII",
+                "1000",
+                "10 2.4",
+                "1001",
+                "11 2.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    header = inspect_las_file(str(path))
+    data = load_las_preview(str(path), max_samples=10)
+
+    assert header.row_count == 2
+    assert data.well_name == "WRAPPED-WELL"
+    assert data.curves[0].depth == [1000.0, 1001.0]
+    assert data.curves[1].values == [2.4, 2.5]
+
+
+@pytest.mark.parametrize(
     ("semantic_type", "format", "expected"),
     [
         ("well_log", "LAS", True),
@@ -195,18 +274,46 @@ def test_backend_prepares_bounded_plain_payload_without_qt_objects(bounded_las: 
     assert not isinstance(preview.payload, WellLogCanvas)
 
 
-def test_backend_renders_and_releases_well_log_canvas(qtbot, bounded_las: Path):
+def test_backend_renders_and_releases_interactive_well_log_view(qtbot, bounded_las: Path):
     engine = GeoVizEngine.default()
     preview = engine.prepare(_request(bounded_las), PreviewOptions(max_curves=2, max_depth_samples=20))
     widget = engine.create_widget(preview.kind)
     qtbot.addWidget(widget)
 
-    assert isinstance(widget, WellLogCanvas)
+    assert isinstance(widget, WellLogView)
     engine.render(widget, preview)
-    assert len(widget.tracks) == 3
+    assert len(widget.canvas.tracks) == 3
+    assert (widget._full_top, widget._full_bottom) == (1_000.0, 6_000.0)
+    assert (widget._zoom_handler._full_top, widget._zoom_handler._full_bottom) == (
+        1_000.0,
+        6_000.0,
+    )
+
+    widget.resize(640, 480)
+    before_zoom = widget.canvas.tracks[0].depth_span
+    wheel_event = QWheelEvent(
+        QPointF(120.0, 120.0),
+        QPointF(120.0, 120.0),
+        QPoint(),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    widget.wheelEvent(wheel_event)
+    assert widget.canvas.tracks[0].depth_span < before_zoom
+    assert widget.verticalScrollBar().maximum() > 0
+
+    widget.set_depth_range(1_500.0, 5_500.0)
+    widget.reset_view()
+    assert (widget.canvas.tracks[0].depth_top, widget.canvas.tracks[0].depth_bottom) == (
+        1_000.0,
+        6_000.0,
+    )
 
     engine.release(widget)
-    assert widget.tracks == []
+    assert widget.canvas.tracks == []
 
 
 def test_backend_maps_invalid_las_to_structured_error(tmp_path: Path):

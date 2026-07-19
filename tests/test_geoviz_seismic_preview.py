@@ -9,13 +9,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PySide6.QtWidgets import QComboBox, QSlider
+from PySide6.QtWidgets import QWidget
 
 from geoviz import ErrorCode, GeoVizEngine, GeoVizError, PreviewKind, PreviewOptions, PreviewRequest
-from geoviz_seismic import SeismicPreviewWidget, SeismicPreviewPayload, SeismicSlice
+import geoviz_seismic
+from geoviz_seismic import SeismicPreviewPayload, SeismicSlice
 from geoviz_seismic.loader import SeismicLoader
 from geoviz_seismic.models import SeismicVolumeMeta
-from geoviz_seismic.profile_widget import ProfileWidget
 from geoviz_seismic.preview_widget import downsample_2d
 from geoviz.previews.seismic import downsample_2d as engine_downsample_2d
 
@@ -273,7 +273,30 @@ def test_slice_preview_import_check_rejects_wrong_pythonpath(tmp_path: Path):
     )
 
 
-def test_widget_switches_stable_slice_modes(qtbot, small_segy_path):
+def test_backend_creates_full_view_lazily_and_delegates_async_load(
+    qtbot, monkeypatch, small_segy_path
+):
+    created = []
+
+    class FakeSeismicView(QWidget):
+        def __init__(self, parent=None, *, auto_load=True):
+            super().__init__(parent)
+            self.auto_load = auto_load
+            self.render_modes = []
+            self.loaded_paths = []
+            self.cleaned_up = False
+            created.append(self)
+
+        def set_render_mode(self, mode):
+            self.render_modes.append(mode)
+
+        def load_segy_async(self, path):
+            self.loaded_paths.append(path)
+
+        def cleanup(self):
+            self.cleaned_up = True
+
+    monkeypatch.setattr(geoviz_seismic, "SeismicView", FakeSeismicView)
     preview = GeoVizEngine.default().prepare(
         _request(small_segy_path), PreviewOptions(max_slice_axis=16)
     )
@@ -281,67 +304,15 @@ def test_widget_switches_stable_slice_modes(qtbot, small_segy_path):
     widget = engine.create_widget(preview.kind)
     qtbot.addWidget(widget)
 
-    assert isinstance(widget, SeismicPreviewWidget)
-    combo = widget.findChild(QComboBox)
-    profile = widget.findChild(ProfileWidget)
-    assert combo is not None
-    assert profile is not None
-    assert [combo.itemData(index) for index in range(combo.count())] == [
-        "inline",
-        "crossline",
-        "time",
-    ]
+    assert isinstance(widget, FakeSeismicView)
+    assert created == [widget]
+    assert widget.auto_load is False
+    assert widget.render_modes == ["planes"]
+    assert widget.loaded_paths == []
 
     engine.render(widget, preview)
-    assert profile._current_data is preview.payload.slices["inline"].data
-    assert profile._current_slice_info is preview.payload.slices["inline"].info
-
-    combo.setCurrentIndex(combo.findData("time"))
-    assert profile._current_data is preview.payload.slices["time"].data
-    assert profile._current_slice_info is preview.payload.slices["time"].info
+    assert widget.render_modes == ["planes", "planes"]
+    assert widget.loaded_paths == [str(small_segy_path)]
 
     engine.release(widget)
-    assert widget._slices == {}
-    assert profile._overlay.text() == "暂无地震切片"
-    assert not profile._overlay.isHidden()
-
-
-def test_widget_position_slider_reloads_slice(qtbot, small_segy_path):
-    preview = GeoVizEngine.default().prepare(
-        _request(small_segy_path), PreviewOptions(max_slice_axis=16)
-    )
-    engine = GeoVizEngine.default()
-    widget = engine.create_widget(preview.kind)
-    qtbot.addWidget(widget)
-    assert isinstance(widget, SeismicPreviewWidget)
-
-    engine.render(widget, preview)
-    slider = widget.position_slider
-    assert isinstance(slider, QSlider)
-    assert slider.isEnabled()
-    assert slider.maximum() >= 1
-
-    axis = preview.payload.axes["inline"]
-    middle_index = axis.index_of(preview.payload.slices["inline"].info.position)
-    target_index = 0 if middle_index != 0 else min(1, axis.count - 1)
-    assert target_index != middle_index or axis.count == 1
-
-    if axis.count > 1:
-        middle_data = widget.profile._current_data
-        widget._reload_timer.setInterval(0)
-        slider.setValue(target_index)
-        # Process the zero-interval debounce timer.
-        qtbot.waitUntil(
-            lambda: int(widget.profile._current_slice_info.position)
-            == axis.position_at(target_index),
-            timeout=3000,
-        )
-        assert widget.profile._current_data is not None
-        # Position must change; data object may be a new array.
-        assert int(widget.profile._current_slice_info.position) == axis.position_at(
-            target_index
-        )
-        assert "Inline" in widget.position_label.text()
-
-    engine.release(widget)
-    assert not slider.isEnabled()
+    assert widget.cleaned_up is True
