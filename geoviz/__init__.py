@@ -20,6 +20,8 @@ from .registry import PreviewRegistry
 # name → (module, attribute) for lazy workbench-facing exports.
 _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "WellLogCanvas": ("geoviz_well_log", "WellLogCanvas"),
+    "WellSectionCanvas": ("geoviz_well_log", "WellSectionCanvas"),
+    "DatumTransformer": ("geoviz_well_log", "DatumTransformer"),
     "WellLogData": ("geoviz_well_log", "WellLogData"),
     "CurveData": ("geoviz_well_log", "CurveData"),
     "build_qpainter_tracks": ("geoviz_well_log", "build_qpainter_tracks"),

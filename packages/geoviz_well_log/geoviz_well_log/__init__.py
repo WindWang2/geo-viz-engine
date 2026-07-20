@@ -68,6 +68,12 @@ from .xml_preview import load_xml_preview
 from .export_qpainter import export_svg, export_pdf, export_png
 
 # Cross-well widgets
+from .section import (
+    DatumTransformer,
+    FaciesQuad,
+    HorizonLink,
+    WellSectionCanvas,
+)
 from .cross_well_widget import CrossWellWidget
 from .painter_sync_manager import QPainterSyncManager
 
