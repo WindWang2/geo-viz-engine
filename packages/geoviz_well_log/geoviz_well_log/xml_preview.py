@@ -34,8 +34,8 @@ def _unit_for_header(h_name: str) -> str:
 def load_xml_preview(
     path: str,
     *,
-    max_curves: int = 12,
-    max_samples: int = 2_000,
+    max_curves: int = 30,
+    max_samples: int = 100_000,
 ) -> WellLogData:
     path_obj = Path(path)
     try:
@@ -70,6 +70,17 @@ def load_xml_preview(
                             r_vals: list[str] = []
                             for c_elem in r_elem:
                                 if _local_tag(c_elem) == "Cell":
+                                    idx_attr = c_elem.attrib.get(
+                                        "{urn:schemas-microsoft-com:office:spreadsheet}Index",
+                                        c_elem.attrib.get("ss:Index", c_elem.attrib.get("Index", ""))
+                                    )
+                                    if idx_attr:
+                                        try:
+                                            target_col = int(idx_attr) - 1
+                                            while len(r_vals) < target_col:
+                                                r_vals.append("")
+                                        except ValueError:
+                                            pass
                                     txt = ""
                                     for d_elem in c_elem:
                                         if _local_tag(d_elem) == "Data":
