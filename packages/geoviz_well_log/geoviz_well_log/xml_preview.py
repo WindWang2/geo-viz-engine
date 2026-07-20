@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from .models import CurveData, IntervalItem, LithologyInterval, WellIntervals, WellLogData
+from .models import CurveData, FaciesInterval, IntervalItem, LithologyInterval, WellIntervals, WellLogData
 
 
 def _clean_tag(tag: str) -> str:
@@ -280,20 +280,27 @@ def load_xml_preview(
                             except ValueError:
                                 pass
 
-                # 3. Core & Text annotations / photo descriptions (取心、文本道)
+                # 3. Core & Text annotations / photo descriptions / Facies (取心、文本道)
                 if any(k in w_name for k in ("文本", "取心", "说明", "备注")):
-                    txt_i = next((i for i, c in enumerate(w_h) if c in ("文本", "道名", "描述", "说明", "进尺", "心长")), -1)
-                    if txt_i >= 0:
-                        for r in w_rows[1:]:
-                            if top_i < len(r) and txt_i < len(r):
-                                try:
-                                    t_val = float(r[top_i])
-                                    b_val = float(r[bot_i]) if bot_i >= 0 and bot_i < len(r) and r[bot_i] else t_val + 2.0
-                                    n_val = r[txt_i].strip()
-                                    if n_val:
-                                        text_desc_list.append(IntervalItem(top=t_val, bottom=b_val, name=n_val))
-                                except ValueError:
-                                    pass
+                    txt_i = next((i for i, c in enumerate(w_h) if c in ("文本", "描述", "说明", "进尺", "心长")), -1)
+                    track_i = next((i for i, c in enumerate(w_h) if c in ("道名", "类型")), -1)
+                    for r in w_rows[1:]:
+                        if top_i < len(r):
+                            try:
+                                t_val = float(r[top_i])
+                                b_val = float(r[bot_i]) if bot_i >= 0 and bot_i < len(r) and r[bot_i] else t_val + 2.0
+                                track_name = r[track_i].strip() if track_i >= 0 and track_i < len(r) else ""
+                                val = r[txt_i].strip() if txt_i >= 0 and txt_i < len(r) else ""
+                                if not val and track_i >= 0 and track_i < len(r) and track_i != txt_i:
+                                    val = r[track_i].strip()
+
+                                if val and t_val < b_val:
+                                    if "相" in track_name:
+                                        facies_list.append(FaciesInterval(top=t_val, bottom=b_val, facies=val))
+                                    else:
+                                        text_desc_list.append(IntervalItem(top=t_val, bottom=b_val, name=val))
+                            except ValueError:
+                                pass
 
                 # 4. Standard Horizon Markers (标准层道)
                 if "标准层" in w_name:
