@@ -58,11 +58,15 @@ class CurveTrack(BaseTrack):
     def _visible_data(self, curve: CurveData) -> tuple[list[float], list[float]]:
         depths = self._sorted_depths.get(curve.name, curve.depth)
         values = self._sorted_values.get(curve.name, curve.values)
-        margin = (self.depth_bottom - self.depth_top) * 0.01
+        if not depths or not values:
+            return [], []
+        margin = (self.depth_bottom - self.depth_top) * 0.05
         top = self.depth_top - margin
         bottom = self.depth_bottom + margin
         start = bisect.bisect_left(depths, top)
         end = bisect.bisect_right(depths, bottom)
+        start = max(0, start - 1)
+        end = min(len(depths), end + 1)
         return depths[start:end], values[start:end]
 
     def _downsample(self, depths: list[float], values: list[float],
@@ -202,9 +206,16 @@ class CurveTrack(BaseTrack):
                         xs = rect.left() + t_arr * rect.width()
 
                 path = QPainterPath()
-                path.moveTo(float(xs[0]), float(ys[0]))
-                for x, y in zip(xs[1:], ys[1:]):
-                    path.lineTo(float(x), float(y))
+                first = True
+                for x, y in zip(xs, ys):
+                    if np.isnan(x) or np.isnan(y) or np.isinf(x) or np.isinf(y):
+                        first = True
+                        continue
+                    if first:
+                        path.moveTo(float(x), float(y))
+                        first = False
+                    else:
+                        path.lineTo(float(x), float(y))
 
                 self._path_cache[curve.name] = (cache_key, path)
 
