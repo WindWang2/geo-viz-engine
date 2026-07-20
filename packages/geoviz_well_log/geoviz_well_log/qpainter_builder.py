@@ -131,7 +131,10 @@ def build_qpainter_tracks(data: WellLogData, merge_groups: list[tuple[list[str],
         tracks.append(LithologyTrack(intervals=litho_intervals, label="岩性", width=80))
 
     # 5. Facies with group_name
-    if data.intervals and data.intervals.facies:
+    if data.facies:
+        facies_items = [IntervalItem(top=f.top, bottom=f.bottom, name=f.facies) for f in data.facies]
+        tracks.append(IntervalTrack(intervals=facies_items, label="沉积相", width=80))
+    elif data.intervals and data.intervals.facies:
         f = data.intervals.facies
         has_data = any([f.phase, f.sub_phase, f.micro_phase])
         if has_data:

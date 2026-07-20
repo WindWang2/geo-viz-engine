@@ -209,6 +209,9 @@ def load_xml_preview(
 
     lithology_list: list[LithologyInterval] = []
     formation_list: list[IntervalItem] = []
+    facies_list: list[FaciesInterval] = []
+    text_desc_list: list[IntervalItem] = []
+    horizon_list: list[IntervalItem] = []
 
     for worksheet_elem in root.iter():
         if _clean_tag(worksheet_elem.tag).lower() == "worksheet":
@@ -235,44 +238,81 @@ def load_xml_preview(
                             if row_vals:
                                 w_rows.append(row_vals)
 
-            if "岩性" in w_name and len(w_rows) > 1:
+            if len(w_rows) > 1:
                 w_h = [x.strip() for x in w_rows[0]]
-                top_i = next((i for i, c in enumerate(w_h) if c in ("顶深", "顶TVD", "Top")), -1)
+                top_i = next((i for i, c in enumerate(w_h) if c in ("顶深", "顶TVD", "深度", "Top")), -1)
                 bot_i = next((i for i, c in enumerate(w_h) if c in ("底深", "底TVD", "Bottom")), -1)
-                name_i = next((i for i, c in enumerate(w_h) if "岩性" in c), -1)
-                for r in w_rows[1:]:
-                    if top_i < len(r) and bot_i < len(r) and name_i < len(r):
-                        try:
-                            t_val, b_val, n_val = float(r[top_i]), float(r[bot_i]), r[name_i].strip()
-                            if n_val and t_val < b_val:
-                                lithology_list.append(
-                                    LithologyInterval(
-                                        top=t_val,
-                                        bottom=b_val,
-                                        lithology=n_val,
-                                        description=n_val,
+
+                # 1. Lithology (岩性)
+                if "岩性" in w_name:
+                    name_i = next((i for i, c in enumerate(w_h) if "岩性" in c), -1)
+                    for r in w_rows[1:]:
+                        if top_i < len(r) and bot_i < len(r) and name_i < len(r):
+                            try:
+                                t_val, b_val, n_val = float(r[top_i]), float(r[bot_i]), r[name_i].strip()
+                                if n_val and t_val < b_val:
+                                    lithology_list.append(
+                                        LithologyInterval(
+                                            top=t_val,
+                                            bottom=b_val,
+                                            lithology=n_val,
+                                            description=n_val,
+                                        )
                                     )
-                                )
-                        except ValueError:
-                            pass
+                            except ValueError:
+                                pass
 
-            if any(k in w_name for k in ("地层", "砂层", "层序", "分层")) and len(w_rows) > 1:
-                w_h = [x.strip() for x in w_rows[0]]
-                top_i = next((i for i, c in enumerate(w_h) if c in ("顶深", "顶TVD", "Top")), -1)
-                bot_i = next((i for i, c in enumerate(w_h) if c in ("底深", "底TVD", "Bottom")), -1)
-                name_i = next((i for i, c in enumerate(w_h) if c in ("层号", "层名", "相类型", "相")), -1)
-                for r in w_rows[1:]:
-                    if top_i < len(r) and bot_i < len(r) and name_i < len(r):
-                        try:
-                            t_val, b_val, n_val = float(r[top_i]), float(r[bot_i]), r[name_i].strip()
-                            if n_val and t_val < b_val:
-                                formation_list.append(
-                                    IntervalItem(top=t_val, bottom=b_val, name=n_val)
-                                )
-                        except ValueError:
-                            pass
+                # 2. Stratigraphy & Facies (地层单位、砂层组、沉积相)
+                if any(k in w_name for k in ("地层", "砂层", "层序", "分层", "相")):
+                    form_i = next((i for i, c in enumerate(w_h) if c in ("层号", "层名", "组", "统")), -1)
+                    facies_i = next((i for i, c in enumerate(w_h) if "相" in c), -1)
+                    for r in w_rows[1:]:
+                        if top_i < len(r) and bot_i < len(r):
+                            try:
+                                t_val = float(r[top_i])
+                                b_val = float(r[bot_i]) if bot_i < len(r) and r[bot_i] else t_val + 1.0
+                                if t_val < b_val:
+                                    if form_i >= 0 and form_i < len(r) and r[form_i].strip():
+                                        formation_list.append(IntervalItem(top=t_val, bottom=b_val, name=r[form_i].strip()))
+                                    if facies_i >= 0 and facies_i < len(r) and r[facies_i].strip():
+                                        facies_list.append(FaciesInterval(top=t_val, bottom=b_val, facies=r[facies_i].strip()))
+                            except ValueError:
+                                pass
 
-    intervals = WellIntervals(formation=formation_list) if formation_list else None
+                # 3. Core & Text annotations / photo descriptions (取心、文本道)
+                if any(k in w_name for k in ("文本", "取心", "说明", "备注")):
+                    txt_i = next((i for i, c in enumerate(w_h) if c in ("文本", "道名", "描述", "说明", "进尺", "心长")), -1)
+                    if txt_i >= 0:
+                        for r in w_rows[1:]:
+                            if top_i < len(r) and txt_i < len(r):
+                                try:
+                                    t_val = float(r[top_i])
+                                    b_val = float(r[bot_i]) if bot_i >= 0 and bot_i < len(r) and r[bot_i] else t_val + 2.0
+                                    n_val = r[txt_i].strip()
+                                    if n_val:
+                                        text_desc_list.append(IntervalItem(top=t_val, bottom=b_val, name=n_val))
+                                except ValueError:
+                                    pass
+
+                # 4. Standard Horizon Markers (标准层道)
+                if "标准层" in w_name:
+                    name_i = next((i for i, c in enumerate(w_h) if c in ("层名", "标准层", "文本")), -1)
+                    if name_i >= 0:
+                        for r in w_rows[1:]:
+                            if top_i < len(r) and name_i < len(r):
+                                try:
+                                    t_val = float(r[top_i])
+                                    n_val = r[name_i].strip()
+                                    if n_val:
+                                        horizon_list.append(IntervalItem(top=t_val, bottom=t_val + 1.0, name=n_val))
+                                except ValueError:
+                                    pass
+
+    intervals = WellIntervals(
+        formation=formation_list if formation_list else [],
+        sequence=horizon_list if horizon_list else [],
+        lithology_desc=text_desc_list if text_desc_list else [],
+    )
 
     return WellLogData(
         well_name=well_name,
@@ -280,6 +320,7 @@ def load_xml_preview(
         bottom_depth=bottom_depth,
         curves=curves,
         lithology=lithology_list,
+        facies=facies_list,
         intervals=intervals,
     )
 
