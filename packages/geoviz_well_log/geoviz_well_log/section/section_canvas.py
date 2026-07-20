@@ -114,6 +114,9 @@ class WellSectionCanvas(QWidget):
         self._transformer.scale_y = content_h / depth_span
 
         offsets = self._calculate_well_x_offsets()
+        if offsets:
+            total_w = int(offsets[-1][0] + offsets[-1][1] + 20.0)
+            self.setMinimumWidth(total_w)
 
         # 1. Render Facies Quad Fills & Horizon Links across adjacent wells first (background layer)
         if len(self._wells) >= 2:
