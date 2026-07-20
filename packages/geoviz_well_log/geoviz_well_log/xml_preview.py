@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from .models import CurveData, WellLogData
+from .models import CurveData, IntervalItem, LithologyInterval, WellIntervals, WellLogData
 
 
 def _clean_tag(tag: str) -> str:
@@ -207,11 +207,80 @@ def load_xml_preview(
             )
         )
 
+    lithology_list: list[LithologyInterval] = []
+    formation_list: list[IntervalItem] = []
+
+    for worksheet_elem in root.iter():
+        if _clean_tag(worksheet_elem.tag).lower() == "worksheet":
+            w_name = worksheet_elem.attrib.get(
+                "{urn:schemas-microsoft-com:office:spreadsheet}Name",
+                worksheet_elem.attrib.get("ss:Name", ""),
+            )
+            w_rows: list[list[str]] = []
+            for table in worksheet_elem.iter():
+                if _clean_tag(table.tag).lower() == "table":
+                    for row in table.iter():
+                        if _clean_tag(row.tag).lower() == "row":
+                            row_vals: list[str] = []
+                            for cell in row.iter():
+                                if _clean_tag(cell.tag).lower() == "cell":
+                                    txt = ""
+                                    for d in cell.iter():
+                                        if _clean_tag(d.tag).lower() == "data":
+                                            txt = (d.text or "").strip()
+                                            break
+                                    if not txt and cell.text:
+                                        txt = cell.text.strip()
+                                    row_vals.append(txt)
+                            if row_vals:
+                                w_rows.append(row_vals)
+
+            if "岩性" in w_name and len(w_rows) > 1:
+                w_h = [x.strip() for x in w_rows[0]]
+                top_i = next((i for i, c in enumerate(w_h) if c in ("顶深", "顶TVD", "Top")), -1)
+                bot_i = next((i for i, c in enumerate(w_h) if c in ("底深", "底TVD", "Bottom")), -1)
+                name_i = next((i for i, c in enumerate(w_h) if "岩性" in c), -1)
+                for r in w_rows[1:]:
+                    if top_i < len(r) and bot_i < len(r) and name_i < len(r):
+                        try:
+                            t_val, b_val, n_val = float(r[top_i]), float(r[bot_i]), r[name_i].strip()
+                            if n_val and t_val < b_val:
+                                lithology_list.append(
+                                    LithologyInterval(
+                                        top=t_val,
+                                        bottom=b_val,
+                                        lithology=n_val,
+                                        description=n_val,
+                                    )
+                                )
+                        except ValueError:
+                            pass
+
+            if any(k in w_name for k in ("地层", "砂层", "层序", "分层")) and len(w_rows) > 1:
+                w_h = [x.strip() for x in w_rows[0]]
+                top_i = next((i for i, c in enumerate(w_h) if c in ("顶深", "顶TVD", "Top")), -1)
+                bot_i = next((i for i, c in enumerate(w_h) if c in ("底深", "底TVD", "Bottom")), -1)
+                name_i = next((i for i, c in enumerate(w_h) if c in ("层号", "层名", "相类型", "相")), -1)
+                for r in w_rows[1:]:
+                    if top_i < len(r) and bot_i < len(r) and name_i < len(r):
+                        try:
+                            t_val, b_val, n_val = float(r[top_i]), float(r[bot_i]), r[name_i].strip()
+                            if n_val and t_val < b_val:
+                                formation_list.append(
+                                    IntervalItem(top=t_val, bottom=b_val, name=n_val)
+                                )
+                        except ValueError:
+                            pass
+
+    intervals = WellIntervals(formation=formation_list) if formation_list else None
+
     return WellLogData(
         well_name=well_name,
         top_depth=top_depth,
         bottom_depth=bottom_depth,
         curves=curves,
+        lithology=lithology_list,
+        intervals=intervals,
     )
 
 
