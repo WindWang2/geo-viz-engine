@@ -38,38 +38,63 @@ def load_xml_preview(
     max_samples: int = 2_000,
 ) -> WellLogData:
     path_obj = Path(path)
-    tree = ET.parse(path_obj)
+    try:
+        import lxml.etree as ET
+    except ImportError:
+        import xml.etree.ElementTree as ET
+
+    tree = ET.parse(str(path_obj))
     root = tree.getroot()
 
     headers: list[str] = []
     rows: list[list[str]] = []
     well_name = path_obj.stem
 
-    # 1. SpreadsheetML / Excel XML (<Table><Row><Cell><Data>)
-    all_rows: list[list[str]] = []
-    for elem in root.iter():
-        if _clean_tag(elem.tag).lower() == "table":
-            for child in elem:
-                if _clean_tag(child.tag).lower() == "row":
-                    row_vals: list[str] = []
-                    for cell in child:
-                        if _clean_tag(cell.tag).lower() == "cell":
-                            cell_text = ""
-                            for data_node in cell:
-                                if _clean_tag(data_node.tag).lower() == "data":
-                                    cell_text = (data_node.text or "").strip()
-                                    break
-                            if not cell_text and cell.text:
-                                cell_text = cell.text.strip()
-                            row_vals.append(cell_text)
-                    if row_vals:
-                        all_rows.append(row_vals)
-            if all_rows:
-                break
+    def _local_tag(elem) -> str:
+        t = elem.tag
+        return t.rsplit("}", 1)[-1] if "}" in t else t
 
-    if all_rows and len(all_rows) > 1:
-        headers = [str(h).strip() for h in all_rows[0] if str(h).strip()]
-        raw_rows = all_rows[1:]
+    # Fast direct child iteration for all worksheets
+    sheets_data: dict[str, list[list[str]]] = {}
+    for child in root:
+        if _local_tag(child) == "Worksheet":
+            s_name = child.attrib.get(
+                "{urn:schemas-microsoft-com:office:spreadsheet}Name",
+                child.attrib.get("ss:Name", "Sheet"),
+            )
+            s_rows: list[list[str]] = []
+            for w_child in child:
+                if _local_tag(w_child) == "Table":
+                    for r_elem in w_child:
+                        if _local_tag(r_elem) == "Row":
+                            r_vals: list[str] = []
+                            for c_elem in r_elem:
+                                if _local_tag(c_elem) == "Cell":
+                                    txt = ""
+                                    for d_elem in c_elem:
+                                        if _local_tag(d_elem) == "Data":
+                                            txt = (d_elem.text or "").strip()
+                                            break
+                                    if not txt and c_elem.text:
+                                        txt = c_elem.text.strip()
+                                    r_vals.append(txt)
+                            if r_vals:
+                                s_rows.append(r_vals)
+            if s_rows:
+                sheets_data[s_name] = s_rows
+
+    # Pick 测井曲线 sheet or first sheet for curve data
+    curve_sheet_rows: list[list[str]] = []
+    for s_name, s_rows in sheets_data.items():
+        if "测井曲线" in s_name:
+            curve_sheet_rows = s_rows
+            break
+    if not curve_sheet_rows and sheets_data:
+        curve_sheet_rows = next(iter(sheets_data.values()))
+
+    if curve_sheet_rows and len(curve_sheet_rows) > 1:
+        headers = [str(h).strip() for h in curve_sheet_rows[0] if str(h).strip()]
+        raw_rows = curve_sheet_rows[1:]
         if headers and headers[0] in ("井号", "Well", "WELL_NAME", "WELL"):
             well_names = [r[0] for r in raw_rows if r and r[0]]
             if well_names:
@@ -213,32 +238,8 @@ def load_xml_preview(
     text_desc_list: list[IntervalItem] = []
     horizon_list: list[IntervalItem] = []
 
-    for worksheet_elem in root.iter():
-        if _clean_tag(worksheet_elem.tag).lower() == "worksheet":
-            w_name = worksheet_elem.attrib.get(
-                "{urn:schemas-microsoft-com:office:spreadsheet}Name",
-                worksheet_elem.attrib.get("ss:Name", ""),
-            )
-            w_rows: list[list[str]] = []
-            for table in worksheet_elem.iter():
-                if _clean_tag(table.tag).lower() == "table":
-                    for row in table.iter():
-                        if _clean_tag(row.tag).lower() == "row":
-                            row_vals: list[str] = []
-                            for cell in row.iter():
-                                if _clean_tag(cell.tag).lower() == "cell":
-                                    txt = ""
-                                    for d in cell.iter():
-                                        if _clean_tag(d.tag).lower() == "data":
-                                            txt = (d.text or "").strip()
-                                            break
-                                    if not txt and cell.text:
-                                        txt = cell.text.strip()
-                                    row_vals.append(txt)
-                            if row_vals:
-                                w_rows.append(row_vals)
-
-            if len(w_rows) > 1:
+    for w_name, w_rows in sheets_data.items():
+        if len(w_rows) > 1:
                 w_h = [x.strip() for x in w_rows[0]]
                 top_i = next((i for i, c in enumerate(w_h) if c in ("顶深", "顶TVD", "深度", "Top")), -1)
                 bot_i = next((i for i, c in enumerate(w_h) if c in ("底深", "底TVD", "Bottom")), -1)
