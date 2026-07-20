@@ -46,7 +46,7 @@ class _TrackMouseFilter(QObject):
         return False  # don't consume — let tracks still receive events
 
 
-class WellLogCanvas(QOpenGLWidget):
+class WellLogCanvas(QWidget):
     """Main canvas widget for well log visualization.
 
     Manages track layout, depth range, and provides unified paint_all()
@@ -59,6 +59,8 @@ class WellLogCanvas(QOpenGLWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setAutoFillBackground(True)
         self._coordinator = LayoutCoordinator()
         self._track_filter = _TrackMouseFilter(self)
         self._crosshair: CrosshairOverlay | None = None
@@ -202,6 +204,7 @@ class WellLogCanvas(QOpenGLWidget):
             self._cache_dirty = False
 
         painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
         painter.drawPixmap(0, 0, self._static_cache)
         if self._crosshair and self._crosshair.visible and self.tracks:
             self._crosshair.paint_overlay(painter, QRectF(self.rect()))
