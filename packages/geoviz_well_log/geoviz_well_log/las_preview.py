@@ -309,12 +309,8 @@ def curve_data_from_arrays(
     depth: np.ndarray,
     values: np.ndarray,
 ) -> CurveData:
-    finite = values[np.isfinite(values)]
-    display_range = (
-        (float(np.min(finite)), float(np.max(finite)))
-        if finite.size
-        else (0.0, 100.0)
-    )
+    from .robust_scale import compute_robust_display_range
+    display_range = compute_robust_display_range(values, header.mnemonic)
     return CurveData(
         name=header.mnemonic,
         unit=header.unit,

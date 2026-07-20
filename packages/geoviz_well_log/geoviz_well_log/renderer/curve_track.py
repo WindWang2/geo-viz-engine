@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import bisect
+import math
 from math import log10
 
 import numpy as np
@@ -24,7 +25,23 @@ class CurveTrack(BaseTrack):
         computed_hh = header_height if header_height is not None else max(56, 28 + n_curves * 18)
         super().__init__(label=label or (curves[0].name if curves else ""),
                          width=width, header_height=computed_hh, parent=parent)
-        self._curves = curves
+        from ..robust_scale import compute_robust_display_range
+        sanitized_curves = []
+        for c in curves:
+            lo, hi = c.display_range
+            if lo <= -100.0 or hi > 1e5 or math.isclose(lo, hi):
+                robust_range = compute_robust_display_range(c.values, c.name)
+                c = CurveData(
+                    name=c.name,
+                    unit=c.unit,
+                    depth=c.depth,
+                    values=c.values,
+                    display_range=robust_range,
+                    color=c.color,
+                    line_style=c.line_style,
+                )
+            sanitized_curves.append(c)
+        self._curves = sanitized_curves
         self._log_scale = log_scale
         self._path_cache = {}
         # Store sorted copies — never mutate the original Pydantic models

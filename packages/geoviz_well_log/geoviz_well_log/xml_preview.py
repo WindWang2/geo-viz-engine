@@ -217,17 +217,13 @@ def load_xml_preview(
         "#0284c7", "#b91c1c", "#4d7c0f", "#6d28d9",
     ]
 
+    from .robust_scale import compute_robust_display_range
+
     curves: list[CurveData] = []
     for idx_in_sel, col_idx in enumerate(selected_indices):
         h_name = headers[col_idx] if col_idx < len(headers) else f"Curve_{col_idx}"
         val_arr = np.asarray(curve_val_lists[col_idx], dtype=np.float64)
-        finite = val_arr[np.isfinite(val_arr)]
-        if finite.size:
-            vmin, vmax = float(np.min(finite)), float(np.max(finite))
-            if math.isclose(vmin, vmax):
-                vmax = vmin + 1.0
-        else:
-            vmin, vmax = 0.0, 100.0
+        vmin, vmax = compute_robust_display_range(val_arr, h_name)
 
         color = color_palette[idx_in_sel % len(color_palette)]
         unit = _unit_for_header(h_name)
