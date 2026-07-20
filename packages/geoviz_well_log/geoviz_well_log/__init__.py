@@ -53,7 +53,7 @@ from .renderer import (
 from .qpainter_builder import build_qpainter_tracks
 from .well_log_view import WellLogView
 
-# Bounded LAS preview loader
+# Bounded LAS and XML preview loaders
 from .las_preview import (
     LASCurveHeader,
     LASPreviewHeader,
@@ -62,6 +62,7 @@ from .las_preview import (
     load_las_preview,
     read_sampled_ascii,
 )
+from .xml_preview import load_xml_preview
 
 # Vector export
 from .export_qpainter import export_svg, export_pdf, export_png

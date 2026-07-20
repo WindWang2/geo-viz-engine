@@ -7,6 +7,7 @@ from geoviz_well_log import (
     WellLogView,
     build_qpainter_tracks,
     load_las_preview,
+    load_xml_preview,
 )
 
 from ..contracts import PreparedPreview, PreviewCapabilities, PreviewKind, PreviewOptions, PreviewRequest
@@ -18,28 +19,37 @@ class WellLogPreviewBackend:
 
     def supports(self, request: PreviewRequest) -> bool:
         semantic_type = request.semantic_type.strip().lower()
-        return request.normalized_format == "las" and semantic_type in {"", "unknown", "well_log"}
+        if semantic_type not in {"", "unknown", "well_log"}:
+            return False
+        return request.normalized_format in {"las", "xml"}
 
     def capabilities(self, request: PreviewRequest) -> PreviewCapabilities:
         return PreviewCapabilities(self.kind, ("zoom", "pan"))
 
     def prepare(self, request: PreviewRequest, options: PreviewOptions) -> PreparedPreview:
         try:
-            payload = load_las_preview(
-                request.path,
-                max_curves=options.max_curves,
-                max_samples=options.max_depth_samples,
-            )
+            if request.normalized_format == "xml":
+                payload = load_xml_preview(
+                    request.path,
+                    max_curves=options.max_curves,
+                    max_samples=options.max_depth_samples,
+                )
+            else:
+                payload = load_las_preview(
+                    request.path,
+                    max_curves=options.max_curves,
+                    max_samples=options.max_depth_samples,
+                )
         except ValueError as error:
             raise GeoVizError(
                 ErrorCode.INVALID_DATA,
-                "无法解析 LAS 测井数据",
+                "无法解析测井数据",
                 detail=str(error),
             ) from error
         except OSError as error:
             raise GeoVizError(
                 ErrorCode.IO_ERROR,
-                "无法读取 LAS 测井数据",
+                "无法读取测井数据",
                 detail=str(error),
             ) from error
 

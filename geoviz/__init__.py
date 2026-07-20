@@ -24,6 +24,7 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "CurveData": ("geoviz_well_log", "CurveData"),
     "build_qpainter_tracks": ("geoviz_well_log", "build_qpainter_tracks"),
     "load_las_preview": ("geoviz_well_log.las_preview", "load_las_preview"),
+    "load_xml_preview": ("geoviz_well_log.xml_preview", "load_xml_preview"),
     "inspect_las_file": ("geoviz_well_log.las_preview", "inspect_las_file"),
     "export_svg": ("geoviz_well_log", "export_svg"),
     "export_pdf": ("geoviz_well_log", "export_pdf"),
