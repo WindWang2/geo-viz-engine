@@ -10,6 +10,7 @@ from .renderer import (
     LithologyTrack,
     SystemsTractTrack,
 )
+from .tracks.image_track import ImageTrack, CorePhotoSegment
 
 # ECharts CURVE_META colors
 CURVE_META = {
@@ -124,11 +125,17 @@ def build_qpainter_tracks(data: WellLogData, merge_groups: list[tuple[list[str],
     if data.intervals and data.intervals.sequence:
         tracks.append(IntervalTrack(intervals=data.intervals.sequence, label="层序", width=50))
 
-    # 7. Lithology description
+    # 7. Core photo & text description track (照片/文本描述)
     if data.intervals and data.intervals.lithology_desc:
-        tracks.append(IntervalTrack(
-            intervals=data.intervals.lithology_desc, label="岩性描述", width=150
-        ))
+        image_track = ImageTrack(name="照片/文本描述", width=180)
+        for item in data.intervals.lithology_desc:
+            photo = CorePhotoSegment(
+                depth_top=item.top,
+                depth_bottom=item.bottom,
+                title=item.name,
+            )
+            image_track.add_core_photo(photo)
+        tracks.append(image_track)
 
     # 8. Curve tracks — merge according to merge_groups
     curve_map = {c.name: c for c in data.curves}

@@ -12,9 +12,12 @@ from .interaction import ZoomPanHandler
 from .overlay import CrosshairOverlay
 from .depth_ruler import DepthRuler
 
+from geoviz_well_log.tracks.image_track import ImageTrack, CorePhotoSegment
+
 __all__ = [
     "BaseTrack", "DepthTrack", "CurveTrack",
     "IntervalTrack", "LithologyTrack", "FaciesTrack", "SystemsTractTrack",
+    "ImageTrack", "CorePhotoSegment",
     "WellLogCanvas", "LayoutCoordinator", "PatternEngine",
     "ZoomPanHandler", "CrosshairOverlay", "DepthRuler",
 ]
