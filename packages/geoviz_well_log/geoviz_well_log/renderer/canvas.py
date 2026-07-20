@@ -61,6 +61,7 @@ class WellLogCanvas(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         self.setAutoFillBackground(True)
+        self.setMouseTracking(True)
         self._coordinator = LayoutCoordinator()
         self._track_filter = _TrackMouseFilter(self)
         from .overlay import CrosshairOverlay
