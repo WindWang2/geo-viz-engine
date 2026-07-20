@@ -63,7 +63,8 @@ class WellLogCanvas(QWidget):
         self.setAutoFillBackground(True)
         self._coordinator = LayoutCoordinator()
         self._track_filter = _TrackMouseFilter(self)
-        self._crosshair: CrosshairOverlay | None = None
+        from .overlay import CrosshairOverlay
+        self._crosshair: CrosshairOverlay | None = CrosshairOverlay(self)
         self._depth_span: float = 100.0
         self._static_cache: QPixmap | None = None
         self._cache_dirty: bool = True
@@ -217,6 +218,9 @@ class WellLogCanvas(QWidget):
         painter.end()
 
     def leaveEvent(self, event):
+        if self._crosshair:
+            self._crosshair.set_cursor_y(None)
+            self.update()
         self.mouse_moved.emit(-1.0)
         if not self._is_resizing:
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -311,9 +315,14 @@ class WellLogCanvas(QWidget):
         y = event.position().y()
         if y < header_h:
             self.mouse_moved.emit(-1.0)
+            if self._crosshair:
+                self._crosshair.set_cursor_y(None)
         else:
             self.mouse_moved.emit(float(y))
+            if self._crosshair:
+                self._crosshair.set_cursor_y(float(y))
 
+        self.update()
         self._update_hover_tooltip(event.position())
         super().mouseMoveEvent(event)
 
