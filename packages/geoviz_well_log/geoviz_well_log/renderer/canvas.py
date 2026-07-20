@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QRectF, Signal, QObject, QEvent, QSize
 from PySide6.QtGui import QPainter, QColor, QPen, QFont, QMouseEvent, QPixmap, QCursor
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QToolTip, QWidget
 
 from .track_base import BaseTrack, ECHARTS_HEADER_BG, ECHARTS_BORDER, ECHARTS_TEXT, ECHARTS_GROUP_HEADER_HEIGHT
 from .coordinator import LayoutCoordinator
@@ -286,7 +286,125 @@ class WellLogCanvas(QWidget):
             self.mouse_moved.emit(-1.0)
         else:
             self.mouse_moved.emit(float(y))
+        
+        self._update_hover_tooltip(event.position())
         super().mouseMoveEvent(event)
+
+    def _interpolate_curve_val(self, curve, depth: float) -> float | None:
+        if not getattr(curve, "depth", None) or not getattr(curve, "values", None):
+            return None
+        depths = curve.depth
+        vals = curve.values
+        if len(depths) != len(vals) or len(depths) == 0:
+            return None
+        if depth < depths[0] or depth > depths[-1]:
+            return None
+        import bisect
+        idx = bisect.bisect_left(depths, depth)
+        if idx == 0:
+            return vals[0]
+        if idx >= len(depths):
+            return vals[-1]
+        d0, d1 = depths[idx - 1], depths[idx]
+        v0, v1 = vals[idx - 1], vals[idx]
+        if abs(d1 - d0) < 1e-6:
+            return v0
+        t = (depth - d0) / (d1 - d0)
+        return v0 + t * (v1 - v0)
+
+    def _update_hover_tooltip(self, pos):
+        if not self.tracks or pos.y() < 56:
+            QToolTip.hideText()
+            return
+
+        visible = [(i, t) for i, t in enumerate(self.tracks) if getattr(t, '_visible', True)]
+        if not visible:
+            QToolTip.hideText()
+            return
+
+        w = self.width()
+        natural_width = self.total_width
+        scale = w / natural_width if natural_width > 0 else 1.0
+
+        x = pos.x()
+        cur_x = 0.0
+        target_track = None
+        for _, track in visible:
+            sw = track.width * scale
+            if cur_x <= x < cur_x + sw:
+                target_track = track
+                break
+            cur_x += sw
+
+        if target_track is None:
+            QToolTip.hideText()
+            return
+
+        top = target_track.depth_top
+        bottom = target_track.depth_bottom
+        h = self.height()
+        header_h = max((t.header_height for t in self.tracks), default=56)
+        content_h = max(1.0, h - header_h)
+        rel_y = max(0.0, min(content_h, pos.y() - header_h))
+        depth = top + (rel_y / content_h) * (bottom - top)
+
+        label = getattr(target_track, "label", "井道")
+        lines = [f"📍 深度: {depth:.2f} m  [{label}]"]
+
+        if hasattr(target_track, "curves"):
+            for curve in target_track.curves:
+                val = self._interpolate_curve_val(curve, depth)
+                if val is not None:
+                    unit_str = f" {curve.unit}" if getattr(curve, "unit", "") else ""
+                    lines.append(f"  • {curve.name}: {val:.2f}{unit_str}")
+        elif hasattr(target_track, "intervals") and target_track.intervals:
+            for item in target_track.intervals:
+                if item.top <= depth <= item.bottom:
+                    lines.append(f"  • {item.name} ({item.top:.1f}m - {item.bottom:.1f}m)")
+        elif hasattr(target_track, "core_photos") and target_track.core_photos:
+            for photo in target_track.core_photos:
+                if photo.depth_top <= depth <= photo.depth_bottom:
+                    lines.append(f"  • 描述: 📷 {photo.title} ({photo.depth_top:.1f}m - {photo.depth_bottom:.1f}m)")
+                    lines.append("    (双击弹出查看详情)")
+
+        QToolTip.showText(self.mapToGlobal(pos.toPoint()), "\n".join(lines), self)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position()
+            visible = [(i, t) for i, t in enumerate(self.tracks) if getattr(t, '_visible', True)]
+            w = self.width()
+            natural_width = self.total_width
+            scale = w / natural_width if natural_width > 0 else 1.0
+            x = pos.x()
+            cur_x = 0.0
+            for _, track in visible:
+                sw = track.width * scale
+                if cur_x <= x < cur_x + sw:
+                    if hasattr(track, "core_photos") and track.core_photos:
+                        top = track.depth_top
+                        bottom = track.depth_bottom
+                        h = self.height()
+                        header_h = max((t.header_height for t in self.tracks), default=56)
+                        content_h = max(1.0, h - header_h)
+                        rel_y = max(0.0, min(content_h, pos.y() - header_h))
+                        depth = top + (rel_y / content_h) * (bottom - top)
+                        for photo in track.core_photos:
+                            if photo.depth_top <= depth <= photo.depth_bottom:
+                                try:
+                                    import os
+                                    from geoviz_well_log.image_preview_dialog import ImagePreviewDialog
+                                    pix = photo.pixmap
+                                    if pix is None and photo.image_path and os.path.exists(photo.image_path):
+                                        pix = QPixmap(photo.image_path)
+                                    if pix is not None and not pix.isNull():
+                                        dlg = ImagePreviewDialog(pix, photo.title, self)
+                                        dlg.exec()
+                                except Exception:
+                                    pass
+                    break
+                cur_x += sw
+        super().mouseDoubleClickEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if self._is_resizing and event.button() == Qt.MouseButton.LeftButton:
