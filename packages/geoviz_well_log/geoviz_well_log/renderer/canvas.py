@@ -219,7 +219,7 @@ class WellLogCanvas(QWidget):
 
     def leaveEvent(self, event):
         if self._crosshair:
-            self._crosshair.set_cursor_y(None)
+            self._crosshair.set_cursor_pos(None, None)
             self.update()
         self.mouse_moved.emit(-1.0)
         if not self._is_resizing:
@@ -312,15 +312,15 @@ class WellLogCanvas(QWidget):
 
         # Hide crosshair when cursor is in the track header area
         header_h = max((t.header_height for t in self.tracks), default=56)
-        y = event.position().y()
-        if y < header_h:
+        pos = event.position()
+        if pos.y() < header_h:
             self.mouse_moved.emit(-1.0)
             if self._crosshair:
-                self._crosshair.set_cursor_y(None)
+                self._crosshair.set_cursor_pos(None, None)
         else:
-            self.mouse_moved.emit(float(y))
+            self.mouse_moved.emit(float(pos.y()))
             if self._crosshair:
-                self._crosshair.set_cursor_y(float(y))
+                self._crosshair.set_cursor_pos(float(pos.x()), float(pos.y()))
 
         self.update()
         self._update_hover_tooltip(event.position())

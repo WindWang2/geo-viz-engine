@@ -15,11 +15,16 @@ class CrosshairOverlay:
 
     def __init__(self, canvas: WellLogCanvas):
         self._canvas = canvas
+        self._cursor_x: float | None = None
         self._cursor_y: float | None = None
 
     @property
     def visible(self) -> bool:
         return self._cursor_y is not None
+
+    def set_cursor_pos(self, x: float | None, y: float | None):
+        self._cursor_x = x
+        self._cursor_y = y
 
     def set_cursor_y(self, y: float | None):
         self._cursor_y = y
@@ -104,7 +109,7 @@ class CrosshairOverlay:
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # Dashed horizontal line across full width
+        # Dashed horizontal red cursor line
         pen = QPen(QColor("#ef4444"), 1, Qt.PenStyle.DashLine)
         painter.setPen(pen)
         painter.drawLine(int(rect.left()), int(cursor_y),
@@ -114,57 +119,56 @@ class CrosshairOverlay:
         depth = self.depth_at_y(cursor_y)
         rows = self._collect_values(depth)
 
-        font = QFont()
-        font.setPixelSize(12)
+        font = QFont("SansSerif", 9)
         painter.setFont(font)
         fm = QFontMetrics(font)
 
         # Build panel lines
-        lines = [f"深度: {depth:.1f} m"]
+        lines = [f"📍 深度: {depth:.2f} m"]
         for label, value in rows:
             lines.append(f"{label}: {value}")
 
-        line_h = fm.height() + 2
-        max_w = max(fm.horizontalAdvance(l) for l in lines) + 16
-        panel_h = len(lines) * line_h + 8
-        panel_w = max_w
+        line_h = fm.height() + 4
+        max_w = max(fm.horizontalAdvance(l) for l in lines) + 24
+        panel_h = len(lines) * line_h + 12
+        panel_w = max(160.0, float(max_w))
 
-        # Position: follow mouse cursor
-        cursor_pos = self._canvas.mapFromGlobal(QCursor.pos())
-        # Convert canvas coordinates to viewport/overlay widget coordinates
-        # (canvas may be horizontally scrolled inside QScrollArea)
-        canvas_offset = self._canvas.pos()
-        cursor_x = float(cursor_pos.x()) + canvas_offset.x()
+        # Position: follow mouse cursor inside canvas coordinates
+        if self._cursor_x is not None:
+            cursor_x = self._cursor_x
+        else:
+            cursor_x = float(self._canvas.mapFromGlobal(QCursor.pos()).x())
+
         px = cursor_x + 16
-        py = cursor_y - panel_h - 8
-        # Keep panel within bounds
+        py = cursor_y + 12
+
+        # Keep panel within visible bounds
         if px + panel_w > rect.right():
-            px = cursor_x - panel_w - 8
-        if py < rect.top():
-            py = cursor_y + 8
-        px = max(rect.left(), min(px, rect.right() - panel_w))
+            px = cursor_x - panel_w - 12
+        if py + panel_h > rect.bottom():
+            py = cursor_y - panel_h - 12
+        px = max(rect.left() + 4, min(px, rect.right() - panel_w - 4))
+        py = max(rect.top() + 4, min(py, rect.bottom() - panel_h - 4))
 
         panel_rect = QRectF(px, py, panel_w, panel_h)
 
-        # Semi-transparent background
-        painter.fillRect(panel_rect, QColor(255, 255, 255, 210))
-        painter.setPen(QPen(QColor("#94a3b8"), 1))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(panel_rect, 4, 4)
+        # Draw sleek dark slate panel background with crisp rounded corners
+        painter.setPen(QPen(QColor(15, 23, 42, 180), 1))
+        painter.setBrush(QBrush(QColor(15, 23, 42, 230)))
+        painter.drawRoundedRect(panel_rect, 6, 6)
 
-        # Text
-        painter.setPen(QColor("#0f172a"))
+        # Title: Depth
+        ty = py + 6
+        painter.setFont(QFont("SansSerif", 9, QFont.Weight.Bold))
+        painter.setPen(QColor("#38bdf8"))  # Cyan accent color for depth header
+        depth_rect = QRectF(px + 10, ty, panel_w - 20, line_h)
+        painter.drawText(depth_rect, Qt.AlignmentFlag.AlignVCenter, lines[0])
+
+        # Content rows
         painter.setFont(font)
-        ty = py + 4
-        for i, line in enumerate(lines):
-            text_rect = QRectF(px + 8, ty + i * line_h, panel_w - 16, line_h)
-            if i == 0:
-                bold_font = QFont(font)
-                bold_font.setBold(True)
-                painter.setFont(bold_font)
-                painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, line)
-                painter.setFont(font)
-            else:
-                painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, line)
+        painter.setPen(QColor("#f8fafc"))  # White text
+        for i, line in enumerate(lines[1:], start=1):
+            text_rect = QRectF(px + 10, ty + i * line_h, panel_w - 20, line_h)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, line)
 
         painter.restore()
