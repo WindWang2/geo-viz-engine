@@ -49,6 +49,18 @@ def normalize_volume_to_uint8(data: np.ndarray) -> np.ndarray:
     norm = (data - dmin) / (dmax - dmin)
     return (norm * 255.0).astype(np.uint8)
 
+class Renderer3DLODManager:
+    """Manages dynamic LOD level during active 3D camera interaction."""
+
+    def __init__(self, idle_debounce_ms: float = 50.0):
+        self.idle_debounce_ms = idle_debounce_ms
+
+    def get_render_lod(self, is_interacting: bool, idle_ms: float) -> int:
+        if is_interacting or idle_ms < self.idle_debounce_ms:
+            return 2  # 2x downsampled LOD
+        return 1  # Full resolution
+
+
 class DualGLVolumeItem(gl.GLVolumeItem):
     """Custom OpenGL volume item that displays two superimposed volumes
     using a single 3D texture and dynamic colormapping in a custom GLSL shader.
@@ -59,6 +71,11 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         self._primary_visible = True
         self._overlay_visible = True
         self._overlay_opacity = 0.5
+
+    def get_lod_data(self, lod_level: int = 1) -> np.ndarray:
+        if lod_level <= 1 or self.data is None:
+            return self.data
+        return self.data[::lod_level, ::lod_level, ::lod_level]
         
         self._primary_cmap_lut = None
         self._overlay_cmap_lut = None

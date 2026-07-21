@@ -14,6 +14,41 @@ from .label_layout import compute_header_label_policy, fit_label_text
 from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
 
 
+def clip_curve_depth_range(
+    depths: np.ndarray, values: np.ndarray, top_depth: float, bottom_depth: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Clip curve depth and values arrays strictly to the visible viewport depth range."""
+    if len(depths) == 0:
+        return depths, values
+
+    mask = (depths >= top_depth) & (depths <= bottom_depth)
+    return depths[mask], values[mask]
+
+
+def simplify_curve_screen_space(
+    x_px: np.ndarray, y_px: np.ndarray, epsilon: float = 0.5
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fast bucket min-max simplification for screen-space 60 FPS curve rendering."""
+    n = len(x_px)
+    if n <= 1000:
+        return x_px, y_px
+
+    bucket_size = max(2, n // 400)
+    n_buckets = n // bucket_size
+
+    x_trunc = x_px[: n_buckets * bucket_size].reshape(n_buckets, bucket_size)
+    y_trunc = y_px[: n_buckets * bucket_size].reshape(n_buckets, bucket_size)
+
+    idx_min = np.argmin(x_trunc, axis=1)
+    idx_max = np.argmax(x_trunc, axis=1)
+
+    rows = np.arange(n_buckets)
+    rows_combined = np.repeat(rows, 2)
+    idx_combined = np.column_stack([idx_min, idx_max]).ravel()
+
+    return x_trunc[rows_combined, idx_combined], y_trunc[rows_combined, idx_combined]
+
+
 class CurveTrack(BaseTrack):
     """Log curve track with viewport culling and adaptive downsampling."""
 
