@@ -43,7 +43,6 @@ class CurveTrack(BaseTrack):
             sanitized_curves.append(c)
         self._curves = sanitized_curves
         self._log_scale = log_scale
-        self._path_cache = {}
         self._downsampled_cache = {}
         # Store sorted ndarray copies — never mutate the original Pydantic models
         self._sorted_depths: dict[str, np.ndarray] = {}
@@ -109,6 +108,7 @@ class CurveTrack(BaseTrack):
         key = (
             pixel_height,
             int(round(rect.width())),
+            int(round(span)),
             int(round(self.depth_top / quantum)),
             int(round(self.depth_bottom / quantum)),
         )
@@ -176,8 +176,6 @@ class CurveTrack(BaseTrack):
 
         # Horizontal grid lines (ECharts splitLine parity)
         self.paint_grid(painter, rect)
-
-        pixel_height = max(1, int(rect.height()))
 
         for curve in self._curves:
             depths, values = self._cached_downsampled(curve, rect)

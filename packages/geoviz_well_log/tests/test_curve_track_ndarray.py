@@ -111,7 +111,7 @@ def test_header_range_uses_nan_safe_precomputed(qapp):
     assert "nan" not in range_str.lower()
 
 
-def test_path_cache_hits_on_repeated_key(qapp):
+def test_downsampled_cache_hits_on_repeated_key(qapp):
     track, _ = _make_track()
     track.set_depth_range(0.0, 625.0)
     from PySide6.QtCore import QRectF
@@ -120,3 +120,18 @@ def test_path_cache_hits_on_repeated_key(qapp):
     d1 = track._cached_downsampled(track._curves[0], rect)
     d2 = track._cached_downsampled(track._curves[0], rect)
     assert d1[0] is d2[0] and d1[1] is d2[1]  # same cached arrays on hit
+
+
+def test_downsample_cache_invalidated_on_zoom_at_fixed_top(qapp):
+    track, _ = _make_track()
+    track.set_depth_range(0.0, 625.0)
+    from PySide6.QtCore import QRectF
+
+    rect = QRectF(0, 0, 150, 800)
+    d1 = track._cached_downsampled(track._curves[0], rect)
+    # Zoom in at the same top edge: span halves
+    track.set_depth_range(0.0, 312.5)
+    d2 = track._cached_downsampled(track._curves[0], rect)
+    assert d1[0] is not d2[0]  # recomputed, not a stale hit
+    # Window actually narrowed
+    assert d2[0].max() <= 312.5 * 1.05 + 0.125
