@@ -81,3 +81,29 @@ def test_set_track_visible_by_label(qapp):
     widget.set_track_visible_by_label("GR", True)
     for canvas in widget._canvases:
         assert canvas.tracks[0]._visible is True
+
+
+def test_set_manual_link_is_idempotent(qapp):
+    widget = _make_widget()
+    widget.set_manual_link(True)
+    assert widget._manual_link_active is True
+    widget.set_manual_link(True)
+    assert widget._manual_link_active is True
+    widget._manual_link_picks.append(("W1", None))
+    widget.set_manual_link(False)
+    assert widget._manual_link_active is False
+    assert widget._manual_link_picks == []
+
+
+def test_clear_all_resets_manual_link_state(qapp):
+    widget = _make_widget()
+    widget.set_manual_link(True)
+    widget._manual_link_picks.append(("W1", None))
+    widget.clear_all()
+    assert widget._manual_link_active is False
+    assert widget._manual_link_picks == []
+
+
+def test_track_labels_union_in_order(qapp):
+    widget = _make_widget()
+    assert widget.track_labels() == ["GR"]

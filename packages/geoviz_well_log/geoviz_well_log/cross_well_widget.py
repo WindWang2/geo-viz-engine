@@ -173,6 +173,8 @@ class CrossWellWidget(QWidget):
         self._overlay.set_canvases([], well_names=[])
         self._formation_data.clear()
         self._wrappers.clear()
+        self._manual_link_active = False
+        self._manual_link_picks.clear()
         self._update_minimum_width()
 
     def set_formation_data(self, well_name: str, intervals: list[IntervalItem]):
@@ -199,6 +201,16 @@ class CrossWellWidget(QWidget):
                 if (track.label or "") == label:
                     track._visible = visible
             canvas.update()
+
+    def track_labels(self) -> list[str]:
+        """Union of track labels across all canvases, in first-seen order."""
+        seen: list[str] = []
+        for canvas in self._canvases:
+            for track in canvas.tracks:
+                label = track.label or ""
+                if label and label not in seen:
+                    seen.append(label)
+        return seen
 
     def _update_minimum_width(self):
         """Ensure widget is wide enough for all canvases."""
@@ -287,6 +299,11 @@ class CrossWellWidget(QWidget):
     def toggle_manual_link(self):
         """Toggle manual linking mode."""
         self._manual_link_active = not self._manual_link_active
+        self._manual_link_picks.clear()
+
+    def set_manual_link(self, active: bool):
+        """Idempotently enable/disable manual linking (preferred over toggle)."""
+        self._manual_link_active = bool(active)
         self._manual_link_picks.clear()
 
     def _finish_manual_link(self):
