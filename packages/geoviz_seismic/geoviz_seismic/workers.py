@@ -249,6 +249,7 @@ class SliceReadWorker(QThread):
     def stop(self) -> None:
         with QMutexLocker(self._mutex):
             self._stop = True
+        self.requestInterruption()
         self._cond.wakeAll()
         self.wait(5000)
 
