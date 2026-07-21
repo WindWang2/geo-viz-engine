@@ -1,47 +1,83 @@
-"""LRU cache for seismic 2-D slice data."""
+"""LRU cache for seismic 2-D slice data (RAM L1 + VRAM L2)."""
+from __future__ import annotations
 
 from collections import OrderedDict
-
+from dataclasses import dataclass
+import threading
 import numpy as np
 
 
-class SeismicCache:
-    """Simple LRU cache keyed by ``(slice_type, position)`` tuples.
+@dataclass(frozen=True)
+class SliceCacheKey:
+    volume_id: str
+    slice_type: str
+    position: int
+    downsample_factor: tuple[int, ...] = (1, 1, 1)
+    attribute_id: str = "raw"
 
-    Args:
-        max_slices: Maximum number of slices to retain. Eviction is
-            count-based; a single slice can be multiple MB.
 
-    Note:
-        There is no memory-based eviction. For large volumes, consider
-        lowering *max_slices* to avoid excessive RAM usage.
-    """
+class RamSliceCache:
+    """RAM (L1) LRU cache with strict Byte Budget and slice count limits."""
 
-    def __init__(self, max_slices: int = 50):
-        self._max = max_slices
-        self._cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
+    def __init__(self, max_bytes: int = 512 * 1024 * 1024, max_slices: int = 200):
+        self._max_bytes = max_bytes
+        self._max_slices = max_slices
+        self._current_bytes = 0
+        self._cache: OrderedDict[Any, np.ndarray] = OrderedDict()
+        self._lock = threading.RLock()
 
-    def get(self, key: tuple) -> np.ndarray | None:
-        """Return cached slice or ``None``."""
-        if key in self._cache:
-            self._cache.move_to_end(key)
-            return self._cache[key]
-        return None
+    def get(self, key: Any) -> np.ndarray | None:
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._cache[key]
+            return None
 
-    def put(self, key: tuple, data: np.ndarray) -> None:
-        """Insert a slice, evicting the oldest entry if capacity is exceeded."""
-        if key in self._cache:
-            self._cache.move_to_end(key)
-        self._cache[key] = data
-        while len(self._cache) > self._max:
-            self._cache.popitem(last=False)
+    def put(self, key: Any, data: np.ndarray) -> None:
+        size_bytes = data.nbytes
+        with self._lock:
+            if key in self._cache:
+                self._current_bytes -= self._cache[key].nbytes
+                self._cache.move_to_end(key)
+
+            while (self._current_bytes + size_bytes > self._max_bytes or len(self._cache) >= self._max_slices) and self._cache:
+                k, evicted = self._cache.popitem(last=False)
+                self._current_bytes -= evicted.nbytes
+
+            self._cache[key] = data
+            self._current_bytes += size_bytes
 
     def clear(self) -> None:
-        """Remove all cached slices."""
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
+            self._current_bytes = 0
 
     def __len__(self) -> int:
-        return len(self._cache)
+        with self._lock:
+            return len(self._cache)
 
-    def __contains__(self, key: tuple) -> bool:
-        return key in self._cache
+    def __contains__(self, key: Any) -> bool:
+        with self._lock:
+            return key in self._cache
+
+
+class DualLevelSeismicCache:
+    """Dual-level LRU Cache combining L1 (RAM) and L2 (VRAM handle) budgets."""
+
+    def __init__(self, ram_bytes: int = 512 * 1024 * 1024, vram_bytes: int = 256 * 1024 * 1024):
+        self.ram_cache = RamSliceCache(max_bytes=ram_bytes)
+        self.vram_cache: OrderedDict[Any, Any] = OrderedDict()
+        self.vram_bytes_limit = vram_bytes
+        self.current_vram_bytes = 0
+
+    def get_slice(self, key: Any) -> np.ndarray | None:
+        return self.ram_cache.get(key)
+
+    def put_slice(self, key: Any, data: np.ndarray) -> None:
+        self.ram_cache.put(key, data)
+
+
+# Backward-compatible alias
+class SeismicCache(RamSliceCache):
+    def __init__(self, max_slices: int = 50):
+        super().__init__(max_bytes=512 * 1024 * 1024, max_slices=max_slices)

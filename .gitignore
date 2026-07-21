@@ -50,7 +50,6 @@ data/generated/*
 tmp/
 *.tmp
 .worktrees/
-.superpowers/
 
 # Coverage
 .coverage
@@ -66,5 +65,4 @@ htmlcov/
 .claude/
 .context/
 .gemini/
-.gstack/
 .cache/

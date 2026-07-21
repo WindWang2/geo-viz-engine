@@ -132,6 +132,12 @@ class ColormapManager:
         return lut
 
     @staticmethod
+    def get_lut_bytes(name: str, n_colors: int = 256) -> bytes:
+        """Return raw 1D LUT byte buffer for 1D OpenGL texture uploading."""
+        lut = ColormapManager.get_colormap(name, n_colors)
+        return lut.tobytes()
+
+    @staticmethod
     def clear_cache() -> None:
         """Clear all cached LUTs (useful for testing or memory-constrained scenarios)."""
         ColormapManager._LUT_CACHE.clear()
