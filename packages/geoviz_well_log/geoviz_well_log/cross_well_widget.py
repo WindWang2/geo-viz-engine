@@ -389,48 +389,87 @@ class CrossWellWidget(QWidget):
 
     # --- Composite vector export ---
 
-    def export_composite(self, path: str, fmt: str = "svg"):
-        """Export all canvases + correlation polygons as a single file."""
+    def export_composite(self, path: str, fmt: str = "svg", *,
+                         dpi: int = 96, width_px: int | None = None,
+                         page_size: str | None = None):
+        """Export all canvases + correlation polygons as a single file.
+
+        Optional keyword args (defaults preserve legacy behavior):
+        ``dpi`` — PNG dots-per-meter metadata / PDF resolution.
+        ``width_px`` — rescale output width (height proportional); all formats.
+        ``page_size`` — PDF only: "A4" or "LETTER", content fitted to the page.
+        """
         if not self._canvases:
             return
 
         spacing = self._well_spacing
-        total_w = sum(c.width() for c in self._canvases) + \
-                  spacing * (len(self._canvases) - 1)
-        total_h = max(c.height() for c in self._canvases)
+        natural_w = sum(c.width() for c in self._canvases) + \
+                    spacing * (len(self._canvases) - 1)
+        natural_h = max(c.height() for c in self._canvases)
+
+        if width_px and width_px > 0 and not page_size:
+            scale = width_px / natural_w
+        else:
+            scale = 1.0
+        total_w = max(1, int(round(natural_w * scale)))
+        total_h = max(1, int(round(natural_h * scale)))
 
         if fmt == "svg":
-            self._export_svg(path, total_w, total_h)
+            self._export_svg(path, total_w, total_h, natural_w, natural_h)
         elif fmt == "pdf":
-            self._export_pdf(path, total_w, total_h)
+            self._export_pdf(path, total_w, total_h, natural_w, natural_h, dpi, page_size)
         elif fmt == "png":
-            self._export_png(path, total_w, total_h)
+            self._export_png(path, total_w, total_h, natural_w, natural_h, dpi)
 
-    def _export_svg(self, path: str, w: int, h: int):
+    def _export_svg(self, path: str, w: int, h: int, natural_w: int, natural_h: int):
         gen = QSvgGenerator()
         gen.setFileName(path)
         gen.setSize(QSize(w, h))
         gen.setViewBox(QRectF(0, 0, w, h))
         painter = QPainter(gen)
-        self._paint_composite(painter, w, h)
+        painter.scale(w / natural_w, h / natural_h)
+        self._paint_composite(painter, natural_w, natural_h)
         painter.end()
 
-    def _export_pdf(self, path: str, w: int, h: int):
+    def _export_pdf(self, path: str, w: int, h: int, natural_w: int, natural_h: int,
+                    dpi: int, page_size: str | None):
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
         printer.setOutputFileName(path)
-        mm_w = w * 25.4 / 96
-        mm_h = h * 25.4 / 96
-        printer.setPageSize(QPageSize(QSizeF(mm_w, mm_h), QPageSize.Unit.Millimeter))
+        printer.setResolution(dpi)
+        if page_size:
+            page_id = (
+                QPageSize.PageSizeId.A4
+                if page_size.upper() == "A4"
+                else QPageSize.PageSizeId.Letter
+            )
+            qps = QPageSize(page_id)
+            if natural_w > natural_h:
+                qps = QPageSize(page_id, QPageSize.Orientation.Landscape)
+            printer.setPageSize(qps)
+            size_pt = qps.size(QPageSize.Unit.Point)
+            px_w = size_pt.width() * dpi / 72.0
+            px_h = size_pt.height() * dpi / 72.0
+            fit = min(px_w / natural_w, px_h / natural_h)
+        else:
+            mm_w = w * 25.4 / dpi
+            mm_h = h * 25.4 / dpi
+            printer.setPageSize(QPageSize(QSizeF(mm_w, mm_h), QPageSize.Unit.Millimeter))
+            fit = w / natural_w
         painter = QPainter(printer)
-        self._paint_composite(painter, w, h)
+        painter.scale(fit, fit)
+        self._paint_composite(painter, natural_w, natural_h)
         painter.end()
 
-    def _export_png(self, path: str, w: int, h: int):
+    def _export_png(self, path: str, w: int, h: int, natural_w: int, natural_h: int,
+                    dpi: int):
         img = QImage(w, h, QImage.Format.Format_ARGB32)
         img.fill(0xFFFFFFFF)
+        img.setDotsPerMeterX(int(dpi / 0.0254))
+        img.setDotsPerMeterY(int(dpi / 0.0254))
         painter = QPainter(img)
-        self._paint_composite(painter, w, h)
+        painter.scale(w / natural_w, h / natural_h)
+        self._paint_composite(painter, natural_w, natural_h)
         painter.end()
         img.save(path)
 
