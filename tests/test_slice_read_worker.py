@@ -100,3 +100,29 @@ def test_worker_stale_generation_dropped(qapp, small_segy_path, qtbot):
     finally:
         worker.stop()
     assert results == []
+
+
+def test_worker_stop_and_restart(qapp, small_segy_path, qtbot):
+    from geoviz_seismic.workers import SliceReadWorker
+    from geoviz_seismic.loader import SeismicLoader
+
+    loader = SeismicLoader(str(small_segy_path))
+    meta = loader.inspect()
+    mid_il = meta.iline_start + (meta.n_inlines // 2) * meta.iline_step
+    loader.close()
+
+    worker = SliceReadWorker()
+    worker.start()
+    worker.set_volume(str(small_segy_path), 1)
+    worker.stop()
+    assert not worker.isRunning()
+
+    results = []
+    worker.slice_ready.connect(lambda *a: results.append(a))
+    worker.ensure_running()
+    worker.request("inline", mid_il, 1)
+    try:
+        qtbot.waitUntil(lambda: len(results) == 1, timeout=10000)
+    finally:
+        worker.stop()
+    assert results[0][1] == mid_il

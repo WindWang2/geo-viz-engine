@@ -54,6 +54,7 @@ class SeismicView(QWidget):
         self._slice_worker = SliceReadWorker()
         self._slice_worker.slice_ready.connect(self._on_slice_ready)
         self._slice_worker.prefetch_ready.connect(self._on_prefetch_ready)
+        self._slice_worker.read_error.connect(self._on_slice_read_error)
         retain_background_worker(self._slice_worker)
         self._slice_worker.start()
         # Views discarded without cleanup() would otherwise leak a running
@@ -173,6 +174,9 @@ class SeismicView(QWidget):
         # Throttle slice updates: only refresh 2D profile after
         # a short delay of no new slice_changed signals (drag release)
         self._pending_slice: dict[str, int] = {}
+        # Latest requested actual position per axis; guards against stale
+        # in-flight worker results overwriting a newer panel position.
+        self._latest_slice_request: dict[str, int] = {}
         self._slice_timer = QTimer(self)
         self._slice_timer.setSingleShot(True)
         # Debounce: 80ms coalesces rapid slider drags into one render.
@@ -1021,10 +1025,14 @@ class SeismicView(QWidget):
             cache_key = (slice_type, actual_pos)
             cached = self._cache.get(cache_key)
             if cached is not None:
+                # Record the user's current position so a late in-flight
+                # result for an older position can't overwrite the panel.
+                self._latest_slice_request[slice_type] = actual_pos
                 self._update_profile_panel(slice_type, actual_pos, cached.T)
             else:
                 # Async: worker reads from disk; panel updates on slice_ready
                 self._ensure_slice_worker()
+                self._latest_slice_request[slice_type] = actual_pos
                 self._slice_worker.request(
                     slice_type, actual_pos, self._segy_generation
                 )
@@ -1034,7 +1042,17 @@ class SeismicView(QWidget):
         if generation != self._segy_generation:
             return
         self._cache.put((slice_type, actual_pos), data)
-        self._update_profile_panel(slice_type, actual_pos, data.T)
+        # Latest-wins applies to the queue only; an in-flight read for a
+        # superseded same-generation position must not update the panel.
+        latest = self._latest_slice_request.get(slice_type)
+        if latest is None or latest == actual_pos:
+            self._update_profile_panel(slice_type, actual_pos, data.T)
+
+    @Slot(str, int, int)
+    def _on_slice_read_error(self, slice_type: str, actual_pos: int, generation: int):
+        if generation != self._segy_generation:
+            return
+        self._slice_label.setText(f"Read error: {slice_type} {actual_pos}")
 
     @Slot(str, int, object, int)
     def _on_prefetch_ready(self, slice_type: str, actual_pos: int, data, generation: int):

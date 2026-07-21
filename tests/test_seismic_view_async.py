@@ -50,6 +50,7 @@ pytestmark = requires_seismic_view
 class _FakeWorker(QObject):
     slice_ready = Signal(str, int, object, int)
     prefetch_ready = Signal(str, int, object, int)
+    read_error = Signal(str, int, int)
 
     def __init__(self):
         super().__init__()
@@ -176,3 +177,28 @@ def test_worker_restarts_after_cleanup(qtbot, monkeypatch):
     view._ensure_slice_worker()
     assert view._slice_worker_stopped is False
     assert fake.stopped is False
+
+
+def test_stale_inflight_slice_does_not_update_panel(qtbot, monkeypatch):
+    view, fake = _make_view(qtbot, monkeypatch)
+    view._meta = type("M", (), {
+        "iline_start": 100, "iline_step": 2,
+        "xline_start": 200, "xline_step": 1,
+    })()
+    view._ds_factor = (1, 1, 1)
+    view._loader = object()
+    view._segy_generation = 7
+    view._latest_slice_request = {"inline": 110}
+    applied = []
+    monkeypatch.setattr(
+        view, "_update_profile_panel",
+        lambda stype, pos, data: applied.append((stype, pos)),
+    )
+    import numpy as np
+    # In-flight result for a superseded position: cached but panel not updated
+    view._on_slice_ready("inline", 108, np.ones((2, 2), dtype=np.float32), 7)
+    assert applied == []
+    assert view._cache.get(("inline", 108)) is not None
+    # Current position still updates
+    view._on_slice_ready("inline", 110, np.ones((2, 2), dtype=np.float32), 7)
+    assert applied == [("inline", 110)]

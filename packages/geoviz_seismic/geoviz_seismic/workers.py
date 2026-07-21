@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import math
 import time
 
@@ -8,6 +9,8 @@ import numpy as np
 from PySide6.QtCore import QCoreApplication, QMutex, QMutexLocker, QThread, QWaitCondition, Signal
 
 from .loader import SeismicLoader
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_PREVIEW_VOXELS = 128 * 128 * 128
 
@@ -217,6 +220,7 @@ class SliceReadWorker(QThread):
 
     slice_ready = Signal(str, int, object, int)    # type, actual_pos, ndarray, generation
     prefetch_ready = Signal(str, int, object, int)  # type, actual_pos, ndarray, generation
+    read_error = Signal(str, int, int)              # type, actual_pos, generation
 
     _PREFETCH_OFFSETS = (1, -1, 2, -2)
 
@@ -257,6 +261,9 @@ class SliceReadWorker(QThread):
         """Restart the worker if it was stopped (e.g. after view cleanup)."""
         with QMutexLocker(self._mutex):
             self._stop = False
+        # Self-healing window: if run() is mid-exit, isRunning() is still
+        # True so start() is skipped; the next cache-miss request re-triggers
+        # _ensure_slice_worker() and starts the thread once run() has exited.
         if not self.isRunning():
             self.start()
 
@@ -277,10 +284,8 @@ class SliceReadWorker(QThread):
             return self._volume_path, self._volume_generation, dirty
 
     def run(self):
-        from .loader import SeismicLoader
-
         loader = None
-        loader_path = None
+        failed_path: str | None = None
         try:
             while True:
                 with QMutexLocker(self._mutex):
@@ -295,12 +300,23 @@ class SliceReadWorker(QThread):
                     if loader is not None:
                         loader.close()
                         loader = None
-                    loader_path = None
+                    failed_path = None
                 if path is None:
                     continue
                 if loader is None:
-                    loader = SeismicLoader(path)
-                    loader_path = path
+                    if failed_path == path:
+                        # Loader construction already failed for this volume:
+                        # drain/skip its requests instead of hot-looping on
+                        # retries, but keep the thread alive.
+                        with QMutexLocker(self._mutex):
+                            self._requests.clear()
+                        continue
+                    try:
+                        loader = SeismicLoader(path)
+                    except Exception:
+                        logger.exception("Failed to open SEGY volume: %s", path)
+                        failed_path = path
+                        continue
                 item = self._take_next()
                 if item is None:
                     continue
@@ -310,6 +326,8 @@ class SliceReadWorker(QThread):
                 try:
                     data, meta, step = self._read(loader, slice_type, pos)
                 except Exception:
+                    logger.exception("Slice read failed: %s %d", slice_type, pos)
+                    self.read_error.emit(slice_type, pos, gen)
                     continue
                 self.slice_ready.emit(slice_type, pos, data, gen)
                 self._prefetch(loader, meta, slice_type, pos, step, gen)
