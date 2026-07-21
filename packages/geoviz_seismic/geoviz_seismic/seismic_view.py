@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, Signal, Slot
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QCoreApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
@@ -21,6 +21,7 @@ from .workers import (
     SegyLoadWorker,
     SeismicLoadError,
     SeismicLoadResult,
+    SliceReadWorker,
     SyntheticWorker,
     downsample_factor_for_budget,
     retain_background_worker,
@@ -46,6 +47,22 @@ class SeismicView(QWidget):
         self._loader: SeismicLoader | None = None
         self._segy_path: str | None = None
         self._cache = SeismicCache(max_slices=50)
+        # Unparented + retained: parenting the QThread to this widget aborts
+        # the process ("QThread: Destroyed while still running") when the
+        # widget wrapper is garbage-collected without cleanup() being called.
+        self._slice_worker = SliceReadWorker()
+        self._slice_worker.slice_ready.connect(self._on_slice_ready)
+        self._slice_worker.prefetch_ready.connect(self._on_prefetch_ready)
+        retain_background_worker(self._slice_worker)
+        self._slice_worker.start()
+        self._slice_worker_stopped = False
+        # Views discarded without cleanup() would otherwise leak a running
+        # worker thread that aborts the process at interpreter teardown
+        # (retain_background_worker's shutdown only interrupts; the worker's
+        # condition-variable wait needs stop() to wake it).
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._slice_worker.stop)
         self._meta: SeismicVolumeMeta | None = None
         self._horizon_grids: dict[str, np.ndarray] = {}
         self._ds_factor: tuple[int, int, int] = (1, 1, 1)
@@ -155,7 +172,7 @@ class SeismicView(QWidget):
 
         # Throttle slice updates: only refresh 2D profile after
         # a short delay of no new slice_changed signals (drag release)
-        self._pending_slice: tuple[str, int] | None = None
+        self._pending_slice: dict[str, int] = {}
         self._slice_timer = QTimer(self)
         self._slice_timer.setSingleShot(True)
         # Debounce: 80ms coalesces rapid slider drags into one render.
@@ -232,6 +249,24 @@ class SeismicView(QWidget):
             if self._synth_worker.isRunning():
                 self._synth_worker.requestInterruption()
 
+        self._stop_slice_worker()
+
+    def _stop_slice_worker(self) -> None:
+        """Stop the slice-read worker exactly once (idempotent)."""
+        if not self._slice_worker_stopped:
+            self._slice_worker_stopped = True
+            self._slice_worker.stop()
+
+    def __del__(self):
+        # Views are often dropped without cleanup() (tests, page switches);
+        # the long-lived worker thread must not outlive the process or it
+        # aborts at interpreter teardown ("QThread: Destroyed while still
+        # running").
+        try:
+            self._stop_slice_worker()
+        except Exception:
+            pass
+
     def cancel_pending_segy_load(self) -> None:
         """Invalidate SEGY callbacks and cooperatively stop active file loads."""
         self._segy_generation += 1
@@ -242,6 +277,7 @@ class SeismicView(QWidget):
         if self._loader is not None:
             self._loader.close()
             self._loader = None
+        # In-flight slice reads are invalidated by the bumped generation.
 
     def get_project_state(self) -> dict:
         """Return seismic file path and view settings for .gvz persistence."""
@@ -408,6 +444,7 @@ class SeismicView(QWidget):
         raw_xl = result.raw_crossline
         raw_t = result.raw_timeslice
         self._loader = SeismicLoader(result.path)
+        self._slice_worker.set_volume(result.path, self._segy_generation)
         self._meta = meta
         self._ds_factor = result.downsample_factor
         
@@ -843,7 +880,7 @@ class SeismicView(QWidget):
 
     @Slot(str, int)
     def _on_slice_changed(self, slice_type: str, position: int):
-        self._pending_slice = (slice_type, position)
+        self._pending_slice[slice_type] = position
         self._slice_timer.start()  # Resets timer on each drag move
         # Sync toolbar slider from 3D slider
         self._sync_toolbar_slider(slice_type, position)
@@ -938,64 +975,66 @@ class SeismicView(QWidget):
 
     @Slot()
     def _apply_pending_slice(self):
-        if self._pending_slice is None:
+        if not self._pending_slice:
             return
-        slice_type, position = self._pending_slice
-        self._pending_slice = None
-        if self._meta is None:
-            return
+        pending = dict(self._pending_slice)
+        self._pending_slice.clear()
 
-        # Rebuild 3D slice planes (debounced -- was running on every tick before)
-        self._renderer_3d._update_slice_planes()
+        # Rebuild only the 3D planes whose axis changed
+        self._renderer_3d._update_slice_planes_for(set(pending))
 
         # Demo mode: slice from cached volume data directly
         if self._loader is None:
             vol = self._renderer_3d._volume_data_cpu
             if vol is None:
                 return
-            if slice_type == "inline":
-                raw = vol[position, :, :]
-            elif slice_type == "crossline":
-                raw = vol[:, position, :]
-            else:
-                raw = vol[:, :, position]
-            self._update_profile_panel(slice_type, position, raw.T)
+            for slice_type, position in pending.items():
+                if slice_type == "inline":
+                    raw = vol[position, :, :]
+                elif slice_type == "crossline":
+                    raw = vol[:, position, :]
+                else:
+                    raw = vol[:, :, position]
+                self._update_profile_panel(slice_type, position, raw.T)
+            return
+
+        if self._meta is None:
             return
 
         # Plane widget gives downsampled voxel indices.
         # Convert to actual inline/crossline numbers for segyio.
         m = self._meta
         df = self._ds_factor
-        if slice_type == "inline":
-            actual_pos = m.iline_start + position * df[0] * m.iline_step
-        elif slice_type == "crossline":
-            actual_pos = m.xline_start + position * df[1] * m.xline_step
-        else:
-            actual_pos = position * df[2]
+        for slice_type, position in pending.items():
+            if slice_type == "inline":
+                actual_pos = m.iline_start + position * df[0] * m.iline_step
+            elif slice_type == "crossline":
+                actual_pos = m.xline_start + position * df[1] * m.xline_step
+            else:
+                actual_pos = position * df[2]
 
-        cache_key = (slice_type, actual_pos)
-        cached = self._cache.get(cache_key)
-        if cached is not None:
-            raw = cached
-            self._log.debug("Cache hit: %s %d", slice_type, actual_pos)
-        else:
-            self._log.debug("Cache miss: %s %d, reading from disk",
-                            slice_type, actual_pos)
-            try:
-                if slice_type == "inline":
-                    raw = self._loader.read_inline(actual_pos)
-                elif slice_type == "crossline":
-                    raw = self._loader.read_crossline(actual_pos)
-                else:
-                    raw = self._loader.read_timeslice(actual_pos)
-            except Exception as exc:
-                self._log.error("Failed to read %s %d: %s",
-                                slice_type, actual_pos, exc)
-                self._slice_label.setText(f"Read error: {slice_type} {actual_pos}")
-                return
-            self._cache.put(cache_key, raw)
+            cache_key = (slice_type, actual_pos)
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                self._update_profile_panel(slice_type, actual_pos, cached.T)
+            else:
+                # Async: worker reads from disk; panel updates on slice_ready
+                self._slice_worker.request(
+                    slice_type, actual_pos, self._segy_generation
+                )
 
-        self._update_profile_panel(slice_type, actual_pos, raw.T)
+    @Slot(str, int, object, int)
+    def _on_slice_ready(self, slice_type: str, actual_pos: int, data, generation: int):
+        if generation != self._segy_generation:
+            return
+        self._cache.put((slice_type, actual_pos), data)
+        self._update_profile_panel(slice_type, actual_pos, data.T)
+
+    @Slot(str, int, object, int)
+    def _on_prefetch_ready(self, slice_type: str, actual_pos: int, data, generation: int):
+        if generation != self._segy_generation:
+            return
+        self._cache.put((slice_type, actual_pos), data)
 
     def _update_profile_panel(self, slice_type: str, position: int, slice_2d: np.ndarray):
         """Route slice data to the correct profile panel and cache raw data for export."""
