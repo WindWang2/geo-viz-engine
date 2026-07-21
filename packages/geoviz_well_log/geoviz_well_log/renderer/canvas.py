@@ -203,6 +203,8 @@ class WellLogCanvas(QWidget):
         super().resizeEvent(event)
 
     def paintEvent(self, event):
+        if self.visibleRegion().isEmpty():
+            return  # off-screen in scroll area: defer rasterization
         dpr = self.devicePixelRatioF()
         w = int(self.width() * dpr)
         h = int(self.height() * dpr)
