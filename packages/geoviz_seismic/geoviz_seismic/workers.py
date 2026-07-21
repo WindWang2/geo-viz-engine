@@ -5,7 +5,7 @@ import math
 import time
 
 import numpy as np
-from PySide6.QtCore import QCoreApplication, QThread, Signal
+from PySide6.QtCore import QCoreApplication, QMutex, QMutexLocker, QThread, QWaitCondition, Signal
 
 from .loader import SeismicLoader
 
@@ -204,3 +204,138 @@ class SegyLoadWorker(QThread):
             self.done.emit(result)
         elif failure is not None:
             self.error.emit(failure)
+
+
+class SliceReadWorker(QThread):
+    """Long-lived background slice reader with a latest-wins queue and prefetch.
+
+    Owns its own SeismicLoader inside the worker thread (segyio handles are
+    not thread-safe). GUI thread submits requests; results come back via
+    signals. Prefetch results use a separate signal so the view can cache
+    them without refreshing panels.
+    """
+
+    slice_ready = Signal(str, int, object, int)    # type, actual_pos, ndarray, generation
+    prefetch_ready = Signal(str, int, object, int)  # type, actual_pos, ndarray, generation
+
+    _PREFETCH_OFFSETS = (1, -1, 2, -2)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._mutex = QMutex()
+        self._cond = QWaitCondition()
+        self._requests: dict[str, tuple[int, int]] = {}  # slice_type -> (actual_pos, generation)
+        self._volume_path: str | None = None
+        self._volume_generation = 0
+        self._volume_dirty = False
+        self._stop = False
+
+    # --- GUI-thread API ---
+
+    def set_volume(self, path: str, generation: int) -> None:
+        with QMutexLocker(self._mutex):
+            self._volume_path = path
+            self._volume_generation = int(generation)
+            self._volume_dirty = True
+            self._requests.clear()
+        self._cond.wakeAll()
+
+    def request(self, slice_type: str, actual_pos: int, generation: int) -> None:
+        with QMutexLocker(self._mutex):
+            # Latest wins: replace any queued request of the same slice type
+            self._requests[slice_type] = (int(actual_pos), int(generation))
+        self._cond.wakeAll()
+
+    def stop(self) -> None:
+        with QMutexLocker(self._mutex):
+            self._stop = True
+        self._cond.wakeAll()
+        self.wait(5000)
+
+    # --- worker thread ---
+
+    def _take_next(self) -> tuple[str, int, int] | None:
+        with QMutexLocker(self._mutex):
+            if not self._requests:
+                return None
+            slice_type = next(iter(self._requests))
+            pos, generation = self._requests.pop(slice_type)
+            return slice_type, pos, generation
+
+    def _current_volume(self) -> tuple[str | None, int, bool]:
+        with QMutexLocker(self._mutex):
+            dirty = self._volume_dirty
+            self._volume_dirty = False
+            return self._volume_path, self._volume_generation, dirty
+
+    def run(self):
+        from .loader import SeismicLoader
+
+        loader = None
+        loader_path = None
+        try:
+            while True:
+                with QMutexLocker(self._mutex):
+                    if self._stop:
+                        return
+                    if not self._requests and not self._volume_dirty:
+                        self._cond.wait(self._mutex)
+                        if self._stop:
+                            return
+                path, generation, dirty = self._current_volume()
+                if dirty:
+                    if loader is not None:
+                        loader.close()
+                        loader = None
+                    loader_path = None
+                if path is None:
+                    continue
+                if loader is None:
+                    loader = SeismicLoader(path)
+                    loader_path = path
+                item = self._take_next()
+                if item is None:
+                    continue
+                slice_type, pos, gen = item
+                if gen != generation:
+                    continue  # stale request from a previous volume
+                try:
+                    data, meta, step = self._read(loader, slice_type, pos)
+                except Exception:
+                    continue
+                self.slice_ready.emit(slice_type, pos, data, gen)
+                self._prefetch(loader, meta, slice_type, pos, step, gen)
+        finally:
+            if loader is not None:
+                loader.close()
+
+    @staticmethod
+    def _read(loader, slice_type: str, pos: int):
+        meta = loader.inspect()
+        if slice_type == "inline":
+            return loader.read_inline(pos), meta, meta.iline_step
+        if slice_type == "crossline":
+            return loader.read_crossline(pos), meta, meta.xline_step
+        return loader.read_timeslice(pos), meta, 1
+
+    def _prefetch(self, loader, meta, slice_type: str, pos: int, step: int, gen: int) -> None:
+        bounds = {
+            "inline": (meta.iline_start, meta.iline_start + (meta.n_inlines - 1) * meta.iline_step),
+            "crossline": (meta.xline_start, meta.xline_start + (meta.n_crosslines - 1) * meta.xline_step),
+            "time": (0, meta.n_samples - 1),
+        }
+        lo, hi = bounds[slice_type]
+        for off in self._PREFETCH_OFFSETS:
+            if self.isInterruptionRequested():
+                return
+            neighbor = pos + off * step
+            if not (lo <= neighbor <= hi):
+                continue
+            with QMutexLocker(self._mutex):
+                if slice_type in self._requests:
+                    return  # user request pending: prefetch later
+            try:
+                data, _, _ = self._read(loader, slice_type, neighbor)
+            except Exception:
+                continue
+            self.prefetch_ready.emit(slice_type, neighbor, data, gen)
