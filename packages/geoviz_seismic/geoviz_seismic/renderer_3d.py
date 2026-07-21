@@ -1376,87 +1376,130 @@ class Renderer3D(QWidget):
     def _create_slice_planes(self):
         if self._volume_data_cpu is None:
             return
-            
+
         ni, nx, nt = self._volume_data_cpu.shape
         si, sx, st = self._volume_spacing
-        
+
         # Pre-fetch color lookup table for hardware upload reuse
         lut = ColormapManager.get_colormap(self._cmap_name)
 
-        # 1. Inline — Perpendicular to IL axis (x)
-        il_raw = self._get_sliced_data(0, self._il_pos) # returns GPU or CPU array
-        img_il_rgb = apply_colormap_gpu(il_raw, lut)
-        self._img_il = gl.GLImageItem(img_il_rgb)
-        self._img_il.scale(sx, st, 1)
-        self._img_il.rotate(90, 1, 0, 0)  # Puts Time (Height) on Z axis
-        self._img_il.rotate(90, 0, 0, 1)  # Puts Crossline (Width) on Y axis
-        self._img_il.translate(self._il_pos * si, 0, 0)
-        self._view.addItem(self._img_il)
-        
-        # Red Border for Inline
-        il_pts = np.array([[0, 0, 0], [0, nx*sx, 0], [0, nx*sx, nt*st], [0, 0, nt*st], [0, 0, 0]])
-        self._line_il = gl.GLLinePlotItem(pos=il_pts, color=(1, 0, 0, 1), width=2, antialias=True)
-        self._line_il.translate(self._il_pos * si, 0, 0)
-        self._view.addItem(self._line_il)
+        # 1-3. Axis-aligned planes (Inline / Crossline / Time)
+        self._create_slice_plane("inline")
+        self._create_slice_plane("crossline")
+        self._create_slice_plane("time")
 
-        # 2. Crossline — Perpendicular to XL axis (y)
-        xl_raw = self._get_sliced_data(1, self._xl_pos)
-        img_xl_rgb = apply_colormap_gpu(xl_raw, lut)
-        self._img_xl = gl.GLImageItem(img_xl_rgb)
-        self._img_xl.scale(si, st, 1)
-        self._img_xl.rotate(90, 1, 0, 0)
-        self._img_xl.translate(0, self._xl_pos * sx, 0)
-        self._view.addItem(self._img_xl)
-        
-        # Green Border for Crossline
-        xl_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, 0, nt*st], [0, 0, nt*st], [0, 0, 0]])
-        self._line_xl = gl.GLLinePlotItem(pos=xl_pts, color=(0, 1, 0, 1), width=2, antialias=True)
-        self._line_xl.translate(0, self._xl_pos * sx, 0)
-        self._view.addItem(self._line_xl)
-
-        # 3. Time — Perpendicular to T axis (z)
-        t_raw = self._get_sliced_data(2, self._t_pos)
-        img_t_rgb = apply_colormap_gpu(t_raw, lut)
-        self._img_t = gl.GLImageItem(img_t_rgb)
-        self._img_t.scale(si, sx, 1)
-        self._img_t.translate(0, 0, self._t_pos * st)
-        self._view.addItem(self._img_t)
-        
-        # Blue Border for Time
-        t_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, nx*sx, 0], [0, nx*sx, 0], [0, 0, 0]])
-        self._line_t = gl.GLLinePlotItem(pos=t_pts, color=(0, 0, 1, 1), width=2, antialias=True)
-        self._line_t.translate(0, 0, self._t_pos * st)
-        self._view.addItem(self._line_t)
-        
         # 4. Polyline-driven arbitrary curtain (if set)
         self._render_polyline_curtain(ni, nx, nt, si, sx, st, lut)
 
+    def _create_slice_plane(self, axis: str):
+        """Build the slice plane + border for a single axis (inline/crossline/time)."""
+        if self._volume_data_cpu is None:
+            return
+
+        ni, nx, nt = self._volume_data_cpu.shape
+        si, sx, st = self._volume_spacing
+        lut = ColormapManager.get_colormap(self._cmap_name)
+
+        if axis == "inline":
+            # 1. Inline — Perpendicular to IL axis (x)
+            il_raw = self._get_sliced_data(0, self._il_pos) # returns GPU or CPU array
+            img_il_rgb = apply_colormap_gpu(il_raw, lut)
+            self._img_il = gl.GLImageItem(img_il_rgb)
+            self._img_il.scale(sx, st, 1)
+            self._img_il.rotate(90, 1, 0, 0)  # Puts Time (Height) on Z axis
+            self._img_il.rotate(90, 0, 0, 1)  # Puts Crossline (Width) on Y axis
+            self._img_il.translate(self._il_pos * si, 0, 0)
+            self._view.addItem(self._img_il)
+
+            # Red Border for Inline
+            il_pts = np.array([[0, 0, 0], [0, nx*sx, 0], [0, nx*sx, nt*st], [0, 0, nt*st], [0, 0, 0]])
+            self._line_il = gl.GLLinePlotItem(pos=il_pts, color=(1, 0, 0, 1), width=2, antialias=True)
+            self._line_il.translate(self._il_pos * si, 0, 0)
+            self._view.addItem(self._line_il)
+        elif axis == "crossline":
+            # 2. Crossline — Perpendicular to XL axis (y)
+            xl_raw = self._get_sliced_data(1, self._xl_pos)
+            img_xl_rgb = apply_colormap_gpu(xl_raw, lut)
+            self._img_xl = gl.GLImageItem(img_xl_rgb)
+            self._img_xl.scale(si, st, 1)
+            self._img_xl.rotate(90, 1, 0, 0)
+            self._img_xl.translate(0, self._xl_pos * sx, 0)
+            self._view.addItem(self._img_xl)
+
+            # Green Border for Crossline
+            xl_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, 0, nt*st], [0, 0, nt*st], [0, 0, 0]])
+            self._line_xl = gl.GLLinePlotItem(pos=xl_pts, color=(0, 1, 0, 1), width=2, antialias=True)
+            self._line_xl.translate(0, self._xl_pos * sx, 0)
+            self._view.addItem(self._line_xl)
+        elif axis == "time":
+            # 3. Time — Perpendicular to T axis (z)
+            t_raw = self._get_sliced_data(2, self._t_pos)
+            img_t_rgb = apply_colormap_gpu(t_raw, lut)
+            self._img_t = gl.GLImageItem(img_t_rgb)
+            self._img_t.scale(si, sx, 1)
+            self._img_t.translate(0, 0, self._t_pos * st)
+            self._view.addItem(self._img_t)
+
+            # Blue Border for Time
+            t_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, nx*sx, 0], [0, nx*sx, 0], [0, 0, 0]])
+            self._line_t = gl.GLLinePlotItem(pos=t_pts, color=(0, 0, 1, 1), width=2, antialias=True)
+            self._line_t.translate(0, 0, self._t_pos * st)
+            self._view.addItem(self._line_t)
+
+    _PLANE_ATTRS = {
+        "inline": ("_img_il", "_line_il"),
+        "crossline": ("_img_xl", "_line_xl"),
+        "time": ("_img_t", "_line_t"),
+    }
+
     def _update_slice_planes(self):
-        # Clear existing plane visuals from item graph
-        items_to_clean = (
-            getattr(self, "_img_il", None), getattr(self, "_img_xl", None), getattr(self, "_img_t", None), getattr(self, "_img_arb", None),
-            getattr(self, "_line_il", None), getattr(self, "_line_xl", None), getattr(self, "_line_t", None), getattr(self, "_line_arb", None)
-        )
-        for v in items_to_clean:
-            if v is not None:
+        """Full rebuild (backward compatible)."""
+        self._update_slice_planes_for(None)
+
+    def _update_slice_planes_for(self, axes: set[str] | None = None):
+        """Rebuild only the planes for `axes` (None = full rebuild)."""
+        if axes is None or axes >= {"inline", "crossline", "time"}:
+            axes = None  # fall through to full path
+        if axes is None:
+            # Original full-rebuild body (unchanged):
+            items_to_clean = (
+                getattr(self, "_img_il", None), getattr(self, "_img_xl", None), getattr(self, "_img_t", None), getattr(self, "_img_arb", None),
+                getattr(self, "_line_il", None), getattr(self, "_line_xl", None), getattr(self, "_line_t", None), getattr(self, "_line_arb", None)
+            )
+            for v in items_to_clean:
+                if v is not None:
+                    try:
+                        self._view.removeItem(v)
+                    except Exception:
+                        pass
+
+            self._img_il = self._img_xl = self._img_t = self._img_arb = None
+            self._line_il = self._line_xl = self._line_t = self._line_arb = None
+
+            for item in getattr(self, '_arb_curtain_items', []):
                 try:
-                    self._view.removeItem(v)
+                    self._view.removeItem(item)
                 except Exception:
                     pass
-        
-        self._img_il = self._img_xl = self._img_t = self._img_arb = None
-        self._line_il = self._line_xl = self._line_t = self._line_arb = None
-        
-        # Clean up polyline curtain items
-        for item in getattr(self, '_arb_curtain_items', []):
-            try:
-                self._view.removeItem(item)
-            except Exception:
-                pass
-        self._arb_curtain_items = []
-        
-        # Recreate instantly (leveraging GPU accelerated slicing cached results)
-        self._create_slice_planes()
+            self._arb_curtain_items = []
+
+            self._create_slice_planes()
+            self._view.update()
+            return
+
+        for axis in axes:
+            attrs = self._PLANE_ATTRS.get(axis)
+            if attrs is None:
+                continue
+            for attr in attrs:
+                item = getattr(self, attr, None)
+                if item is not None:
+                    try:
+                        self._view.removeItem(item)
+                    except Exception:
+                        pass
+                    setattr(self, attr, None)
+            self._create_slice_plane(axis)
         self._view.update()
 
     def set_arbitrary_polyline(self, points: list[tuple[float, float]]):
