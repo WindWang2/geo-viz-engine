@@ -39,6 +39,7 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "validate_polygon_geometry": ("geoviz_paleo_map.topology", "validate_polygon_geometry"),
     "export_professional_figure": ("geoviz_paleo_map", "export_professional_figure"),
     "CrossWellCanvas": ("geoviz_cross_well", "CrossWellCanvas"),
+    "FormationTop": ("geoviz_cross_well.tops_model", "FormationTop"),
     "WellTieCanvas": ("geoviz_well_tie.canvas", "WellTieCanvas"),
     "PlotWidget": ("geoviz_plots", "PlotWidget"),
     "SurfaceWidget": ("geoviz_plots", "SurfaceWidget"),

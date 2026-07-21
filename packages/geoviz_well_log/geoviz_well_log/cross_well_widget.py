@@ -40,7 +40,8 @@ class CrossWellWidget(QWidget):
         # Scrolling is handled by an outer QScrollArea in CrossWellPage.
         self._container_layout = QHBoxLayout(self)
         self._container_layout.setContentsMargins(20, 0, 20, 0)
-        self._container_layout.setSpacing(150)
+        self._well_spacing = 150
+        self._container_layout.setSpacing(self._well_spacing)
         self._container_layout.addStretch()
         self.setMinimumHeight(400)
 
@@ -182,6 +183,21 @@ class CrossWellWidget(QWidget):
         """Show or hide a specific track on a canvas."""
         if 0 <= track_index < len(canvas.tracks):
             canvas.tracks[track_index]._visible = visible
+            canvas.update()
+
+    def set_well_spacing(self, px: int):
+        """Set inter-well spacing in pixels (layout and export share it)."""
+        self._well_spacing = max(0, int(px))
+        self._container_layout.setSpacing(self._well_spacing)
+        self._update_minimum_width()
+        self._overlay.update()
+
+    def set_track_visible_by_label(self, label: str, visible: bool):
+        """Show or hide tracks matching `label` across all canvases."""
+        for canvas in self._canvases:
+            for track in canvas.tracks:
+                if (track.label or "") == label:
+                    track._visible = visible
             canvas.update()
 
     def _update_minimum_width(self):
@@ -361,7 +377,7 @@ class CrossWellWidget(QWidget):
         if not self._canvases:
             return
 
-        spacing = 150
+        spacing = self._well_spacing
         total_w = sum(c.width() for c in self._canvases) + \
                   spacing * (len(self._canvases) - 1)
         total_h = max(c.height() for c in self._canvases)
@@ -403,7 +419,7 @@ class CrossWellWidget(QWidget):
 
     def _paint_composite(self, painter: QPainter, total_w: int, total_h: int):
         """Paint all canvases at computed x-offsets, then overlay correlation polygons."""
-        spacing = 150
+        spacing = self._well_spacing
         x_off = 0
         canvas_x_offsets: dict[int, float] = {}
         canvas_right_edges: dict[int, float] = {}

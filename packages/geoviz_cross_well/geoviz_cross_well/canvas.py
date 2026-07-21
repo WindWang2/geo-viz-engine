@@ -32,6 +32,7 @@ class PickingOverlay(QWidget):
         self._hover_pick_id: str | None = None
         self._depth_domain = "MD"
         self._seismic_tie: SeismicTie | None = None
+        self._tops_visible = True
 
         self._parent_canvas = parent
         self._hover_well_idx: int | None = None
@@ -65,6 +66,10 @@ class PickingOverlay(QWidget):
 
     def set_seismic_tie(self, tie: SeismicTie | None):
         self._seismic_tie = tie
+        self.update()
+
+    def set_tops_visible(self, visible: bool):
+        self._tops_visible = bool(visible)
         self.update()
 
     def paintEvent(self, event):
@@ -122,6 +127,8 @@ class PickingOverlay(QWidget):
 
 
     def _paint_tops(self, painter: QPainter):
+        if not self._tops_visible:
+            return
         overlay = self._widget._overlay
         for i, canvas in enumerate(self._widget._canvases):
             if i >= len(self._widget._well_names):
@@ -276,6 +283,9 @@ class CrossWellCanvas(QWidget):
     @property
     def seismic_tie(self) -> SeismicTie:
         return self._seismic_tie
+
+    def set_tops_visible(self, visible: bool):
+        self._overlay.set_tops_visible(visible)
 
     @property
     def pick_mode(self) -> bool:
