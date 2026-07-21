@@ -28,6 +28,7 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "load_las_preview": ("geoviz_well_log.las_preview", "load_las_preview"),
     "load_xml_preview": ("geoviz_well_log.xml_preview", "load_xml_preview"),
     "inspect_las_file": ("geoviz_well_log.las_preview", "inspect_las_file"),
+    "curve_data_from_arrays": ("geoviz_well_log.las_preview", "curve_data_from_arrays"),
     "export_svg": ("geoviz_well_log", "export_svg"),
     "export_pdf": ("geoviz_well_log", "export_pdf"),
     "export_png": ("geoviz_well_log", "export_png"),
