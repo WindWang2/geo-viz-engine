@@ -120,6 +120,11 @@ class WellLogCanvas(QWidget):
         self.setMinimumWidth(self.total_width)
 
     def set_depth_range(self, top: float, bottom: float):
+        if self.tracks:
+            cur_top = self.tracks[0].depth_top
+            cur_bottom = self.tracks[0].depth_bottom
+            if abs(top - cur_top) < 1e-9 and abs(bottom - cur_bottom) < 1e-9:
+                return  # no-op: avoid cascade cache invalidation across wells
         self._depth_span = bottom - top
         self._coordinator.set_depth_range(top, bottom)
         self._cache_dirty = True
