@@ -60,6 +60,10 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "IntervalItem": ("geoviz_well_log.models", "IntervalItem"),
     "LithologyInterval": ("geoviz_well_log.models", "LithologyInterval"),
     "WellIntervals": ("geoviz_well_log.models", "WellIntervals"),
+    # Downsample provider hook installed by the workbench at startup.
+    "set_downsample_provider": ("geoviz_well_log.renderer.downsample", "set_downsample_provider"),
+    "get_downsample_provider": ("geoviz_well_log.renderer.downsample", "get_downsample_provider"),
+    "numpy_minmax_downsample": ("geoviz_well_log.renderer.downsample", "numpy_minmax_downsample"),
 }
 
 
