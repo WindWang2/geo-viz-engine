@@ -70,6 +70,9 @@ class _FakeWorker(QObject):
     def stop(self):
         self.stopped = True
 
+    def ensure_running(self):
+        self.stopped = False
+
 
 def _make_view(qtbot, monkeypatch) -> tuple:
     from geoviz_seismic.seismic_view import SeismicView
@@ -163,3 +166,13 @@ def test_prefetch_only_fills_cache(qtbot, monkeypatch):
     view._on_prefetch_ready("time", 12, data, 3)
     assert applied == []
     assert view._cache.get(("time", 12)) is data
+
+
+def test_worker_restarts_after_cleanup(qtbot, monkeypatch):
+    view, fake = _make_view(qtbot, monkeypatch)
+    # Simulate page-switch-away then back with a new SEGY
+    view.cleanup()
+    assert fake.stopped is True
+    view._ensure_slice_worker()
+    assert view._slice_worker_stopped is False
+    assert fake.stopped is False

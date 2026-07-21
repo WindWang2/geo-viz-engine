@@ -253,6 +253,13 @@ class SliceReadWorker(QThread):
         self._cond.wakeAll()
         self.wait(5000)
 
+    def ensure_running(self) -> None:
+        """Restart the worker if it was stopped (e.g. after view cleanup)."""
+        with QMutexLocker(self._mutex):
+            self._stop = False
+        if not self.isRunning():
+            self.start()
+
     # --- worker thread ---
 
     def _take_next(self) -> tuple[str, int, int] | None:

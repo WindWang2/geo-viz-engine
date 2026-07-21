@@ -47,6 +47,7 @@ class SeismicView(QWidget):
         self._loader: SeismicLoader | None = None
         self._segy_path: str | None = None
         self._cache = SeismicCache(max_slices=50)
+        self._slice_worker_stopped = False
         # Unparented + retained: parenting the QThread to this widget aborts
         # the process ("QThread: Destroyed while still running") when the
         # widget wrapper is garbage-collected without cleanup() being called.
@@ -55,7 +56,6 @@ class SeismicView(QWidget):
         self._slice_worker.prefetch_ready.connect(self._on_prefetch_ready)
         retain_background_worker(self._slice_worker)
         self._slice_worker.start()
-        self._slice_worker_stopped = False
         # Views discarded without cleanup() would otherwise leak a running
         # worker thread that aborts the process at interpreter teardown
         # (retain_background_worker's shutdown only interrupts; the worker's
@@ -257,6 +257,10 @@ class SeismicView(QWidget):
             self._slice_worker_stopped = True
             self._slice_worker.stop()
 
+    def _ensure_slice_worker(self) -> None:
+        self._slice_worker_stopped = False
+        self._slice_worker.ensure_running()
+
     def __del__(self):
         # Views are often dropped without cleanup() (tests, page switches);
         # the long-lived worker thread must not outlive the process or it
@@ -444,6 +448,7 @@ class SeismicView(QWidget):
         raw_xl = result.raw_crossline
         raw_t = result.raw_timeslice
         self._loader = SeismicLoader(result.path)
+        self._ensure_slice_worker()
         self._slice_worker.set_volume(result.path, self._segy_generation)
         self._meta = meta
         self._ds_factor = result.downsample_factor
@@ -1019,6 +1024,7 @@ class SeismicView(QWidget):
                 self._update_profile_panel(slice_type, actual_pos, cached.T)
             else:
                 # Async: worker reads from disk; panel updates on slice_ready
+                self._ensure_slice_worker()
                 self._slice_worker.request(
                     slice_type, actual_pos, self._segy_generation
                 )
