@@ -96,38 +96,39 @@ def test_curve_track_path_caching(qtbot):
     track = CurveTrack(curves=[curve], label="GR", width=150)
     qtbot.addWidget(track)
     track.set_depth_range(0, 1000)
-    
+
     # Render 1st time
     pm1 = QPixmap(150, 800)
     painter1 = QPainter(pm1)
     track.paint_content(painter1, QRectF(0, 0, 150, 800))
     painter1.end()
-    
-    # Assert cache is populated
-    assert hasattr(track, "_path_cache")
-    assert curve.name in track._path_cache
-    cache_key, path1 = track._path_cache[curve.name]
-    
+
+    # Assert downsampled-array cache is populated
+    assert hasattr(track, "_downsampled_cache")
+    assert curve.name in track._downsampled_cache
+    _, depths1, values1 = track._downsampled_cache[curve.name]
+
     # Render 2nd time with exact same geometry
     pm2 = QPixmap(150, 800)
     painter2 = QPainter(pm2)
     track.paint_content(painter2, QRectF(0, 0, 150, 800))
     painter2.end()
-    
-    # Assert cached path object was reused (identical memory ID)
-    _, path2 = track._path_cache[curve.name]
-    assert path1 is path2
-    
+
+    # Assert cached arrays were reused (identical memory ID)
+    _, depths2, values2 = track._downsampled_cache[curve.name]
+    assert depths1 is depths2
+    assert values1 is values2
+
     # Alter depth range to invalidate cache
     track.set_depth_range(100, 900)
     pm3 = QPixmap(150, 800)
     painter3 = QPainter(pm3)
     track.paint_content(painter3, QRectF(0, 0, 150, 800))
     painter3.end()
-    
-    # Assert cache key changed and path was re-generated (new path object)
-    _, path3 = track._path_cache[curve.name]
-    assert path1 is not path3
+
+    # Assert cache entry changed and arrays were re-generated (new objects)
+    _, depths3, values3 = track._downsampled_cache[curve.name]
+    assert depths1 is not depths3
 
 
 def test_curve_track_multi_scale_rendering(qtbot):
