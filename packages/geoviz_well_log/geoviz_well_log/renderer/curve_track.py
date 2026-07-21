@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import bisect
 import math
 from math import log10
 
@@ -45,17 +44,26 @@ class CurveTrack(BaseTrack):
         self._curves = sanitized_curves
         self._log_scale = log_scale
         self._path_cache = {}
-        # Store sorted copies — never mutate the original Pydantic models
-        self._sorted_depths: dict[str, list[float]] = {}
-        self._sorted_values: dict[str, list[float]] = {}
+        self._downsampled_cache = {}
+        # Store sorted ndarray copies — never mutate the original Pydantic models
+        self._sorted_depths: dict[str, np.ndarray] = {}
+        self._sorted_values: dict[str, np.ndarray] = {}
+        self._range_strs: dict[str, str] = {}
         for c in self._curves:
             if c.depth != sorted(c.depth):
                 pairs = sorted(zip(c.depth, c.values))
-                self._sorted_depths[c.name] = [p[0] for p in pairs]
-                self._sorted_values[c.name] = [p[1] for p in pairs]
+                self._sorted_depths[c.name] = np.asarray([p[0] for p in pairs], dtype=np.float64)
+                self._sorted_values[c.name] = np.asarray([p[1] for p in pairs], dtype=np.float64)
             else:
-                self._sorted_depths[c.name] = list(c.depth)
-                self._sorted_values[c.name] = list(c.values)
+                self._sorted_depths[c.name] = np.asarray(c.depth, dtype=np.float64)
+                self._sorted_values[c.name] = np.asarray(c.values, dtype=np.float64)
+            vals = self._sorted_values[c.name]
+            if len(vals) and not np.all(np.isnan(vals)):
+                vmin = float(np.nanmin(vals))
+                vmax = float(np.nanmax(vals))
+                self._range_strs[c.name] = f"{vmin:.1f}~{vmax:.1f} {c.unit}".strip()
+            else:
+                self._range_strs[c.name] = c.unit
 
     def _value_to_x(self, value: float, display_range: tuple[float, float],
                     rect: QRectF) -> float:
@@ -73,23 +81,44 @@ class CurveTrack(BaseTrack):
             t = (value - lo) / (hi - lo) if hi != lo else 0.5
         return rect.left() + t * rect.width()
 
-    def _visible_data(self, curve: CurveData) -> tuple[list[float], list[float]]:
-        depths = self._sorted_depths.get(curve.name, curve.depth)
-        values = self._sorted_values.get(curve.name, curve.values)
-        if not depths or not values:
-            return [], []
+    def _visible_data(self, curve: CurveData) -> tuple[np.ndarray, np.ndarray]:
+        depths = self._sorted_depths.get(curve.name)
+        values = self._sorted_values.get(curve.name)
+        if depths is None or values is None or len(depths) == 0:
+            empty = np.empty(0, dtype=np.float64)
+            return empty, empty
         margin = (self.depth_bottom - self.depth_top) * 0.05
         top = self.depth_top - margin
         bottom = self.depth_bottom + margin
-        start = bisect.bisect_left(depths, top)
-        end = bisect.bisect_right(depths, bottom)
-        start = max(0, start - 1)
-        end = min(len(depths), end + 1)
+        start = max(0, int(np.searchsorted(depths, top, side="left")) - 1)
+        end = min(len(depths), int(np.searchsorted(depths, bottom, side="right")) + 1)
         return depths[start:end], values[start:end]
 
-    def _downsample(self, depths: list[float], values: list[float],
-                    pixel_height: int) -> tuple[list[float], list[float]]:
+    def _downsample(self, depths: np.ndarray, values: np.ndarray,
+                    pixel_height: int) -> tuple[np.ndarray, np.ndarray]:
         return get_downsample_provider()(depths, values, pixel_height)
+
+    def _range_str_for(self, curve: CurveData) -> str:
+        return self._range_strs.get(curve.name, curve.unit)
+
+    def _cached_downsampled(self, curve: CurveData, rect: QRectF) -> tuple[np.ndarray, np.ndarray]:
+        """Downsampled arrays cached on a quantized depth-window key."""
+        pixel_height = max(1, int(rect.height()))
+        span = max(1e-9, self.depth_bottom - self.depth_top)
+        quantum = span / pixel_height
+        key = (
+            pixel_height,
+            int(round(rect.width())),
+            int(round(self.depth_top / quantum)),
+            int(round(self.depth_bottom / quantum)),
+        )
+        cached = self._downsampled_cache.get(curve.name)
+        if cached is not None and cached[0] == key:
+            return cached[1], cached[2]
+        depths, values = self._visible_data(curve)
+        depths, values = self._downsample(depths, values, pixel_height)
+        self._downsampled_cache[curve.name] = (key, depths, values)
+        return depths, values
 
     def _make_pen(self, curve: CurveData) -> QPen:
         pen = QPen(QColor(curve.color), 1.5)
@@ -130,14 +159,7 @@ class CurveTrack(BaseTrack):
             swatch_rect = QRectF(rect.left() + 6, y_offset + 4, 10, 5)
             painter.fillRect(swatch_rect, color)
 
-            # Compute min/max from curve values
-            vals = curve.values
-            if vals:
-                vmin = min(vals)
-                vmax = max(vals)
-                range_str = f"{vmin:.1f}~{vmax:.1f} {curve.unit}".strip()
-            else:
-                range_str = curve.unit
+            range_str = self._range_str_for(curve)
 
             # Curve name + range
             painter.setPen(color)
@@ -158,63 +180,43 @@ class CurveTrack(BaseTrack):
         pixel_height = max(1, int(rect.height()))
 
         for curve in self._curves:
-            cache_key = (
-                self.depth_top,
-                self.depth_bottom,
-                rect.left(),
-                rect.top(),
-                rect.width(),
-                rect.height(),
-                self._log_scale,
-            )
-            
-            cached = self._path_cache.get(curve.name)
-            if cached is not None and cached[0] == cache_key:
-                path = cached[1]
-            else:
-                depths, values = self._visible_data(curve)
-                depths, values = self._downsample(depths, values, pixel_height)
-                if len(depths) < 2:
-                    continue
+            depths, values = self._cached_downsampled(curve, rect)
+            if len(depths) < 2:
+                continue
 
-                # Vectorize coordinate mapping using numpy
-                depths_arr = np.array(depths)
-                values_arr = np.array(values)
+            # y coordinate calculation
+            ys = rect.top() + (depths - self.depth_top) / (self.depth_bottom - self.depth_top) * rect.height()
 
-                # y coordinate calculation
-                ys = rect.top() + (depths_arr - self.depth_top) / (self.depth_bottom - self.depth_top) * rect.height()
-
-                # x coordinate calculation based on display scale mode
-                lo, hi = curve.display_range
-                if self._log_scale:
-                    clipped_vals = np.clip(values_arr, max(lo, 1e-10), None)
-                    log_lo = log10(max(lo, 1e-10))
-                    log_hi = log10(max(hi, 1e-10))
-                    if log_lo == log_hi:
-                        xs = np.full_like(values_arr, rect.left() + 0.5 * rect.width())
-                    else:
-                        t_arr = (np.log10(clipped_vals) - log_lo) / (log_hi - log_lo)
-                        xs = rect.left() + t_arr * rect.width()
+            # x coordinate calculation based on display scale mode
+            lo, hi = curve.display_range
+            if self._log_scale:
+                clipped_vals = np.clip(values, max(lo, 1e-10), None)
+                log_lo = log10(max(lo, 1e-10))
+                log_hi = log10(max(hi, 1e-10))
+                if log_lo == log_hi:
+                    xs = np.full_like(values, rect.left() + 0.5 * rect.width())
                 else:
-                    if hi == lo:
-                        xs = np.full_like(values_arr, rect.left() + 0.5 * rect.width())
-                    else:
-                        t_arr = (values_arr - lo) / (hi - lo)
-                        xs = rect.left() + t_arr * rect.width()
+                    t_arr = (np.log10(clipped_vals) - log_lo) / (log_hi - log_lo)
+                    xs = rect.left() + t_arr * rect.width()
+            else:
+                if hi == lo:
+                    xs = np.full_like(values, rect.left() + 0.5 * rect.width())
+                else:
+                    t_arr = (values - lo) / (hi - lo)
+                    xs = rect.left() + t_arr * rect.width()
 
-                path = QPainterPath()
-                first = True
-                for x, y in zip(xs, ys):
-                    if np.isnan(x) or np.isnan(y) or np.isinf(x) or np.isinf(y):
-                        first = True
-                        continue
-                    if first:
-                        path.moveTo(float(x), float(y))
-                        first = False
-                    else:
-                        path.lineTo(float(x), float(y))
-
-                self._path_cache[curve.name] = (cache_key, path)
+            finite = np.isfinite(xs) & np.isfinite(ys)
+            path = QPainterPath()
+            first = True
+            for x, y, ok in zip(xs, ys, finite):
+                if not ok:
+                    first = True
+                    continue
+                if first:
+                    path.moveTo(float(x), float(y))
+                    first = False
+                else:
+                    path.lineTo(float(x), float(y))
 
             painter.setPen(self._make_pen(curve))
             painter.setBrush(Qt.BrushStyle.NoBrush)

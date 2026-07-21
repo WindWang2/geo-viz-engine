@@ -1,5 +1,9 @@
 """Injectable Min-Max LOD downsampling for curve rendering.
 
+Provider protocol (ndarray in, ndarray out):
+``provider(depths: np.ndarray, values: np.ndarray, pixel_height: int)``
+-> ``(np.ndarray, np.ndarray)``.
+
 Default provider is the engine's NumPy implementation. Host applications
 (e.g. paleo_workbench) may inject a C++-accelerated provider at startup via
 ``set_downsample_provider`` — the engine itself has no such dependency.
@@ -11,36 +15,38 @@ from typing import Callable
 import numpy as np
 
 DownsampleFn = Callable[
-    [list[float], list[float], int], tuple[list[float], list[float]]
+    [np.ndarray, np.ndarray, int], tuple[np.ndarray, np.ndarray]
 ]
 
 
 def numpy_minmax_downsample(
-    depths: list[float], values: list[float], pixel_height: int
-) -> tuple[list[float], list[float]]:
-    """Min-max 2-points-per-bin downsampling (engine default)."""
-    if len(depths) <= pixel_height * 2:
+    depths: np.ndarray, values: np.ndarray, pixel_height: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Min-max 2-points-per-bin downsampling (engine default, ndarray-native).
+
+    Semantics are identical to the legacy list-based implementation:
+    bins of ``step = len // pixel_height`` (last bin may be partial), each
+    bin emits its min and max in index (depth) order.
+    """
+    depths = np.asarray(depths, dtype=np.float64)
+    values = np.asarray(values, dtype=np.float64)
+    n = len(depths)
+    if n <= pixel_height * 2:
         return depths, values
-    arr_v = np.array(values)
-    step = max(1, len(arr_v) // pixel_height)
-    result_d: list[float] = []
-    result_v: list[float] = []
-    for i in range(0, len(arr_v), step):
-        chunk = arr_v[i:i + step]
+    step = max(1, n // pixel_height)
+    out_d: list[float] = []
+    out_v: list[float] = []
+    for i in range(0, n, step):
+        chunk = values[i:i + step]
         max_idx = i + int(np.argmax(chunk))
         min_idx = i + int(np.argmin(chunk))
-        # Emit in depth order to avoid zigzag artifacts
-        if max_idx <= min_idx:
-            result_d.append(depths[max_idx])
-            result_v.append(values[max_idx])
-            result_d.append(depths[min_idx])
-            result_v.append(values[min_idx])
-        else:
-            result_d.append(depths[min_idx])
-            result_v.append(values[min_idx])
-            result_d.append(depths[max_idx])
-            result_v.append(values[max_idx])
-    return result_d, result_v
+        lo, hi = (max_idx, min_idx) if max_idx < min_idx else (min_idx, max_idx)
+        # Emit in index (depth) order to avoid zigzag artifacts
+        out_d.append(depths[lo])
+        out_v.append(values[lo])
+        out_d.append(depths[hi])
+        out_v.append(values[hi])
+    return np.asarray(out_d, dtype=np.float64), np.asarray(out_v, dtype=np.float64)
 
 
 _provider: DownsampleFn = numpy_minmax_downsample
