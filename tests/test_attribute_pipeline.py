@@ -1,6 +1,6 @@
 """Integration tests for AttributePipeline dispatch (Phase 11.5-B / 11.5-D).
 
-Covers all 14 attribute combo entries including the curvature/dip/azimuth
+Covers all 15 attribute combo entries including the curvature/dip/azimuth
 paths (idx 8-13) that previously had no UI-dispatch test coverage.
 """
 
@@ -17,7 +17,7 @@ def _sample_slice(shape=(64, 40)) -> np.ndarray:
 
 class TestAttributeRegistry:
     def test_label_count_matches_specs(self):
-        assert len(ap.labels()) == len(ap.ATTRIBUTES) == 14
+        assert len(ap.labels()) == len(ap.ATTRIBUTES) == 15
 
     def test_rgb_index_is_unique_and_kind_rgb(self):
         idx = ap.rgb_index()
@@ -80,6 +80,29 @@ class TestApplyCurvatureAttributes:
         assert out.shape == data.shape
         assert not np.any(np.isnan(out))
         assert not np.any(np.isinf(out))
+
+
+class TestCoherenceC3:
+    """Phase P5: expose C3 coherence in the attribute combo."""
+
+    def test_coherence_c3_in_labels(self):
+        assert "相干性(C3)" in ap.labels()
+
+    def test_coherence_c3_apply_slice(self):
+        idx = ap.labels().index("相干性(C3)")
+        rng = np.random.default_rng(0)
+        data = rng.standard_normal((16, 32)).astype(np.float32)
+        out = ap.apply(idx, data)
+        assert out.shape == data.shape
+        assert float(np.nanmin(out)) >= 0.0
+        assert float(np.nanmax(out)) <= 1.0
+
+    def test_coherence_c3_high_for_smooth_data(self):
+        idx = ap.labels().index("相干性(C3)")
+        x = np.linspace(0, 4 * np.pi, 32, dtype=np.float32)
+        data = np.tile(np.sin(x), (16, 1))
+        out = ap.apply(idx, data)
+        assert float(np.nanmean(out)) > 0.5
 
 
 class TestApplyAllIndicesCovered:

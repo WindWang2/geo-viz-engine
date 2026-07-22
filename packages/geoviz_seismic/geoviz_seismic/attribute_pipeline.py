@@ -83,6 +83,7 @@ ATTRIBUTES: Sequence[AttributeSpec] = (
     AttributeSpec("平均曲率", "curvature", _curvature_mean),
     AttributeSpec("高斯曲率", "curvature", _curvature_gaussian),
     AttributeSpec("最大曲率", "curvature", _curvature_max),
+    AttributeSpec("相干性(C3)", "curvature", _attr.compute_coherence_c3),
 )
 
 
