@@ -1548,6 +1548,21 @@ class Renderer3D(QWidget):
         )
         self._view.addItem(self._bbox_visual)
 
+    def set_coord_mode(self, mode: str):
+        """Set coordinate system view mode ('grid' for IL/XL or 'geo' for Easting/Northing in meters)."""
+        self._coord_mode = mode
+        if self._loaded and self._volume_data_cpu is not None:
+            # Clear old 3D axis labels
+            for item in getattr(self, '_axis_labels', []):
+                try:
+                    self._view.removeItem(item)
+                except Exception:
+                    pass
+            self._axis_labels = []
+            ni, nx, nt = self._volume_data_cpu.shape
+            self._create_axis_labels(ni, nx, nt, self._volume_spacing)
+            self._view.update()
+
     def _create_axis_labels(self, ni, nx, nt, sp):
         """Create visible 3D coordinate axes with colored lines, arrows, and tick labels."""
         si, sx, st = sp
@@ -1555,6 +1570,8 @@ class Renderer3D(QWidget):
         pad = max_dim * 0.08  # Extension beyond bounding box
         
         self._axis_labels = []
+        is_geo = getattr(self, "_coord_mode", "grid") == "geo"
+        meta = getattr(self, "_meta", None)
         
         # ---- Solid colored axis LINES (RGB convention) ----
         # Inline axis (X) — Red
@@ -1583,14 +1600,26 @@ class Renderer3D(QWidget):
         
         # ---- Axis endpoint text labels ----
         try:
+            if is_geo and meta is not None:
+                x_start, y_start = meta.il_xl_to_xy(meta.iline_start, meta.xline_start)
+                x_end, y_end = meta.il_xl_to_xy(meta.iline_start + (ni - 1) * meta.iline_step, meta.xline_start + (nx - 1) * meta.xline_step)
+                il_text = f"Easting X ({x_start:.0f}m - {x_end:.0f}m)"
+                xl_text = f"Northing Y ({y_start:.0f}m - {y_end:.0f}m)"
+            elif is_geo:
+                il_text = "Easting X (m)"
+                xl_text = "Northing Y (m)"
+            else:
+                il_text = f'Inline (0-{ni-1})'
+                xl_text = f'Xline (0-{nx-1})'
+
             il_label = gl.GLTextItem(
                 pos=np.array([ni * si + pad * 1.2, 0, 0]),
-                text=f'Inline (0-{ni-1})',
+                text=il_text,
                 color=(255, 100, 100, 255)
             )
             xl_label = gl.GLTextItem(
                 pos=np.array([0, nx * sx + pad * 1.2, 0]),
-                text=f'Xline (0-{nx-1})',
+                text=xl_text,
                 color=(100, 220, 100, 255)
             )
             t_label = gl.GLTextItem(
@@ -1610,10 +1639,20 @@ class Renderer3D(QWidget):
         for i in range(n_ticks + 1):
             frac = i / n_ticks
             try:
+                if is_geo and meta is not None:
+                    curr_il = meta.iline_start + frac * (ni - 1) * meta.iline_step
+                    curr_xl = meta.xline_start + frac * (nx - 1) * meta.xline_step
+                    x_val, y_val = meta.il_xl_to_xy(curr_il, curr_xl)
+                    il_tick_str = f"{x_val:.0f}m"
+                    xl_tick_str = f"{y_val:.0f}m"
+                else:
+                    il_tick_str = str(int(frac * ni))
+                    xl_tick_str = str(int(frac * nx))
+
                 pos_il = np.array([frac * ni * si, -tick_offset, 0])
                 tick_il = gl.GLTextItem(
                     pos=pos_il,
-                    text=str(int(frac * ni)),
+                    text=il_tick_str,
                     color=(220, 180, 180, 220)
                 )
                 self._view.addItem(tick_il)
@@ -1622,7 +1661,7 @@ class Renderer3D(QWidget):
                 pos_xl = np.array([-tick_offset, frac * nx * sx, 0])
                 tick_xl = gl.GLTextItem(
                     pos=pos_xl,
-                    text=str(int(frac * nx)),
+                    text=xl_tick_str,
                     color=(180, 220, 180, 220)
                 )
                 self._view.addItem(tick_xl)
