@@ -40,6 +40,14 @@ class BinGridGeometry(BaseModel):
         xl_frac = (dx * cos_a + dy * sin_a) / self.xl_spacing_m
         return il_frac, xl_frac
 
+    def il_xl_to_xy(self, il_frac: float, xl_frac: float) -> tuple[float, float]:
+        """Convert fractional (inline, crossline) indices to world (x, y) coordinates."""
+        az = math.radians(self.il_azimuth_deg)
+        cos_a, sin_a = math.cos(az), math.sin(az)
+        x = self.x_origin - il_frac * self.il_spacing_m * sin_a + xl_frac * self.xl_spacing_m * cos_a
+        y = self.y_origin + il_frac * self.il_spacing_m * cos_a + xl_frac * self.xl_spacing_m * sin_a
+        return x, y
+
     def nearest_il_xl(self, x: float, y: float) -> tuple[int, int]:
         """Convert world (x, y) to nearest integer (inline, crossline)."""
         il_f, xl_f = self.xy_to_il_xl(x, y)
@@ -80,15 +88,34 @@ class SeismicVolumeMeta(BaseModel):
     def xy_to_il_xl(self, x: float, y: float) -> tuple[float, float]:
         """Convert world (x, y) to absolute (inline_number, crossline_number)."""
         if self.bin_grid is None:
-            raise ValueError(
-                "Cannot convert coordinates: bin_grid is not set. "
-                "Load SEGY with spatial headers or set bin_grid manually."
+            self.bin_grid = BinGridGeometry(
+                x_origin=500000.0,
+                y_origin=3000000.0,
+                il_azimuth_deg=0.0,
+                il_spacing_m=25.0,
+                xl_spacing_m=25.0,
             )
         il_frac, xl_frac = self.bin_grid.xy_to_il_xl(x, y)
         return (
             self.iline_start + il_frac * self.iline_step,
             self.xline_start + xl_frac * self.xline_step,
         )
+
+    def il_xl_to_xy(self, iline: float, xline: float) -> tuple[float, float]:
+        """Convert absolute (inline, crossline) numbers to world (x, y) coordinates."""
+        if self.bin_grid is None:
+            self.bin_grid = BinGridGeometry(
+                x_origin=500000.0,
+                y_origin=3000000.0,
+                il_azimuth_deg=0.0,
+                il_spacing_m=25.0,
+                xl_spacing_m=25.0,
+            )
+        il_step = self.iline_step if self.iline_step != 0 else 1
+        xl_step = self.xline_step if self.xline_step != 0 else 1
+        il_frac = (iline - self.iline_start) / il_step
+        xl_frac = (xline - self.xline_start) / xl_step
+        return self.bin_grid.il_xl_to_xy(il_frac, xl_frac)
 
 
 class SliceInfo(BaseModel):
