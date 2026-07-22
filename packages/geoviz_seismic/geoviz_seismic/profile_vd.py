@@ -409,7 +409,10 @@ class ProfileVD(QWidget):
         if self._normalized is None:
             return
 
-        lut = ColormapManager.get_colormap(self._colormap_name)
+        try:
+            lut = ColormapManager.get_colormap(self._colormap_name)
+        except (ValueError, KeyError):
+            lut = ColormapManager.get_colormap("seismic")
 
         n_rows, n_cols = self._normalized.shape
 
