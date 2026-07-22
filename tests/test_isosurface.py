@@ -87,3 +87,83 @@ def test_volume_data_accessor(qtbot):
     empty = Renderer3D()
     qtbot.addWidget(empty)
     assert empty.volume_data() is None
+
+
+from geoviz_seismic.seismic_view import SeismicView
+
+
+def _view(qtbot):
+    v = SeismicView(auto_load=False)
+    qtbot.addWidget(v)
+    vol = np.random.default_rng(1).standard_normal((8, 8, 8)).astype(np.float32)
+    v._renderer_3d.load_volume(vol)
+    return v
+
+
+def test_isosurface_controls_disabled_without_extractor(qtbot):
+    v = _view(qtbot)
+    v._refresh_isosurface_controls()
+    assert not v._iso_checkbox.isEnabled()
+    assert not v._iso_spin.isEnabled()
+
+
+def test_isosurface_controls_enabled_with_extractor(qtbot):
+    iso_mod.set_isosurface_extractor(
+        lambda vol, iso: (np.zeros((0, 3), np.float32), np.zeros((0, 3), np.int32))
+    )
+    v = _view(qtbot)
+    v._refresh_isosurface_controls()
+    assert v._iso_checkbox.isEnabled()
+    assert v._iso_spin.isEnabled()
+
+
+def test_isosurface_toggle_extracts_and_clears(qtbot):
+    calls = []
+
+    def fake(vol, iso):
+        calls.append(iso)
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        return verts, np.array([[0, 1, 2]], dtype=np.int32)
+
+    iso_mod.set_isosurface_extractor(fake)
+    v = _view(qtbot)
+    v._refresh_isosurface_controls()
+    v._iso_checkbox.setChecked(True)
+    qtbot.wait(350)  # debounce 200ms
+    assert len(calls) == 1
+    assert v._renderer_3d._isosurface_item is not None
+    v._iso_checkbox.setChecked(False)
+    assert v._renderer_3d._isosurface_item is None
+
+
+def test_isosurface_threshold_debounce(qtbot):
+    calls = []
+
+    def fake(vol, iso):
+        calls.append(iso)
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        return verts, np.array([[0, 1, 2]], dtype=np.int32)
+
+    iso_mod.set_isosurface_extractor(fake)
+    v = _view(qtbot)
+    v._refresh_isosurface_controls()
+    v._iso_checkbox.setChecked(True)
+    qtbot.wait(350)
+    assert len(calls) == 1
+    v._iso_spin.setValue(v._iso_spin.value() + 0.01)
+    v._iso_spin.setValue(v._iso_spin.value() + 0.01)
+    qtbot.wait(350)
+    assert len(calls) == 2  # 两次快速改动合并为一次提取
+
+
+def test_isosurface_extractor_error_unchecks(qtbot):
+    def boom(vol, iso):
+        raise RuntimeError("extraction failed")
+
+    iso_mod.set_isosurface_extractor(boom)
+    v = _view(qtbot)
+    v._refresh_isosurface_controls()
+    v._iso_checkbox.setChecked(True)
+    qtbot.wait(350)
+    assert not v._iso_checkbox.isChecked()
+    assert v._renderer_3d._isosurface_item is None

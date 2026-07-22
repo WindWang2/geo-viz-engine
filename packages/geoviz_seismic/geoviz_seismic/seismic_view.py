@@ -7,7 +7,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QPushButton, QComboBox, QLabel, QFileDialog, QToolBar,
-    QDoubleSpinBox, QSlider,
+    QDoubleSpinBox, QSlider, QCheckBox,
 )
 
 from .renderer_3d import Renderer3D
@@ -609,6 +609,19 @@ class SeismicView(QWidget):
         self._clip_spin.setFixedWidth(80)
         self._clip_spin.valueChanged.connect(self._on_clip_changed)
 
+        self._iso_checkbox = QCheckBox(" 等值面")
+        self._iso_checkbox.setEnabled(False)
+        self._iso_checkbox.toggled.connect(self._on_isosurface_toggled)
+        self._iso_spin = QDoubleSpinBox()
+        self._iso_spin.setDecimals(3)
+        self._iso_spin.setFixedWidth(90)
+        self._iso_spin.setEnabled(False)
+        self._iso_spin.valueChanged.connect(self._on_isosurface_threshold_changed)
+        self._iso_timer = QTimer(self)
+        self._iso_timer.setSingleShot(True)
+        self._iso_timer.setInterval(200)
+        self._iso_timer.timeout.connect(self._rebuild_isosurface)
+
         # Toolbar slice sliders
         self._tb_il_slider = QSlider(Qt.Orientation.Horizontal)
         self._tb_xl_slider = QSlider(Qt.Orientation.Horizontal)
@@ -764,6 +777,9 @@ class SeismicView(QWidget):
         bar2.addSeparator()
         bar2.addWidget(QLabel(" 裁剪:"))
         bar2.addWidget(self._clip_spin)
+        bar2.addSeparator()
+        bar2.addWidget(self._iso_checkbox)
+        bar2.addWidget(self._iso_spin)
 
         # ----- Row 3: 叠加、特征属性与切片滑动条 -----
         bar3 = self._toolbar_row3
@@ -981,6 +997,7 @@ class SeismicView(QWidget):
         self._update_tb_slider_label("inline", self._renderer_3d._il_pos)
         self._update_tb_slider_label("crossline", self._renderer_3d._xl_pos)
         self._update_tb_slider_label("time", self._renderer_3d._t_pos)
+        self._refresh_isosurface_controls()
 
     @Slot()
     def _apply_pending_slice(self):
@@ -1277,6 +1294,54 @@ class SeismicView(QWidget):
         modes = ["sharp", "linear", "sigmoid", "threshold"]
         if 0 <= index < len(modes):
             self._renderer_3d.set_opacity_mode(modes[index])
+
+    def _refresh_isosurface_controls(self):
+        from .isosurface import get_isosurface_extractor
+
+        vol = self._renderer_3d.volume_data()
+        ok = vol is not None and get_isosurface_extractor() is not None
+        self._iso_checkbox.setEnabled(ok)
+        self._iso_spin.setEnabled(ok)
+        if not ok:
+            self._iso_checkbox.setToolTip("等值面不可用（未注入提取器或未加载数据）")
+            if self._iso_checkbox.isChecked():
+                self._iso_checkbox.setChecked(False)
+            return
+        self._iso_checkbox.setToolTip("")
+        vmin = float(np.nanmin(vol))
+        vmax = float(np.nanmax(vol))
+        self._iso_spin.blockSignals(True)
+        self._iso_spin.setRange(vmin, vmax)
+        self._iso_spin.setSingleStep((vmax - vmin) / 100.0 if vmax > vmin else 1.0)
+        self._iso_spin.setValue((vmin + vmax) / 2.0)
+        self._iso_spin.blockSignals(False)
+
+    def _on_isosurface_toggled(self, checked: bool):
+        if checked:
+            self._iso_timer.start()
+        else:
+            self._iso_timer.stop()
+            self._renderer_3d.clear_isosurface()
+
+    def _on_isosurface_threshold_changed(self, _value: float):
+        if self._iso_checkbox.isChecked():
+            self._iso_timer.start()
+
+    def _rebuild_isosurface(self):
+        from .isosurface import get_isosurface_extractor
+
+        extractor = get_isosurface_extractor()
+        vol = self._renderer_3d.volume_data()
+        if extractor is None or vol is None or not self._iso_checkbox.isChecked():
+            return
+        try:
+            verts, faces = extractor(vol, float(self._iso_spin.value()))
+        except Exception:
+            self._log.warning("isosurface extraction failed", exc_info=True)
+            self._renderer_3d.clear_isosurface()
+            self._iso_checkbox.setChecked(False)
+            return
+        self._renderer_3d.set_isosurface(verts, faces)
 
     def _on_hillshade_toggled(self, checked: bool):
         self._renderer_3d.set_hillshading(checked)
