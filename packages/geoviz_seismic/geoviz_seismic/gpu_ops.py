@@ -112,6 +112,17 @@ def _normalize_to_lut_index(
     return xp, idx
 
 
+# Cached GPU LUT texture — avoids re-uploading the 256x4 table on every call
+# (the old per-call cp.asarray(lut) made GPU 200x slower than CPU). Keyed on
+# id(lut) so it rebuilds only when the colormap object actually changes.
+_gpu_lut_cache: dict[int, "cp.ndarray"] = {}
+
+# Below this element count, GPU kernel-launch + D2H transfer overhead exceeds
+# the compute benefit — defer to the NumPy path. ~256x256 is the breakeven on
+# an RTX 3080 Laptop for a normalize+LUT-gather pipeline.
+_GPU_MIN_ELEMENTS = 256 * 256
+
+
 def apply_colormap_gpu(data: cp.ndarray | np.ndarray,
                        lut: np.ndarray,
                        value_range: tuple[float, float] | None = None) -> np.ndarray:
@@ -129,16 +140,30 @@ def apply_colormap_gpu(data: cp.ndarray | np.ndarray,
     Returns:
         np.ndarray: Final RGBA CPU image ready for GUI texture upload.
     """
-    xp, idx = _normalize_to_lut_index(data, len(lut), value_range)
-    # 3. Map via LUT
-    if xp is cp:
-        # Upload LUT to GPU briefly for lightning fast vector lookup
-        gpu_lut = cp.asarray(lut)
-        rgba_gpu = gpu_lut[idx]
-        # Finally, pull small final RGBA image to CPU
-        return cp.asnumpy(rgba_gpu)
-    else:
+    # Size guard: small arrays pay GPU overhead with no compute benefit.
+    # Also guards against cupy not being available or data not on GPU.
+    use_gpu = (
+        _CUPY_AVAILABLE
+        and isinstance(data, cp.ndarray)
+        and data.size >= _GPU_MIN_ELEMENTS
+    )
+    if not use_gpu:
+        xp, idx = _normalize_to_lut_index(data, len(lut), value_range)
+        # If data was a small GPU array, idx is a cupy array — convert for
+        # the NumPy LUT gather (lut is always CPU NumPy).
+        if xp is cp:
+            idx = cp.asnumpy(idx)
         return lut[idx]
+
+    # GPU path: normalize + index on GPU, gather through cached LUT.
+    xp, idx = _normalize_to_lut_index(data, len(lut), value_range)
+    lut_id = id(lut)
+    gpu_lut = _gpu_lut_cache.get(lut_id)
+    if gpu_lut is None:
+        gpu_lut = cp.asarray(lut)
+        _gpu_lut_cache[lut_id] = gpu_lut
+    rgba_gpu = gpu_lut[idx]
+    return cp.asnumpy(rgba_gpu)
 
 
 def apply_colormap_index(
