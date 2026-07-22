@@ -1551,17 +1551,104 @@ class Renderer3D(QWidget):
     def set_coord_mode(self, mode: str):
         """Set coordinate system view mode ('grid' for IL/XL or 'geo' for Easting/Northing in meters)."""
         self._coord_mode = mode
-        if self._loaded and self._volume_data_cpu is not None:
-            # Clear old 3D axis labels
-            for item in getattr(self, '_axis_labels', []):
-                try:
-                    self._view.removeItem(item)
-                except Exception:
-                    pass
-            self._axis_labels = []
-            ni, nx, nt = self._volume_data_cpu.shape
-            self._create_axis_labels(ni, nx, nt, self._volume_spacing)
-            self._view.update()
+        if not self._loaded or self._volume_data_cpu is None:
+            return
+
+        ni, nx, nt = self._volume_data_cpu.shape
+        si, sx, st = self._volume_spacing
+        meta = getattr(self, "_meta", None)
+
+        # Clear old 3D axis labels and bounding box
+        for item in getattr(self, '_axis_labels', []):
+            try:
+                self._view.removeItem(item)
+            except Exception:
+                pass
+        self._axis_labels = []
+
+        if self._bbox_visual is not None:
+            try:
+                self._view.removeItem(self._bbox_visual)
+            except Exception:
+                pass
+            self._bbox_visual = None
+
+        if mode == "geo" and meta is not None:
+            x0, y0 = meta.il_xl_to_xy(meta.iline_start, meta.xline_start)
+            x1, y1 = meta.il_xl_to_xy(meta.iline_start + (ni - 1) * meta.iline_step, meta.xline_start + (nx - 1) * meta.xline_step)
+            wx = max(10.0, abs(x1 - x0))
+            wy = max(10.0, abs(y1 - y0))
+            cx = (x0 + x1) / 2.0
+            cy = (y0 + y1) / 2.0
+            cz = (nt * st) / 2.0
+
+            scale_x = wx / max(1, ni * si)
+            scale_y = wy / max(1, nx * sx)
+
+            if self._volume_visual is not None:
+                self._volume_visual.resetTransform()
+                self._volume_visual.scale(si * 2 * scale_x, sx * 2 * scale_y, st * 2)
+
+            max_grid_len = max(wx, wy) * 1.5
+            self._base_grid.setSize(max_grid_len, max_grid_len)
+            self._base_grid.setSpacing(max_grid_len / 10.0, max_grid_len / 10.0)
+            self._base_grid.resetTransform()
+            self._base_grid.translate(cx, cy, 0)
+
+            corners = np.array([
+                [min(x0, x1), min(y0, y1), 0],
+                [max(x0, x1), min(y0, y1), 0],
+                [max(x0, x1), max(y0, y1), 0],
+                [min(x0, x1), max(y0, y1), 0],
+                [min(x0, x1), min(y0, y1), nt * st],
+                [max(x0, x1), min(y0, y1), nt * st],
+                [max(x0, x1), max(y0, y1), nt * st],
+                [min(x0, x1), max(y0, y1), nt * st]
+            ], dtype=np.float32)
+            edges = [
+                0, 1, 1, 2, 2, 3, 3, 0,
+                4, 5, 5, 6, 6, 7, 7, 4,
+                0, 4, 1, 5, 2, 6, 3, 7
+            ]
+            self._bbox_visual = gl.GLLinePlotItem(
+                pos=corners[edges],
+                color=(0.3, 0.7, 1.0, 0.8),
+                width=1.8,
+                mode='lines'
+            )
+            self._view.addItem(self._bbox_visual)
+
+            max_dim = max(wx, wy, nt * st)
+            self._view.setCameraPosition(
+                center=QVector3D(cx, cy, cz),
+                distance=max_dim * 2.2
+            )
+        else:
+            cx = (ni * si) / 2.0
+            cy = (nx * sx) / 2.0
+            cz = (nt * st) / 2.0
+
+            if self._volume_visual is not None:
+                self._volume_visual.resetTransform()
+                self._volume_visual.scale(si * 2, sx * 2, st * 2)
+
+            max_grid_len = max(ni * si, nx * sx) * 1.5
+            self._base_grid.setSize(max_grid_len, max_grid_len)
+            self._base_grid.setSpacing(max_grid_len / 10.0, max_grid_len / 10.0)
+            self._base_grid.resetTransform()
+            self._base_grid.translate(cx, cy, 0)
+
+            self._create_bbox(ni, nx, nt, (si, sx, st))
+
+            max_dim = max(ni * si, nx * sx, nt * st)
+            self._view.setCameraPosition(
+                center=QVector3D(cx, cy, cz),
+                distance=max_dim * 2.2
+            )
+
+        self._create_axis_labels(ni, nx, nt, (si, sx, st))
+        self._update_slice_planes()
+        self._view.update()
 
     def _create_axis_labels(self, ni, nx, nt, sp):
         """Create visible 3D coordinate axes with colored lines, arrows, and tick labels."""
