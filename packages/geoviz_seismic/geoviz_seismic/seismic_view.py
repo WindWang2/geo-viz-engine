@@ -362,40 +362,8 @@ class SeismicView(QWidget):
         self._log.info("Demo loaded: shape=%s", data.shape)
 
     def load_segy(self, path: str):
-        """Load a SEGY file synchronously (for backward compat)."""
-        self.cancel_pending_segy_load()
-        self._segy_path = path
-        self._loader = SeismicLoader(path)
-        self._meta = self._loader.inspect()
-        self._log.info("SEGY inspected: %s (%dx%dx%d)", path,
-                       self._meta.n_inlines, self._meta.n_crosslines,
-                       self._meta.n_samples)
-        self._ds_factor = (1, 1, 1)
-        self._ds_factor = downsample_factor_for_budget(
-            (
-                self._meta.n_inlines,
-                self._meta.n_crosslines,
-                self._meta.n_samples,
-            ),
-            max_voxels=DEFAULT_MAX_PREVIEW_VOXELS,
-        )
-        vol = self._loader.get_volume_downsampled(factor=self._ds_factor)
-        self._log.info("Volume downsampled: shape=%s", vol.shape)
-        self._renderer_3d.load_volume(vol)
-        mid_il = self._meta.iline_start + (self._meta.n_inlines // 2) * self._meta.iline_step
-        mid_xl = self._meta.xline_start + (self._meta.n_crosslines // 2) * self._meta.xline_step
-        mid_t = self._meta.n_samples // 2
-        
-        raw_il = self._loader.read_inline(mid_il)
-        raw_xl = self._loader.read_crossline(mid_xl)
-        raw_t = self._loader.read_timeslice(mid_t)
-        
-        self._update_profile_panel("inline", mid_il, raw_il.T)
-        self._update_profile_panel("crossline", mid_xl, raw_xl.T)
-        self._update_profile_panel("time", mid_t, raw_t.T)
-        
-        self._slice_label.setText(f"Loaded: IL:{mid_il} XL:{mid_xl} T:{mid_t}")
-        self._setup_toolbar_sliders()
+        """Load a SEGY file in a background thread to keep the GUI responsive."""
+        self.load_segy_async(path)
 
     def load_segy_async(self, path: str):
         """Load a SEGY file in a background thread."""
