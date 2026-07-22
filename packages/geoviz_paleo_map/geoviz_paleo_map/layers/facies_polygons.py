@@ -116,6 +116,14 @@ class FaciesPolygonsLayer(PaleoLayer):
         self._hierarchy = hierarchy
         self._active_level = active_level
         self._locked_ids = locked_ids or {}
+        # Cache of resolved per-feature lock state: feature_id ->
+        # (active_lock, locked_geometry, locked_feature_id). The resolution
+        # walks the hierarchy ancestor chain (get_node + get_ancestors), which
+        # is O(depth) per feature — previously recomputed for every visible
+        # border on every paint tick. Keyed on id(self._locked_ids) so the
+        # cache invalidates if the locked-ids dict is replaced.
+        self._lock_state_cache: dict[str, tuple] = {}
+        self._lock_state_key: int | None = None
         self._selected_id: str | None = None
         self._topology_model = None  # set externally when edit mode is active
         self._screen_cache = ScreenPathCache()
@@ -280,6 +288,40 @@ class FaciesPolygonsLayer(PaleoLayer):
                 painter.restore()
         painter.restore()
 
+    def _resolve_lock_state(self, feature_id: str) -> tuple:
+        """Resolve the lock state for a feature, using a per-frame cache.
+
+        Returns ``(active_lock, locked_geometry, locked_feature_id)``. The
+        ancestor-chain walk (get_node + get_ancestors) is O(depth) and was
+        previously executed for every visible border on every paint tick;
+        cached here keyed on id(self._locked_ids) so it recomputes only when
+        the locked-ids dict changes.
+        """
+        lid = id(self._locked_ids)
+        if self._lock_state_key != lid:
+            self._lock_state_cache.clear()
+            self._lock_state_key = lid
+        cached = self._lock_state_cache.get(feature_id)
+        if cached is not None:
+            return cached
+        active_lock = None
+        locked_geometry = False
+        locked_feature_id = None
+        if self._hierarchy is not None and self._locked_ids:
+            node = self._hierarchy.get_node(feature_id)
+            if node is not None:
+                ancestors = self._hierarchy.get_ancestors(feature_id)
+                chain = ancestors + [node.feature]
+                for f in chain:
+                    if f.id in self._locked_ids:
+                        active_lock = self._locked_ids[f.id]
+                        locked_geometry = True
+                        locked_feature_id = f.id
+                        break
+        result = (active_lock, locked_geometry, locked_feature_id)
+        self._lock_state_cache[feature_id] = result
+        return result
+
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
         vp_bbox = viewport.world_bbox()
 
@@ -375,21 +417,10 @@ class FaciesPolygonsLayer(PaleoLayer):
                     visible_borders = []
 
                 for border_item in visible_borders:
-                    active_lock = None
+                    active_lock, locked_geometry, locked_feature_id = self._resolve_lock_state(
+                        border_item.feature_id
+                    )
                     active_lock_depth = 0
-                    locked_geometry = False
-                    locked_feature_id = None
-                    if self._hierarchy is not None and self._locked_ids:
-                        node = self._hierarchy.get_node(border_item.feature_id)
-                        if node is not None:
-                            ancestors = self._hierarchy.get_ancestors(border_item.feature_id)
-                            chain = ancestors + [node.feature]
-                            for f in chain:
-                                if f.id in self._locked_ids:
-                                    active_lock = self._locked_ids[f.id]
-                                    locked_geometry = True
-                                    locked_feature_id = f.id
-                                    break
 
                     levels = ["facies", "sub_facies", "micro_facies"]
                     active_depth = levels.index(self._active_level) if self._active_level in levels else 0

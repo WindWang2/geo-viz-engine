@@ -4,8 +4,8 @@ import math
 from math import log10
 
 import numpy as np
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QPainter, QPen, QPainterPath, QColor, QFont
+from PySide6.QtCore import QRectF, Qt, QPointF
+from PySide6.QtGui import QPainter, QPen, QPainterPath, QColor, QFont, QPolygonF
 from PySide6.QtWidgets import QWidget
 
 from ..models import CurveData, LineStyle
@@ -49,6 +49,36 @@ def simplify_curve_screen_space(
     return x_trunc[rows_combined, idx_combined], y_trunc[rows_combined, idx_combined]
 
 
+def build_curve_path(xs: np.ndarray, ys: np.ndarray) -> QPainterPath:
+    """Build a QPainterPath from screen-space arrays, splitting at NaN/Inf gaps.
+
+    This is the same moveTo/lineTo construction the paint loop used to do per
+    frame, factored out so it can be *cached* on the quantized depth/width key
+    and rebuilt only when the view actually changes — not on every repaint.
+    NaN/Inf entries break the curve into separate sub-paths (a visual gap).
+    """
+    finite = np.isfinite(xs) & np.isfinite(ys)
+    path = QPainterPath()
+    if not finite.any():
+        return path
+    n = len(xs)
+    i = 0
+    while i < n:
+        if not finite[i]:
+            i += 1
+            continue
+        # Find the end of this finite run.
+        j = i
+        while j < n and finite[j]:
+            j += 1
+        if j - i >= 2:
+            path.moveTo(float(xs[i]), float(ys[i]))
+            for k in range(i + 1, j):
+                path.lineTo(float(xs[k]), float(ys[k]))
+        i = j
+    return path
+
+
 class CurveTrack(BaseTrack):
     """Log curve track with viewport culling and adaptive downsampling."""
 
@@ -79,6 +109,11 @@ class CurveTrack(BaseTrack):
         self._curves = sanitized_curves
         self._log_scale = log_scale
         self._downsampled_cache = {}
+        # Cache of built QPainterPath per curve, keyed on the same quantized
+        # depth/width key as _downsampled_cache — so the path is rebuilt only
+        # when the view changes, not on every paint (the per-paint zip loop
+        # over every curve point was the classic PySide6 bottleneck).
+        self._path_cache: dict[str, tuple[tuple, QPainterPath]] = {}
         # Store sorted ndarray copies — never mutate the original Pydantic models
         self._sorted_depths: dict[str, np.ndarray] = {}
         self._sorted_values: dict[str, np.ndarray] = {}
@@ -155,6 +190,58 @@ class CurveTrack(BaseTrack):
         self._downsampled_cache[curve.name] = (key, depths, values)
         return depths, values
 
+    def _cached_path(self, curve: CurveData, rect: QRectF) -> QPainterPath:
+        """Cached QPainterPath for a curve, keyed on the downsample cache key.
+
+        The path is built once per quantized depth/width window (same key as
+        ``_cached_downsampled``) and reused across repaints. For curves with
+        more than 1000 screen-space points, ``simplify_curve_screen_space``
+        applies a bucketed min/max reduction first — keeping visual fidelity
+        while cutting the per-build point count ~4x.
+        """
+        depths, values = self._cached_downsampled(curve, rect)
+        if len(depths) < 2:
+            return QPainterPath()
+        ys = rect.top() + (depths - self.depth_top) / (self.depth_bottom - self.depth_top) * rect.height()
+        lo, hi = curve.display_range
+        if self._log_scale:
+            clipped_vals = np.clip(values, max(lo, 1e-10), None)
+            log_lo = log10(max(lo, 1e-10))
+            log_hi = log10(max(hi, 1e-10))
+            if log_lo == log_hi:
+                xs = np.full_like(values, rect.left() + 0.5 * rect.width())
+            else:
+                t_arr = (np.log10(clipped_vals) - log_lo) / (log_hi - log_lo)
+                xs = rect.left() + t_arr * rect.width()
+        else:
+            if hi == lo:
+                xs = np.full_like(values, rect.left() + 0.5 * rect.width())
+            else:
+                t_arr = (values - lo) / (hi - lo)
+                xs = rect.left() + t_arr * rect.width()
+
+        # Key on the rect + downsample key so the cache invalidates on the
+        # same events (zoom, pan past quantum, resize) as the downsample cache.
+        pixel_height = max(1, int(rect.height()))
+        span = max(1e-9, self.depth_bottom - self.depth_top)
+        quantum = span / pixel_height
+        path_key = (
+            int(round(rect.width())),
+            int(round(span)),
+            int(round(self.depth_top / quantum)),
+            int(round(self.depth_bottom / quantum)),
+        )
+        cached = self._path_cache.get(curve.name)
+        if cached is not None and cached[0] == path_key:
+            return cached[1]
+        # For dense curves, apply screen-space bucketed min/max reduction
+        # first — keeps the silhouette while cutting the point count ~4x
+        # (simplify_curve_screen_space was previously defined but never wired).
+        sx, sy = simplify_curve_screen_space(xs, ys)
+        path = build_curve_path(sx, sy)
+        self._path_cache[curve.name] = (path_key, path)
+        return path
+
     def _make_pen(self, curve: CurveData) -> QPen:
         pen = QPen(QColor(curve.color), 1.5)
         if curve.line_style == LineStyle.DASHED:
@@ -213,43 +300,9 @@ class CurveTrack(BaseTrack):
         self.paint_grid(painter, rect)
 
         for curve in self._curves:
-            depths, values = self._cached_downsampled(curve, rect)
-            if len(depths) < 2:
+            path = self._cached_path(curve, rect)
+            if path.isEmpty():
                 continue
-
-            # y coordinate calculation
-            ys = rect.top() + (depths - self.depth_top) / (self.depth_bottom - self.depth_top) * rect.height()
-
-            # x coordinate calculation based on display scale mode
-            lo, hi = curve.display_range
-            if self._log_scale:
-                clipped_vals = np.clip(values, max(lo, 1e-10), None)
-                log_lo = log10(max(lo, 1e-10))
-                log_hi = log10(max(hi, 1e-10))
-                if log_lo == log_hi:
-                    xs = np.full_like(values, rect.left() + 0.5 * rect.width())
-                else:
-                    t_arr = (np.log10(clipped_vals) - log_lo) / (log_hi - log_lo)
-                    xs = rect.left() + t_arr * rect.width()
-            else:
-                if hi == lo:
-                    xs = np.full_like(values, rect.left() + 0.5 * rect.width())
-                else:
-                    t_arr = (values - lo) / (hi - lo)
-                    xs = rect.left() + t_arr * rect.width()
-
-            finite = np.isfinite(xs) & np.isfinite(ys)
-            path = QPainterPath()
-            first = True
-            for x, y, ok in zip(xs, ys, finite):
-                if not ok:
-                    first = True
-                    continue
-                if first:
-                    path.moveTo(float(x), float(y))
-                    first = False
-                else:
-                    path.lineTo(float(x), float(y))
 
             painter.setPen(self._make_pen(curve))
             painter.setBrush(Qt.BrushStyle.NoBrush)

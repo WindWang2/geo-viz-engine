@@ -53,6 +53,9 @@ class ProfileVD(QWidget):
         self._data: np.ndarray | None = None
         self._normalized: np.ndarray | None = None
         self._rgba_override: np.ndarray | None = None
+        # Long-lived contiguous RGBA buffer backing the QImage — avoids a
+        # fresh .tobytes() allocation on every zoom/pan rebuild.
+        self._rgba_buf: np.ndarray | None = None
         self._has_data = False
         self._colormap_name = "seismic"
         self._slice_info = None
@@ -430,14 +433,20 @@ class ProfileVD(QWidget):
         rgba = lut[indices]
 
         sub_samples, sub_traces, _ = rgba.shape
+        # QImage wraps the numpy buffer directly; QPixmap.fromImage already
+        # copies into a device-dependent pixmap, so the previous img.copy()
+        # was a redundant full-image deep copy on every zoom/pan rebuild.
+        # Keep a reference to rgba for the QImage's lifetime to avoid the
+        # .tobytes() allocation too (QImage shares the buffer, doesn't copy).
+        self._rgba_buf = np.ascontiguousarray(rgba)
         img = QImage(
-            rgba.tobytes(),
+            self._rgba_buf.data,
             sub_traces,
             sub_samples,
             sub_traces * 4,
             QImage.Format.Format_RGBA8888,
         )
-        self._image = QPixmap.fromImage(img.copy())
+        self._image = QPixmap.fromImage(img)
         self.update()
 
     def _build_image_from_rgba(self) -> None:
@@ -457,14 +466,17 @@ class ProfileVD(QWidget):
 
         sub = self._rgba_override[row_start:row_end, col_start:col_end]
         sub_rows, sub_cols = sub.shape[0], sub.shape[1]
+        # Same zero-copy pattern as _build_image_from_normalized: hold the
+        # contiguous buffer alive for the QImage (avoids .tobytes() + .copy()).
+        self._rgba_buf = np.ascontiguousarray(sub)
         img = QImage(
-            sub.tobytes(),
+            self._rgba_buf.data,
             sub_cols,
             sub_rows,
             sub_cols * 4,
             QImage.Format.Format_RGBA8888,
         )
-        self._image = QPixmap.fromImage(img.copy())
+        self._image = QPixmap.fromImage(img)
         self.update()
 
     def _reset_zoom(self) -> None:

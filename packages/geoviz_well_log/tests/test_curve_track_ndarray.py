@@ -135,3 +135,65 @@ def test_downsample_cache_invalidated_on_zoom_at_fixed_top(qapp):
     assert d1[0] is not d2[0]  # recomputed, not a stale hit
     # Window actually narrowed
     assert d2[0].max() <= 312.5 * 1.05 + 0.125
+
+
+def test_path_cache_returns_same_object_on_hit(qapp):
+    """The QPainterPath is cached — repeated calls with the same rect return
+    the identical path object (no per-paint rebuild). Regression guard for the
+    classic PySide6 per-paint zip-loop bottleneck."""
+    track, _ = _make_track()
+    track.set_depth_range(0.0, 625.0)
+    from PySide6.QtCore import QRectF
+
+    rect = QRectF(0, 0, 150, 800)
+    p1 = track._cached_path(track._curves[0], rect)
+    p2 = track._cached_path(track._curves[0], rect)
+    assert p1 is p2  # cache hit — same object
+    assert not p1.isEmpty()
+
+
+def test_path_cache_invalidated_on_zoom(qapp):
+    """Zooming rebuilds the path (cache key includes the depth window)."""
+    track, _ = _make_track()
+    track.set_depth_range(0.0, 625.0)
+    from PySide6.QtCore import QRectF
+
+    rect = QRectF(0, 0, 150, 800)
+    p1 = track._cached_path(track._curves[0], rect)
+    track.set_depth_range(0.0, 312.5)  # zoom in: span halves
+    p2 = track._cached_path(track._curves[0], rect)
+    assert p1 is not p2  # rebuilt
+
+
+def test_build_curve_path_splits_at_nan_gaps():
+    """NaN entries break the curve into separate sub-paths (visual gaps)."""
+    from geoviz_well_log.renderer.curve_track import build_curve_path
+
+    xs = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+    ys = np.array([0.0, 1.0, np.nan, 3.0, 4.0, 5.0])
+    path = build_curve_path(xs, ys)
+    # Two sub-paths: [0,1] and [3,4,5], separated by the NaN at index 2.
+    # elementCount counts moveTo+lineTo elements; first run has 2 points,
+    # second run has 3 points -> 1 moveTo + 1 lineTo + 1 moveTo + 2 lineTo = 5.
+    assert path.elementCount() == 5
+
+
+def test_simplify_curve_screen_space_reduces_dense_arrays():
+    """The screen-space simplifier reduces >1000-point arrays to ~buckets."""
+    from geoviz_well_log.renderer.curve_track import simplify_curve_screen_space
+
+    n = 5000
+    xs = np.arange(n, dtype=np.float64)
+    ys = np.arange(n, dtype=np.float64)
+    sx, sy = simplify_curve_screen_space(xs, ys)
+    assert len(sx) < n  # reduced
+    assert len(sx) == len(sy)
+
+
+def test_simplify_curve_screen_space_passthrough_small():
+    """Small arrays pass through untouched."""
+    from geoviz_well_log.renderer.curve_track import simplify_curve_screen_space
+
+    xs = np.arange(100, dtype=np.float64)
+    sx, sy = simplify_curve_screen_space(xs, xs)
+    assert len(sx) == 100

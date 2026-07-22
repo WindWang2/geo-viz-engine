@@ -724,6 +724,10 @@ class Renderer3D(QWidget):
         self._loaded = False
         self._volume_data_cpu: np.ndarray | None = None
         self._volume_data_gpu = None  # CuPy array reference if available
+        # Cached (dmin, dmax) over the volume — shared by all 3 slice planes so
+        # apply_colormap_gpu skips the per-slice nanmin/nanmax scan. Invalidated
+        # on volume load/clear.
+        self._slice_range_cache: tuple[float, float] | None = None
         
         self._volume_spacing = (1, 1, 1)
         self._volume_origin = (0, 0, 0)
@@ -865,6 +869,7 @@ class Renderer3D(QWidget):
                     spacing=(1, 1, 1)):
         """Load volume into renderer, automatically syncing to GPU if available."""
         self._volume_data_cpu = data
+        self._slice_range_cache = None  # invalidate; recomputed on next slice build
         self._volume_spacing = spacing
         self._volume_origin = origin
         
@@ -1217,6 +1222,7 @@ class Renderer3D(QWidget):
         self._clear_visuals()
         self._loaded = False
         self._volume_data_cpu = None
+        self._slice_range_cache = None
         self._volume_data_gpu = None
         self._overlay_volume_data_cpu = None
         self._overlay_volume_visual = None
@@ -1424,15 +1430,34 @@ class Renderer3D(QWidget):
         # Pre-fetch color lookup table for hardware upload reuse
         lut = ColormapManager.get_colormap(self._cmap_name)
 
+        # Compute the display value range ONCE for all 3 slice planes — the
+        # previous code recomputed nanmin/nanmax per slice inside
+        # apply_colormap_gpu (3 redundant full-array passes per slider tick).
+        value_range = self._slice_value_range()
+
         # 1-3. Axis-aligned planes (Inline / Crossline / Time)
-        self._create_slice_plane("inline")
-        self._create_slice_plane("crossline")
-        self._create_slice_plane("time")
+        self._create_slice_plane("inline", value_range=value_range)
+        self._create_slice_plane("crossline", value_range=value_range)
+        self._create_slice_plane("time", value_range=value_range)
 
         # 4. Polyline-driven arbitrary curtain (if set)
         self._render_polyline_curtain(ni, nx, nt, si, sx, st, lut)
 
-    def _create_slice_plane(self, axis: str):
+    def _slice_value_range(self) -> tuple[float, float] | None:
+        """Cached (dmin, dmax) over the loaded volume for slice-plane colouring.
+
+        Computed lazily and invalidated when the volume changes, so the three
+        slice planes share one colour scale without re-scanning the volume on
+        every slider drag.
+        """
+        if self._volume_data_cpu is None:
+            return None
+        if self._slice_range_cache is None:
+            vol = self._volume_data_cpu
+            self._slice_range_cache = (float(np.nanmin(vol)), float(np.nanmax(vol)))
+        return self._slice_range_cache
+
+    def _create_slice_plane(self, axis: str, value_range: tuple[float, float] | None = None):
         """Build or update the slice plane + border for a single axis (inline/crossline/time) in-place."""
         if self._volume_data_cpu is None:
             return
@@ -1444,7 +1469,7 @@ class Renderer3D(QWidget):
         if axis == "inline":
             # 1. Inline — Perpendicular to IL axis (x)
             il_raw = self._get_sliced_data(0, self._il_pos)
-            img_il_rgb = apply_colormap_gpu(il_raw, lut)
+            img_il_rgb = apply_colormap_gpu(il_raw, lut, value_range=value_range)
 
             if self._img_il is not None and self._line_il is not None:
                 # Fast In-Place Texture & Transform Update
@@ -1473,7 +1498,7 @@ class Renderer3D(QWidget):
         elif axis == "crossline":
             # 2. Crossline — Perpendicular to XL axis (y)
             xl_raw = self._get_sliced_data(1, self._xl_pos)
-            img_xl_rgb = apply_colormap_gpu(xl_raw, lut)
+            img_xl_rgb = apply_colormap_gpu(xl_raw, lut, value_range=value_range)
 
             if self._img_xl is not None and self._line_xl is not None:
                 # Fast In-Place Texture & Transform Update
@@ -1500,7 +1525,7 @@ class Renderer3D(QWidget):
         elif axis == "time":
             # 3. Time — Perpendicular to T axis (z)
             t_raw = self._get_sliced_data(2, self._t_pos)
-            img_t_rgb = apply_colormap_gpu(t_raw, lut)
+            img_t_rgb = apply_colormap_gpu(t_raw, lut, value_range=value_range)
 
             if self._img_t is not None and self._line_t is not None:
                 # Fast In-Place Texture & Transform Update (Zero Scene Graph Overhead)
@@ -1608,7 +1633,7 @@ class Renderer3D(QWidget):
             self._view.addItem(self._line_arb)
             
             # Draw vertical curtain walls between each consecutive pair of waypoints
-            img_arb_rgb = apply_colormap_gpu(arb_data, lut)
+            img_arb_rgb = apply_colormap_gpu(arb_data, lut, value_range=self._slice_value_range())
             
             # We render the whole curtain as individual segment planes
             # Track horizontal position in the sampled data

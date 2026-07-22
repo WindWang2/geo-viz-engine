@@ -76,25 +76,36 @@ def slice_volume_gpu(volume: cp.ndarray | np.ndarray,
     return to_cpu(sl)
 
 
-def apply_colormap_gpu(data: cp.ndarray | np.ndarray, 
-                       lut: np.ndarray) -> np.ndarray:
+def apply_colormap_gpu(data: cp.ndarray | np.ndarray,
+                       lut: np.ndarray,
+                       value_range: tuple[float, float] | None = None) -> np.ndarray:
     """
     Perform min-max normalization and LUT lookup entirely on the GPU if possible.
-    
+
     Args:
         data: The 2D seismic data slice (could be CuPy or NumPy).
         lut: The (N, 4) unit8 RGBA lookup table (CPU NumPy).
-        
+        value_range: Optional pre-computed (dmin, dmax). When supplied, the
+            per-slice ``nanmin``/``nanmax`` scan is skipped — a significant
+            saving when many slices share one colour scale (the 3 slice planes
+            in Renderer3D all share the volume's display range).
+
     Returns:
         np.ndarray: Final RGBA CPU image ready for GUI texture upload.
     """
     if not _CUPY_AVAILABLE or not isinstance(data, cp.ndarray):
         # Standard NumPy fallback logic if not on GPU
         xp = np
-        dmin, dmax = xp.nanmin(data), xp.nanmax(data)
+        if value_range is not None:
+            dmin, dmax = value_range
+        else:
+            dmin, dmax = xp.nanmin(data), xp.nanmax(data)
     else:
         xp = cp
-        dmin, dmax = xp.nanmin(data), xp.nanmax(data)
+        if value_range is not None:
+            dmin, dmax = value_range
+        else:
+            dmin, dmax = xp.nanmin(data), xp.nanmax(data)
 
     # 1. Min-Max Normalization
     if dmax == dmin:
