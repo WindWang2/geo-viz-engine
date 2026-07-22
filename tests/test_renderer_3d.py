@@ -42,6 +42,34 @@ def test_renderer_3d_load_volume_does_not_warn_on_slider_connections(qtbot):
     ]
     assert disconnect_warnings == []
 
+
+def test_renderer_3d_base_grid_position_and_reset(qtbot):
+    from geoviz_seismic.renderer_3d import Renderer3D
+
+    widget = Renderer3D()
+    qtbot.addWidget(widget)
+    data = np.random.randn(100, 100, 50).astype(np.float32)
+
+    # First load
+    widget.load_volume(data, spacing=(2.0, 2.0, 1.0))
+    t1 = widget._base_grid.transform().matrix()
+    pos1_x = t1[0, 3]  # Translation X element
+    pos1_y = t1[1, 3]  # Translation Y element
+
+    # Expected cx = (100 * 2.0)/2 = 100.0, cy = (100 * 2.0)/2 = 100.0
+    assert abs(pos1_x - 100.0) < 1e-3
+    assert abs(pos1_y - 100.0) < 1e-3
+
+    # Second load with same data
+    widget.load_volume(data, spacing=(2.0, 2.0, 1.0))
+    t2 = widget._base_grid.transform().matrix()
+    pos2_x = t2[0, 3]
+    pos2_y = t2[1, 3]
+
+    # Translation X/Y should remain 100.0, NOT accumulate to 200.0!
+    assert abs(pos2_x - 100.0) < 1e-3
+    assert abs(pos2_y - 100.0) < 1e-3
+
 def test_renderer_3d_signals():
     """Verify Renderer3D class exposes the expected signal."""
     from geoviz_seismic.renderer_3d import Renderer3D

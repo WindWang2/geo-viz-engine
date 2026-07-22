@@ -71,12 +71,6 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         self._primary_visible = True
         self._overlay_visible = True
         self._overlay_opacity = 0.5
-
-    def get_lod_data(self, lod_level: int = 1) -> np.ndarray:
-        if lod_level <= 1 or self.data is None:
-            return self.data
-        return self.data[::lod_level, ::lod_level, ::lod_level]
-        
         self._primary_cmap_lut = None
         self._overlay_cmap_lut = None
         
@@ -101,6 +95,11 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         self._shading_enabled = False
         self._shading_light_dir = (1.0, 1.0, 1.0)
         self._shading_needs_upload = False
+
+    def get_lod_data(self, lod_level: int = 1) -> np.ndarray:
+        if lod_level <= 1 or self.data is None:
+            return self.data
+        return self.data[::lod_level, ::lod_level, ::lod_level]
 
     def setShading(self, enabled: bool, light_dir=(1.0, 1.0, 1.0)):
         self._shading_enabled = enabled
@@ -897,7 +896,11 @@ class Renderer3D(QWidget):
         self._view.opts['center'] = QVector3D(cx, cy, cz)
         self._view.setCameraPosition(distance=max(ni*si, nx*sx, nt*st) * 1.5)
         
-        # Update grid to floor
+        # Update grid to floor aligned with volume bounds
+        max_grid_len = max(ni * si, nx * sx) * 1.5
+        self._base_grid.setSize(max_grid_len, max_grid_len)
+        self._base_grid.setSpacing(max_grid_len / 10.0, max_grid_len / 10.0)
+        self._base_grid.resetTransform()
         self._base_grid.translate(cx, cy, 0)
 
         self._mode = getattr(self, "_mode", "planes")
