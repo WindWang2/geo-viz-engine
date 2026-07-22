@@ -167,3 +167,29 @@ def test_isosurface_extractor_error_unchecks(qtbot):
     qtbot.wait(350)
     assert not v._iso_checkbox.isChecked()
     assert v._renderer_3d._isosurface_item is None
+
+
+def test_isosurface_rebuilt_after_volume_swap(qtbot):
+    calls = []
+
+    def fake(vol, iso):
+        calls.append((vol.shape, iso))
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        return verts, np.array([[0, 1, 2]], dtype=np.int32)
+
+    iso_mod.set_isosurface_extractor(fake)
+    v = _view(qtbot)
+    v._refresh_isosurface_controls()
+    v._iso_checkbox.setChecked(True)
+    qtbot.wait(350)
+    assert len(calls) == 1
+    assert v._renderer_3d._isosurface_item is not None
+    # 新数据体加载：_clear_visuals 清掉 mesh，但 checkbox 仍勾选 → 刷新后应自动重建
+    v._renderer_3d.load_volume(
+        np.random.default_rng(2).standard_normal((6, 6, 6)).astype(np.float32)
+    )
+    assert v._renderer_3d._isosurface_item is None
+    v._refresh_isosurface_controls()
+    qtbot.wait(350)
+    assert len(calls) == 2
+    assert v._renderer_3d._isosurface_item is not None

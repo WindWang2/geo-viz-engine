@@ -1315,6 +1315,11 @@ class SeismicView(QWidget):
         self._iso_spin.setSingleStep((vmax - vmin) / 100.0 if vmax > vmin else 1.0)
         self._iso_spin.setValue((vmin + vmax) / 2.0)
         self._iso_spin.blockSignals(False)
+        # Volume swapped while the isosurface was active: the mesh was cleared
+        # by load_volume; schedule a rebuild with the new volume + threshold
+        # instead of leaving a checked-but-empty state.
+        if self._iso_checkbox.isChecked():
+            self._iso_timer.start()
 
     def _on_isosurface_toggled(self, checked: bool):
         if checked:
