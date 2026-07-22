@@ -1433,7 +1433,7 @@ class Renderer3D(QWidget):
         self._render_polyline_curtain(ni, nx, nt, si, sx, st, lut)
 
     def _create_slice_plane(self, axis: str):
-        """Build the slice plane + border for a single axis (inline/crossline/time)."""
+        """Build or update the slice plane + border for a single axis (inline/crossline/time) in-place."""
         if self._volume_data_cpu is None:
             return
 
@@ -1443,49 +1443,84 @@ class Renderer3D(QWidget):
 
         if axis == "inline":
             # 1. Inline — Perpendicular to IL axis (x)
-            il_raw = self._get_sliced_data(0, self._il_pos) # returns GPU or CPU array
+            il_raw = self._get_sliced_data(0, self._il_pos)
             img_il_rgb = apply_colormap_gpu(il_raw, lut)
-            self._img_il = gl.GLImageItem(img_il_rgb)
-            self._img_il.scale(sx, st, 1)
-            self._img_il.rotate(90, 1, 0, 0)  # Puts Time (Height) on Z axis
-            self._img_il.rotate(90, 0, 0, 1)  # Puts Crossline (Width) on Y axis
-            self._img_il.translate(self._il_pos * si, 0, 0)
-            self._view.addItem(self._img_il)
 
-            # Red Border for Inline
-            il_pts = np.array([[0, 0, 0], [0, nx*sx, 0], [0, nx*sx, nt*st], [0, 0, nt*st], [0, 0, 0]])
-            self._line_il = gl.GLLinePlotItem(pos=il_pts, color=(1, 0, 0, 1), width=2, antialias=True)
-            self._line_il.translate(self._il_pos * si, 0, 0)
-            self._view.addItem(self._line_il)
+            if self._img_il is not None and self._line_il is not None:
+                # Fast In-Place Texture & Transform Update
+                self._img_il.setData(img_il_rgb)
+                self._img_il.resetTransform()
+                self._img_il.scale(sx, st, 1)
+                self._img_il.rotate(90, 1, 0, 0)
+                self._img_il.rotate(90, 0, 0, 1)
+                self._img_il.translate(self._il_pos * si, 0, 0)
+
+                self._line_il.resetTransform()
+                self._line_il.translate(self._il_pos * si, 0, 0)
+            else:
+                self._img_il = gl.GLImageItem(img_il_rgb)
+                self._img_il.scale(sx, st, 1)
+                self._img_il.rotate(90, 1, 0, 0)
+                self._img_il.rotate(90, 0, 0, 1)
+                self._img_il.translate(self._il_pos * si, 0, 0)
+                self._view.addItem(self._img_il)
+
+                il_pts = np.array([[0, 0, 0], [0, nx*sx, 0], [0, nx*sx, nt*st], [0, 0, nt*st], [0, 0, 0]])
+                self._line_il = gl.GLLinePlotItem(pos=il_pts, color=(1, 0, 0, 1), width=2, antialias=True)
+                self._line_il.translate(self._il_pos * si, 0, 0)
+                self._view.addItem(self._line_il)
+
         elif axis == "crossline":
             # 2. Crossline — Perpendicular to XL axis (y)
             xl_raw = self._get_sliced_data(1, self._xl_pos)
             img_xl_rgb = apply_colormap_gpu(xl_raw, lut)
-            self._img_xl = gl.GLImageItem(img_xl_rgb)
-            self._img_xl.scale(si, st, 1)
-            self._img_xl.rotate(90, 1, 0, 0)
-            self._img_xl.translate(0, self._xl_pos * sx, 0)
-            self._view.addItem(self._img_xl)
 
-            # Green Border for Crossline
-            xl_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, 0, nt*st], [0, 0, nt*st], [0, 0, 0]])
-            self._line_xl = gl.GLLinePlotItem(pos=xl_pts, color=(0, 1, 0, 1), width=2, antialias=True)
-            self._line_xl.translate(0, self._xl_pos * sx, 0)
-            self._view.addItem(self._line_xl)
+            if self._img_xl is not None and self._line_xl is not None:
+                # Fast In-Place Texture & Transform Update
+                self._img_xl.setData(img_xl_rgb)
+                self._img_xl.resetTransform()
+                self._img_xl.scale(si, st, 1)
+                self._img_xl.rotate(90, 1, 0, 0)
+                self._img_xl.translate(0, self._xl_pos * sx, 0)
+
+                self._line_xl.resetTransform()
+                self._line_xl.translate(0, self._xl_pos * sx, 0)
+            else:
+                self._img_xl = gl.GLImageItem(img_xl_rgb)
+                self._img_xl.scale(si, st, 1)
+                self._img_xl.rotate(90, 1, 0, 0)
+                self._img_xl.translate(0, self._xl_pos * sx, 0)
+                self._view.addItem(self._img_xl)
+
+                xl_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, 0, nt*st], [0, 0, nt*st], [0, 0, 0]])
+                self._line_xl = gl.GLLinePlotItem(pos=xl_pts, color=(0, 1, 0, 1), width=2, antialias=True)
+                self._line_xl.translate(0, self._xl_pos * sx, 0)
+                self._view.addItem(self._line_xl)
+
         elif axis == "time":
             # 3. Time — Perpendicular to T axis (z)
             t_raw = self._get_sliced_data(2, self._t_pos)
             img_t_rgb = apply_colormap_gpu(t_raw, lut)
-            self._img_t = gl.GLImageItem(img_t_rgb)
-            self._img_t.scale(si, sx, 1)
-            self._img_t.translate(0, 0, self._t_pos * st)
-            self._view.addItem(self._img_t)
 
-            # Blue Border for Time
-            t_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, nx*sx, 0], [0, nx*sx, 0], [0, 0, 0]])
-            self._line_t = gl.GLLinePlotItem(pos=t_pts, color=(0, 0, 1, 1), width=2, antialias=True)
-            self._line_t.translate(0, 0, self._t_pos * st)
-            self._view.addItem(self._line_t)
+            if self._img_t is not None and self._line_t is not None:
+                # Fast In-Place Texture & Transform Update (Zero Scene Graph Overhead)
+                self._img_t.setData(img_t_rgb)
+                self._img_t.resetTransform()
+                self._img_t.scale(si, sx, 1)
+                self._img_t.translate(0, 0, self._t_pos * st)
+
+                self._line_t.resetTransform()
+                self._line_t.translate(0, 0, self._t_pos * st)
+            else:
+                self._img_t = gl.GLImageItem(img_t_rgb)
+                self._img_t.scale(si, sx, 1)
+                self._img_t.translate(0, 0, self._t_pos * st)
+                self._view.addItem(self._img_t)
+
+                t_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, nx*sx, 0], [0, nx*sx, 0], [0, 0, 0]])
+                self._line_t = gl.GLLinePlotItem(pos=t_pts, color=(0, 0, 1, 1), width=2, antialias=True)
+                self._line_t.translate(0, 0, self._t_pos * st)
+                self._view.addItem(self._line_t)
 
     _PLANE_ATTRS = {
         "inline": ("_img_il", "_line_il"),
@@ -1498,7 +1533,7 @@ class Renderer3D(QWidget):
         self._update_slice_planes_for(None)
 
     def _update_slice_planes_for(self, axes: set[str] | None = None):
-        """Rebuild only the planes for `axes` (None = full rebuild)."""
+        """Rebuild or in-place update the planes for `axes` (None = full rebuild)."""
         if axes is None or axes >= {"inline", "crossline", "time"}:
             axes = None  # fall through to full path
         if axes is None:
@@ -1529,17 +1564,6 @@ class Renderer3D(QWidget):
             return
 
         for axis in axes:
-            attrs = self._PLANE_ATTRS.get(axis)
-            if attrs is None:
-                continue
-            for attr in attrs:
-                item = getattr(self, attr, None)
-                if item is not None:
-                    try:
-                        self._view.removeItem(item)
-                    except Exception:
-                        pass
-                    setattr(self, attr, None)
             self._create_slice_plane(axis)
         self._view.update()
 

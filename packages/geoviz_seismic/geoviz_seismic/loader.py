@@ -182,6 +182,20 @@ class SeismicLoader:
         meta = self.inspect()
         f = self._open()
         fi, fx, ft = factor
+
+        # Fast path: use segyio.tools.cube C-extension reader if standard 3D geometry is active
+        if self._f is not None and not getattr(self._f, "unstructured", False):
+            try:
+                raw_cube = segyio.tools.cube(f)
+                vol = np.ascontiguousarray(raw_cube[::fi, ::fx, ::ft], dtype=np.float32)
+                self._downsampled = vol
+                self._downsample_factor = factor
+                if cancellation_token is not None:
+                    cancellation_token.raise_if_cancelled()
+                return vol
+            except Exception as e:
+                logger.debug("segyio.tools.cube fast path unavailable (%s); using strided trace read", e)
+
         il_indices = range(0, meta.n_inlines, fi)
         xl_indices = range(0, meta.n_crosslines, fx)
         t_indices = range(0, meta.n_samples, ft)
