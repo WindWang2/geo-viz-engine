@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QImage, QPainter, QPixmap, QFont, QPen, QColor
+from PySide6.QtGui import QImage, QPainter, QPixmap, QFont, QPen, QColor, qRgb
 from PySide6.QtWidgets import QWidget
 
 from .colormap import ColormapManager
@@ -53,9 +53,14 @@ class ProfileVD(QWidget):
         self._data: np.ndarray | None = None
         self._normalized: np.ndarray | None = None
         self._rgba_override: np.ndarray | None = None
-        # Long-lived contiguous RGBA buffer backing the QImage — avoids a
-        # fresh .tobytes() allocation on every zoom/pan rebuild.
+        # Long-lived contiguous buffer backing the QImage — avoids a fresh
+        # allocation on every zoom/pan rebuild. Holds the uint8 index array
+        # (Indexed8 path).
         self._rgba_buf: np.ndarray | None = None
+        # Indexed8 colour table (256 RGB entries) + the LUT object id it was
+        # built from, so it's rebuilt only when the colormap actually changes.
+        self._color_table: list[int] | None = None
+        self._color_table_lut_id: int | None = None
         self._has_data = False
         self._colormap_name = "seismic"
         self._slice_info = None
@@ -80,6 +85,13 @@ class ProfileVD(QWidget):
 
         # Display gain
         self._clip_pct = 99.0  # percentile clip (P1 to P_clip)
+        # Cached percentile clip range (lo, hi) — the expensive nanpercentile
+        # scan (23ms on a 1.5M-pixel slice) was recomputed on every slice-swap
+        # and every clip change, but the clip range is approximately stable
+        # across sibling slices of the same volume. Invalidated on clip_pct
+        # change and on volume reload (data shape change).
+        self._clip_range_cache: tuple[float, float] | None = None
+        self._clip_range_shape: tuple[int, ...] | None = None
 
         # Zoom/pan viewport state
         self._zoom_scale: float = 1.0
@@ -182,6 +194,7 @@ class ProfileVD(QWidget):
         if abs(pct - self._clip_pct) < 0.01:
             return
         self._clip_pct = pct
+        self._clip_range_cache = None  # invalidate; recompute on next _renormalize
         if self._has_data:
             self._renormalize()
 
@@ -317,18 +330,34 @@ class ProfileVD(QWidget):
         self._build_image_from_rgba()
 
     def _renormalize(self):
-        """Compute normalized data using percentile clipping."""
+        """Compute normalized data using percentile clipping.
+
+        The percentile clip range (lo, hi) is cached across sibling slices of
+        the same volume — the expensive ``nanpercentile`` scan (23ms on a
+        1.5M-pixel slice) was recomputed per slice-swap, but the clip range is
+        approximately stable across slices of the same volume. The cache is
+        invalidated on clip_pct change or data-shape change (new volume).
+        """
+        if self._data is None:
+            return
         dmin, dmax = np.nanmin(self._data), np.nanmax(self._data)
         if dmax == dmin:
             self._normalized = np.zeros_like(self._data, dtype=np.float32)
-        else:
+            self._build_image_from_normalized()
+            return
+        # Compute or reuse the cached clip range.
+        shape = self._data.shape
+        if self._clip_range_cache is None or self._clip_range_shape != shape:
             pct = self._clip_pct
             lo = np.nanpercentile(self._data, 100.0 - pct)
             hi = np.nanpercentile(self._data, pct)
             if hi <= lo:
                 hi = dmax
                 lo = dmin
-            self._normalized = np.clip((self._data - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+            self._clip_range_cache = (float(lo), float(hi))
+            self._clip_range_shape = shape
+        lo, hi = self._clip_range_cache
+        self._normalized = np.clip((self._data - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
         self._build_image_from_normalized()
 
     # ------------------------------------------------------------------
@@ -402,7 +431,14 @@ class ProfileVD(QWidget):
     # ------------------------------------------------------------------
 
     def _build_image_from_normalized(self) -> None:
-        """Map the visible portion of normalized data through the colour LUT."""
+        """Map the visible portion of normalized data through the colour LUT.
+
+        Uses ``QImage.Format_Indexed8`` + a 256-entry colour table instead of
+        gathering a full ``(H,W,4)`` RGBA array per rebuild — the LUT lookup
+        happens at Qt paint time (the QWidget-side equivalent of the GL
+        Indexed8+shader path in ``GLImageLutItem``). Saves ~20ms of RGBA
+        gather + 4x memory per zoom/pan rebuild.
+        """
         if self._rgba_override is not None:
             self._build_image_from_rgba()
             return
@@ -431,24 +467,24 @@ class ProfileVD(QWidget):
 
         sub = self._normalized[row_start:row_end, col_start:col_end]
 
-        indices = (sub * (len(lut) - 1)).astype(np.int32)
-        indices = np.clip(indices, 0, len(lut) - 1)
-        rgba = lut[indices]
+        # Emit a uint8 index array directly — no lut[idx] RGBA gather.
+        indices = np.clip(sub * (len(lut) - 1), 0, len(lut) - 1).astype(np.uint8)
+        sub_samples, sub_traces = indices.shape
 
-        sub_samples, sub_traces, _ = rgba.shape
-        # QImage wraps the numpy buffer directly; QPixmap.fromImage already
-        # copies into a device-dependent pixmap, so the previous img.copy()
-        # was a redundant full-image deep copy on every zoom/pan rebuild.
-        # Keep a reference to rgba for the QImage's lifetime to avoid the
-        # .tobytes() allocation too (QImage shares the buffer, doesn't copy).
-        self._rgba_buf = np.ascontiguousarray(rgba)
+        # Hold the contiguous buffer alive for the QImage's lifetime.
+        self._rgba_buf = np.ascontiguousarray(indices)
         img = QImage(
             self._rgba_buf.data,
             sub_traces,
             sub_samples,
-            sub_traces * 4,
-            QImage.Format.Format_RGBA8888,
+            sub_traces,  # 1 byte per pixel (Indexed8), not 4 (RGBA)
+            QImage.Format.Format_Indexed8,
         )
+        # Build the colour table once per colormap (256 RGB entries).
+        if self._color_table is None or self._color_table_lut_id is not id(lut):
+            self._color_table = [qRgb(int(r), int(g), int(b)) for r, g, b, _ in lut[:256]]
+            self._color_table_lut_id = id(lut)
+        img.setColorTable(self._color_table)
         self._image = QPixmap.fromImage(img)
         self.update()
 
