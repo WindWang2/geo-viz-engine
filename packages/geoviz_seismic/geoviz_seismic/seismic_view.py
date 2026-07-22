@@ -736,8 +736,15 @@ class SeismicView(QWidget):
         )
         self._overlay_opacity_slider.valueChanged.connect(self._on_overlay_opacity_changed)
 
+        self.btn_coord = QPushButton(" 📍 网格(IL/XL)")
+        self.btn_coord.setCheckable(True)
+        self.btn_coord.setStyleSheet("QPushButton:checked { background: #2563eb; color: #ffffff; font-weight: bold; }")
+        self._coord_mode = "grid"
+        self.btn_coord.clicked.connect(self._toggle_coord_mode)
+
         bar.addWidget(load_btn)
         bar.addWidget(demo_btn)
+        bar.addWidget(self.btn_coord)
         bar.addWidget(horizon_btn)
         bar.addWidget(horizon_list_btn)
         bar.addSeparator()
@@ -944,20 +951,50 @@ class SeismicView(QWidget):
         # both the 2D profile update and the 3D scene rebuild.
         self._renderer_3d.set_position_external(slice_type, value)
 
+    @Slot()
+    def _toggle_coord_mode(self):
+        """Toggle between Grid coordinates (IL/XL) and Geographic coordinates (Easting/Northing in meters)."""
+        if hasattr(self, "btn_coord") and self.btn_coord.isChecked():
+            self._coord_mode = "geo"
+            self.btn_coord.setText(" 🌐 地理(X/Y)")
+        else:
+            self._coord_mode = "grid"
+            if hasattr(self, "btn_coord"):
+                self.btn_coord.setText(" 📍 网格(IL/XL)")
+        # Refresh current labels
+        if hasattr(self, "_renderer_3d"):
+            self._update_tb_slider_label("inline", self._renderer_3d._il_pos)
+            self._update_tb_slider_label("crossline", self._renderer_3d._xl_pos)
+
     def _update_tb_slider_label(self, slice_type: str, position: int):
         """Update the toolbar slider value label with actual coordinate."""
         m = self._meta
         if m is None:
             return
-        if slice_type == "inline":
-            coord = m.iline_start + position * m.iline_step
-            self._tb_il_label.setText(f"IL {coord}")
-        elif slice_type == "crossline":
-            coord = m.xline_start + position * m.xline_step
-            self._tb_xl_label.setText(f"XL {coord}")
+        if getattr(self, "_coord_mode", "grid") == "geo":
+            if slice_type == "inline":
+                il = m.iline_start + position * m.iline_step
+                xl = m.xline_start + (self._renderer_3d._xl_pos if hasattr(self, '_renderer_3d') else 0) * m.xline_step
+                x_geo, _ = m.il_xl_to_xy(il, xl)
+                self._tb_il_label.setText(f"X {x_geo:.0f}m")
+            elif slice_type == "crossline":
+                il = m.iline_start + (self._renderer_3d._il_pos if hasattr(self, '_renderer_3d') else 0) * m.iline_step
+                xl = m.xline_start + position * m.xline_step
+                _, y_geo = m.il_xl_to_xy(il, xl)
+                self._tb_xl_label.setText(f"Y {y_geo:.0f}m")
+            else:
+                coord = m.t0_ms + position * m.dt_ms
+                self._tb_t_label.setText(f"T {coord:.0f}")
         else:
-            coord = m.t0_ms + position * m.dt_ms
-            self._tb_t_label.setText(f"T {coord:.0f}")
+            if slice_type == "inline":
+                coord = m.iline_start + position * m.iline_step
+                self._tb_il_label.setText(f"IL {coord}")
+            elif slice_type == "crossline":
+                coord = m.xline_start + position * m.xline_step
+                self._tb_xl_label.setText(f"XL {coord}")
+            else:
+                coord = m.t0_ms + position * m.dt_ms
+                self._tb_t_label.setText(f"T {coord:.0f}")
 
     def _on_slice_step(self, slice_type: str, delta: int):
         """Handle Shift+wheel slice browsing: increment/decrement slice position."""
