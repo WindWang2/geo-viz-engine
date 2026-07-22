@@ -292,3 +292,149 @@ def test_dual_gl_volume_item_legacy_shaders_use_legacy_texture_functions(
     assert "texture3D(u_texture" in fragment_source
     assert "texture2D(u_horizon_texture" in fragment_source
     assert "texture(u_horizon_texture" not in fragment_source
+
+
+def test_gl_image_lut_item_shader_has_lut_lookup_and_compiles(monkeypatch):
+    """GLImageLutItem's shader must compile via PyOpenGL and contain the
+    Indexed8+LUT lookup (``texture(u_lut, vec2(texture(u_index, uv).r, 0.5))``).
+    Primary CI gate for the slice-plane LUT path — runs with zero GL hardware
+    via the compiler-monkeypatch pattern copied from the DualGLVolumeItem test.
+    """
+    import geoviz_seismic.renderer_3d as renderer
+    from OpenGL.GL import shaders as pyopengl_shaders
+
+    assert getattr(renderer, "gl_shaders", None) is pyopengl_shaders
+
+    class FakeFormat:
+        @staticmethod
+        def version():
+            return (3, 2)
+
+    class FakeContext:
+        @staticmethod
+        def format():
+            return FakeFormat()
+
+        @staticmethod
+        def isOpenGLES():
+            return True
+
+    class FakeQOpenGLContext:
+        @staticmethod
+        def currentContext():
+            return FakeContext()
+
+    captured_sources = []
+
+    class FakeProgram(int):
+        def __new__(cls, value):
+            return super().__new__(cls, value)
+
+    class FakeCompiler:
+        program = FakeProgram(101)
+
+        @staticmethod
+        def compileShader(sources, shader_type):
+            captured_sources.append((tuple(sources), shader_type))
+            return len(captured_sources)
+
+        @classmethod
+        def compileProgram(cls, *_shaders):
+            return cls.program
+
+    monkeypatch.setattr(renderer, "gl_shaders", FakeCompiler)
+    monkeypatch.setattr(renderer.QtGui, "QOpenGLContext", FakeQOpenGLContext)
+    monkeypatch.setattr(renderer.GL, "glBindAttribLocation", lambda *_args: None)
+    monkeypatch.setattr(renderer.GL, "glLinkProgram", lambda *_args: None)
+
+    # GLES3 >= 3.0 -> CORE shader path.
+    lut = np.zeros((256, 4), dtype=np.uint8)
+    item = renderer.GLImageLutItem(np.zeros((4, 4), dtype=np.uint8), lut=lut)
+    first = item.getLutShaderProgram()
+    second = item.getLutShaderProgram()
+
+    assert first == 101
+    assert second is first  # cached — compiled once
+    assert len(captured_sources) == 2  # vertex + fragment
+    fragment_source = "".join(captured_sources[1][0])
+    assert "#version 300 es" in fragment_source
+    # The LUT-lookup core: sample index texture .r, look up colour in u_lut.
+    assert "uniform sampler2D u_index" in fragment_source
+    assert "uniform sampler2D u_lut" in fragment_source
+    assert "texture(u_index" in fragment_source
+    assert "texture(u_lut" in fragment_source
+
+
+@pytest.mark.parametrize(
+    ("is_gles", "version"),
+    [(True, (2, 0)), (False, (2, 1))],
+    ids=["gles2", "desktop-legacy"],
+)
+def test_gl_image_lut_item_legacy_shader_uses_texture2d(monkeypatch, is_gles, version):
+    """Legacy GL path must use texture2D (not texture())."""
+    import geoviz_seismic.renderer_3d as renderer
+
+    class FakeFormat:
+        @staticmethod
+        def version():
+            return version
+
+    class FakeContext:
+        @staticmethod
+        def format():
+            return FakeFormat()
+
+        @staticmethod
+        def isOpenGLES():
+            return is_gles
+
+    class FakeQOpenGLContext:
+        @staticmethod
+        def currentContext():
+            return FakeContext()
+
+    captured_sources = []
+
+    class FakeCompiler:
+        @staticmethod
+        def compileShader(sources, shader_type):
+            captured_sources.append((tuple(sources), shader_type))
+            return len(captured_sources)
+
+        @staticmethod
+        def compileProgram(*_shaders):
+            return object()
+
+    monkeypatch.setattr(renderer, "gl_shaders", FakeCompiler)
+    monkeypatch.setattr(renderer.QtGui, "QOpenGLContext", FakeQOpenGLContext)
+    monkeypatch.setattr(renderer.GL, "glBindAttribLocation", lambda *_args: None)
+    monkeypatch.setattr(renderer.GL, "glLinkProgram", lambda *_args: None)
+
+    lut = np.zeros((256, 4), dtype=np.uint8)
+    item = renderer.GLImageLutItem(np.zeros((4, 4), dtype=np.uint8), lut=lut)
+    item.getLutShaderProgram()
+
+    fragment_source = "".join(captured_sources[1][0])
+    assert "texture2D(u_index" in fragment_source
+    assert "texture2D(u_lut" in fragment_source
+    assert "texture(u_index" not in fragment_source
+
+
+def test_apply_colormap_index_parity_with_rgba_path():
+    """apply_colormap_index produces a uint8 index whose lut[idx] is
+    byte-identical to apply_colormap_gpu's RGBA output — guarantees the
+    Indexed8 shader path renders the same pixels as the old RGBA path."""
+    from geoviz_seismic.gpu_ops import apply_colormap_gpu, apply_colormap_index
+    from geoviz_seismic.colormap import ColormapManager
+
+    lut = ColormapManager.get_colormap("seismic")
+    rng = np.random.default_rng(7)
+    data = (rng.standard_normal((100, 150)) * 10).astype(np.float32)
+    vr = (float(np.nanmin(data)), float(np.nanmax(data)))
+
+    rgba = apply_colormap_gpu(data, lut, value_range=vr)
+    idx = apply_colormap_index(data, len(lut), value_range=vr)
+
+    assert idx.dtype == np.uint8
+    assert idx.shape == data.shape
+    np.testing.assert_array_equal(rgba, lut[idx])

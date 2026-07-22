@@ -76,25 +76,18 @@ def slice_volume_gpu(volume: cp.ndarray | np.ndarray,
     return to_cpu(sl)
 
 
-def apply_colormap_gpu(data: cp.ndarray | np.ndarray,
-                       lut: np.ndarray,
-                       value_range: tuple[float, float] | None = None) -> np.ndarray:
-    """
-    Perform min-max normalization and LUT lookup entirely on the GPU if possible.
+def _normalize_to_lut_index(
+    data: cp.ndarray | np.ndarray,
+    lut_len: int,
+    value_range: tuple[float, float] | None = None,
+):
+    """Shared normalize+index step for apply_colormap_gpu / apply_colormap_index.
 
-    Args:
-        data: The 2D seismic data slice (could be CuPy or NumPy).
-        lut: The (N, 4) unit8 RGBA lookup table (CPU NumPy).
-        value_range: Optional pre-computed (dmin, dmax). When supplied, the
-            per-slice ``nanmin``/``nanmax`` scan is skipped — a significant
-            saving when many slices share one colour scale (the 3 slice planes
-            in Renderer3D all share the volume's display range).
-
-    Returns:
-        np.ndarray: Final RGBA CPU image ready for GUI texture upload.
+    Returns the (xp, idx) pair where ``idx`` is an int32 array in [0, lut_len-1]
+    on whichever backend (NumPy or CuPy) ``data`` lives. Callers either gather
+    through the LUT (RGBA path) or return the index directly (Indexed8 path).
     """
     if not _CUPY_AVAILABLE or not isinstance(data, cp.ndarray):
-        # Standard NumPy fallback logic if not on GPU
         xp = np
         if value_range is not None:
             dmin, dmax = value_range
@@ -112,12 +105,31 @@ def apply_colormap_gpu(data: cp.ndarray | np.ndarray,
         norm = xp.zeros_like(data, dtype=xp.float32)
     else:
         norm = (data - dmin) / (dmax - dmin)
-        
+
     # 2. Convert to LUT indices
-    lut_len = len(lut)
     idx = (norm * (lut_len - 1)).astype(xp.int32)
     idx = xp.clip(idx, 0, lut_len - 1)
-    
+    return xp, idx
+
+
+def apply_colormap_gpu(data: cp.ndarray | np.ndarray,
+                       lut: np.ndarray,
+                       value_range: tuple[float, float] | None = None) -> np.ndarray:
+    """
+    Perform min-max normalization and LUT lookup entirely on the GPU if possible.
+
+    Args:
+        data: The 2D seismic data slice (could be CuPy or NumPy).
+        lut: The (N, 4) unit8 RGBA lookup table (CPU NumPy).
+        value_range: Optional pre-computed (dmin, dmax). When supplied, the
+            per-slice ``nanmin``/``nanmax`` scan is skipped — a significant
+            saving when many slices share one colour scale (the 3 slice planes
+            in Renderer3D all share the volume's display range).
+
+    Returns:
+        np.ndarray: Final RGBA CPU image ready for GUI texture upload.
+    """
+    xp, idx = _normalize_to_lut_index(data, len(lut), value_range)
     # 3. Map via LUT
     if xp is cp:
         # Upload LUT to GPU briefly for lightning fast vector lookup
@@ -127,6 +139,25 @@ def apply_colormap_gpu(data: cp.ndarray | np.ndarray,
         return cp.asnumpy(rgba_gpu)
     else:
         return lut[idx]
+
+
+def apply_colormap_index(
+    data: cp.ndarray | np.ndarray,
+    lut_len: int,
+    value_range: tuple[float, float] | None = None,
+) -> np.ndarray:
+    """Normalize a slice to a uint8 LUT index array (the Indexed8 texture path).
+
+    This is the CPU-side half of the GL_R8 + 1-D LUT shader model used by
+    ``GLImageLutItem``: the slice is normalized to ``[0, lut_len-1]`` and
+    returned as a single-channel uint8 array. The RGBA colour lookup happens
+    in the fragment shader (O(1) LUT re-upload on colormap change, no per-pixel
+    gather), avoiding the 4x memory + LUT-gather cost of ``apply_colormap_gpu``.
+    """
+    xp, idx = _normalize_to_lut_index(data, lut_len, value_range)
+    if xp is cp:
+        idx = cp.asnumpy(idx)
+    return idx.astype(np.uint8)
 
 
 def sample_arbitrary_slice_gpu(volume: cp.ndarray | np.ndarray,

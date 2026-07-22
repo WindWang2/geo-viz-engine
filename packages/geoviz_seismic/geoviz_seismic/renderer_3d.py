@@ -17,6 +17,7 @@ from OpenGL.GL import shaders as gl_shaders
 from .colormap import ColormapManager
 from .gpu_ops import (
     is_gpu_available, to_gpu, to_cpu, slice_volume_gpu, apply_colormap_gpu,
+    apply_colormap_index,
     sample_arbitrary_slice_gpu, sample_polyline_slice
 )
 
@@ -59,6 +60,221 @@ class Renderer3DLODManager:
         if is_interacting or idle_ms < self.idle_debounce_ms:
             return 2  # 2x downsampled LOD
         return 1  # Full resolution
+
+
+class GLImageLutItem(gl.GLImageItem):
+    """A 2D textured quad that looks up colour through a 1-D LUT in-shader.
+
+    Drop-in replacement for ``gl.GLImageItem`` on the seismic slice planes:
+    instead of uploading a full ``(H, W, 4)`` RGBA texture per slider tick, it
+    uploads a single-channel ``(H, W)`` uint8 *index* texture (GL_R8, 4x
+    smaller) plus a 256x1 RGBA LUT texture, and the fragment shader does
+    ``texture(u_lut, vec2(texture(u_index, uv).r, 0.5))``. A colormap change
+    becomes an O(1) LUT re-upload (``setLut``) instead of a per-pixel CPU
+    gather + 4x RGBA re-upload. Modelled on ``DualGLVolumeItem``'s LUT path.
+    """
+
+    _LUT_SHADER_LEGACY = {
+        GL.GL_VERTEX_SHADER: """
+            uniform mat4 u_mvp;
+            attribute vec4 a_position;
+            attribute vec2 a_texcoord;
+            varying vec2 v_texcoord;
+            void main() {
+                gl_Position = u_mvp * a_position;
+                v_texcoord = a_texcoord;
+            }
+        """,
+        GL.GL_FRAGMENT_SHADER: """
+            #ifdef GL_ES
+            precision mediump float;
+            #endif
+            uniform sampler2D u_index;
+            uniform sampler2D u_lut;
+            varying vec2 v_texcoord;
+            void main() {
+                float idx = texture2D(u_index, v_texcoord).r;
+                gl_FragColor = texture2D(u_lut, vec2(idx, 0.5));
+            }
+        """,
+    }
+
+    _LUT_SHADER_CORE = {
+        GL.GL_VERTEX_SHADER: """
+            uniform mat4 u_mvp;
+            in vec4 a_position;
+            in vec2 a_texcoord;
+            out vec2 v_texcoord;
+            void main() {
+                gl_Position = u_mvp * a_position;
+                v_texcoord = a_texcoord;
+            }
+        """,
+        GL.GL_FRAGMENT_SHADER: """
+            #ifdef GL_ES
+            precision mediump float;
+            #endif
+            uniform sampler2D u_index;
+            uniform sampler2D u_lut;
+            in vec2 v_texcoord;
+            out vec4 fragColor;
+            void main() {
+                float idx = texture(u_index, v_texcoord).r;
+                fragColor = texture(u_lut, vec2(idx, 0.5));
+            }
+        """,
+    }
+
+    def __init__(self, index_data, lut=None, smooth=False, glOptions='translucent', parentItem=None):
+        # GLImageItem.__init__ calls setData(data); we intercept so self.data
+        # holds the uint8 index array, and seed the LUT separately.
+        super().__init__(index_data, smooth=smooth, glOptions=glOptions, parentItem=parentItem)
+        self._lut = lut
+        self._lut_tex = None
+        self._lut_needs_upload = lut is not None
+        self._lut_shader_program = None
+
+    def setLut(self, lut: np.ndarray) -> None:
+        """Update the 256x4 RGBA LUT without re-uploading the index texture.
+
+        This is the O(1) colormap-change fast path (vs the old per-pixel RGBA
+        rebuild). ``lut`` is a ``(N, 4)`` uint8 array; only the first 256 rows
+        are used.
+        """
+        self._lut = lut
+        self._lut_needs_upload = True
+        self.update()
+
+    def _uploadLut(self) -> None:
+        ctx = QtGui.QOpenGLContext.currentContext()
+        if ctx is None or self._lut is None:
+            return
+        if self._lut_tex is None:
+            self._lut_tex = GL.glGenTextures(1)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._lut_tex)
+        filt = GL.GL_LINEAR if self.smooth else GL.GL_NEAREST
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, filt)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, filt)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+        # Reshape to (1, 256, 4) and upload as a 256-wide 1-row RGBA texture.
+        lut = np.ascontiguousarray(self._lut[:256].reshape((1, 256, 4)))
+        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, 256, 1, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, lut)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        self._lut_needs_upload = False
+
+    def _updateTexture(self) -> None:
+        """Upload the uint8 index array as a single-channel GL_R8 texture.
+
+        Overrides GLImageItem (which assumes RGBA): no transpose (single
+        channel), GL_R8 internal format, GL_RED source format.
+        """
+        if self.texture is None:
+            self.texture = GL.glGenTextures(1)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self.texture)
+        filt = GL.GL_LINEAR if self.smooth else GL.GL_NEAREST
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, filt)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, filt)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+        shape = self.data.shape  # (H, W) uint8
+
+        context = QtGui.QOpenGLContext.currentContext()
+        if not context.isOpenGLES():
+            GL.glTexImage2D(GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_R8, shape[0], shape[1], 0, GL.GL_RED, GL.GL_UNSIGNED_BYTE, None)
+            if GL.glGetTexLevelParameteriv(GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_TEXTURE_WIDTH) == 0:
+                raise Exception("OpenGL failed to create 2D R8 texture (%dx%d); too large." % shape[:2])
+
+        # Single-channel: no (1,0,2) transpose. Contiguous row-major upload.
+        data = np.ascontiguousarray(self.data)
+        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_R8, shape[0], shape[1], 0, GL.GL_RED, GL.GL_UNSIGNED_BYTE, data)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+
+        x, y = shape[:2]
+        pos = np.array([
+            [0, 0, 0, 0],
+            [x, 0, 1, 0],
+            [0, y, 0, 1],
+            [x, y, 1, 1],
+        ], dtype=np.float32)
+        vbo = self.m_vbo_position
+        if not vbo.isCreated():
+            vbo.create()
+        vbo.bind()
+        vbo.allocate(pos, pos.nbytes)
+        vbo.release()
+
+    def getLutShaderProgram(self):
+        """Instance-level shader program with the LUT-lookup fragment stage.
+
+        Distinct from GLImageItem's static ``getShaderProgram`` (RGBA-only):
+        picks CORE vs LEGACY by GL version, compiles the LUT shader pair.
+        """
+        if self._lut_shader_program is not None:
+            return self._lut_shader_program
+
+        ctx = QtGui.QOpenGLContext.currentContext()
+        fmt = ctx.format()
+
+        if ctx.isOpenGLES():
+            glsl_version = "#version 300 es\n" if fmt.version() >= (3, 0) else ""
+            sources = self._LUT_SHADER_CORE if fmt.version() >= (3, 0) else self._LUT_SHADER_LEGACY
+        else:
+            glsl_version = "#version 140\n" if fmt.version() >= (3, 1) else ""
+            sources = self._LUT_SHADER_CORE if fmt.version() >= (3, 1) else self._LUT_SHADER_LEGACY
+
+        compiled = [gl_shaders.compileShader([glsl_version, v], k) for k, v in sources.items()]
+        program = gl_shaders.compileProgram(*compiled)
+        GL.glBindAttribLocation(program, 0, "a_position")
+        GL.glBindAttribLocation(program, 1, "a_texcoord")
+        GL.glLinkProgram(program)
+        self._lut_shader_program = program
+        return program
+
+    def paint(self) -> None:
+        if self._needUpdate:
+            self._updateTexture()
+            self._needUpdate = False
+        if self._lut_needs_upload:
+            self._uploadLut()
+
+        self.setupGLState()
+        mat_mvp = self.mvpMatrix()
+        mat_mvp = np.array(mat_mvp.data(), dtype=np.float32)
+
+        program = self.getLutShaderProgram()
+        loc_pos, loc_tex = 0, 1
+        self.m_vbo_position.bind()
+        GL.glVertexAttribPointer(loc_pos, 2, GL.GL_FLOAT, False, 4 * 4, None)
+        GL.glVertexAttribPointer(loc_tex, 2, GL.GL_FLOAT, False, 4 * 4, GL.GLvoidp(2 * 4))
+        self.m_vbo_position.release()
+        enabled_locs = [loc_pos, loc_tex]
+
+        # Index texture on unit 0, LUT on unit 1.
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self.texture)
+        if self._lut_tex is not None:
+            GL.glActiveTexture(GL.GL_TEXTURE1)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, self._lut_tex)
+
+        for loc in enabled_locs:
+            GL.glEnableVertexAttribArray(loc)
+
+        with program:
+            loc_mvp = GL.glGetUniformLocation(program, "u_mvp")
+            GL.glUniformMatrix4fv(loc_mvp, 1, False, mat_mvp)
+            loc_idx = GL.glGetUniformLocation(program, "u_index")
+            GL.glUniform1i(loc_idx, 0)
+            if self._lut_tex is not None:
+                loc_lut = GL.glGetUniformLocation(program, "u_lut")
+                GL.glUniform1i(loc_lut, 1)
+            GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+
+        for loc in enabled_locs:
+            GL.glDisableVertexAttribArray(loc)
+
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
 
 
 class DualGLVolumeItem(gl.GLVolumeItem):
@@ -1034,11 +1250,22 @@ class Renderer3D(QWidget):
         if not self._loaded:
             return
         self._cmap_name = cmap_name
-        self._update_slice_planes()
+        # Fast path: the slice planes use GLImageLutItem (Indexed8 + LUT
+        # shader), so a pure colormap change is an O(1) LUT re-upload per
+        # plane — no index re-computation or texture re-upload. Fall back to
+        # the full rebuild only if the items don't exist yet (first build) or
+        # aren't LUT items (e.g. the arbitrary curtain, still RGBA).
+        new_lut = ColormapManager.get_colormap(self._cmap_name)
+        lut_items = [getattr(self, attr, None) for attr in ("_img_il", "_img_xl", "_img_t")]
+        if all(isinstance(it, GLImageLutItem) for it in lut_items if it is not None):
+            for it in lut_items:
+                if it is not None:
+                    it.setLut(new_lut)
+        else:
+            self._update_slice_planes()
         
         # Optimize: If volume rendering is active, update colormaps in-place instead of rebuilding
         if self._mode == "volume" and isinstance(self._volume_visual, DualGLVolumeItem):
-            from .colormap import ColormapManager
             cmap_data_primary = ColormapManager.get_colormap(self._cmap_name).copy()
             alpha_curve_primary = self._build_alpha_curve(self._opacity_mode, len(cmap_data_primary))
             cmap_data_primary[:, 3] = alpha_curve_primary.astype(np.uint8)
@@ -1469,11 +1696,11 @@ class Renderer3D(QWidget):
         if axis == "inline":
             # 1. Inline — Perpendicular to IL axis (x)
             il_raw = self._get_sliced_data(0, self._il_pos)
-            img_il_rgb = apply_colormap_gpu(il_raw, lut, value_range=value_range)
+            il_idx = apply_colormap_index(il_raw, len(lut), value_range=value_range)
 
             if self._img_il is not None and self._line_il is not None:
                 # Fast In-Place Texture & Transform Update
-                self._img_il.setData(img_il_rgb)
+                self._img_il.setData(il_idx)
                 self._img_il.resetTransform()
                 self._img_il.scale(sx, st, 1)
                 self._img_il.rotate(90, 1, 0, 0)
@@ -1483,7 +1710,7 @@ class Renderer3D(QWidget):
                 self._line_il.resetTransform()
                 self._line_il.translate(self._il_pos * si, 0, 0)
             else:
-                self._img_il = gl.GLImageItem(img_il_rgb)
+                self._img_il = GLImageLutItem(il_idx, lut=lut)
                 self._img_il.scale(sx, st, 1)
                 self._img_il.rotate(90, 1, 0, 0)
                 self._img_il.rotate(90, 0, 0, 1)
@@ -1498,11 +1725,11 @@ class Renderer3D(QWidget):
         elif axis == "crossline":
             # 2. Crossline — Perpendicular to XL axis (y)
             xl_raw = self._get_sliced_data(1, self._xl_pos)
-            img_xl_rgb = apply_colormap_gpu(xl_raw, lut, value_range=value_range)
+            xl_idx = apply_colormap_index(xl_raw, len(lut), value_range=value_range)
 
             if self._img_xl is not None and self._line_xl is not None:
                 # Fast In-Place Texture & Transform Update
-                self._img_xl.setData(img_xl_rgb)
+                self._img_xl.setData(xl_idx)
                 self._img_xl.resetTransform()
                 self._img_xl.scale(si, st, 1)
                 self._img_xl.rotate(90, 1, 0, 0)
@@ -1511,7 +1738,7 @@ class Renderer3D(QWidget):
                 self._line_xl.resetTransform()
                 self._line_xl.translate(0, self._xl_pos * sx, 0)
             else:
-                self._img_xl = gl.GLImageItem(img_xl_rgb)
+                self._img_xl = GLImageLutItem(xl_idx, lut=lut)
                 self._img_xl.scale(si, st, 1)
                 self._img_xl.rotate(90, 1, 0, 0)
                 self._img_xl.translate(0, self._xl_pos * sx, 0)
@@ -1525,11 +1752,11 @@ class Renderer3D(QWidget):
         elif axis == "time":
             # 3. Time — Perpendicular to T axis (z)
             t_raw = self._get_sliced_data(2, self._t_pos)
-            img_t_rgb = apply_colormap_gpu(t_raw, lut, value_range=value_range)
+            t_idx = apply_colormap_index(t_raw, len(lut), value_range=value_range)
 
             if self._img_t is not None and self._line_t is not None:
                 # Fast In-Place Texture & Transform Update (Zero Scene Graph Overhead)
-                self._img_t.setData(img_t_rgb)
+                self._img_t.setData(t_idx)
                 self._img_t.resetTransform()
                 self._img_t.scale(si, sx, 1)
                 self._img_t.translate(0, 0, self._t_pos * st)
@@ -1537,7 +1764,7 @@ class Renderer3D(QWidget):
                 self._line_t.resetTransform()
                 self._line_t.translate(0, 0, self._t_pos * st)
             else:
-                self._img_t = gl.GLImageItem(img_t_rgb)
+                self._img_t = GLImageLutItem(t_idx, lut=lut)
                 self._img_t.scale(si, sx, 1)
                 self._img_t.translate(0, 0, self._t_pos * st)
                 self._view.addItem(self._img_t)
