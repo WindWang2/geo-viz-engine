@@ -51,7 +51,12 @@ class ProfileVD(QWidget):
         super().__init__(parent)
         self._image: QPixmap | None = None
         self._data: np.ndarray | None = None
-        self._normalized: np.ndarray | None = None
+        self._normalized: np.ndarray | None = None  # kept for compat; lazily built
+        # Cached uint8 LUT-index array - the fused normalize+index result.
+        # Replaces the old two-pass (float32 _normalized -> uint8 in _build_image)
+        # with a single pass. Reused on viewport (zoom/pan) changes; recomputed
+        # only on new slice or clip-range change.
+        self._indexed: np.ndarray | None = None
         self._rgba_override: np.ndarray | None = None
         # Long-lived contiguous buffer backing the QImage — avoids a fresh
         # allocation on every zoom/pan rebuild. Holds the uint8 index array
@@ -129,7 +134,7 @@ class ProfileVD(QWidget):
         if name == self._colormap_name and self._has_data:
             return
         self._colormap_name = name
-        if self._has_data and self._normalized is not None:
+        if self._has_data and (self._indexed is not None or self._normalized is not None):
             self._build_image_from_normalized()
 
     def slice_info(self):
@@ -330,19 +335,22 @@ class ProfileVD(QWidget):
         self._build_image_from_rgba()
 
     def _renormalize(self):
-        """Compute normalized data using percentile clipping.
+        """Compute the uint8 LUT-index array from the current slice.
 
-        The percentile clip range (lo, hi) is cached across sibling slices of
-        the same volume — the expensive ``nanpercentile`` scan (23ms on a
-        1.5M-pixel slice) was recomputed per slice-swap, but the clip range is
-        approximately stable across slices of the same volume. The cache is
-        invalidated on clip_pct change or data-shape change (new volume).
+        Fuses normalize + index into a single pass, avoiding the old
+        intermediate float32 ``_normalized`` array (which was 5ms to allocate
+        + compute on a 1.5M-pixel slice). The percentile clip range (lo, hi)
+        is cached across sibling slices of the same volume.
+
+        On viewport (zoom/pan) changes, ``_build_image_from_normalized``
+        re-slices the cached ``_indexed`` array without re-entering here.
         """
         if self._data is None:
             return
         dmin, dmax = np.nanmin(self._data), np.nanmax(self._data)
         if dmax == dmin:
             self._normalized = np.zeros_like(self._data, dtype=np.float32)
+            self._indexed = np.zeros(self._data.shape, dtype=np.uint8)
             self._build_image_from_normalized()
             return
         # Compute or reuse the cached clip range.
@@ -357,7 +365,12 @@ class ProfileVD(QWidget):
             self._clip_range_cache = (float(lo), float(hi))
             self._clip_range_shape = shape
         lo, hi = self._clip_range_cache
-        self._normalized = np.clip((self._data - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+        # Fused normalize + index: (data - lo) / (hi - lo) * 255 -> clip -> uint8.
+        # Single allocation, single pass - no intermediate float32 array.
+        scale = 255.0 / (hi - lo)
+        self._indexed = np.clip((self._data - lo) * scale, 0, 255).astype(np.uint8)
+        # Keep _normalized None (lazily built only if a legacy consumer needs it).
+        self._normalized = None
         self._build_image_from_normalized()
 
     # ------------------------------------------------------------------
@@ -431,26 +444,36 @@ class ProfileVD(QWidget):
     # ------------------------------------------------------------------
 
     def _build_image_from_normalized(self) -> None:
-        """Map the visible portion of normalized data through the colour LUT.
+        """Map the visible portion of the indexed data through the colour LUT.
 
-        Uses ``QImage.Format_Indexed8`` + a 256-entry colour table instead of
-        gathering a full ``(H,W,4)`` RGBA array per rebuild — the LUT lookup
-        happens at Qt paint time (the QWidget-side equivalent of the GL
-        Indexed8+shader path in ``GLImageLutItem``). Saves ~20ms of RGBA
-        gather + 4x memory per zoom/pan rebuild.
+        Uses ``QImage.Format_Indexed8`` + a 256-entry colour table. The
+        ``_indexed`` array (uint8) is already the LUT index, so this is just a
+        viewport sub-slice + contiguous copy - no arithmetic, no RGBA gather.
+        Reused on zoom/pan without re-entering ``_renormalize``.
         """
         if self._rgba_override is not None:
             self._build_image_from_rgba()
             return
-        if self._normalized is None:
-            return
+        if self._indexed is None:
+            # Legacy fallback: build from _normalized if _indexed wasn't set
+            # (e.g. set_colormap called before first render).
+            if self._normalized is not None:
+                try:
+                    lut = ColormapManager.get_colormap(self._colormap_name)
+                except (ValueError, KeyError):
+                    lut = ColormapManager.get_colormap("seismic")
+                self._indexed = np.clip(
+                    self._normalized * (len(lut) - 1), 0, len(lut) - 1
+                ).astype(np.uint8)
+            else:
+                return
 
         try:
             lut = ColormapManager.get_colormap(self._colormap_name)
         except (ValueError, KeyError):
             lut = ColormapManager.get_colormap("seismic")
 
-        n_rows, n_cols = self._normalized.shape
+        n_rows, n_cols = self._indexed.shape
 
         # Determine visible data range from viewport
         h_start, h_end = self._view_h
@@ -465,19 +488,16 @@ class ProfileVD(QWidget):
         col_end = max(col_start + 1, col_end)
         row_end = max(row_start + 1, row_end)
 
-        sub = self._normalized[row_start:row_end, col_start:col_end]
-
-        # Emit a uint8 index array directly — no lut[idx] RGBA gather.
-        indices = np.clip(sub * (len(lut) - 1), 0, len(lut) - 1).astype(np.uint8)
-        sub_samples, sub_traces = indices.shape
+        sub = self._indexed[row_start:row_end, col_start:col_end]
+        sub_samples, sub_traces = sub.shape
 
         # Hold the contiguous buffer alive for the QImage's lifetime.
-        self._rgba_buf = np.ascontiguousarray(indices)
+        self._rgba_buf = np.ascontiguousarray(sub)
         img = QImage(
             self._rgba_buf.data,
             sub_traces,
             sub_samples,
-            sub_traces,  # 1 byte per pixel (Indexed8), not 4 (RGBA)
+            sub_traces,  # 1 byte per pixel (Indexed8)
             QImage.Format.Format_Indexed8,
         )
         # Build the colour table once per colormap (256 RGB entries).
