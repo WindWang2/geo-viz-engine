@@ -745,6 +745,7 @@ class Renderer3D(QWidget):
         
         self._sculpt_surface = None
         self._sculpt_mode = "above"
+        self._isosurface_item = None
         self._shading_enabled = False
 
         self._init_pyqtgraph(layout)
@@ -980,6 +981,42 @@ class Renderer3D(QWidget):
     def remove_horizon(self, name: str):
         if name in self._horizons:
             self._view.removeItem(self._horizons.pop(name))
+
+    def volume_data(self) -> np.ndarray | None:
+        """Return the CPU volume array currently loaded, or None."""
+        return self._volume_data_cpu
+
+    def set_isosurface(self, verts: np.ndarray, faces: np.ndarray,
+                       color=(0.9, 0.5, 0.1, 0.8)):
+        """Render an isosurface mesh (voxel-index coords), replacing any previous one."""
+        self.clear_isosurface()
+        if verts is None or faces is None or len(verts) == 0 or len(faces) == 0:
+            return
+        si, sx, st = self._volume_spacing
+        oi, ox, ot = self._volume_origin
+        v = np.asarray(verts, dtype=np.float32).copy()
+        v[:, 0] = v[:, 0] * si + oi
+        v[:, 1] = v[:, 1] * sx + ox
+        v[:, 2] = v[:, 2] * st + ot
+        mesh = gl.GLMeshItem(
+            vertexes=v,
+            faces=np.asarray(faces, dtype=np.int32),
+            color=color,
+            shader='shaded',
+            smooth=True,
+        )
+        self._isosurface_item = mesh
+        self._view.addItem(mesh)
+        self._view.update()
+
+    def clear_isosurface(self):
+        """Remove the isosurface mesh if present."""
+        if self._isosurface_item is not None:
+            try:
+                self._view.removeItem(self._isosurface_item)
+            except Exception:
+                pass
+            self._isosurface_item = None
 
     def horizons(self) -> list[str]:
         return list(self._horizons.keys())
@@ -1237,6 +1274,7 @@ class Renderer3D(QWidget):
             except Exception:
                 pass
         self._annotation_items = []
+        self.clear_isosurface()
 
     # ------------------------------------------------------------------
     # Internal Graph Building
