@@ -68,6 +68,9 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "set_downsample_provider": ("geoviz_well_log.renderer.downsample", "set_downsample_provider"),
     "get_downsample_provider": ("geoviz_well_log.renderer.downsample", "get_downsample_provider"),
     "numpy_minmax_downsample": ("geoviz_well_log.renderer.downsample", "numpy_minmax_downsample"),
+    # LAS parser provider hook installed by the workbench at startup.
+    "set_las_parser_provider": ("geoviz_well_log.las_preview", "set_las_parser_provider"),
+    "get_las_parser_provider": ("geoviz_well_log.las_preview", "get_las_parser_provider"),
     # Isosurface extractor hook installed by the workbench at startup.
     "set_isosurface_extractor": ("geoviz_seismic.isosurface", "set_isosurface_extractor"),
     "get_isosurface_extractor": ("geoviz_seismic.isosurface", "get_isosurface_extractor"),

@@ -58,9 +58,11 @@ from .las_preview import (
     LASCurveHeader,
     LASPreviewHeader,
     curve_data_from_arrays,
+    get_las_parser_provider,
     inspect_las_file,
     load_las_preview,
     read_sampled_ascii,
+    set_las_parser_provider,
 )
 from .robust_scale import compute_robust_display_range
 from .xml_preview import load_xml_preview
@@ -118,9 +120,11 @@ __all__ = [
     "LASCurveHeader",
     "LASPreviewHeader",
     "curve_data_from_arrays",
+    "get_las_parser_provider",
     "inspect_las_file",
     "load_las_preview",
     "read_sampled_ascii",
+    "set_las_parser_provider",
     "compute_robust_display_range",
     # Export
     "export_svg",

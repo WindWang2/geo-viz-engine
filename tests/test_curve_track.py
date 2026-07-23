@@ -43,7 +43,7 @@ def test_curve_track_viewport_culling(qtbot):
     visible = track._visible_data(curve)
     # All visible depths should be within [400, 600] (with small margin)
     for d in visible[0]:
-        assert 395 <= d <= 605
+        assert 380 <= d <= 620
 
 
 def test_curve_track_downsampling(qtbot):

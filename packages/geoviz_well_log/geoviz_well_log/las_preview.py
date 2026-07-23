@@ -321,8 +321,11 @@ def curve_data_from_arrays(
     depth: np.ndarray,
     values: np.ndarray,
 ) -> CurveData:
-    from .robust_scale import compute_robust_display_range
-    display_range = compute_robust_display_range(values, header.mnemonic)
+    finite = values[np.isfinite(values)]
+    if finite.size >= 2:
+        display_range = (float(finite.min()), float(finite.max()))
+    else:
+        display_range = (0.0, 100.0)
     return CurveData(
         name=header.mnemonic,
         unit=header.unit,
@@ -332,16 +335,123 @@ def curve_data_from_arrays(
     )
 
 
+_las_parser_provider: Callable | None = None
+
+
+def set_las_parser_provider(provider: Callable | None) -> None:
+    """Register or clear a custom LAS C++ parser provider callable.
+
+    The provider signature is (content: str, null_value: float) -> tuple[tuple[str, ...], np.ndarray].
+    """
+    global _las_parser_provider
+    _las_parser_provider = provider
+
+
+def get_las_parser_provider() -> Callable | None:
+    """Return the currently registered LAS C++ parser provider callable or None."""
+    return _las_parser_provider
+
+
+def _load_las_preview_fast(
+    path: str,
+    provider: Callable,
+    max_curves: int,
+    max_samples: int,
+) -> WellLogData | None:
+    header = inspect_las_file(path, header_only=True)
+    if header.wrapped or not header.curves:
+        return None
+
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+
+    names, arr = provider(content, header.null_value)
+
+    if not isinstance(arr, np.ndarray) or arr.ndim != 2 or arr.shape[0] < 2:
+        return None
+
+    max_index = max(c.index for c in header.curves)
+    if arr.shape[1] <= max_index:
+        return None
+
+    depth_col = arr[:, header.depth_index]
+    valid_mask = np.isfinite(depth_col) & ~np.isclose(depth_col, header.null_value, atol=1e-6)
+    if valid_mask.sum() < 2:
+        return None
+
+    valid_arr = arr[valid_mask]
+    n_valid = valid_arr.shape[0]
+    stride = max(1, math.ceil(n_valid / max_samples))
+
+    indices = np.arange(0, n_valid, stride)
+    if indices[-1] != n_valid - 1:
+        if len(indices) < max_samples:
+            indices = np.append(indices, n_valid - 1)
+        else:
+            indices[-1] = n_valid - 1
+
+    sampled_arr = valid_arr[indices]
+    depth_array = sampled_arr[:, header.depth_index]
+
+    selected = header.non_depth_curves[:max_curves]
+
+    curves: list[CurveData] = []
+    for item in selected:
+        vals = sampled_arr[:, item.index].copy()
+        null_mask = np.isclose(vals, header.null_value, atol=1e-6) | ~np.isfinite(vals)
+        vals[null_mask] = np.nan
+
+        finite = vals[np.isfinite(vals)]
+        if finite.size >= 2:
+            display_range = (float(finite.min()), float(finite.max()))
+        else:
+            display_range = (0.0, 100.0)
+
+        curves.append(
+            CurveData.model_construct(
+                name=item.mnemonic,
+                unit=item.unit,
+                depth=depth_array.tolist(),
+                values=vals.tolist(),
+                display_range=display_range,
+            )
+        )
+
+    well_name = header.well_name or Path(path).stem
+    return WellLogData.model_construct(
+        well_name=well_name,
+        top_depth=float(np.nanmin(depth_array)),
+        bottom_depth=float(np.nanmax(depth_array)),
+        curves=curves,
+    )
+
+
 def load_las_preview(
     path: str,
     *,
     max_curves: int = 12,
     max_samples: int = 2_000,
+    fast: bool = False,
 ) -> WellLogData:
     if max_curves < 0:
         raise ValueError("LAS curve limit cannot be negative")
     if max_samples < 2:
         raise ValueError("LAS preview requires at least two samples")
+
+    if fast:
+        provider = get_las_parser_provider()
+        if provider is not None:
+            try:
+                res = _load_las_preview_fast(
+                    path,
+                    provider,
+                    max_curves=max_curves,
+                    max_samples=max_samples,
+                )
+                if res is not None:
+                    return res
+            except Exception:
+                pass  # Silently fall back to pure-Python path
 
     header = inspect_las_file(path)
     selected = header.non_depth_curves[:max_curves]
@@ -365,7 +475,9 @@ __all__ = [
     "LASCurveHeader",
     "LASPreviewHeader",
     "curve_data_from_arrays",
+    "get_las_parser_provider",
     "inspect_las_file",
     "load_las_preview",
     "read_sampled_ascii",
+    "set_las_parser_provider",
 ]

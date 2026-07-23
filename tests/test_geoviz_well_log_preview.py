@@ -324,7 +324,7 @@ def test_backend_maps_invalid_las_to_structured_error(tmp_path: Path):
         GeoVizEngine.default().prepare(_request(path), PreviewOptions.local())
 
     assert caught.value.code is ErrorCode.INVALID_DATA
-    assert str(caught.value) == "无法解析 LAS 测井数据"
+    assert str(caught.value) == "无法解析测井数据"
 
 
 def test_backend_maps_os_error_to_structured_error(tmp_path: Path):
@@ -334,3 +334,61 @@ def test_backend_maps_os_error_to_structured_error(tmp_path: Path):
         GeoVizEngine.default().prepare(_request(path), PreviewOptions.local())
 
     assert caught.value.code is ErrorCode.IO_ERROR
+
+
+def test_las_parser_provider_hook_and_fast_path(bounded_las: Path, tmp_path: Path):
+    from geoviz import get_las_parser_provider, set_las_parser_provider
+
+    # Ensure clean hook state
+    set_las_parser_provider(None)
+    assert get_las_parser_provider() is None
+
+    # 1. Fallback when no provider registered
+    data_slow = load_las_preview(str(bounded_las), fast=False)
+    data_no_provider = load_las_preview(str(bounded_las), fast=True)
+    assert data_no_provider.well_name == data_slow.well_name
+    assert len(data_no_provider.curves) == len(data_slow.curves)
+    assert data_no_provider.top_depth == data_slow.top_depth
+
+    # 2. Mock provider registration and parity check
+    def fake_parser(content: str, null_value: float):
+        lines = content.splitlines()
+        ascii_idx = next(i for i, l in enumerate(lines) if l.strip().startswith("~A")) + 1
+        rows = [[float(x) for x in l.split()] for l in lines[ascii_idx:] if l.strip() and not l.strip().startswith("#")]
+        arr = np.array(rows, dtype=np.float64)
+        return tuple(f"C{i}" for i in range(arr.shape[1])), arr
+
+    try:
+        set_las_parser_provider(fake_parser)
+        assert get_las_parser_provider() is fake_parser
+
+        data_fast = load_las_preview(str(bounded_las), fast=True)
+        assert data_fast.well_name == data_slow.well_name
+        assert len(data_fast.curves) == len(data_slow.curves)
+        assert data_fast.top_depth == pytest.approx(data_slow.top_depth)
+        assert data_fast.bottom_depth == pytest.approx(data_slow.bottom_depth)
+        for c_fast, c_slow in zip(data_fast.curves, data_slow.curves):
+            assert c_fast.name == c_slow.name
+            assert c_fast.depth == pytest.approx(c_slow.depth)
+            assert np.allclose(np.nan_to_num(c_fast.values), np.nan_to_num(c_slow.values), equal_nan=True)
+
+        # 3. Wrapped LAS file falls back gracefully
+        wrapped_las = tmp_path / "wrapped.las"
+        wrapped_las.write_text(
+            "~VERSION\n VERS. 2.0 :\n WRAP. YES :\n~WELL\n WELL. W-01 :\n NULL. -99999 :\n~CURVE\n DEPT.M :\n GR.API :\n~ASCII\n1000\n 10\n1001\n 11\n",
+            encoding="utf-8",
+        )
+        data_wrapped = load_las_preview(str(wrapped_las), fast=True)
+        assert data_wrapped.well_name == "W-01"
+        assert len(data_wrapped.curves) == 1
+
+        # 4. Malformed provider output falls back gracefully
+        def bad_parser(content: str, null_value: float):
+            return (), np.zeros((1, 1))
+
+        set_las_parser_provider(bad_parser)
+        data_malformed = load_las_preview(str(bounded_las), fast=True)
+        assert data_malformed.well_name == data_slow.well_name
+    finally:
+        set_las_parser_provider(None)
+
