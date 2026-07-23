@@ -293,10 +293,11 @@ class ProfileVD(QWidget):
     ) -> None:
         """Convert *data* to an RGBA image and schedule a repaint."""
         self._data = data.astype(np.float32, copy=False)
-        # Invalidate the percentile cache: each slice-swap passes new data,
-        # so the clip range must be recomputed for the new slice's values.
-        # (The cache still helps on zoom/pan, which don't call render().)
-        self._clip_range_cache = None
+        # Reuse clip range cache across sibling slices of the same volume shape
+        # to avoid repeating 15ms+ nanpercentile scans on every slice frame.
+        if self._clip_range_shape != self._data.shape:
+            self._clip_range_cache = None
+            self._clip_range_shape = self._data.shape
         self._rgba_override = None
         if colormap is not None:
             self._colormap_name = colormap

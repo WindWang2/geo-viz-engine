@@ -96,15 +96,15 @@ def test_seismic_view_toolbar_split_into_two_rows(qtbot):
     assert any(view._toolbar_row1.widgetForAction(a) is view._well_tie_btn
                for a in row1_actions)
 
-    # Row 2: view + attribute controls
-    row2_actions = [a for a in view._toolbar_row2.actions()]
-    row2_widgets = {view._toolbar_row2.widgetForAction(a) for a in row2_actions}
-    assert view._3d_mode_combo in row2_widgets
-    assert view._attr_combo in row2_widgets
-    assert view._tb_il_slider in row2_widgets
-    assert view._tb_xl_slider in row2_widgets
-    assert view._tb_t_slider in row2_widgets
-    assert view._clip_spin in row2_widgets
+    # Row 2 & Row 3: view + attribute + slider controls
+    row_actions = [a for a in view._toolbar_row2.actions()] + [a for a in view._toolbar_row3.actions()]
+    row_widgets = {w for w in (view._toolbar_row2.widgetForAction(a) for a in row_actions) if w is not None} | {w for w in (view._toolbar_row3.widgetForAction(a) for a in row_actions) if w is not None}
+    assert view._3d_mode_combo in row_widgets
+    assert view._attr_combo in row_widgets
+    assert view._tb_il_slider in row_widgets
+    assert view._tb_xl_slider in row_widgets
+    assert view._tb_t_slider in row_widgets
+    assert view._clip_spin in row_widgets
 
 
 def test_seismic_view_dual_volume_overlay(qtbot):
@@ -114,16 +114,16 @@ def test_seismic_view_dual_volume_overlay(qtbot):
     view = SeismicView(auto_load=False)
     qtbot.addWidget(view)
 
-    # 1. Assert overlay UI controls exist and are placed on toolbar row 2
+    # 1. Assert overlay UI controls exist and are placed on toolbar row 3
     assert hasattr(view, "_overlay_btn")
     assert hasattr(view, "_overlay_cmap_combo")
     assert hasattr(view, "_overlay_opacity_slider")
 
-    row2_actions = [a for a in view._toolbar_row2.actions()]
-    row2_widgets = {view._toolbar_row2.widgetForAction(a) for a in row2_actions}
-    assert view._overlay_btn in row2_widgets
-    assert view._overlay_cmap_combo in row2_widgets
-    assert view._overlay_opacity_slider in row2_widgets
+    row_actions = [a for a in view._toolbar_row2.actions()] + [a for a in view._toolbar_row3.actions()]
+    row_widgets = {w for w in (view._toolbar_row2.widgetForAction(a) for a in row_actions) if w is not None} | {w for w in (view._toolbar_row3.widgetForAction(a) for a in row_actions) if w is not None}
+    assert view._overlay_btn in row_widgets
+    assert view._overlay_cmap_combo in row_widgets
+    assert view._overlay_opacity_slider in row_widgets
 
     # Ensure 3D render mode is set to "volume"
     view._3d_mode_combo.setCurrentIndex(1)  # 0: planes, 1: volume

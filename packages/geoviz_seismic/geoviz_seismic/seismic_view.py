@@ -179,11 +179,7 @@ class SeismicView(QWidget):
         self._latest_slice_request: dict[str, int] = {}
         self._slice_timer = QTimer(self)
         self._slice_timer.setSingleShot(True)
-        # Debounce: 30ms coalesces rapid slider drags into one render.
-        # Was 80ms (capped throughput at ~12 Hz); now that per-tick CPU work
-        # is ~5ms (percentile cache + Indexed8 QImage in profile_vd), 30ms
-        # gives ~33 Hz responsive scrubbing without thrashing.
-        self._slice_timer.setInterval(30)
+        self._slice_timer.setInterval(16)
         self._slice_timer.timeout.connect(self._apply_pending_slice)
 
         self._renderer_3d.slice_changed.connect(self._on_slice_changed)
