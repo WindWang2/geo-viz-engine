@@ -183,11 +183,19 @@ class SeismicLoader:
         f = self._open()
         fi, fx, ft = factor
 
-        # Fast path: use segyio.tools.cube C-extension reader if standard 3D geometry is active
-        if self._f is not None and not getattr(self._f, "unstructured", False):
+        # Fast path: use segyio.tools.cube C-extension reader ONLY when reading
+        # at full resolution (factor 1,1,1). When downsampling, tools.cube
+        # reads the entire file into memory (1GB+ for a typical 500x500x1000
+        # volume) just to slice it — the strided iline path below reads only
+        # the needed fraction (e.g. 4x less I/O at factor 4,4,8).
+        if (
+            self._f is not None
+            and not getattr(self._f, "unstructured", False)
+            and factor == (1, 1, 1)
+        ):
             try:
                 raw_cube = segyio.tools.cube(f)
-                vol = np.ascontiguousarray(raw_cube[::fi, ::fx, ::ft], dtype=np.float32)
+                vol = np.ascontiguousarray(raw_cube, dtype=np.float32)
                 self._downsampled = vol
                 self._downsample_factor = factor
                 if cancellation_token is not None:
