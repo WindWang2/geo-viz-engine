@@ -349,7 +349,7 @@ def test_gl_image_lut_item_shader_has_lut_lookup_and_compiles(monkeypatch):
 
     # GLES3 >= 3.0 -> CORE shader path.
     lut = np.zeros((256, 4), dtype=np.uint8)
-    item = renderer.GLImageLutItem(np.zeros((4, 4), dtype=np.uint8), lut=lut)
+    item = renderer.GLImageLutItem(np.zeros((4, 4), dtype=np.uint8), cmap_name="seismic")
     first = item.getLutShaderProgram()
     second = item.getLutShaderProgram()
 
@@ -410,8 +410,7 @@ def test_gl_image_lut_item_legacy_shader_uses_texture2d(monkeypatch, is_gles, ve
     monkeypatch.setattr(renderer.GL, "glBindAttribLocation", lambda *_args: None)
     monkeypatch.setattr(renderer.GL, "glLinkProgram", lambda *_args: None)
 
-    lut = np.zeros((256, 4), dtype=np.uint8)
-    item = renderer.GLImageLutItem(np.zeros((4, 4), dtype=np.uint8), lut=lut)
+    item = renderer.GLImageLutItem(np.zeros((4, 4), dtype=np.uint8), cmap_name="seismic")
     item.getLutShaderProgram()
 
     fragment_source = "".join(captured_sources[1][0])

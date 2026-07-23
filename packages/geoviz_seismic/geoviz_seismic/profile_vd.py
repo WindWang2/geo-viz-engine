@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QImage, QPainter, QPixmap, QFont, QPen, QColor, qRgb
+from PySide6.QtGui import QImage, QPainter, QPixmap, QFont, QPen, QColor
 from PySide6.QtWidgets import QWidget
 
 from .colormap import ColormapManager
@@ -51,10 +51,8 @@ class ProfileVD(QWidget):
         super().__init__(parent)
         self._image: QPixmap | None = None
         self._data: np.ndarray | None = None
-        self._normalized: np.ndarray | None = None  # kept for compat; lazily built
         # Cached uint8 LUT-index array - the fused normalize+index result.
-        # Replaces the old two-pass (float32 _normalized -> uint8 in _build_image)
-        # with a single pass. Reused on viewport (zoom/pan) changes; recomputed
+        # Reused on viewport (zoom/pan) changes; recomputed
         # only on new slice or clip-range change.
         self._indexed: np.ndarray | None = None
         self._rgba_override: np.ndarray | None = None
@@ -62,10 +60,6 @@ class ProfileVD(QWidget):
         # allocation on every zoom/pan rebuild. Holds the uint8 index array
         # (Indexed8 path).
         self._rgba_buf: np.ndarray | None = None
-        # Indexed8 colour table (256 RGB entries) + the LUT object id it was
-        # built from, so it's rebuilt only when the colormap actually changes.
-        self._color_table: list[int] | None = None
-        self._color_table_lut_id: int | None = None
         self._has_data = False
         self._colormap_name = "seismic"
         self._slice_info = None
@@ -134,7 +128,7 @@ class ProfileVD(QWidget):
         if name == self._colormap_name and self._has_data:
             return
         self._colormap_name = name
-        if self._has_data and (self._indexed is not None or self._normalized is not None):
+        if self._has_data and self._indexed is not None:
             self._build_image_from_normalized()
 
     def slice_info(self):
@@ -329,7 +323,6 @@ class ProfileVD(QWidget):
         self._rgba_override = rgba.astype(np.uint8, copy=True)
         # Store synthetic float data for amplitude readout (not meaningful for RGB)
         self._data = np.zeros(rgba.shape[:2], dtype=np.float32)
-        self._normalized = None
         self._slice_info = slice_info
         self._has_data = True
         self._colormap_name = "__rgb__"
@@ -341,10 +334,9 @@ class ProfileVD(QWidget):
     def _renormalize(self):
         """Compute the uint8 LUT-index array from the current slice.
 
-        Fuses normalize + index into a single pass, avoiding the old
-        intermediate float32 ``_normalized`` array (which was 5ms to allocate
-        + compute on a 1.5M-pixel slice). The percentile clip range (lo, hi)
-        is cached across sibling slices of the same volume.
+        Delegates to ``ColormapManager.normalize_to_index`` with the cached
+        percentile clip range. The clip range (lo, hi) is cached across
+        sibling slices of the same volume.
 
         On viewport (zoom/pan) changes, ``_build_image_from_normalized``
         re-slices the cached ``_indexed`` array without re-entering here.
@@ -353,7 +345,6 @@ class ProfileVD(QWidget):
             return
         dmin, dmax = np.nanmin(self._data), np.nanmax(self._data)
         if dmax == dmin:
-            self._normalized = np.zeros_like(self._data, dtype=np.float32)
             self._indexed = np.zeros(self._data.shape, dtype=np.uint8)
             self._build_image_from_normalized()
             return
@@ -369,12 +360,9 @@ class ProfileVD(QWidget):
             self._clip_range_cache = (float(lo), float(hi))
             self._clip_range_shape = shape
         lo, hi = self._clip_range_cache
-        # Fused normalize + index: (data - lo) / (hi - lo) * 255 -> clip -> uint8.
-        # Single allocation, single pass - no intermediate float32 array.
-        scale = 255.0 / (hi - lo)
-        self._indexed = np.clip((self._data - lo) * scale, 0, 255).astype(np.uint8)
-        # Keep _normalized None (lazily built only if a legacy consumer needs it).
-        self._normalized = None
+        self._indexed = ColormapManager.normalize_to_index(
+            self._data, lut_size=256, value_range=(lo, hi)
+        )
         self._build_image_from_normalized()
 
     # ------------------------------------------------------------------
@@ -450,31 +438,23 @@ class ProfileVD(QWidget):
     def _build_image_from_normalized(self) -> None:
         """Map the visible portion of the indexed data through the colour LUT.
 
-        Uses ``QImage.Format_Indexed8`` + a 256-entry colour table. The
-        ``_indexed`` array (uint8) is already the LUT index, so this is just a
-        viewport sub-slice + contiguous copy - no arithmetic, no RGBA gather.
+        Uses ``QImage.Format_Indexed8`` + a 256-entry colour table (cached by
+        colormap name in ``ColormapManager.get_color_table``). The ``_indexed``
+        array (uint8) is already the LUT index, so this is just a viewport
+        sub-slice + contiguous copy - no arithmetic, no RGBA gather.
         Reused on zoom/pan without re-entering ``_renormalize``.
         """
         if self._rgba_override is not None:
             self._build_image_from_rgba()
             return
         if self._indexed is None:
-            # Legacy fallback: build from _normalized if _indexed wasn't set
-            # (e.g. set_colormap called before first render). Scale by 255
-            # to match the indexed path in _renormalize (which uses the same
-            # 255-entry scale regardless of LUT length — the colour table
-            # maps 0..255 to the LUT).
-            if self._normalized is not None:
-                self._indexed = np.clip(
-                    self._normalized * 255.0, 0, 255
-                ).astype(np.uint8)
-            else:
-                return
+            return
 
+        cmap_name = self._colormap_name
         try:
-            lut = ColormapManager.get_colormap(self._colormap_name)
+            ColormapManager.get_colormap(cmap_name)
         except (ValueError, KeyError):
-            lut = ColormapManager.get_colormap("seismic")
+            cmap_name = "seismic"
 
         n_rows, n_cols = self._indexed.shape
 
@@ -503,11 +483,7 @@ class ProfileVD(QWidget):
             sub_traces,  # 1 byte per pixel (Indexed8)
             QImage.Format.Format_Indexed8,
         )
-        # Build the colour table once per colormap (256 RGB entries).
-        if self._color_table is None or self._color_table_lut_id is not id(lut):
-            self._color_table = [qRgb(int(r), int(g), int(b)) for r, g, b, _ in lut[:256]]
-            self._color_table_lut_id = id(lut)
-        img.setColorTable(self._color_table)
+        img.setColorTable(ColormapManager.get_color_table(cmap_name))
         self._image = QPixmap.fromImage(img)
         self.update()
 

@@ -174,6 +174,7 @@ class ColormapManager:
     }
 
     _LUT_CACHE: dict[str, np.ndarray] = {}
+    _COLOR_TABLE_CACHE: dict[str, list[int]] = {}
 
     @staticmethod
     def get_colormap(name: str, n_colors: int = 256) -> np.ndarray:
@@ -203,6 +204,25 @@ class ColormapManager:
         """Clear all cached LUTs and GPU textures (testing / memory-constrained)."""
         ColormapManager._LUT_CACHE.clear()
         _gpu_lut_cache.clear()
+        ColormapManager._COLOR_TABLE_CACHE.clear()
+
+    @staticmethod
+    def get_color_table(name: str) -> list[int]:
+        """Return a 256-entry Qt ``qRgb`` colour table for ``QImage.Format_Indexed8``.
+
+        Cached per colormap name — the table is rebuilt only when the colormap
+        actually changes. This replaces the per-widget ``_color_table`` /
+        ``_color_table_lut_id`` (``id(lut)``) caches that previously lived in
+        ``profile_vd.py``.
+        """
+        cached = ColormapManager._COLOR_TABLE_CACHE.get(name)
+        if cached is not None:
+            return cached
+        from PySide6.QtGui import qRgb
+        lut = ColormapManager.get_colormap(name)
+        table = [qRgb(int(r), int(g), int(b)) for r, g, b, _ in lut[:256]]
+        ColormapManager._COLOR_TABLE_CACHE[name] = table
+        return table
 
     @staticmethod
     def normalize_to_index(

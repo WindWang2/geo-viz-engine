@@ -17,7 +17,6 @@ from OpenGL.GL import shaders as gl_shaders
 from .colormap import ColormapManager
 from .gpu_ops import (
     is_gpu_available, to_gpu, to_cpu, slice_volume_gpu, apply_colormap_gpu,
-    apply_colormap_index,
     sample_arbitrary_slice_gpu, sample_polyline_slice
 )
 
@@ -125,29 +124,31 @@ class GLImageLutItem(gl.GLImageItem):
         """,
     }
 
-    def __init__(self, index_data, lut=None, smooth=False, glOptions='translucent', parentItem=None):
+    def __init__(self, index_data, cmap_name="seismic", smooth=False, glOptions='translucent', parentItem=None):
         # GLImageItem.__init__ calls setData(data); we intercept so self.data
         # holds the uint8 index array, and seed the LUT separately.
         super().__init__(index_data, smooth=smooth, glOptions=glOptions, parentItem=parentItem)
-        self._lut = lut
+        self._cmap_name = cmap_name
         self._lut_tex = None
-        self._lut_needs_upload = lut is not None
+        self._lut_needs_upload = cmap_name is not None
         self._lut_shader_program = None
 
-    def setLut(self, lut: np.ndarray) -> None:
-        """Update the 256x4 RGBA LUT without re-uploading the index texture.
+    def setLut(self, cmap_name: str) -> None:
+        """Update the colormap without re-uploading the index texture.
 
         This is the O(1) colormap-change fast path (vs the old per-pixel RGBA
-        rebuild). ``lut`` is a ``(N, 4)`` uint8 array; only the first 256 rows
-        are used.
+        rebuild). Only the colormap name is stored; the actual LUT is fetched
+        from ``ColormapManager`` on the next ``_uploadLut`` call.
         """
-        self._lut = lut
+        if cmap_name == self._cmap_name and not self._lut_needs_upload:
+            return
+        self._cmap_name = cmap_name
         self._lut_needs_upload = True
         self.update()
 
     def _uploadLut(self) -> None:
         ctx = QtGui.QOpenGLContext.currentContext()
-        if ctx is None or self._lut is None:
+        if ctx is None or self._cmap_name is None:
             return
         if self._lut_tex is None:
             self._lut_tex = GL.glGenTextures(1)
@@ -157,8 +158,10 @@ class GLImageLutItem(gl.GLImageItem):
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, filt)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
-        # Reshape to (1, 256, 4) and upload as a 256-wide 1-row RGBA texture.
-        lut = np.ascontiguousarray(self._lut[:256].reshape((1, 256, 4)))
+        # Fetch the LUT from ColormapManager (cached by name). Reshape to
+        # (1, 256, 4) and upload as a 256-wide 1-row RGBA texture.
+        lut = ColormapManager.get_colormap(self._cmap_name)
+        lut = np.ascontiguousarray(lut[:256].reshape((1, 256, 4)))
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, 256, 1, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, lut)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
         self._lut_needs_upload = False
@@ -1255,12 +1258,11 @@ class Renderer3D(QWidget):
         # plane — no index re-computation or texture re-upload. Fall back to
         # the full rebuild only if the items don't exist yet (first build) or
         # aren't LUT items (e.g. the arbitrary curtain, still RGBA).
-        new_lut = ColormapManager.get_colormap(self._cmap_name)
         lut_items = [getattr(self, attr, None) for attr in ("_img_il", "_img_xl", "_img_t")]
         if all(isinstance(it, GLImageLutItem) for it in lut_items if it is not None):
             for it in lut_items:
                 if it is not None:
-                    it.setLut(new_lut)
+                    it.setLut(cmap_name)
         else:
             self._update_slice_planes()
         
@@ -1817,12 +1819,11 @@ class Renderer3D(QWidget):
 
         ni, nx, nt = self._volume_data_cpu.shape
         si, sx, st = self._volume_spacing
-        lut = ColormapManager.get_colormap(self._cmap_name)
 
         if axis == "inline":
             # 1. Inline — Perpendicular to IL axis (x)
             il_raw = self._get_sliced_data(0, self._il_pos)
-            il_idx = apply_colormap_index(il_raw, len(lut), value_range=value_range)
+            il_idx = ColormapManager.normalize_to_index(il_raw, lut_size=256, value_range=value_range)
 
             if self._img_il is not None and self._line_il is not None:
                 # Fast In-Place Texture & Transform Update
@@ -1836,7 +1837,7 @@ class Renderer3D(QWidget):
                 self._line_il.resetTransform()
                 self._line_il.translate(self._il_pos * si, 0, 0)
             else:
-                self._img_il = GLImageLutItem(il_idx, lut=lut)
+                self._img_il = GLImageLutItem(il_idx, cmap_name=self._cmap_name)
                 self._img_il.scale(sx, st, 1)
                 self._img_il.rotate(90, 1, 0, 0)
                 self._img_il.rotate(90, 0, 0, 1)
@@ -1851,7 +1852,7 @@ class Renderer3D(QWidget):
         elif axis == "crossline":
             # 2. Crossline — Perpendicular to XL axis (y)
             xl_raw = self._get_sliced_data(1, self._xl_pos)
-            xl_idx = apply_colormap_index(xl_raw, len(lut), value_range=value_range)
+            xl_idx = ColormapManager.normalize_to_index(xl_raw, lut_size=256, value_range=value_range)
 
             if self._img_xl is not None and self._line_xl is not None:
                 # Fast In-Place Texture & Transform Update
@@ -1864,7 +1865,7 @@ class Renderer3D(QWidget):
                 self._line_xl.resetTransform()
                 self._line_xl.translate(0, self._xl_pos * sx, 0)
             else:
-                self._img_xl = GLImageLutItem(xl_idx, lut=lut)
+                self._img_xl = GLImageLutItem(xl_idx, cmap_name=self._cmap_name)
                 self._img_xl.scale(si, st, 1)
                 self._img_xl.rotate(90, 1, 0, 0)
                 self._img_xl.translate(0, self._xl_pos * sx, 0)
@@ -1878,7 +1879,7 @@ class Renderer3D(QWidget):
         elif axis == "time":
             # 3. Time — Perpendicular to T axis (z)
             t_raw = self._get_sliced_data(2, self._t_pos)
-            t_idx = apply_colormap_index(t_raw, len(lut), value_range=value_range)
+            t_idx = ColormapManager.normalize_to_index(t_raw, lut_size=256, value_range=value_range)
 
             if self._img_t is not None and self._line_t is not None:
                 # Fast In-Place Texture & Transform Update (Zero Scene Graph Overhead)
@@ -1890,7 +1891,7 @@ class Renderer3D(QWidget):
                 self._line_t.resetTransform()
                 self._line_t.translate(0, 0, self._t_pos * st)
             else:
-                self._img_t = GLImageLutItem(t_idx, lut=lut)
+                self._img_t = GLImageLutItem(t_idx, cmap_name=self._cmap_name)
                 self._img_t.scale(si, sx, 1)
                 self._img_t.translate(0, 0, self._t_pos * st)
                 self._view.addItem(self._img_t)
