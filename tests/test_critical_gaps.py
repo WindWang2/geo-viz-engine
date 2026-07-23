@@ -46,10 +46,10 @@ def test_colormap_hsv_shape_and_range():
     assert rgba[:, 3].min() == 255  # all fully opaque
 
 
-def test_colormap_apply_to_data_dmin_equals_dmax():
+def test_colormap_apply_dmin_equals_dmax():
     """When all data values are the same, output should be a single color."""
     data = np.full((3, 3), 42.0)
-    result = ColormapManager.apply_to_data(data, "seismic")
+    result = ColormapManager.apply_colormap(data, name="seismic")
     assert result.shape == (3, 3, 4)
     # All pixels should have identical RGBA
     assert np.all(result == result[0, 0])

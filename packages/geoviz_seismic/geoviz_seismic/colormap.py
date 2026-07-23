@@ -194,12 +194,6 @@ class ColormapManager:
         return lut
 
     @staticmethod
-    def get_lut_bytes(name: str, n_colors: int = 256) -> bytes:
-        """Return raw 1D LUT byte buffer for 1D OpenGL texture uploading."""
-        lut = ColormapManager.get_colormap(name, n_colors)
-        return lut.tobytes()
-
-    @staticmethod
     def clear_cache() -> None:
         """Clear all cached LUTs and GPU textures (testing / memory-constrained)."""
         ColormapManager._LUT_CACHE.clear()
@@ -309,16 +303,3 @@ class ColormapManager:
 
         # CPU path: numpy fancy-index gather through the LUT.
         return lut[idx]
-
-    @staticmethod
-    def apply_to_data(data: np.ndarray, name: str) -> np.ndarray:
-        """Map float32 data through a colour LUT to RGBA (min-max normalised)."""
-        dmin, dmax = np.nanmin(data), np.nanmax(data)
-        if dmax == dmin:
-            normalized = np.zeros_like(data, dtype=np.float32)
-        else:
-            normalized = (data - dmin) / (dmax - dmin)
-        lut = ColormapManager.get_colormap(name)
-        indices = (normalized * (len(lut) - 1)).astype(np.int32)
-        indices = np.clip(indices, 0, len(lut) - 1)
-        return lut[indices]

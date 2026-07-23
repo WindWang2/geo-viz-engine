@@ -26,9 +26,9 @@ def test_unknown_colormap_raises():
         ColormapManager.get_colormap("nonexistent")
 
 
-def test_apply_colormap_to_data():
+def test_apply_colormap():
     data = np.array([[-1.0, 0.0, 1.0]], dtype=np.float32)
-    result = ColormapManager.apply_to_data(data, "seismic")
+    result = ColormapManager.apply_colormap(data, name="seismic")
     assert result.shape == (1, 3, 4)
     assert result.dtype == np.uint8
     assert result[0, 1, :3].sum() > 600

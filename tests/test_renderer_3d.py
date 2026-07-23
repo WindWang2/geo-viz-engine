@@ -419,20 +419,19 @@ def test_gl_image_lut_item_legacy_shader_uses_texture2d(monkeypatch, is_gles, ve
     assert "texture(u_index" not in fragment_source
 
 
-def test_apply_colormap_index_parity_with_rgba_path():
-    """apply_colormap_index produces a uint8 index whose lut[idx] is
-    byte-identical to apply_colormap_gpu's RGBA output — guarantees the
-    Indexed8 shader path renders the same pixels as the old RGBA path."""
-    from geoviz_seismic.gpu_ops import apply_colormap_gpu, apply_colormap_index
+def test_normalize_to_index_parity_with_apply_colormap():
+    """ColormapManager.normalize_to_index produces a uint8 index whose lut[idx]
+    is byte-identical to ColormapManager.apply_colormap's RGBA output -
+    guarantees the Indexed8 shader path renders the same pixels as the RGBA path."""
     from geoviz_seismic.colormap import ColormapManager
 
-    lut = ColormapManager.get_colormap("seismic")
     rng = np.random.default_rng(7)
     data = (rng.standard_normal((100, 150)) * 10).astype(np.float32)
     vr = (float(np.nanmin(data)), float(np.nanmax(data)))
 
-    rgba = apply_colormap_gpu(data, lut, value_range=vr)
-    idx = apply_colormap_index(data, len(lut), value_range=vr)
+    rgba = ColormapManager.apply_colormap(data, name="seismic", value_range=vr)
+    idx = ColormapManager.normalize_to_index(data, lut_size=256, value_range=vr)
+    lut = ColormapManager.get_colormap("seismic")
 
     assert idx.dtype == np.uint8
     assert idx.shape == data.shape
