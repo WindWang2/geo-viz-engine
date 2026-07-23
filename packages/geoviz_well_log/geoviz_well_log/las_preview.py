@@ -122,8 +122,18 @@ def _valid_depth(tokens: list[str], column_count: int, depth_index: int, null_va
     return depth
 
 
-def inspect_las_file(path: str) -> LASPreviewHeader:
-    """Read LAS metadata and count valid depth rows without retaining ASCII data."""
+def inspect_las_file(path: str, header_only: bool = False) -> LASPreviewHeader:
+    """Read LAS metadata and count valid depth rows without retaining ASCII data.
+
+    Args:
+        path: Path to the LAS file.
+        header_only: If True, stop parsing at the ``~A`` section boundary and
+            return ``row_count=0`` without scanning the ASCII data. Use when
+            the caller only needs header metadata (curve names, null value,
+            depth index) and will parse the data separately — avoids a full
+            O(n_rows) Python-level scan that blocks the GUI thread on large
+            files (303ms on a 50k-row file).
+    """
 
     section = ""
     well_name = ""
@@ -144,6 +154,8 @@ def inspect_las_file(path: str) -> LASPreviewHeader:
                 section = _section_from_line(line)
                 if section == "ASCII":
                     depth_index = _find_depth_index(curves)
+                    if header_only:
+                        break  # header parse complete; skip the data-row scan
                 continue
 
             if section == "VERSION":
