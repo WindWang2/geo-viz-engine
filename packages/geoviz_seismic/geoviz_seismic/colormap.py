@@ -1,6 +1,67 @@
 """Seismic colour-map generation and data-to-RGBA mapping."""
 
+from __future__ import annotations
+
 import numpy as np
+
+# ---------------------------------------------------------------------------
+# GPU acceleration (lazy cupy import — same pattern as gpu_ops.py)
+# ---------------------------------------------------------------------------
+try:
+    import cupy as cp
+    _CUPY_AVAILABLE = True
+    try:
+        _ = cp.cuda.Device().id
+    except Exception:
+        _CUPY_AVAILABLE = False
+except ImportError:
+    cp = None
+    _CUPY_AVAILABLE = False
+
+# Below this element count, GPU kernel-launch + D2H transfer overhead exceeds
+# the compute benefit — defer to the NumPy path. ~256x256 is the breakeven on
+# an RTX 3080 Laptop for a normalize+LUT-gather pipeline.
+_GPU_MIN_ELEMENTS = 256 * 256
+
+# Unified GPU LUT texture cache — keyed on "name:n_colors" for named colormaps
+# (the same key ColormapManager.get_colormap uses), or id(lut) for raw LUT
+# arrays. Replaces the scattered _gpu_lut_cache / _color_table_lut_id caches
+# that previously lived in gpu_ops.py and profile_vd.py.
+_gpu_lut_cache: dict[str | int, cp.ndarray] = {}
+
+
+def _normalize_and_clip(
+    data: np.ndarray,
+    lut_size: int,
+    value_range: tuple[float, float] | None = None,
+) -> tuple[object, np.ndarray]:
+    """Shared normalize+clip step for normalize_to_index / apply_colormap.
+
+    Returns ``(xp, idx)`` where ``idx`` is an int32 array in ``[0, lut_size-1]``
+    on whichever backend (numpy or cupy) ``data`` lives. The ``xp`` is the
+    module (``np`` or ``cp``) so the caller knows whether to ``asnumpy``.
+    """
+    use_gpu = (
+        _CUPY_AVAILABLE
+        and cp is not None
+        and isinstance(data, cp.ndarray)
+        and data.size >= _GPU_MIN_ELEMENTS
+    )
+    xp = cp if use_gpu else np
+
+    if value_range is not None:
+        dmin, dmax = value_range
+    else:
+        dmin, dmax = xp.nanmin(data), xp.nanmax(data)
+
+    if dmax == dmin:
+        idx = xp.zeros(data.shape, dtype=xp.int32)
+    else:
+        norm = (data - dmin) / (dmax - dmin)
+        idx = xp.clip(
+            (norm * (lut_size - 1)).astype(xp.int32), 0, lut_size - 1
+        )
+    return xp, idx
 
 
 def _build_seismic(n: int) -> np.ndarray:
@@ -139,8 +200,95 @@ class ColormapManager:
 
     @staticmethod
     def clear_cache() -> None:
-        """Clear all cached LUTs (useful for testing or memory-constrained scenarios)."""
+        """Clear all cached LUTs and GPU textures (testing / memory-constrained)."""
         ColormapManager._LUT_CACHE.clear()
+        _gpu_lut_cache.clear()
+
+    @staticmethod
+    def normalize_to_index(
+        data: np.ndarray,
+        lut_size: int = 256,
+        value_range: tuple[float, float] | None = None,
+    ) -> np.ndarray:
+        """Normalize data to a uint8 LUT-index array in ``[0, lut_size-1]``.
+
+        Fuses min-max normalization + clip into a single pass, returning a
+        uint8 array on CPU. GPU acceleration is used automatically when cupy
+        is available, the input is a cupy array, and the array is large enough
+        to amortize kernel-launch overhead (``_GPU_MIN_ELEMENTS``).
+
+        Note: the index values are identical to ``gpu_ops._normalize_to_lut_index``
+        but the return dtype is uint8 (not int32) — the Indexed8/GL_R8 texture
+        path needs a single-byte index.
+
+        Args:
+            data: Input array (numpy or cupy).
+            lut_size: Number of LUT entries (default 256 for Indexed8/GL_R8).
+                Must be ≤ 256 (uint8 range).
+            value_range: Optional ``(vmin, vmax)`` override. When ``None``,
+                ``nanmin``/``nanmax`` of the data is used.
+
+        Returns:
+            ``np.ndarray`` of dtype ``uint8``, same shape as ``data``.
+        """
+        if lut_size < 1 or lut_size > 256:
+            raise ValueError(f"lut_size must be in [1, 256], got {lut_size}")
+        xp, idx = _normalize_and_clip(data, lut_size, value_range)
+        if xp is cp:
+            idx = cp.asnumpy(idx)
+        return idx.astype(np.uint8)
+
+    @staticmethod
+    def apply_colormap(
+        data: np.ndarray,
+        name: str | None = None,
+        lut: np.ndarray | None = None,
+        value_range: tuple[float, float] | None = None,
+    ) -> np.ndarray:
+        """Normalize data and gather through a colour LUT → RGBA image.
+
+        One-stop colour application: normalizes to ``[0, lut_len-1]``, then
+        gathers through the LUT to produce an ``(H, W, 4)`` uint8 RGBA array.
+        GPU acceleration is used automatically when beneficial (same guard
+        as :meth:`normalize_to_index`).
+
+        Either ``name`` (a registered colormap name) or ``lut`` (a raw
+        ``(N, 4)`` uint8 array) must be provided. When ``name`` is given,
+        the LUT is fetched from :meth:`get_colormap` and the GPU texture
+        cache is keyed on ``name:len(lut)`` — no ``id(lut)`` for named
+        colormaps. When ``lut`` is passed directly, the cache falls back to
+        ``id(lut)`` to avoid per-call re-upload.
+
+        Args:
+            data: Input array (numpy or cupy).
+            name: Colormap name (e.g. ``"seismic"``, ``"gray"``).
+            lut: Raw ``(N, 4)`` uint8 RGBA array. Used when ``name`` is ``None``.
+            value_range: Optional ``(vmin, vmax)`` override.
+
+        Returns:
+            ``np.ndarray`` of dtype ``uint8``, shape ``(*data.shape, 4)``.
+        """
+        if lut is None:
+            if name is None:
+                raise ValueError("apply_colormap requires either name or lut")
+            lut = ColormapManager.get_colormap(name)
+
+        xp, idx = _normalize_and_clip(data, len(lut), value_range)
+
+        if xp is cp:
+            # GPU path: gather through a cached GPU LUT texture.
+            # Named colormaps key on "name:len(lut)"; raw LUTs key on id(lut)
+            # to avoid the per-call cp.asarray(lut) that made GPU 200x slower.
+            cache_key = f"{name}:{len(lut)}" if name is not None else id(lut)
+            gpu_lut = _gpu_lut_cache.get(cache_key)
+            if gpu_lut is None:
+                gpu_lut = cp.asarray(lut)
+                _gpu_lut_cache[cache_key] = gpu_lut
+            rgba = gpu_lut[idx]
+            return cp.asnumpy(rgba)
+
+        # CPU path: numpy fancy-index gather through the LUT.
+        return lut[idx]
 
     @staticmethod
     def apply_to_data(data: np.ndarray, name: str) -> np.ndarray:
