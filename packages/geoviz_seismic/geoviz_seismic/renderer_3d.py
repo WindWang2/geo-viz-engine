@@ -16,7 +16,7 @@ from OpenGL.GL import shaders as gl_shaders
 # Internal imports
 from .colormap import ColormapManager
 from .gpu_ops import (
-    is_gpu_available, to_gpu, to_cpu, slice_volume_gpu, apply_colormap_gpu,
+    is_gpu_available, to_gpu, slice_volume_gpu,
     sample_arbitrary_slice_gpu, sample_polyline_slice
 )
 
@@ -37,17 +37,6 @@ def compute_normal_map(data: np.ndarray) -> np.ndarray:
     
     # Map from [-1, 1] to [0, 255] for uint8 storage
     return ((N + 1.0) * 127.5).astype(np.uint8)
-
-def normalize_volume_to_uint8(data: np.ndarray) -> np.ndarray:
-    """Normalize raw float or other data to 0-255 uint8 range for texture mapping."""
-    if data is None:
-        return None
-    dmin = np.nanmin(data)
-    dmax = np.nanmax(data)
-    if dmax == dmin:
-        return np.zeros_like(data, dtype=np.uint8)
-    norm = (data - dmin) / (dmax - dmin)
-    return (norm * 255.0).astype(np.uint8)
 
 class Renderer3DLODManager:
     """Manages dynamic LOD level during active 3D camera interaction."""
@@ -1322,7 +1311,7 @@ class Renderer3D(QWidget):
         try:
                         # Downsample and normalize primary volume data
             primary_data = self._volume_data_cpu[::2, ::2, ::2]
-            primary_normalized = normalize_volume_to_uint8(primary_data)
+            primary_normalized = ColormapManager.normalize_to_index(primary_data, lut_size=256)
             
             # Pre-compute normals for hillshading (Phase 2 Audit Task 2)
             normal_data = compute_normal_map(primary_data)
@@ -1330,7 +1319,7 @@ class Renderer3D(QWidget):
             # Downsample and normalize overlay volume data if available if available
             if self._overlay_volume_data_cpu is not None:
                 overlay_data = self._overlay_volume_data_cpu[::2, ::2, ::2]
-                overlay_normalized = normalize_volume_to_uint8(overlay_data)
+                overlay_normalized = ColormapManager.normalize_to_index(overlay_data, lut_size=256)
             else:
                 overlay_normalized = np.zeros_like(primary_normalized)
 
@@ -1987,7 +1976,7 @@ class Renderer3D(QWidget):
             self._view.addItem(self._line_arb)
             
             # Draw vertical curtain walls between each consecutive pair of waypoints
-            img_arb_rgb = apply_colormap_gpu(arb_data, lut, value_range=self._slice_value_range())
+            img_arb_rgb = ColormapManager.apply_colormap(arb_data, lut=lut, value_range=self._slice_value_range())
             
             # We render the whole curtain as individual segment planes
             # Track horizontal position in the sampled data
