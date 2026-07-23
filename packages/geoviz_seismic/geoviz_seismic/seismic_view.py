@@ -1014,7 +1014,10 @@ class SeismicView(QWidget):
         self._pending_slice.clear()
 
         # Rebuild only the 3D planes whose axis changed
-        self._renderer_3d._update_slice_planes_for(set(pending))
+        try:
+            self._renderer_3d._update_slice_planes_for(set(pending))
+        except (RuntimeError, AttributeError):
+            return
 
         # Demo mode: slice from cached volume data directly
         if self._loader is None:
