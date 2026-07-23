@@ -123,7 +123,7 @@ class FaciesPolygonsLayer(PaleoLayer):
         # border on every paint tick. Keyed on id(self._locked_ids) so the
         # cache invalidates if the locked-ids dict is replaced.
         self._lock_state_cache: dict[str, tuple] = {}
-        self._lock_state_key: int | None = None
+        self._lock_state_key: frozenset | None = None
         self._selected_id: str | None = None
         self._topology_model = None  # set externally when edit mode is active
         self._screen_cache = ScreenPathCache()
@@ -294,13 +294,16 @@ class FaciesPolygonsLayer(PaleoLayer):
         Returns ``(active_lock, locked_geometry, locked_feature_id)``. The
         ancestor-chain walk (get_node + get_ancestors) is O(depth) and was
         previously executed for every visible border on every paint tick;
-        cached here keyed on id(self._locked_ids) so it recomputes only when
-        the locked-ids dict changes.
+        cached here keyed on a snapshot of the locked-ids dict so it
+        recomputes only when the lock state actually changes. Keying on
+        id(self._locked_ids) was unsafe — canvas mutates the dict in place
+        (del/[fid]=), which doesn't change the id, so the cache never
+        invalidated.
         """
-        lid = id(self._locked_ids)
-        if self._lock_state_key != lid:
+        lock_snapshot = frozenset(self._locked_ids.items())
+        if self._lock_state_key != lock_snapshot:
             self._lock_state_cache.clear()
-            self._lock_state_key = lid
+            self._lock_state_key = lock_snapshot
         cached = self._lock_state_cache.get(feature_id)
         if cached is not None:
             return cached

@@ -4,8 +4,8 @@ import math
 from math import log10
 
 import numpy as np
-from PySide6.QtCore import QRectF, Qt, QPointF
-from PySide6.QtGui import QPainter, QPen, QPainterPath, QColor, QFont, QPolygonF
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QPainter, QPen, QPainterPath, QColor, QFont
 from PySide6.QtWidgets import QWidget
 
 from ..models import CurveData, LineStyle
@@ -220,12 +220,15 @@ class CurveTrack(BaseTrack):
                 t_arr = (values - lo) / (hi - lo)
                 xs = rect.left() + t_arr * rect.width()
 
-        # Key on the rect + downsample key so the cache invalidates on the
-        # same events (zoom, pan past quantum, resize) as the downsample cache.
+        # Key on pixel_height + rect + depth window so the cache invalidates
+        # on the same events (zoom, pan past quantum, resize) as the downsample
+        # cache. Includes pixel_height because path-building depends on the
+        # downsample output which depends on pixel_height.
         pixel_height = max(1, int(rect.height()))
         span = max(1e-9, self.depth_bottom - self.depth_top)
         quantum = span / pixel_height
         path_key = (
+            pixel_height,
             int(round(rect.width())),
             int(round(span)),
             int(round(self.depth_top / quantum)),

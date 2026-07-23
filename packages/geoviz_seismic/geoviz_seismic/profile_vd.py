@@ -299,6 +299,10 @@ class ProfileVD(QWidget):
     ) -> None:
         """Convert *data* to an RGBA image and schedule a repaint."""
         self._data = data.astype(np.float32, copy=False)
+        # Invalidate the percentile cache: each slice-swap passes new data,
+        # so the clip range must be recomputed for the new slice's values.
+        # (The cache still helps on zoom/pan, which don't call render().)
+        self._clip_range_cache = None
         self._rgba_override = None
         if colormap is not None:
             self._colormap_name = colormap
@@ -456,14 +460,13 @@ class ProfileVD(QWidget):
             return
         if self._indexed is None:
             # Legacy fallback: build from _normalized if _indexed wasn't set
-            # (e.g. set_colormap called before first render).
+            # (e.g. set_colormap called before first render). Scale by 255
+            # to match the indexed path in _renormalize (which uses the same
+            # 255-entry scale regardless of LUT length — the colour table
+            # maps 0..255 to the LUT).
             if self._normalized is not None:
-                try:
-                    lut = ColormapManager.get_colormap(self._colormap_name)
-                except (ValueError, KeyError):
-                    lut = ColormapManager.get_colormap("seismic")
                 self._indexed = np.clip(
-                    self._normalized * (len(lut) - 1), 0, len(lut) - 1
+                    self._normalized * 255.0, 0, 255
                 ).astype(np.uint8)
             else:
                 return
