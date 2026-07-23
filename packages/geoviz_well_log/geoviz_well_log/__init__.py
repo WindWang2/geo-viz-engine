@@ -62,6 +62,7 @@ from .las_preview import (
     load_las_preview,
     read_sampled_ascii,
 )
+from .robust_scale import compute_robust_display_range
 from .xml_preview import load_xml_preview
 
 # Vector export
@@ -120,6 +121,7 @@ __all__ = [
     "inspect_las_file",
     "load_las_preview",
     "read_sampled_ascii",
+    "compute_robust_display_range",
     # Export
     "export_svg",
     "export_pdf",
