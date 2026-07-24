@@ -2,20 +2,35 @@
 
 from __future__ import annotations
 
+from .depth_transform import (
+    ConstantVelocityDepth,
+    DepthTransformKind,
+    DepthTransformState,
+    select_depth_transform,
+)
+from .fence import FenceExtraction, FenceSection, extract_fence_strip, well_to_well_path
 from .models import (
     TimeDepthTable,
     VerticalDomain,
     WellHead,
     WellTrajectory3D,
 )
-from .scene import WellSeismicScene
+from .probe import ProbeState, probe_from_fence_s
+from .scene import ProfileWellHit, WellSeismicScene
 from .survey import SurveySpec, survey_from_corners
 from .volume_access import InMemoryVolumeAccess, VolumeAccess
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "ConstantVelocityDepth",
+    "DepthTransformKind",
+    "DepthTransformState",
+    "FenceExtraction",
+    "FenceSection",
     "InMemoryVolumeAccess",
+    "ProbeState",
+    "ProfileWellHit",
     "SurveySpec",
     "TimeDepthTable",
     "VerticalDomain",
@@ -23,7 +38,11 @@ __all__ = [
     "WellHead",
     "WellSeismicScene",
     "WellTrajectory3D",
+    "extract_fence_strip",
+    "probe_from_fence_s",
+    "select_depth_transform",
     "survey_from_corners",
+    "well_to_well_path",
 ]
 
 

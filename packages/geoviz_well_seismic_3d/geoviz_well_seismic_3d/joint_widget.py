@@ -45,6 +45,14 @@ class WellSeismicJointWidget(QWidget):
                 1,
             )
 
+        try:
+            from .profile_2d import FenceProfile2D
+
+            self._profile = FenceProfile2D(self)
+            layout.addWidget(self._profile, 0)
+        except Exception:
+            self._profile = None
+
         layout.addWidget(self._status, 0)
 
     @property
@@ -86,6 +94,8 @@ class WellSeismicJointWidget(QWidget):
                 )
 
         self._overlay_wells()
+        if self._profile is not None:
+            self._profile.set_scene(scene)
         survey = scene.survey
         survey_txt = (
             f"IL {survey.iline_start}–{survey.iline_start + (survey.n_inlines - 1) * survey.iline_step}, "
@@ -93,8 +103,10 @@ class WellSeismicJointWidget(QWidget):
             if survey
             else "no survey"
         )
+        preview = " · preview" if getattr(scene, "preview_mode", False) else ""
+        nf = len(scene.fences)
         self._status.setText(
-            f"域={domain} · wells={n_wells} · {survey_txt}"
+            f"域={domain} · wells={n_wells} · fences={nf} · {survey_txt}{preview}"
         )
 
     def _overlay_wells(self) -> None:

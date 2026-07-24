@@ -74,6 +74,14 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     # Isosurface extractor hook installed by the workbench at startup.
     "set_isosurface_extractor": ("geoviz_seismic.isosurface", "set_isosurface_extractor"),
     "get_isosurface_extractor": ("geoviz_seismic.isosurface", "get_isosurface_extractor"),
+    # Well–seismic joint 3D analysis (geoviz_well_seismic_3d).
+    "WellSeismicScene": ("geoviz_well_seismic_3d", "WellSeismicScene"),
+    "WellSeismicJointWidget": ("geoviz_well_seismic_3d", "WellSeismicJointWidget"),
+    "WellHead": ("geoviz_well_seismic_3d", "WellHead"),
+    "TimeDepthTable": ("geoviz_well_seismic_3d", "TimeDepthTable"),
+    "InMemoryVolumeAccess": ("geoviz_well_seismic_3d", "InMemoryVolumeAccess"),
+    "VerticalDomain": ("geoviz_well_seismic_3d", "VerticalDomain"),
+    "FenceSection": ("geoviz_well_seismic_3d", "FenceSection"),
 }
 
 
