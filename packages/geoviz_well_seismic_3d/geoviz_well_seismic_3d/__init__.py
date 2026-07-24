@@ -16,7 +16,9 @@ from .models import (
     WellTrajectory3D,
 )
 from .probe import ProbeState, probe_from_fence_s
+from .registration import VolumeRegistration
 from .scene import ProfileWellHit, WellSeismicScene
+from .segy_survey import horizon_corners_from_dat, survey_corners_from_segy
 from .survey import SurveySpec, survey_from_corners
 from .volume_access import InMemoryVolumeAccess, VolumeAccess
 
@@ -35,12 +37,15 @@ __all__ = [
     "TimeDepthTable",
     "VerticalDomain",
     "VolumeAccess",
+    "VolumeRegistration",
     "WellHead",
     "WellSeismicScene",
     "WellTrajectory3D",
     "extract_fence_strip",
+    "horizon_corners_from_dat",
     "probe_from_fence_s",
     "select_depth_transform",
+    "survey_corners_from_segy",
     "survey_from_corners",
     "well_to_well_path",
 ]

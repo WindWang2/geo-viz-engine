@@ -39,15 +39,20 @@ def extract_fence_strip(
     volume: np.ndarray | VolumeAccess,
     *,
     fence: FenceSection,
-    xy_to_il_xl,
-    iline_start: float,
-    iline_step: float,
-    xline_start: float,
-    xline_step: float,
+    xy_to_il_xl=None,
+    iline_start: float = 0.0,
+    iline_step: float = 1.0,
+    xline_start: float = 0.0,
+    xline_step: float = 1.0,
     n_along: int = 128,
     sample_axis: np.ndarray | None = None,
+    registration=None,
 ) -> FenceExtraction:
-    """Sample volume along fence polyline; single result for 3D+2D consumers."""
+    """Sample volume along fence polyline; single result for 3D+2D consumers.
+
+    Prefer ``registration`` (VolumeRegistration) when the cube is a preview so
+    indices scale to the loaded shape. Legacy il/xl params remain for tests.
+    """
     if hasattr(volume, "data"):
         data = np.asarray(volume.data)
     else:
@@ -56,7 +61,6 @@ def extract_fence_strip(
         raise ValueError("volume must be 3-D")
     ni, nx, nt = data.shape
     verts = fence.vertices_xy
-    # Arc-length parameterization
     seg = np.diff(verts, axis=0)
     seg_len = np.linalg.norm(seg, axis=1)
     total = float(seg_len.sum()) or 1.0
@@ -71,11 +75,16 @@ def extract_fence_strip(
 
     amp = np.zeros((n_along, nt), dtype=np.float32)
     for i, (x, y) in enumerate(samples_xy):
-        il, xl = xy_to_il_xl(float(x), float(y))
-        ii = int(round((il - iline_start) / (iline_step or 1)))
-        xi = int(round((xl - xline_start) / (xline_step or 1)))
-        ii = max(0, min(ni - 1, ii))
-        xi = max(0, min(nx - 1, xi))
+        if registration is not None:
+            vi, vx = registration.xy_to_volume_idx(float(x), float(y))
+            ii = int(max(0, min(ni - 1, round(vi))))
+            xi = int(max(0, min(nx - 1, round(vx))))
+        else:
+            il, xl = xy_to_il_xl(float(x), float(y))
+            ii = int(round((il - iline_start) / (iline_step or 1)))
+            xi = int(round((xl - xline_start) / (xline_step or 1)))
+            ii = max(0, min(ni - 1, ii))
+            xi = max(0, min(nx - 1, xi))
         amp[i, :] = data[ii, xi, :]
 
     if sample_axis is None:

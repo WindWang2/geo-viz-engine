@@ -10,6 +10,7 @@ from .depth_transform import DepthTransformState, select_depth_transform
 from .fence import FenceExtraction, FenceSection, extract_fence_strip, well_to_well_path
 from .models import TimeDepthTable, VerticalDomain, WellHead, WellTrajectory3D
 from .probe import ProbeState, probe_from_fence_s
+from .registration import VolumeRegistration
 from .survey import Corner, SurveySpec, survey_from_corners
 from .volume_access import VolumeAccess
 from .well_geometry import project_well_trajectory
@@ -51,6 +52,7 @@ class WellSeismicScene:
         self._curves_by_well: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]] = {}
         self.las_paths: list[str] = []
         self.preview_mode: bool = True  # #65 formalization flag
+        self._registration: VolumeRegistration | None = None
 
     # ------------------------------------------------------------------
     # Survey
@@ -64,6 +66,7 @@ class WellSeismicScene:
         self._survey = survey
         self._invalidate_traj()
         self._extract_cache.clear()
+        self._rebuild_registration()
 
     def set_survey_from_corners(
         self,
@@ -194,10 +197,28 @@ class WellSeismicScene:
     def set_volume_access(self, access: VolumeAccess | None) -> None:
         self._volume = access
         self._extract_cache.clear()
+        self._rebuild_registration()
 
     @property
     def volume_access(self) -> VolumeAccess | None:
         return self._volume
+
+    @property
+    def registration(self) -> VolumeRegistration | None:
+        """Survey ↔ loaded volume index map (preview-aware)."""
+        return self._registration
+
+    def _rebuild_registration(self) -> None:
+        if self._survey is None or self._volume is None:
+            self._registration = None
+            return
+        ni, nx, nt = self._volume.shape
+        self._registration = VolumeRegistration(
+            survey=self._survey,
+            n_inline=ni,
+            n_crossline=nx,
+            n_sample=nt,
+        )
 
     def set_preview_mode(self, enabled: bool) -> None:
         """#65: mark whether current volume is a downsampled preview."""
@@ -280,6 +301,8 @@ class WellSeismicScene:
             saxis = self._depth_transform.constant.time_ms_to_depth_m(
                 survey.t0_ms + np.arange(nt) * survey.dt_ms
             )
+        if self._registration is None:
+            self._rebuild_registration()
         ext = extract_fence_strip(
             self._volume,
             fence=fence,
@@ -290,6 +313,7 @@ class WellSeismicScene:
             xline_step=survey.xline_step,
             n_along=n_along,
             sample_axis=np.asarray(saxis, dtype=np.float64),
+            registration=self._registration,
         )
         self._extract_cache[fence.id] = ext
         return ext
@@ -360,7 +384,33 @@ class WellSeismicScene:
     def probe_slice_indices(self) -> tuple[int, int, int] | None:
         if self._probe is None:
             return None
+        if self._registration is not None:
+            p = self._probe
+            z = p.z
+            if p.domain == "depth":
+                # Convert depth m → time ms via inverse V0 for sample axis
+                z = float(self._depth_transform.constant.depth_m_to_time_ms(z))
+            return self._registration.world_xyz_to_volume(
+                p.x, p.y, z, domain="time"
+            )
         return self._probe.slice_indices(self._survey)
+
+    def world_to_render_xyz(self, x: float, y: float, z: float) -> tuple[float, float, float]:
+        """Map world XY + domain Z to volume/render index space."""
+        if self._registration is not None:
+            if self._domain is VerticalDomain.DEPTH:
+                z = float(self._depth_transform.constant.depth_m_to_time_ms(z))
+            vi, vx = self._registration.xy_to_volume_idx(x, y)
+            vt = self._registration.time_ms_to_sample_idx(z)
+            return float(vi), float(vx), float(vt)
+        if self._survey is None:
+            return x, y, z
+        s = self._survey
+        il, xl = s.xy_to_il_xl(x, y)
+        il_idx = (il - s.iline_start) / (s.iline_step or 1)
+        xl_idx = (xl - s.xline_start) / (s.xline_step or 1)
+        t_idx = (z - s.t0_ms) / s.dt_ms if s.dt_ms else z
+        return il_idx, xl_idx, t_idx
 
     def _require_volume(self) -> None:
         if self._volume is None:
