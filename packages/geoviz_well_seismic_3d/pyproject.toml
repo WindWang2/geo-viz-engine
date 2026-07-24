@@ -1,0 +1,28 @@
+[project]
+name = "geoviz-well-seismic-3d"
+version = "0.1.0"
+description = "Well–seismic joint 3D scene: survey, Time-domain wells, Renderer3D facade"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [{ name = "Kevin", email = "kevin@example.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = [
+    "numpy>=1.26",
+    "pyside6>=6.6",
+    "pyqtgraph>=0.13",
+    "geoviz-seismic",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["geoviz_well_seismic_3d"]
