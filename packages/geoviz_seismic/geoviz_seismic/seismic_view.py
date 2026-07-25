@@ -932,35 +932,68 @@ class SeismicView(QWidget):
             self._update_tb_slider_label("inline", self._renderer_3d._il_pos)
             self._update_tb_slider_label("crossline", self._renderer_3d._xl_pos)
 
+    def _preview_to_survey_coords(
+        self, slice_type: str, position: int
+    ) -> tuple[float, float, float]:
+        """Map preview-voxel slider index → full-grid IL / XL / time_ms.
+
+        Toolbar sliders and Renderer3D use **downsampled** indices; 2D profiles
+        and survey labels must use ``position * ds_factor`` (same as
+        ``_apply_pending_slice``).
+        """
+        m = self._meta
+        df = getattr(self, "_ds_factor", (1, 1, 1)) or (1, 1, 1)
+        fi, fx, ft = int(df[0]), int(df[1]), int(df[2])
+        if m is None:
+            return float(position), float(position), float(position)
+        il_pos = self._renderer_3d._il_pos if hasattr(self, "_renderer_3d") else 0
+        xl_pos = self._renderer_3d._xl_pos if hasattr(self, "_renderer_3d") else 0
+        if slice_type == "inline":
+            il = m.iline_start + position * fi * m.iline_step
+            xl = m.xline_start + xl_pos * fx * m.xline_step
+            t_ms = m.t0_ms + (
+                (self._renderer_3d._t_pos if hasattr(self, "_renderer_3d") else 0)
+                * ft
+                * m.dt_ms
+            )
+            return float(il), float(xl), float(t_ms)
+        if slice_type == "crossline":
+            il = m.iline_start + il_pos * fi * m.iline_step
+            xl = m.xline_start + position * fx * m.xline_step
+            t_ms = m.t0_ms + (
+                (self._renderer_3d._t_pos if hasattr(self, "_renderer_3d") else 0)
+                * ft
+                * m.dt_ms
+            )
+            return float(il), float(xl), float(t_ms)
+        # time: position is preview sample index
+        il = m.iline_start + il_pos * fi * m.iline_step
+        xl = m.xline_start + xl_pos * fx * m.xline_step
+        t_ms = m.t0_ms + position * ft * m.dt_ms
+        return float(il), float(xl), float(t_ms)
+
     def _update_tb_slider_label(self, slice_type: str, position: int):
-        """Update the toolbar slider value label with actual coordinate."""
+        """Update the toolbar slider value label with actual survey coordinate."""
         m = self._meta
         if m is None:
             return
+        il, xl, t_ms = self._preview_to_survey_coords(slice_type, position)
         if getattr(self, "_coord_mode", "grid") == "geo":
             if slice_type == "inline":
-                il = m.iline_start + position * m.iline_step
-                xl = m.xline_start + (self._renderer_3d._xl_pos if hasattr(self, '_renderer_3d') else 0) * m.xline_step
                 x_geo, _ = m.il_xl_to_xy(il, xl)
                 self._tb_il_label.setText(f"X {x_geo:.0f}m")
             elif slice_type == "crossline":
-                il = m.iline_start + (self._renderer_3d._il_pos if hasattr(self, '_renderer_3d') else 0) * m.iline_step
-                xl = m.xline_start + position * m.xline_step
                 _, y_geo = m.il_xl_to_xy(il, xl)
                 self._tb_xl_label.setText(f"Y {y_geo:.0f}m")
             else:
-                coord = m.t0_ms + position * m.dt_ms
-                self._tb_t_label.setText(f"T {coord:.0f}")
+                self._tb_t_label.setText(f"T {t_ms:.0f}")
         else:
             if slice_type == "inline":
-                coord = m.iline_start + position * m.iline_step
-                self._tb_il_label.setText(f"IL {coord}")
+                self._tb_il_label.setText(f"IL {il:.0f}")
             elif slice_type == "crossline":
-                coord = m.xline_start + position * m.xline_step
-                self._tb_xl_label.setText(f"XL {coord}")
+                self._tb_xl_label.setText(f"XL {xl:.0f}")
             else:
-                coord = m.t0_ms + position * m.dt_ms
-                self._tb_t_label.setText(f"T {coord:.0f}")
+                self._tb_t_label.setText(f"T {t_ms:.0f}")
 
     def _on_slice_step(self, slice_type: str, delta: int):
         """Handle Shift+wheel slice browsing: increment/decrement slice position."""
@@ -1295,6 +1328,9 @@ class SeismicView(QWidget):
     def _on_clip_changed(self, value: float):
         for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
             pw._vd.set_clip_percentile(value)
+        # Keep 3D orthogonal planes on the same colour scale as 2D profiles
+        if hasattr(self._renderer_3d, "set_slice_clip_percentile"):
+            self._renderer_3d.set_slice_clip_percentile(value)
 
     def _on_opacity_changed(self, index: int):
         modes = ["sharp", "linear", "sigmoid", "threshold"]

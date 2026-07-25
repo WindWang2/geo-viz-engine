@@ -932,10 +932,10 @@ class Renderer3D(QWidget):
         self._loaded = False
         self._volume_data_cpu: np.ndarray | None = None
         self._volume_data_gpu = None  # CuPy array reference if available
-        # Cached (dmin, dmax) over the volume — shared by all 3 slice planes so
-        # apply_colormap_gpu skips the per-slice nanmin/nanmax scan. Invalidated
-        # on volume load/clear.
+        # Cached (dmin, dmax) for slice planes. Percentile clip (default 99%)
+        # matches 2D ProfileVD so 3D is not dominated by amplitude extrema.
         self._slice_range_cache: tuple[float, float] | None = None
+        self._slice_clip_pct: float = 99.0
         
         self._volume_spacing = (1, 1, 1)
         self._volume_origin = (0, 0, 0)
@@ -1787,18 +1787,42 @@ class Renderer3D(QWidget):
         # 4. Polyline-driven arbitrary curtain (if set)
         self._render_polyline_curtain(ni, nx, nt, si, sx, st, lut)
 
-    def _slice_value_range(self) -> tuple[float, float] | None:
-        """Cached (dmin, dmax) over the loaded volume for slice-plane colouring.
+    def set_slice_clip_percentile(self, pct: float) -> None:
+        """Match 2D ProfileVD clip: use P(100-pct)..P(pct) for plane colouring."""
+        pct = float(max(50.0, min(99.9, pct)))
+        if abs(pct - getattr(self, "_slice_clip_pct", 99.0)) < 0.01:
+            return
+        self._slice_clip_pct = pct
+        self._slice_range_cache = None
+        if self._loaded and self._volume_data_cpu is not None:
+            self._update_slice_planes()
 
-        Computed lazily and invalidated when the volume changes, so the three
-        slice planes share one colour scale without re-scanning the volume on
-        every slider drag.
+    def _slice_value_range(self) -> tuple[float, float] | None:
+        """Cached (dmin, dmax) for slice-plane colouring.
+
+        Uses the same percentile clip as 2D profiles (default 99%) so 3D
+        orthogonal planes are not washed out by volume extrema.
         """
         if self._volume_data_cpu is None:
             return None
         if self._slice_range_cache is None:
             vol = self._volume_data_cpu
-            self._slice_range_cache = (float(np.nanmin(vol)), float(np.nanmax(vol)))
+            pct = float(getattr(self, "_slice_clip_pct", 99.0))
+            lo_p = max(0.0, 100.0 - pct)
+            hi_p = min(100.0, pct)
+            # Subsample for speed on large previews (still stable for colour scale)
+            flat = vol.ravel()
+            if flat.size > 2_000_000:
+                step = max(1, flat.size // 2_000_000)
+                sample = flat[::step]
+            else:
+                sample = flat
+            lo = float(np.nanpercentile(sample, lo_p))
+            hi = float(np.nanpercentile(sample, hi_p))
+            if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+                lo = float(np.nanmin(vol))
+                hi = float(np.nanmax(vol))
+            self._slice_range_cache = (lo, hi)
         return self._slice_range_cache
 
     def _create_slice_plane(self, axis: str, value_range: tuple[float, float] | None = None):
