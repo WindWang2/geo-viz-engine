@@ -168,7 +168,13 @@ class GLImageLutItem(gl.GLImageItem):
         The previous R8 path skipped that transpose and scrambled every 3D
         orthogonal plane relative to 2D profiles.
         """
-        arr = np.asarray(index_2d)
+        # Host only: cupy refuses implicit np.asarray; GL needs contiguous CPU bytes.
+        if hasattr(index_2d, "get") and not isinstance(index_2d, np.ndarray):
+            try:
+                index_2d = index_2d.get()
+            except Exception:
+                pass
+        arr = np.ascontiguousarray(np.asarray(index_2d))
         if arr.ndim != 2:
             raise ValueError(f"index texture must be 2-D, got shape {arr.shape}")
         sx, sy = int(arr.shape[0]), int(arr.shape[1])

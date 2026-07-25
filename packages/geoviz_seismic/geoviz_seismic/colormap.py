@@ -40,6 +40,10 @@ def _normalize_and_clip(
     Returns ``(xp, idx)`` where ``idx`` is an int32 array in ``[0, lut_size-1]``
     on whichever backend (numpy or cupy) ``data`` lives. The ``xp`` is the
     module (``np`` or ``cp``) so the caller knows whether to ``asnumpy``.
+
+    Small cupy arrays fall back to host first: mixing ``np.*`` with cupy inputs
+    can leave a cupy result while ``xp is np``, which then skips the D2H path
+    in callers (breaks GL_R8 upload for preview planes ≤128²).
     """
     use_gpu = (
         _CUPY_AVAILABLE
@@ -47,6 +51,13 @@ def _normalize_and_clip(
         and isinstance(data, cp.ndarray)
         and data.size >= _GPU_MIN_ELEMENTS
     )
+    if (
+        not use_gpu
+        and _CUPY_AVAILABLE
+        and cp is not None
+        and isinstance(data, cp.ndarray)
+    ):
+        data = cp.asnumpy(data)
     xp = cp if use_gpu else np
 
     if value_range is not None:
@@ -248,9 +259,11 @@ class ColormapManager:
         if lut_size < 1 or lut_size > 256:
             raise ValueError(f"lut_size must be in [1, 256], got {lut_size}")
         xp, idx = _normalize_and_clip(data, lut_size, value_range)
-        if xp is cp:
+        # Always return host uint8 (contract for Indexed8 / GL_R8). Prefer
+        # isinstance over ``xp is cp`` so partial GPU fall-through cannot leak.
+        if _CUPY_AVAILABLE and cp is not None and isinstance(idx, cp.ndarray):
             idx = cp.asnumpy(idx)
-        return idx.astype(np.uint8)
+        return np.asarray(idx, dtype=np.uint8)
 
     @staticmethod
     def apply_colormap(
@@ -289,7 +302,9 @@ class ColormapManager:
 
         xp, idx = _normalize_and_clip(data, len(lut), value_range)
 
-        if xp is cp:
+        if xp is cp or (
+            _CUPY_AVAILABLE and cp is not None and isinstance(idx, cp.ndarray)
+        ):
             # GPU path: gather through a cached GPU LUT texture.
             # Named colormaps key on "name:len(lut)"; raw LUTs key on id(lut)
             # to avoid the per-call cp.asarray(lut) that made GPU 200x slower.
@@ -298,6 +313,8 @@ class ColormapManager:
             if gpu_lut is None:
                 gpu_lut = cp.asarray(lut)
                 _gpu_lut_cache[cache_key] = gpu_lut
+            if not isinstance(idx, cp.ndarray):
+                idx = cp.asarray(idx)
             rgba = gpu_lut[idx]
             return cp.asnumpy(rgba)
 

@@ -95,7 +95,31 @@ class TestNormalizeToIndex:
         cpu_result = ColormapManager.normalize_to_index(data_np, lut_size=256)
         gpu_result = ColormapManager.normalize_to_index(data_gpu, lut_size=256)
 
+        assert isinstance(gpu_result, np.ndarray)
         np.testing.assert_array_equal(cpu_result, gpu_result)
+
+    @pytest.mark.skipif(
+        not _cupy_available(),
+        reason="CuPy not available",
+    )
+    def test_small_cupy_returns_numpy_host(self):
+        """Preview planes (≤128²) must not leak cupy into GL_R8 upload.
+
+        Regression: small cupy inputs skipped the GPU path but still returned
+        a cupy ndarray, and prepare_r8_upload(np.asarray(...)) raised TypeError.
+        """
+        import cupy as cp
+
+        data_np = np.random.randn(100, 80).astype(np.float32)
+        data_gpu = cp.asarray(data_np)
+        assert data_gpu.size < 256 * 256
+
+        result = ColormapManager.normalize_to_index(data_gpu, lut_size=256)
+        assert isinstance(result, np.ndarray)
+        assert result.dtype == np.uint8
+        assert result.shape == data_np.shape
+        expected = ColormapManager.normalize_to_index(data_np, lut_size=256)
+        np.testing.assert_array_equal(result, expected)
 
 
 # ---------------------------------------------------------------------------
