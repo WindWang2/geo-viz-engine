@@ -68,6 +68,69 @@ class WellSeismicJointWidget(QWidget):
     def renderer(self):
         return self._renderer
 
+    @property
+    def profile_widget(self):
+        """Public access to the fence 2D profile (may be reparented by hosts)."""
+        return getattr(self, "_profile", None)
+
+    def take_profile_widget(self):
+        """Detach fence 2D profile for embedding in a separate host panel."""
+        profile = getattr(self, "_profile", None)
+        self._profile = None
+        return profile
+
+    def slice_indices(self) -> tuple[int, int, int] | None:
+        """Current orthogonal slice indices (il, xl, sample) if renderer is ready."""
+        r = self._renderer
+        if r is None:
+            return None
+        try:
+            il = int(getattr(r, "_il_pos", 0) or 0)
+            xl = int(getattr(r, "_xl_pos", 0) or 0)
+            t = int(getattr(r, "_t_pos", 0) or 0)
+            return il, xl, t
+        except Exception:
+            return None
+
+    def set_layer_visibility(
+        self,
+        *,
+        wells: bool = True,
+        fences: bool = True,
+        volume: bool = True,
+    ) -> None:
+        """Show/hide joint layers without digging into Renderer3D private fields."""
+        scene = self._scene
+        if scene is not None:
+            for f in scene.fences:
+                f.visible = bool(fences)
+        if self._renderer is not None:
+            try:
+                self._renderer.setVisible(bool(volume))
+            except Exception:
+                pass
+        # Rebuild overlays according to flags
+        if scene is not None:
+            if wells:
+                self.set_well_trajectories(scene.well_trajectories())
+            else:
+                self.set_well_trajectories({})
+            if fences:
+                ext = scene.extract_active_fence()
+                self.set_fence_curtains([ext] if ext is not None else [])
+            else:
+                self.set_fence_curtains([])
+        for item in self._well_items:
+            try:
+                item.setVisible(bool(wells))
+            except Exception:
+                pass
+        for item in self._curtain_items:
+            try:
+                item.setVisible(bool(fences))
+            except Exception:
+                pass
+
     def set_scene(self, scene: WellSeismicScene) -> None:
         self._scene = scene
         self._sync_from_scene()
