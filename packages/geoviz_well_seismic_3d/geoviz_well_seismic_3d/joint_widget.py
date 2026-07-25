@@ -84,11 +84,18 @@ class WellSeismicJointWidget(QWidget):
         r = self._renderer
         if r is None:
             return None
+        get_pos = getattr(r, "get_slice_positions", None)
+        if callable(get_pos):
+            try:
+                return tuple(int(x) for x in get_pos())  # type: ignore[return-value]
+            except Exception:
+                pass
         try:
-            il = int(getattr(r, "_il_pos", 0) or 0)
-            xl = int(getattr(r, "_xl_pos", 0) or 0)
-            t = int(getattr(r, "_t_pos", 0) or 0)
-            return il, xl, t
+            return (
+                int(getattr(r, "_il_pos", 0) or 0),
+                int(getattr(r, "_xl_pos", 0) or 0),
+                int(getattr(r, "_t_pos", 0) or 0),
+            )
         except Exception:
             return None
 
@@ -99,16 +106,33 @@ class WellSeismicJointWidget(QWidget):
         fences: bool = True,
         volume: bool = True,
     ) -> None:
-        """Show/hide joint layers without digging into Renderer3D private fields."""
+        """Show/hide joint layers independently (volume off must not hide wells/fences)."""
         scene = self._scene
         if scene is not None:
             for f in scene.fences:
                 f.visible = bool(fences)
+        # Keep the Renderer3D widget visible so overlays stay; only hide planes.
         if self._renderer is not None:
             try:
-                self._renderer.setVisible(bool(volume))
+                self._renderer.setVisible(True)
             except Exception:
                 pass
+            set_planes = getattr(self._renderer, "set_planes_visible", None)
+            if callable(set_planes):
+                try:
+                    set_planes(bool(volume))
+                except Exception:
+                    pass
+            else:
+                # Fallback: hide known plane attributes without hiding widget
+                for attr in ("_img_il", "_img_xl", "_img_t", "_line_il", "_line_xl", "_line_t"):
+                    item = getattr(self._renderer, attr, None)
+                    if item is None:
+                        continue
+                    try:
+                        item.setVisible(bool(volume))
+                    except Exception:
+                        pass
         # Rebuild overlays according to flags
         if scene is not None:
             if wells:

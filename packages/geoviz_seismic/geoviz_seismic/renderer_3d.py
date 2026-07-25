@@ -2226,6 +2226,44 @@ class Renderer3D(QWidget):
         if value >= 0:
             self.slice_changed.emit(slice_type, value)
 
+    def get_slice_positions(self) -> tuple[int, int, int]:
+        """Public: current (inline, crossline, time) voxel indices."""
+        return (
+            int(getattr(self, "_il_pos", 0) or 0),
+            int(getattr(self, "_xl_pos", 0) or 0),
+            int(getattr(self, "_t_pos", 0) or 0),
+        )
+
+    def set_planes_visible(self, visible: bool) -> None:
+        """Show/hide orthogonal volume planes without hiding the whole widget.
+
+        Overlay items (wells, fences) added by hosts stay under host control.
+        """
+        vis = bool(visible)
+        for attr in (
+            "_img_il",
+            "_img_xl",
+            "_img_t",
+            "_line_il",
+            "_line_xl",
+            "_line_t",
+            "_volume_visual",
+            "_img_arb",
+            "_line_arb",
+        ):
+            item = getattr(self, attr, None)
+            if item is None:
+                continue
+            try:
+                item.setVisible(vis)
+            except Exception:
+                pass
+        # Keep widget itself visible so host overlays remain on-screen
+        try:
+            self.setVisible(True)
+        except Exception:
+            pass
+
     def set_position_external(self, slice_type: str, position: int):
         """Set a slice position from an external source (toolbar slider, etc.).
 
