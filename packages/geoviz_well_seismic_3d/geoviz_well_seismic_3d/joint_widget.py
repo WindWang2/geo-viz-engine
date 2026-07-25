@@ -218,29 +218,62 @@ class WellSeismicJointWidget(QWidget):
         self._view().addItem(self._probe_item)
 
     def set_slice_indices(self, il: int, xl: int, sample: int) -> None:
-        """Drive orthogonal slices via Renderer3D public API when available."""
+        """Drive orthogonal slices and rebuild plane geometry immediately."""
         r = self._renderer
         if r is None:
             return
+        apply_all = getattr(r, "apply_slice_positions", None)
+        if callable(apply_all):
+            try:
+                apply_all(int(il), int(xl), int(sample), rebuild=True)
+                return
+            except Exception:
+                logger.debug("apply_slice_positions failed", exc_info=True)
+        # Fallback: set_position_external per axis + force rebuild
         for name, val in (("inline", il), ("crossline", xl), ("time", sample)):
-            method = getattr(r, "set_slice", None) or getattr(r, "set_slice_position", None)
-            if callable(method):
+            ext = getattr(r, "set_position_external", None)
+            if callable(ext):
                 try:
-                    method(name, int(val))
+                    ext(name, int(val))
                     continue
                 except Exception:
                     pass
-            # Fallback: sliders if present
-            slider = {
-                "inline": getattr(r, "_il_slider", None),
-                "crossline": getattr(r, "_xl_slider", None),
-                "time": getattr(r, "_t_slider", None),
-            }.get(name)
-            if slider is not None:
-                try:
-                    slider.setValue(int(val))
-                except Exception:
-                    pass
+        rebuild = getattr(r, "_update_slice_planes", None)
+        if callable(rebuild):
+            try:
+                rebuild()
+            except Exception:
+                pass
+
+    def set_camera_pose(
+        self,
+        *,
+        distance: float = 250.0,
+        elevation: float = 30.0,
+        azimuth: float = 45.0,
+    ) -> None:
+        """Public camera pose for host align-view (no private _view digs)."""
+        r = self._renderer
+        if r is None:
+            return
+        method = getattr(r, "set_camera_pose", None)
+        if callable(method):
+            try:
+                method(distance=distance, elevation=elevation, azimuth=azimuth)
+                return
+            except Exception:
+                pass
+        # Last resort only inside this widget
+        view = self._view()
+        if view is not None:
+            try:
+                view.setCameraPosition(
+                    distance=float(distance),
+                    elevation=float(elevation),
+                    azimuth=float(azimuth),
+                )
+            except Exception:
+                pass
 
     def _view(self):
         """Access GL view only inside this widget (not for hosts)."""

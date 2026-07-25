@@ -2270,7 +2270,8 @@ class Renderer3D(QWidget):
         Updates the internal state and syncs the 3D slider, but does NOT
         rebuild slice planes here -- that's expensive and happens on every
         slider tick. The caller's slice_changed handler debounces the
-        actual 3D + 2D render.
+        actual 3D + 2D render. Hosts that need immediate geometry should use
+        :meth:`apply_slice_positions`.
         """
         if not self._loaded:
             return
@@ -2290,6 +2291,52 @@ class Renderer3D(QWidget):
         setattr(self, attr, position)
         # 3D slice planes rebuilt in the debounced handler, not here.
         self.slice_changed.emit(slice_type, position)
+
+    def apply_slice_positions(
+        self, il: int, xl: int, t: int, *, rebuild: bool = True
+    ) -> None:
+        """Public: set all three slice indices and optionally rebuild planes now.
+
+        Used by joint hosts / clip mapping where there is no SeismicView
+        debounce loop to rebuild geometry.
+        """
+        if not self._loaded:
+            return
+        for slice_type, pos in (
+            ("inline", int(il)),
+            ("crossline", int(xl)),
+            ("time", int(t)),
+        ):
+            self.set_position_external(slice_type, pos)
+        if rebuild:
+            try:
+                self._update_slice_planes()
+            except Exception:
+                pass
+            try:
+                self._view.update()
+            except Exception:
+                pass
+
+    def set_camera_pose(
+        self,
+        *,
+        distance: float = 250.0,
+        elevation: float = 30.0,
+        azimuth: float = 45.0,
+    ) -> None:
+        """Public camera control for host alignment (no private ``_view`` digs)."""
+        view = getattr(self, "_view", None)
+        if view is None:
+            return
+        try:
+            view.setCameraPosition(
+                distance=float(distance),
+                elevation=float(elevation),
+                azimuth=float(azimuth),
+            )
+        except Exception:
+            pass
 
     def set_horizon_picks(self, points: list[tuple[float, float, float]]):
         """Render manually picked horizon points as a 3D scatter plot.
