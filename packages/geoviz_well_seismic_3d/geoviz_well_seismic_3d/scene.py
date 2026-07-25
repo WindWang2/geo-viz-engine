@@ -43,7 +43,8 @@ class WellSeismicScene:
         self._traj_cache: dict[str, WellTrajectory3D] | None = None
         self._fences: list[FenceSection] = []
         self._active_fence_id: str | None = None
-        self._extract_cache: dict[str, FenceExtraction] = {}
+        # Key: (fence_id, VerticalDomain value, n_along) so Time/Depth extracts coexist
+        self._extract_cache: dict[tuple, FenceExtraction] = {}
         self._probe: ProbeState | None = None
         self._depth_transform: DepthTransformState = select_depth_transform()
         self._near_well_m: float = 100.0
@@ -283,15 +284,28 @@ class WellSeismicScene:
                 return f
         return None
 
-    def extract_active_fence(self, *, n_along: int = 128) -> FenceExtraction | None:
+    def extract_active_fence(
+        self,
+        *,
+        n_along: int = 128,
+        domain: VerticalDomain | None = None,
+    ) -> FenceExtraction | None:
+        """Extract active fence strip.
+
+        domain:
+            If set, sample axis uses this domain instead of scene ``vertical_domain``.
+            Workbench 2D profile forces Time while 3D may stay on Depth (#122).
+        """
         fence = self.active_fence()
         if fence is None or self._volume is None or self._survey is None:
             return None
-        if fence.id in self._extract_cache:
-            return self._extract_cache[fence.id]
+        use_domain = domain if domain is not None else self._domain
+        cache_key = (fence.id, use_domain, int(n_along))
+        if cache_key in self._extract_cache:
+            return self._extract_cache[cache_key]
         survey = self._survey
         nt = getattr(self._volume, "shape", (0, 0, 0))[2]
-        if self._domain is VerticalDomain.TIME:
+        if use_domain is VerticalDomain.TIME:
             saxis = survey.t0_ms + np.arange(nt) * survey.dt_ms
         else:
             saxis = self._depth_transform.constant.time_ms_to_depth_m(
@@ -311,7 +325,7 @@ class WellSeismicScene:
             sample_axis=np.asarray(saxis, dtype=np.float64),
             registration=self._registration,
         )
-        self._extract_cache[fence.id] = ext
+        self._extract_cache[cache_key] = ext
         return ext
 
     # ------------------------------------------------------------------

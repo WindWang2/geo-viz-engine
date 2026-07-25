@@ -7,7 +7,13 @@ from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QImage, QPainter, QColor, QPen, QPixmap
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+from .models import VerticalDomain
 from .scene import WellSeismicScene
+
+# Empty-state guidance (#122) — not orthogonal IL/XL/T fallback
+_EMPTY_FENCE_HINT = (
+    "无活动剖面。在 3D 点选两口井，或用顶栏井对 +「井间剖面」创建 fence。"
+)
 
 
 class FenceProfile2D(QWidget):
@@ -18,8 +24,11 @@ class FenceProfile2D(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._scene: WellSeismicScene | None = None
+        # None = follow scene domain; Time = force Time extract (workbench #122)
+        self._extract_domain: VerticalDomain | None = None
         self._label = QLabel("无活动剖面")
         self._label.setMinimumHeight(140)
+        self._label.setWordWrap(True)
         self._label.setStyleSheet("background: #0f172a; color: #94a3b8;")
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._pix: QPixmap | None = None
@@ -31,6 +40,11 @@ class FenceProfile2D(QWidget):
         lay.addWidget(self._label)
         self._label.mousePressEvent = self._on_click  # type: ignore[method-assign]
 
+    def set_extract_domain(self, domain: VerticalDomain | None) -> None:
+        """Override sample-axis domain for extracts (None follows scene)."""
+        self._extract_domain = domain
+        self.refresh()
+
     def set_scene(self, scene: WellSeismicScene | None) -> None:
         self._scene = scene
         self.refresh()
@@ -40,9 +54,12 @@ class FenceProfile2D(QWidget):
             self._label.setText("无场景")
             self._label.setPixmap(QPixmap())
             return
-        ext = self._scene.extract_active_fence()
+        if self._extract_domain is not None:
+            ext = self._scene.extract_active_fence(domain=self._extract_domain)
+        else:
+            ext = self._scene.extract_active_fence()
         if ext is None:
-            self._label.setText("无活动剖面（创建井间剖面或折线）")
+            self._label.setText(_EMPTY_FENCE_HINT)
             self._label.setPixmap(QPixmap())
             return
         self._smax = float(ext.arc_length_m[-1]) or 1.0
