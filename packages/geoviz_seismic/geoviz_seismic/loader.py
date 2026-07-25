@@ -109,20 +109,25 @@ class SeismicLoader:
             ) from e
 
     def read_timeslice(self, sample_idx: int) -> np.ndarray:
-        """Read one time slice (zero-based index). Returns ``(n_inlines, n_xlines)``."""
+        """Read one time slice (zero-based index). Returns ``(n_inlines, n_xlines)``.
+
+        Note: ``segyio`` ``depth_slice`` often returns ``(n_xlines, n_inlines)``
+        for this geometry. We always normalize to volume axis order so 2D Time
+        profiles match 3D horizontal planes (``volume[:, :, t]``).
+        """
         try:
             t0 = time.monotonic()
             f = self._open()
             meta = self._meta or self.inspect()
+            expected = (meta.n_inlines, meta.n_crosslines)
             try:
                 data = np.asarray(f.depth_slice[sample_idx], dtype=np.float32)
             except (AttributeError, KeyError):
-                result = np.empty((meta.n_inlines, meta.n_crosslines),
-                                  dtype=np.float32)
+                data = np.empty(expected, dtype=np.float32)
                 for i, il in enumerate(f.ilines.tolist()):
                     line = np.asarray(f.iline[il], dtype=np.float32)
-                    result[i, :] = line[:, sample_idx]
-                data = result
+                    data[i, :] = line[:, sample_idx]
+            data = self._normalize_timeslice_axes(data, meta)
             logger.debug("read_timeslice(%d): %.3fs, shape=%s", sample_idx,
                          time.monotonic() - t0, data.shape)
             return data
@@ -133,6 +138,24 @@ class SeismicLoader:
                 f"{e}. Sample index may be out of range "
                 f"(available: 0-{meta.n_samples - 1})."
             ) from e
+
+    @staticmethod
+    def _normalize_timeslice_axes(
+        data: np.ndarray, meta: SeismicVolumeMeta
+    ) -> np.ndarray:
+        """Force timeslice to ``(n_inlines, n_crosslines)`` matching the cube."""
+        expected = (int(meta.n_inlines), int(meta.n_crosslines))
+        if data.shape == expected:
+            return np.ascontiguousarray(data, dtype=np.float32)
+        if data.shape == (expected[1], expected[0]):
+            # segyio depth_slice often returns (n_xline, n_iline)
+            return np.ascontiguousarray(data.T, dtype=np.float32)
+        logger.warning(
+            "timeslice shape %s does not match volume axes %s; returning as-is",
+            data.shape,
+            expected,
+        )
+        return np.ascontiguousarray(data, dtype=np.float32)
 
     def read_trace(self, iline: int, xline: int) -> np.ndarray:
         """Read a single trace at the given (inline, crossline) position.
