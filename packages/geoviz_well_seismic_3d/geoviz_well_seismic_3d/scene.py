@@ -256,6 +256,29 @@ class WellSeismicScene:
             raise KeyError(fence_id)
         self._active_fence_id = fence_id
 
+    def remove_fence(self, fence_id: str) -> None:
+        """Remove a fence by id; reassign active to last remaining if needed."""
+        before = len(self._fences)
+        self._fences = [f for f in self._fences if f.id != fence_id]
+        if len(self._fences) == before:
+            raise KeyError(fence_id)
+        # Drop cache entries for this fence
+        self._extract_cache = {
+            k: v
+            for k, v in self._extract_cache.items()
+            if not (isinstance(k, tuple) and k and k[0] == fence_id)
+        }
+        if self._active_fence_id == fence_id:
+            self._active_fence_id = self._fences[-1].id if self._fences else None
+
+    def remove_active_fence(self) -> bool:
+        """Remove the active fence. Returns False if none."""
+        fid = self._active_fence_id
+        if fid is None:
+            return False
+        self.remove_fence(fid)
+        return True
+
     def set_fence_visible(self, fence_id: str, visible: bool) -> None:
         for f in self._fences:
             if f.id == fence_id:
