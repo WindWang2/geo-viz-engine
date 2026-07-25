@@ -155,11 +155,32 @@ class GLImageLutItem(gl.GLImageItem):
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
         self._lut_needs_upload = False
 
+    @staticmethod
+    def prepare_r8_upload(index_2d: np.ndarray) -> tuple[np.ndarray, int, int]:
+        """Pack a 2-D index image for ``glTexImage2D`` like pyqtgraph GLImageItem.
+
+        ``index_2d`` uses the same axes as plane geometry: shape ``(sx, sy)``
+        where local +X spans ``sx`` and local +Y spans ``sy`` (see
+        ``_create_slice_plane`` scale calls).
+
+        pyqtgraph uploads with ``width=sx, height=sy`` after transposing the
+        first two axes so OpenGL's row-major layout matches numpy C-order.
+        The previous R8 path skipped that transpose and scrambled every 3D
+        orthogonal plane relative to 2D profiles.
+        """
+        arr = np.asarray(index_2d)
+        if arr.ndim != 2:
+            raise ValueError(f"index texture must be 2-D, got shape {arr.shape}")
+        sx, sy = int(arr.shape[0]), int(arr.shape[1])
+        # Equivalent to RGBA path: data.transpose((1, 0, ...))
+        upload = np.ascontiguousarray(arr.T)
+        return upload, sx, sy
+
     def _updateTexture(self) -> None:
         """Upload the uint8 index array as a single-channel GL_R8 texture.
 
-        Overrides GLImageItem (which assumes RGBA): no transpose (single
-        channel), GL_R8 internal format, GL_RED source format.
+        Overrides GLImageItem (RGBA) with GL_R8 / GL_RED, but **keeps** the
+        same axis transpose so plane orientation matches 2D profiles.
         """
         if self.texture is None:
             self.texture = GL.glGenTextures(1)
@@ -169,20 +190,29 @@ class GLImageLutItem(gl.GLImageItem):
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, filt)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
-        shape = self.data.shape  # (H, W) uint8
+
+        data, width, height = self.prepare_r8_upload(self.data)
 
         context = QtGui.QOpenGLContext.currentContext()
         if not context.isOpenGLES():
-            GL.glTexImage2D(GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_R8, shape[0], shape[1], 0, GL.GL_RED, GL.GL_UNSIGNED_BYTE, None)
+            GL.glTexImage2D(
+                GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_R8, width, height, 0,
+                GL.GL_RED, GL.GL_UNSIGNED_BYTE, None,
+            )
             if GL.glGetTexLevelParameteriv(GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_TEXTURE_WIDTH) == 0:
-                raise Exception("OpenGL failed to create 2D R8 texture (%dx%d); too large." % shape[:2])
+                raise Exception(
+                    "OpenGL failed to create 2D R8 texture (%dx%d); too large."
+                    % (width, height)
+                )
 
-        # Single-channel: no (1,0,2) transpose. Contiguous row-major upload.
-        data = np.ascontiguousarray(self.data)
-        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_R8, shape[0], shape[1], 0, GL.GL_RED, GL.GL_UNSIGNED_BYTE, data)
+        GL.glTexImage2D(
+            GL.GL_TEXTURE_2D, 0, GL.GL_R8, width, height, 0,
+            GL.GL_RED, GL.GL_UNSIGNED_BYTE, data,
+        )
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
 
-        x, y = shape[:2]
+        # Geometry extents still follow pre-transpose shape (sx, sy)
+        x, y = width, height
         pos = np.array([
             [0, 0, 0, 0],
             [x, 0, 1, 0],
