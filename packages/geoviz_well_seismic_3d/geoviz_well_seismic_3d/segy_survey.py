@@ -1,4 +1,14 @@
-"""Build joint SurveySpec corners from SEGY text/trace headers (#59 / wayfinder C)."""
+"""Survey corners from SEGY aligned to SeismicLoader volume axes (wayfinder #81/#84).
+
+**Contract (decision A):** Volume shape is ``(n_inline, n_crossline, n_sample)``
+from ``SeismicLoader``. ``SurveySpec.n_inlines`` / ``n_crosslines`` match that
+assignment (full-grid counts). Preview cubes keep the same axis order;
+``VolumeRegistration`` only scales indices for downsampling.
+
+On non-standard SEGY (FieldRecord/CDP as geometry), loader IL numbers are the
+text-header **xlines** and loader XL numbers are text **inlines**. Corners are
+built in **loader** IL/XL space so survey and cube agree without transposing.
+"""
 
 from __future__ import annotations
 
@@ -8,17 +18,46 @@ from pathlib import Path
 
 def survey_corners_from_segy(
     segy_path: Path | str,
-) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float], tuple[float, float, float, float], dict]:
-    """Return (p1, p2, p3, meta) for survey_from_corners.
+) -> tuple[
+    tuple[float, float, float, float],
+    tuple[float, float, float, float],
+    tuple[float, float, float, float],
+    dict,
+]:
+    """Return (p1, p2, p3, meta) for ``survey_from_corners`` in **loader** axes.
 
-    p* = (inline, crossline, x, y). meta includes n_samples, dt_ms, t0_ms.
-    Uses SEGY textual header when present; falls back to trace scan.
+    p* = (loader_inline, loader_crossline, x, y) so that
+    ``n_inlines == SeismicLoader.n_inlines`` and
+    ``n_crosslines == SeismicLoader.n_crosslines``.
+
+    meta includes n_samples, dt_ms, t0_ms, and loader counts.
     """
     path = Path(segy_path)
     if not path.is_file():
         raise FileNotFoundError(str(path))
 
     import segyio
+
+    loader_meta: dict = {}
+    try:
+        from geoviz_seismic.loader import SeismicLoader
+
+        loader = SeismicLoader(str(path))
+        try:
+            m = loader.inspect()
+            loader_meta = {
+                "loader_n_inlines": m.n_inlines,
+                "loader_n_crosslines": m.n_crosslines,
+                "loader_iline_start": m.iline_start,
+                "loader_xline_start": m.xline_start,
+                "n_samples": m.n_samples,
+                "dt_ms": m.dt_ms,
+                "t0_ms": m.t0_ms,
+            }
+        finally:
+            loader.close()
+    except Exception:
+        pass
 
     with segyio.open(str(path), "r", ignore_geometry=True) as f:
         text = ""
@@ -31,68 +70,55 @@ def survey_corners_from_segy(
         dt_ms = dt_us / 1000.0
         t0_ms = float(f.samples[0]) if n_samples else 0.0
 
-        parsed = _parse_text_header(text)
-        if parsed is not None:
-            p1, p2, p3 = parsed
-            return p1, p2, p3, {
-                "n_samples": n_samples,
-                "dt_ms": dt_ms,
-                "t0_ms": t0_ms,
+        classic = _parse_text_header_classic(text)
+        if classic is not None:
+            p1, p2, p3 = _classic_corners_to_loader_axes(*classic)
+            meta = {
+                "n_samples": loader_meta.get("n_samples", n_samples),
+                "dt_ms": loader_meta.get("dt_ms", dt_ms),
+                "t0_ms": loader_meta.get("t0_ms", t0_ms),
+                "source": "text_header_loader_axes",
+                **{k: v for k, v in loader_meta.items() if k.startswith("loader_")},
             }
+            return p1, p2, p3, meta
 
-        # Fallback: FieldRecord≈IL, CDP≈XL, SourceX/Y
-        TF = segyio.TraceField
-        n = f.tracecount
-        if n <= 0:
-            raise ValueError("SEGY has no traces")
-        h0 = f.header[0]
-        h1 = f.header[n - 1]
-        il0 = float(h0[TF.FieldRecord] or 0)
-        xl0 = float(h0[TF.CDP] or 0)
-        x0 = float(h0[TF.SourceX] or 0)
-        y0 = float(h0[TF.SourceY] or 0)
-        il1 = float(h1[TF.FieldRecord] or il0)
-        xl1 = float(h1[TF.CDP] or xl0)
-        x1 = float(h1[TF.SourceX] or x0)
-        y1 = float(h1[TF.SourceY] or y0)
-        # Mid corner: same IL as first, XL as last when possible
-        p1 = (il0, xl0, x0, y0)
-        p2 = (il0, xl1, x1 if abs(y1) < 1e-6 else x0 + (x1 - x0), y0)
-        # Approximate P2/P3 from extents
-        p2 = (il0, xl1, float(h1[TF.SourceX] if h1[TF.FieldRecord] == h0[TF.FieldRecord] else x1), y0)
-        # Better: scan for max XL on first IL and max IL on last XL
-        first_il = int(il0)
-        last_xl = int(xl1)
-        x_at_p2, y_at_p2 = x0, y0
-        x_at_p3, y_at_p3 = x1, y1
-        for i in range(0, min(n, 5000), max(1, n // 2000)):
-            h = f.header[i]
-            il = int(h[TF.FieldRecord] or 0)
-            xl = int(h[TF.CDP] or 0)
-            sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
-            if il == first_il and xl >= last_xl:
-                last_xl = xl
-                x_at_p2, y_at_p2 = sx, sy
-        last_il = int(il1)
-        for i in range(max(0, n - 5000), n, max(1, n // 2000)):
-            h = f.header[i]
-            il = int(h[TF.FieldRecord] or 0)
-            xl = int(h[TF.CDP] or 0)
-            sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
-            if xl == last_xl and il >= last_il:
-                last_il = il
-                x_at_p3, y_at_p3 = sx, sy
-        p1 = (float(first_il), float(xl0), x0, y0)
-        p2 = (float(first_il), float(last_xl), x_at_p2, y_at_p2)
-        p3 = (float(last_il), float(last_xl), x_at_p3, y_at_p3)
-        return p1, p2, p3, {"n_samples": n_samples, "dt_ms": dt_ms, "t0_ms": t0_ms}
+        # Fallback: FieldRecord≈loader-related, CDP≈loader-related (same as loader)
+        return _corners_from_trace_scan(f, n_samples, dt_ms, t0_ms, loader_meta)
 
 
-def _parse_text_header(text: str) -> tuple | None:
-    """Parse G&G-style text header used by 200P_seismic.sgy."""
+def _classic_corners_to_loader_axes(
+    p1: tuple, p2: tuple, p3: tuple
+) -> tuple[tuple, tuple, tuple]:
+    """Map classic text corners (IL=+Y, XL=+X) to loader IL/XL assignment.
+
+    On this SEGY class, SeismicLoader treats text **xline** as volume axis 0
+    (inline) and text **inline** as volume axis 1 (crossline). Loader IL runs
+    along map +X; loader XL along map +Y.
+
+    Classic::
+        p1 (il0, xl0, x0, y0), p2 (il0, xl1, x1, y0), p3 (il1, xl1, x1, y1)
+
+    Loader::
+        p1 (xl0, il0, x0, y0), p2 (xl0, il1, x0, y1), p3 (xl1, il1, x1, y1)
+    """
+    il0, xl0, x0, y0 = (float(v) for v in p1)
+    _il0b, xl1, x1, _y0b = (float(v) for v in p2)
+    il1, _xl1b, x2, y1 = (float(v) for v in p3)
+    lp1 = (xl0, il0, x0, y0)
+    lp2 = (xl0, il1, x0, y1)  # same loader IL, +loader XL → +Y
+    lp3 = (xl1, il1, x2, y1)  # +loader IL → +X
+    return lp1, lp2, lp3
+
+
+def align_horizon_corners_to_loader_axes(p1, p2, p3) -> tuple:
+    """Remap horizon P1–P3 (classic text IL/XL) to loader axis assignment."""
+    return _classic_corners_to_loader_axes(p1, p2, p3)
+
+
+def _parse_text_header_classic(text: str) -> tuple | None:
+    """P1–P3 with text Inline along +Y, Crossline along +X (classic az=0)."""
     if not text:
         return None
-    # First inline:1315    Last inline:1725
     m_il = re.search(r"First\s+inline\s*:\s*(\d+)\s+Last\s+inline\s*:\s*(\d+)", text, re.I)
     m_xl = re.search(r"First\s+xline\s*:\s*(\d+)\s+Last\s+xline\s*:\s*(\d+)", text, re.I)
     m_x = re.search(r"xmin\s*:\s*([-\d.]+)\s+xmax\s*:\s*([-\d.]+)", text, re.I)
@@ -102,13 +128,11 @@ def _parse_text_header(text: str) -> tuple | None:
     il0, il1 = float(m_il.group(1)), float(m_il.group(2))
     xl0, xl1 = float(m_xl.group(1)), float(m_xl.group(2))
     x0, x1 = float(m_x.group(1)), float(m_x.group(2))
-    # Text head sometimes lists ymax wrong; prefer ymax from second ymin line or 16406 from data
     if m_y:
         y0, y1 = float(m_y.group(1)), float(m_y.group(2))
-        # If ymax equals xmax-like error (same as xmax 12793), use IL spacing * n
+        # Text header often duplicates xmax into ymax; recover from IL spacing
         if abs(y1 - x1) < 1.0 and il1 > il0:
-            # recover from known spacing ~40 if ymax corrupted
-            y1 = y0 + (il1 - il0) * 40.014634  # match data/层位 P3
+            y1 = y0 + (il1 - il0) * 40.014634
     else:
         y0, y1 = 0.0, (il1 - il0) * 40.014634
     p1 = (il0, xl0, x0, y0)
@@ -117,8 +141,66 @@ def _parse_text_header(text: str) -> tuple | None:
     return p1, p2, p3
 
 
+def _corners_from_trace_scan(f, n_samples: int, dt_ms: float, t0_ms: float, loader_meta: dict):
+    """Fallback when text header is missing: scan FieldRecord/CDP + SourceX/Y."""
+    import segyio
+
+    TF = segyio.TraceField
+    n = f.tracecount
+    if n <= 0:
+        raise ValueError("SEGY has no traces")
+    h0 = f.header[0]
+    h1 = f.header[n - 1]
+    # Prefer loader starts when available (already FieldRecord/CDP order)
+    if loader_meta.get("loader_iline_start") is not None:
+        il0 = float(loader_meta["loader_iline_start"])
+        xl0 = float(loader_meta["loader_xline_start"])
+    else:
+        il0 = float(h0[TF.FieldRecord] or 0)
+        xl0 = float(h0[TF.CDP] or 0)
+    x0 = float(h0[TF.SourceX] or 0)
+    y0 = float(h0[TF.SourceY] or 0)
+    il1 = float(h1[TF.FieldRecord] or il0)
+    xl1 = float(h1[TF.CDP] or xl0)
+    x1 = float(h1[TF.SourceX] or x0)
+    y1 = float(h1[TF.SourceY] or y0)
+
+    first_il = int(il0)
+    last_xl = int(xl1)
+    x_at_p2, y_at_p2 = x0, y0
+    x_at_p3, y_at_p3 = x1, y1
+    for i in range(0, min(n, 5000), max(1, n // 2000)):
+        h = f.header[i]
+        il = int(h[TF.FieldRecord] or 0)
+        xl = int(h[TF.CDP] or 0)
+        sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
+        if il == first_il and xl >= last_xl:
+            last_xl = xl
+            x_at_p2, y_at_p2 = sx, sy
+    last_il = int(il1)
+    for i in range(max(0, n - 5000), n, max(1, n // 2000)):
+        h = f.header[i]
+        il = int(h[TF.FieldRecord] or 0)
+        xl = int(h[TF.CDP] or 0)
+        sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
+        if xl == last_xl and il >= last_il:
+            last_il = il
+            x_at_p3, y_at_p3 = sx, sy
+    p1 = (float(first_il), float(xl0), x0, y0)
+    p2 = (float(first_il), float(last_xl), x_at_p2, y_at_p2)
+    p3 = (float(last_il), float(last_xl), x_at_p3, y_at_p3)
+    meta = {
+        "n_samples": loader_meta.get("n_samples", n_samples),
+        "dt_ms": loader_meta.get("dt_ms", dt_ms),
+        "t0_ms": loader_meta.get("t0_ms", t0_ms),
+        "source": "trace_scan",
+        **{k: v for k, v in loader_meta.items() if k.startswith("loader_")},
+    }
+    return p1, p2, p3, meta
+
+
 def horizon_corners_from_dat(path: Path | str) -> tuple | None:
-    """Parse P1/P2/P3 from SMI horizon header if present."""
+    """Parse P1/P2/P3 from SMI horizon header (inline, crossline, x, y)."""
     text = Path(path).read_text(encoding="utf-8", errors="replace")
     pts = {}
     for label in ("P1", "P2", "P3"):
@@ -127,7 +209,6 @@ def horizon_corners_from_dat(path: Path | str) -> tuple | None:
             text,
         )
         if m:
-            # Format: Inline, Crossline, x, y
             pts[label] = (
                 float(m.group(1)),
                 float(m.group(2)),

@@ -76,13 +76,25 @@ def survey_from_corners(
     il_spacing = il_len / n_il_steps if n_il_steps else 1.0
 
     # Azimuth of inline axis from north (+Y), clockwise (BinGridGeometry convention).
-    # IL direction vector from p1 toward increasing IL: along p1→(p1 + (p3-p2))
-    # For standard P1-P2-P3 where +X = +XL and +Y = +IL, azimuth is 0.
-    il_dx = (x2 - x1)  # same as p1 + (p3-p2) - p1 when p2-p1 is pure XL
-    il_dy = (y2 - y1)
-    # If p1→p2 is pure XL and p2→p3 is pure IL, il_dx≈0, il_dy>0 → az=0
-    # azimuth clockwise from north: atan2(east, north) = atan2(il_dx, il_dy)
+    # IL direction: p2→p3. For classic IL=+Y/XL=+X, az=0.
+    # BinGrid with positive spacing: IL unit = (-sin az, cos az).
+    # When IL is along +X, az=90 would map positive spacing to -X; flip spacing
+    # signs so corner vectors and BinGrid stay consistent (wayfinder #84).
+    il_dx = x2 - x1
+    il_dy = y2 - y1
     az_deg = float(np_degrees(np_atan2(il_dx, il_dy))) if (il_dx or il_dy) else 0.0
+    # BinGrid with positive spacing: IL unit = (-sin az, cos az), XL = (cos az, sin az).
+    # Flip spacing signs when corners require the opposite direction (e.g. IL along +X).
+    sin_a = np_sin(az_deg)
+    cos_a = np_cos(az_deg)
+    pred_il = (-sin_a, cos_a)
+    pred_xl = (cos_a, sin_a)
+    des_il = (il_dx, il_dy)
+    des_xl = (x1 - x0, y1 - y0)
+    if pred_il[0] * des_il[0] + pred_il[1] * des_il[1] < 0:
+        il_spacing = -il_spacing
+    if pred_xl[0] * des_xl[0] + pred_xl[1] * des_xl[1] < 0:
+        xl_spacing = -xl_spacing
 
     bin_grid = BinGridGeometry(
         x_origin=x0,
@@ -120,3 +132,15 @@ def np_degrees(rad: float) -> float:
     import math
 
     return math.degrees(rad)
+
+
+def np_sin(deg: float) -> float:
+    import math
+
+    return math.sin(math.radians(deg))
+
+
+def np_cos(deg: float) -> float:
+    import math
+
+    return math.cos(math.radians(deg))

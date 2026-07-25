@@ -18,7 +18,11 @@ from .models import (
 from .probe import ProbeState, probe_from_fence_s
 from .registration import VolumeRegistration
 from .scene import ProfileWellHit, WellSeismicScene
-from .segy_survey import horizon_corners_from_dat, survey_corners_from_segy
+from .segy_survey import (
+    align_horizon_corners_to_loader_axes,
+    horizon_corners_from_dat,
+    survey_corners_from_segy,
+)
 from .survey import SurveySpec, survey_from_corners
 from .volume_access import InMemoryVolumeAccess, VolumeAccess
 
@@ -42,6 +46,7 @@ __all__ = [
     "WellSeismicScene",
     "WellTrajectory3D",
     "extract_fence_strip",
+    "align_horizon_corners_to_loader_axes",
     "horizon_corners_from_dat",
     "probe_from_fence_s",
     "select_depth_transform",

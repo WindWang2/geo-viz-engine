@@ -85,6 +85,10 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "VolumeRegistration": ("geoviz_well_seismic_3d", "VolumeRegistration"),
     "survey_corners_from_segy": ("geoviz_well_seismic_3d", "survey_corners_from_segy"),
     "horizon_corners_from_dat": ("geoviz_well_seismic_3d", "horizon_corners_from_dat"),
+    "align_horizon_corners_to_loader_axes": (
+        "geoviz_well_seismic_3d",
+        "align_horizon_corners_to_loader_axes",
+    ),
     "select_depth_transform": ("geoviz_well_seismic_3d", "select_depth_transform"),
 }
 

@@ -212,12 +212,8 @@ class WellSeismicScene:
         if self._survey is None or self._volume is None:
             self._registration = None
             return
-        ni, nx, nt = self._volume.shape
-        self._registration = VolumeRegistration(
-            survey=self._survey,
-            n_inline=ni,
-            n_crossline=nx,
-            n_sample=nt,
+        self._registration = VolumeRegistration.from_survey_and_shape(
+            self._survey, self._volume.shape
         )
 
     def set_preview_mode(self, enabled: bool) -> None:
