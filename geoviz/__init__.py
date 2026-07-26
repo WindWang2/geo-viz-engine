@@ -45,6 +45,7 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "WellTieCanvas": ("geoviz_well_tie.canvas", "WellTieCanvas"),
     "PlotWidget": ("geoviz_plots", "PlotWidget"),
     "SurfaceWidget": ("geoviz_plots", "SurfaceWidget"),
+    "XYPreviewPayload": ("geoviz.previews.dat", "XYPreviewPayload"),
     "interpolate_idw": ("geoviz_plots", "interpolate_idw"),
     "interpolate_scipy": ("geoviz_plots", "interpolate_scipy"),
     "azimuth_to_rad": ("geoviz_plots", "azimuth_to_rad"),

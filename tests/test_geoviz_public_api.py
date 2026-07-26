@@ -64,7 +64,7 @@ def test_default_engine_exposes_all_local_preview_capabilities(
                 "heads", str(dat_files["well_head"]), "well_head", "dat", "Wells"
             ),
             geoviz.PreviewKind.XY_SCATTER,
-            ("zoom", "pan"),
+            ("zoom", "pan", "hover", "point_select"),
         ),
         (
             geoviz.PreviewRequest(
@@ -98,6 +98,10 @@ def test_default_engine_exposes_all_local_preview_capabilities(
         capabilities = engine.capabilities(request)
         assert capabilities.kind is expected_kind
         assert capabilities.interactions == expected_interactions
+
+
+def test_xy_preview_payload_is_available_from_public_facade():
+    assert geoviz.XYPreviewPayload.__name__ == "XYPreviewPayload"
 
 
 def test_geoviz_package_has_no_workbench_imports():

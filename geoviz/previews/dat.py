@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,6 +49,8 @@ class XYPreviewPayload:
     names: tuple[str, ...]
     x: np.ndarray
     y: np.ndarray
+    resource_id: str = ""
+    record_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -412,7 +415,12 @@ def _prepare_error(error: Exception) -> GeoVizError:
     return GeoVizError(ErrorCode.INVALID_DATA, _SCHEMA_ERROR, detail=str(error))
 
 
-def _well_head_payload(path: str, options: PreviewOptions) -> XYPreviewPayload:
+def _well_head_payload(
+    path: str,
+    options: PreviewOptions,
+    *,
+    resource_id: str = "",
+) -> XYPreviewPayload:
     header, row_count, row_width = _scan_dat(path)
     if not any(_WELL_HEAD_MARKER in line for line in header):
         raise _DatSchemaError("missing well-head marker")
@@ -441,6 +449,8 @@ def _well_head_payload(path: str, options: PreviewOptions) -> XYPreviewPayload:
         names=tuple(row[0] for row in selected),
         x=np.ascontiguousarray([row[1] for row in selected], dtype=np.float64),
         y=np.ascontiguousarray([row[2] for row in selected], dtype=np.float64),
+        resource_id=str(resource_id),
+        record_ids=tuple(int(index) for index in indices),
     )
 
 
@@ -626,11 +636,18 @@ class XYScatterBackend:
         return _supports_with_header(request, supports_well_head)
 
     def capabilities(self, request: PreviewRequest) -> PreviewCapabilities:
-        return PreviewCapabilities(self.kind, ("zoom", "pan"))
+        return PreviewCapabilities(
+            self.kind,
+            ("zoom", "pan", "hover", "point_select"),
+        )
 
     def prepare(self, request: PreviewRequest, options: PreviewOptions) -> PreparedPreview:
         try:
-            payload = _well_head_payload(request.path, options)
+            payload = _well_head_payload(
+                request.path,
+                options,
+                resource_id=request.resource_id,
+            )
         except (OSError, UnicodeError, _DatSchemaError) as error:
             raise _prepare_error(error) from error
         return PreparedPreview(
@@ -640,7 +657,9 @@ class XYScatterBackend:
             summary_rows=(("井数", str(len(payload.names))),),
             estimated_bytes=payload.x.nbytes
             + payload.y.nbytes
-            + sum(len(name.encode("utf-8")) for name in payload.names),
+            + sum(len(name.encode("utf-8")) for name in payload.names)
+            + sys.getsizeof(payload.record_ids)
+            + sum(sys.getsizeof(record_id) for record_id in payload.record_ids),
         )
 
     def create_widget(self, parent: QWidget | None = None) -> QWidget:

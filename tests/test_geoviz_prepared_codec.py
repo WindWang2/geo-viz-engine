@@ -19,6 +19,8 @@ def test_roundtrip_xy_scatter():
         names=("A1", "B2"),
         x=np.array([1.0, 2.0]),
         y=np.array([3.0, 4.0]),
+        resource_id="resource-7",
+        record_ids=(4, 9),
     )
     prepared = PreparedPreview(
         kind=PreviewKind.XY_SCATTER,
@@ -33,6 +35,8 @@ def test_roundtrip_xy_scatter():
     assert restored.title == "wells"
     assert restored.summary_rows == (("井数", "2"),)
     assert list(restored.payload.names) == ["A1", "B2"]
+    assert restored.payload.resource_id == "resource-7"
+    assert restored.payload.record_ids == (4, 9)
     np.testing.assert_array_equal(restored.payload.x, payload.x)
     np.testing.assert_array_equal(restored.payload.y, payload.y)
 

@@ -6,7 +6,7 @@ import numpy as np
 
 from .contracts import PreparedPreview, PreviewKind
 
-PAYLOAD_SCHEMA_VERSION = 1
+PAYLOAD_SCHEMA_VERSION = 2
 CACHEABLE_KINDS = frozenset(
     {PreviewKind.XY_SCATTER, PreviewKind.SURFACE, PreviewKind.FORMATION_TOPS}
 )
@@ -46,6 +46,8 @@ def encode_prepared_preview(
         if not isinstance(payload, XYPreviewPayload):
             raise ValueError("XY_SCATTER payload type mismatch")
         meta["names"] = list(payload.names)
+        meta["resource_id"] = payload.resource_id
+        meta["record_ids"] = list(payload.record_ids)
         arrays["x"] = np.asarray(payload.x)
         arrays["y"] = np.asarray(payload.y)
     elif preview.kind is PreviewKind.SURFACE:
@@ -91,6 +93,8 @@ def decode_prepared_preview(
             names=tuple(meta["names"]),
             x=np.asarray(arrays["x"]),
             y=np.asarray(arrays["y"]),
+            resource_id=str(meta.get("resource_id") or ""),
+            record_ids=tuple(int(value) for value in meta.get("record_ids", ())),
         )
     elif kind is PreviewKind.SURFACE:
         SurfacePreviewPayload, _ = _dat_payload_types()

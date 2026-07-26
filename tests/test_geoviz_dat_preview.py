@@ -126,9 +126,15 @@ def test_well_head_prepare_preserves_names_xy_extent_and_plain_numpy_payload(
     assert preview.title == "Well locations"
     assert isinstance(preview.payload, XYPreviewPayload)
     assert preview.payload.names == ("Alpha", "Gamma")
+    assert preview.payload.resource_id == "dat-1"
+    assert preview.payload.record_ids == (0, 2)
     assert preview.payload.x.tolist() == [100.0, 125.0]
     assert preview.payload.y.tolist() == [500.0, 525.0]
-    assert preview.estimated_bytes >= preview.payload.x.nbytes + preview.payload.y.nbytes
+    assert preview.estimated_bytes >= (
+        preview.payload.x.nbytes
+        + preview.payload.y.nbytes
+        + len(preview.payload.record_ids) * np.dtype(np.int64).itemsize
+    )
 
 
 def test_horizon_prepare_builds_finite_bounded_surface_grid(horizon_dat: Path):

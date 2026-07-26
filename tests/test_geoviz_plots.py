@@ -1,7 +1,8 @@
 """Tests for geoviz_plots package (Chart axes, IDW interpolation, and custom plotting widgets)."""
 import pytest
-import math
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QMouseEvent, QWheelEvent
+
 from geoviz_plots.chart.axes import nice_number, calculate_ticks
 
 def test_nice_number_rounding():
@@ -87,6 +88,322 @@ def test_lttb_small_dataset():
     assert np.array_equal(dy, y)
 
 from geoviz_plots.chart.plot_widget import PlotWidget
+
+
+def test_plot_widget_emits_distinct_hover_and_click_events(qtbot):
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 600)
+    widget.add_series(
+        ScatterSeries([10.0, 20.0], [30.0, 40.0], name="Well locations")
+    )
+    widget.autofit()
+    widget.show()
+
+    hovered = []
+    clicked = []
+    hover_cleared = []
+    widget.point_hovered.connect(lambda *point: hovered.append(point))
+    widget.point_clicked.connect(lambda *point: clicked.append(point))
+    widget.point_hover_cleared.connect(lambda: hover_cleared.append(True))
+
+    px, py = widget.data_to_pixel(10.0, 30.0)
+    point = QPoint(round(px), round(py))
+    qtbot.mouseMove(widget, point)
+
+    assert hovered == [("Well locations", 0, 10.0, 30.0)]
+    assert clicked == []
+
+    qtbot.mouseClick(widget, Qt.LeftButton, pos=point)
+
+    assert clicked == [("Well locations", 0, 10.0, 30.0)]
+
+    qtbot.mouseMove(widget, QPoint(70, 30))
+
+    assert hover_cleared == [True]
+    assert widget.hovered_point is None
+
+
+def test_plot_widget_clears_hover_when_view_changes_or_pointer_leaves(qtbot):
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 600)
+    widget.add_series(
+        ScatterSeries([10.0, 20.0], [30.0, 40.0], name="Well locations")
+    )
+    widget.autofit()
+    cleared = []
+    widget.point_hover_cleared.connect(lambda: cleared.append(True))
+    px, py = widget.data_to_pixel(10.0, 30.0)
+
+    widget.check_nearest_point(QPointF(px, py))
+    widget.focus_point(10.0, 30.0)
+
+    assert widget.hovered_point is None
+    assert cleared == [True]
+
+    px, py = widget.data_to_pixel(10.0, 30.0)
+    widget.check_nearest_point(QPointF(px, py))
+    QCoreApplication.sendEvent(widget, QEvent(QEvent.Leave))
+
+    assert widget.hovered_point is None
+    assert cleared == [True, True]
+
+
+def test_plot_widget_clear_discards_hover_and_prior_click_gesture(qtbot):
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 600)
+    widget.add_series(
+        ScatterSeries([10.0, 20.0], [30.0, 40.0], name="Well locations")
+    )
+    widget.autofit()
+    widget.show()
+    hover_cleared = []
+    resets = []
+    widget.point_hover_cleared.connect(lambda: hover_cleared.append(True))
+    widget.reset_requested.connect(lambda: resets.append(True))
+    px, py = widget.data_to_pixel(10.0, 30.0)
+    point = QPoint(round(px), round(py))
+    qtbot.mouseClick(widget, Qt.LeftButton, pos=point)
+
+    widget.clear()
+
+    assert hover_cleared == [True]
+    assert widget.hovered_point is None
+    assert widget.hover_pos is None
+
+    qtbot.mouseDClick(widget, Qt.LeftButton, pos=point)
+
+    assert resets == [True]
+
+
+def test_plot_widget_focus_is_equal_aspect_idempotent_and_resettable(qtbot):
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 600)
+    widget.add_series(
+        ScatterSeries([0.0, 100.0], [0.0, 50.0], name="Well locations")
+    )
+    widget.set_equal_aspect(True)
+    widget.autofit()
+
+    full_view = (
+        widget.view_xmin,
+        widget.view_xmax,
+        widget.view_ymin,
+        widget.view_ymax,
+    )
+    left, right, top, bottom = widget.get_plot_rect(widget.width(), widget.height())
+    x_units_per_pixel = (widget.view_xmax - widget.view_xmin) / (right - left)
+    y_units_per_pixel = (widget.view_ymax - widget.view_ymin) / (bottom - top)
+    assert x_units_per_pixel == pytest.approx(y_units_per_pixel)
+
+    widget.focus_point(25.0, 20.0, zoom_factor=4.0)
+    focused_view = (
+        widget.view_xmin,
+        widget.view_xmax,
+        widget.view_ymin,
+        widget.view_ymax,
+    )
+    assert widget.view_xmax - widget.view_xmin == pytest.approx(
+        (full_view[1] - full_view[0]) / 4.0
+    )
+    assert widget.view_ymax - widget.view_ymin == pytest.approx(
+        (full_view[3] - full_view[2]) / 4.0
+    )
+
+    widget.focus_point(25.0, 20.0, zoom_factor=4.0)
+    assert (
+        widget.view_xmin,
+        widget.view_xmax,
+        widget.view_ymin,
+        widget.view_ymax,
+    ) == pytest.approx(focused_view)
+
+    widget.reset_view()
+    assert (
+        widget.view_xmin,
+        widget.view_xmax,
+        widget.view_ymin,
+        widget.view_ymax,
+    ) == pytest.approx(full_view)
+
+
+def test_plot_widget_selected_point_is_independent_from_hover(qtbot):
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.add_series(
+        ScatterSeries([10.0, 20.0], [30.0, 40.0], name="Well locations")
+    )
+
+    widget.set_selected_point("Well locations", 1, label="A2")
+
+    assert widget.selected_point == ("Well locations", 1)
+    assert widget.selected_label == "A2"
+    assert widget.hovered_point is None
+
+    widget.clear_selected_point()
+
+    assert widget.selected_point is None
+    assert widget.selected_label == ""
+
+
+def test_plot_widget_blank_double_click_requests_full_view_reset(qtbot):
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 600)
+    widget.add_series(
+        ScatterSeries([10.0, 20.0], [30.0, 40.0], name="Well locations")
+    )
+    widget.set_equal_aspect(True)
+    widget.autofit()
+    full_view = (
+        widget.view_xmin,
+        widget.view_xmax,
+        widget.view_ymin,
+        widget.view_ymax,
+    )
+    widget.focus_point(10.0, 30.0, zoom_factor=4.0)
+    resets = []
+    widget.reset_requested.connect(lambda: resets.append(True))
+
+    qtbot.mouseDClick(widget, Qt.LeftButton, pos=QPoint(70, 30))
+
+    assert resets == [True]
+    assert (
+        widget.view_xmin,
+        widget.view_xmax,
+        widget.view_ymin,
+        widget.view_ymax,
+    ) == pytest.approx(full_view)
+
+
+def test_plot_widget_drag_does_not_emit_point_click(qtbot):
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 600)
+    widget.add_series(
+        ScatterSeries([10.0, 20.0], [30.0, 40.0], name="Well locations")
+    )
+    widget.autofit()
+    clicked = []
+    widget.point_clicked.connect(lambda *point: clicked.append(point))
+    px, py = widget.data_to_pixel(10.0, 30.0)
+    start = QPointF(px, py)
+    end = QPointF(px + 20.0, py + 20.0)
+
+    for event in (
+        QMouseEvent(
+            QEvent.MouseButtonPress,
+            start,
+            start,
+            Qt.LeftButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        ),
+        QMouseEvent(
+            QEvent.MouseMove,
+            end,
+            end,
+            Qt.NoButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        ),
+        QMouseEvent(
+            QEvent.MouseButtonRelease,
+            end,
+            end,
+            Qt.LeftButton,
+            Qt.NoButton,
+            Qt.NoModifier,
+        ),
+    ):
+        QCoreApplication.sendEvent(widget, event)
+
+    assert clicked == []
+
+
+def test_plot_widget_equal_aspect_tracks_widget_resize(qtbot):
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 600)
+    widget.add_series(
+        ScatterSeries([0.0, 100.0], [0.0, 50.0], name="Well locations")
+    )
+    widget.set_equal_aspect(True)
+    widget.autofit()
+    widget.show()
+
+    widget.resize(1200, 400)
+    qtbot.wait(1)
+
+    left, right, top, bottom = widget.get_plot_rect(widget.width(), widget.height())
+    x_units_per_pixel = (widget.view_xmax - widget.view_xmin) / (right - left)
+    y_units_per_pixel = (widget.view_ymax - widget.view_ymin) / (bottom - top)
+    assert x_units_per_pixel == pytest.approx(y_units_per_pixel)
+
+
+def test_plot_widget_equal_aspect_survives_drag_and_wheel(qtbot):
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 600)
+    widget.add_series(
+        ScatterSeries([0.0, 100.0], [0.0, 50.0], name="Well locations")
+    )
+    widget.set_equal_aspect(True)
+    widget.autofit()
+    widget.show()
+    start = QPointF(300.0, 250.0)
+    end = QPointF(340.0, 275.0)
+
+    for event in (
+        QMouseEvent(
+            QEvent.MouseButtonPress,
+            start,
+            start,
+            Qt.LeftButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        ),
+        QMouseEvent(
+            QEvent.MouseMove,
+            end,
+            end,
+            Qt.NoButton,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        ),
+        QMouseEvent(
+            QEvent.MouseButtonRelease,
+            end,
+            end,
+            Qt.LeftButton,
+            Qt.NoButton,
+            Qt.NoModifier,
+        ),
+    ):
+        QCoreApplication.sendEvent(widget, event)
+
+    QCoreApplication.sendEvent(
+        widget,
+        QWheelEvent(
+            end,
+            end,
+            QPoint(),
+            QPoint(0, 120),
+            Qt.NoButton,
+            Qt.NoModifier,
+            Qt.ScrollUpdate,
+            False,
+        ),
+    )
+
+    left, right, top, bottom = widget.get_plot_rect(widget.width(), widget.height())
+    x_units_per_pixel = (widget.view_xmax - widget.view_xmin) / (right - left)
+    y_units_per_pixel = (widget.view_ymax - widget.view_ymin) / (bottom - top)
+    assert x_units_per_pixel == pytest.approx(y_units_per_pixel)
+
 
 def test_plot_widget_basic(qtbot):
     """Verify that PlotWidget can add series, calculate view bounds, map coords, and zoom/pan."""
@@ -275,8 +592,3 @@ def test_surface_widget_basic(qtbot):
     dx, dy = widget.pixel_to_data(px, py)
     assert dx == pytest.approx(5.0)
     assert dy == pytest.approx(5.0)
-
-
-
-
-

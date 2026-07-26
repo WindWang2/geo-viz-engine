@@ -1,11 +1,13 @@
 """QPainter-based high-performance 2D Line and Scatter plotting widget."""
-import numpy as np
 import math
-from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QPointF, Signal, Slot, QRectF
+import time
+
+import numpy as np
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics, QBrush, QPolygonF
-from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtPrintSupport import QPrinter
+from PySide6.QtSvg import QSvgGenerator
+from PySide6.QtWidgets import QApplication, QWidget
 
 from geoviz_plots.chart.axes import calculate_ticks
 from geoviz_plots.chart.series import LineSeries, ScatterSeries, lttb_downsample
@@ -21,7 +23,11 @@ class PlotWidget(QWidget):
     - SVG/PDF vector exports.
     """
     # Signals for interactive linking
+    point_hovered = Signal(str, int, float, float)  # series_name, index, x, y
+    point_hover_cleared = Signal()
+    point_clicked = Signal(str, int, float, float)  # series_name, index, x, y
     point_selected = Signal(str, int, float, float)  # series_name, index, x, y
+    reset_requested = Signal()
     view_changed = Signal(float, float, float, float)  # xmin, xmax, ymin, ymax
 
     def __init__(self, parent=None):
@@ -36,6 +42,9 @@ class PlotWidget(QWidget):
         self.view_xmax = 1.0
         self.view_ymin = 0.0
         self.view_ymax = 1.0
+        self._equal_aspect = False
+        self._autofit_bounds = None
+        self._full_view_bounds = None
         
         # Styling parameters (Premium Elegant Dark Theme by default)
         self.bg_color = QColor(25, 25, 25)
@@ -54,8 +63,15 @@ class PlotWidget(QWidget):
         
         # Interaction states
         self.last_mouse_pos = None
+        self._press_pos = None
+        self._dragged_since_press = False
+        self._last_click_pos = None
+        self._last_click_hit = None
+        self._last_click_time = 0.0
         self.hover_pos = None
+        self.hovered_point = None  # (series_name, index)
         self.selected_point = None  # (series_name, index)
+        self.selected_label = ""
         self.highlighted_points = {}  # series_name -> set(index)
         
         self._kdtree = None
@@ -104,19 +120,38 @@ class PlotWidget(QWidget):
 
     def clear(self):
         """Clear all series from the plot."""
+        self._invalidate_hover()
+        self._clear_last_click()
+        self.last_mouse_pos = None
+        self._press_pos = None
+        self._dragged_since_press = False
         self.series_list.clear()
         self.highlighted_points.clear()
         self.selected_point = None
+        self.selected_label = ""
         self._tree_metadata.clear()
         self._rebuild_kdtree()
+        self._autofit_bounds = None
+        self._full_view_bounds = None
         self.update()
+
+    def set_equal_aspect(self, enabled: bool) -> None:
+        """Keep one data unit the same physical size on both axes."""
+        self._equal_aspect = bool(enabled)
+        if not self._equal_aspect:
+            return
+        if self._autofit_bounds is not None:
+            self._full_view_bounds = self._equalized_bounds(self._autofit_bounds)
+        self._apply_view(self._equalized_bounds(self._current_view()))
 
     def autofit(self):
         """Auto-scale the viewport to fit all visible data with a 5% margin buffer."""
         if not self.series_list:
-            self.view_xmin, self.view_xmax = 0.0, 1.0
-            self.view_ymin, self.view_ymax = 0.0, 1.0
-            self.update()
+            self._autofit_bounds = (0.0, 1.0, 0.0, 1.0)
+            self._full_view_bounds = self._view_for_current_aspect(
+                self._autofit_bounds
+            )
+            self._apply_view(self._full_view_bounds)
             return
             
         g_xmin, g_xmax = float('inf'), float('-inf')
@@ -136,9 +171,11 @@ class PlotWidget(QWidget):
             g_ymax = max(g_ymax, ymax)
             
         if not has_data:
-            self.view_xmin, self.view_xmax = 0.0, 1.0
-            self.view_ymin, self.view_ymax = 0.0, 1.0
-            self.update()
+            self._autofit_bounds = (0.0, 1.0, 0.0, 1.0)
+            self._full_view_bounds = self._view_for_current_aspect(
+                self._autofit_bounds
+            )
+            self._apply_view(self._full_view_bounds)
             return
             
         # Add 5% padding
@@ -149,12 +186,105 @@ class PlotWidget(QWidget):
         if dy == 0.0:
             dy = abs(g_ymin) * 0.1 if g_ymin != 0.0 else 1.0
             
-        self.view_xmin = g_xmin - 0.05 * dx
-        self.view_xmax = g_xmax + 0.05 * dx
-        self.view_ymin = g_ymin - 0.05 * dy
-        self.view_ymax = g_ymax + 0.05 * dy
-        
-        self.view_changed.emit(self.view_xmin, self.view_xmax, self.view_ymin, self.view_ymax)
+        self._autofit_bounds = (
+            g_xmin - 0.05 * dx,
+            g_xmax + 0.05 * dx,
+            g_ymin - 0.05 * dy,
+            g_ymax + 0.05 * dy,
+        )
+        self._full_view_bounds = self._view_for_current_aspect(
+            self._autofit_bounds
+        )
+        self._apply_view(self._full_view_bounds)
+
+    def focus_point(
+        self,
+        x: float,
+        y: float,
+        *,
+        zoom_factor: float = 4.0,
+    ) -> None:
+        """Center a fixed zoom derived from the last autofit view."""
+        if zoom_factor <= 0.0:
+            raise ValueError("zoom_factor must be positive")
+        if self._full_view_bounds is None:
+            self.autofit()
+        assert self._full_view_bounds is not None
+        full_xmin, full_xmax, full_ymin, full_ymax = self._full_view_bounds
+        half_width = (full_xmax - full_xmin) / (2.0 * zoom_factor)
+        half_height = (full_ymax - full_ymin) / (2.0 * zoom_factor)
+        self._apply_view(
+            (
+                float(x) - half_width,
+                float(x) + half_width,
+                float(y) - half_height,
+                float(y) + half_height,
+            )
+        )
+
+    def reset_view(self) -> None:
+        """Restore the full data view recorded by the last autofit."""
+        if self._full_view_bounds is None:
+            self.autofit()
+            return
+        self._apply_view(self._full_view_bounds)
+
+    def _current_view(self) -> tuple[float, float, float, float]:
+        return (
+            self.view_xmin,
+            self.view_xmax,
+            self.view_ymin,
+            self.view_ymax,
+        )
+
+    def _view_for_current_aspect(
+        self,
+        bounds: tuple[float, float, float, float],
+    ) -> tuple[float, float, float, float]:
+        if not self._equal_aspect:
+            return bounds
+        return self._equalized_bounds(bounds)
+
+    def _equalized_bounds(
+        self,
+        bounds: tuple[float, float, float, float],
+    ) -> tuple[float, float, float, float]:
+        xmin, xmax, ymin, ymax = bounds
+        left, right, top, bottom = self.get_plot_rect(self.width(), self.height())
+        plot_width = max(1.0, right - left)
+        plot_height = max(1.0, bottom - top)
+        units_per_pixel = max(
+            (xmax - xmin) / plot_width,
+            (ymax - ymin) / plot_height,
+        )
+        center_x = (xmin + xmax) / 2.0
+        center_y = (ymin + ymax) / 2.0
+        half_width = units_per_pixel * plot_width / 2.0
+        half_height = units_per_pixel * plot_height / 2.0
+        return (
+            center_x - half_width,
+            center_x + half_width,
+            center_y - half_height,
+            center_y + half_height,
+        )
+
+    def _apply_view(
+        self,
+        bounds: tuple[float, float, float, float],
+    ) -> None:
+        self._invalidate_hover()
+        (
+            self.view_xmin,
+            self.view_xmax,
+            self.view_ymin,
+            self.view_ymax,
+        ) = bounds
+        self.view_changed.emit(
+            self.view_xmin,
+            self.view_xmax,
+            self.view_ymin,
+            self.view_ymax,
+        )
         self.update()
 
     def get_plot_rect(self, width, height) -> tuple[float, float, float, float]:
@@ -175,8 +305,10 @@ class PlotWidget(QWidget):
         x_range = self.view_xmax - self.view_xmin
         y_range = self.view_ymax - self.view_ymin
         
-        if x_range == 0: x_range = 1.0
-        if y_range == 0: y_range = 1.0
+        if x_range == 0:
+            x_range = 1.0
+        if y_range == 0:
+            y_range = 1.0
         
         px = left + (x - self.view_xmin) / x_range * plot_w
         py = bottom - (y - self.view_ymin) / y_range * plot_h
@@ -191,8 +323,10 @@ class PlotWidget(QWidget):
         x_range = self.view_xmax - self.view_xmin
         y_range = self.view_ymax - self.view_ymin
         
-        if plot_w == 0: plot_w = 1.0
-        if plot_h == 0: plot_h = 1.0
+        if plot_w == 0:
+            plot_w = 1.0
+        if plot_h == 0:
+            plot_h = 1.0
         
         x = self.view_xmin + (px - left) / plot_w * x_range
         y = self.view_ymin + (bottom - py) / plot_h * y_range
@@ -212,7 +346,8 @@ class PlotWidget(QWidget):
         
         dx = (dpx / plot_w) * x_range
         dy = -(dpy / plot_h) * y_range
-        
+
+        self._invalidate_hover()
         self.view_xmin -= dx
         self.view_xmax -= dx
         self.view_ymin -= dy
@@ -225,7 +360,8 @@ class PlotWidget(QWidget):
         """Zoom the viewport by a factor relative to a center point in data coordinates (cx, cy)."""
         if factor <= 0.0:
             return
-            
+
+        self._invalidate_hover()
         self.view_xmin = cx - (cx - self.view_xmin) / factor
         self.view_xmax = cx + (self.view_xmax - cx) / factor
         self.view_ymin = cy - (cy - self.view_ymin) / factor
@@ -235,6 +371,32 @@ class PlotWidget(QWidget):
         self.update()
 
     # Inter-page data linking highlight methods
+    def set_selected_point(
+        self,
+        series_name: str,
+        index: int,
+        *,
+        label: str = "",
+    ) -> None:
+        """Select one plotted point and optionally render its caller label."""
+        series = next(
+            (item for item in self.series_list if item.name == series_name),
+            None,
+        )
+        if series is None:
+            raise ValueError(f"unknown series: {series_name}")
+        if index < 0 or index >= len(series.x):
+            raise IndexError(f"point index out of range: {index}")
+        self.selected_point = (series_name, int(index))
+        self.selected_label = str(label)
+        self.update()
+
+    def clear_selected_point(self) -> None:
+        """Clear the caller-owned selected point."""
+        self.selected_point = None
+        self.selected_label = ""
+        self.update()
+
     def highlight_point(self, series_name: str, index: int):
         """Highlight a specific point from external widgets/pages."""
         if series_name not in self.highlighted_points:
@@ -251,6 +413,8 @@ class PlotWidget(QWidget):
     def mousePressEvent(self, event):
         if event.button() in (Qt.LeftButton, Qt.MiddleButton):
             self.last_mouse_pos = event.position()
+            self._press_pos = event.position()
+            self._dragged_since_press = False
             
     def mouseMoveEvent(self, event):
         curr_pos = event.position()
@@ -258,6 +422,13 @@ class PlotWidget(QWidget):
         
         # Panning
         if event.buttons() in (Qt.LeftButton, Qt.MiddleButton) and self.last_mouse_pos is not None:
+            if self._press_pos is not None:
+                drag_distance = (
+                    abs(curr_pos.x() - self._press_pos.x())
+                    + abs(curr_pos.y() - self._press_pos.y())
+                )
+                if drag_distance >= 4.0:
+                    self._dragged_since_press = True
             dpx = curr_pos.x() - self.last_mouse_pos.x()
             dpy = curr_pos.y() - self.last_mouse_pos.y()
             self.pan(dpx, dpy)
@@ -271,12 +442,30 @@ class PlotWidget(QWidget):
             self.check_nearest_point(curr_pos)
         else:
             self.hover_pos = None
-            self.selected_point = None
+            self._clear_hovered_point()
             
         self.update()
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if not self._dragged_since_press:
+                hit = self.check_nearest_point(event.position())
+                self._last_click_pos = event.position()
+                self._last_click_hit = hit
+                self._last_click_time = time.monotonic()
+                if hit is not None:
+                    series_name, index, x_value, y_value = hit
+                    self.point_clicked.emit(
+                        series_name,
+                        int(index),
+                        float(x_value),
+                        float(y_value),
+                    )
+            else:
+                self._clear_last_click()
         self.last_mouse_pos = None
+        self._press_pos = None
+        self._dragged_since_press = False
 
     def wheelEvent(self, event):
         curr_pos = event.position()
@@ -290,11 +479,78 @@ class PlotWidget(QWidget):
         self.zoom(factor, cx, cy)
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.autofit()
+        if event.button() != Qt.LeftButton:
+            return
+        hit = self.check_nearest_point(event.position())
+        previous_point_hit = self._double_click_started_on_point(event.position())
+        self._clear_last_click()
+        if hit is None and not previous_point_hit:
+            self.reset_view()
+            self.reset_requested.emit()
+
+    def _double_click_started_on_point(self, position: QPointF) -> bool:
+        if self._last_click_hit is None or self._last_click_pos is None:
+            return False
+        application = QApplication.instance()
+        interval_seconds = (
+            application.doubleClickInterval() / 1_000.0
+            if application is not None
+            else 0.5
+        )
+        elapsed = time.monotonic() - self._last_click_time
+        distance = math.hypot(
+            position.x() - self._last_click_pos.x(),
+            position.y() - self._last_click_pos.y(),
+        )
+        return elapsed <= interval_seconds and distance < 4.0
+
+    def _clear_last_click(self) -> None:
+        self._last_click_pos = None
+        self._last_click_hit = None
+        self._last_click_time = 0.0
+
+    def leaveEvent(self, event):
+        self._invalidate_hover()
+        super().leaveEvent(event)
+
+    def resizeEvent(self, event):
+        if self._equal_aspect and self._autofit_bounds is not None:
+            current_view = self._current_view()
+            previous_full_view = self._full_view_bounds
+            self._full_view_bounds = self._equalized_bounds(
+                self._autofit_bounds
+            )
+            if previous_full_view is None:
+                self._apply_view(self._full_view_bounds)
+            else:
+                current_width = current_view[1] - current_view[0]
+                current_height = current_view[3] - current_view[2]
+                zoom_factor = max(
+                    (previous_full_view[1] - previous_full_view[0])
+                    / max(current_width, np.finfo(float).eps),
+                    (previous_full_view[3] - previous_full_view[2])
+                    / max(current_height, np.finfo(float).eps),
+                )
+                center_x = (current_view[0] + current_view[1]) / 2.0
+                center_y = (current_view[2] + current_view[3]) / 2.0
+                half_width = (
+                    self._full_view_bounds[1] - self._full_view_bounds[0]
+                ) / (2.0 * zoom_factor)
+                half_height = (
+                    self._full_view_bounds[3] - self._full_view_bounds[2]
+                ) / (2.0 * zoom_factor)
+                self._apply_view(
+                    (
+                        center_x - half_width,
+                        center_x + half_width,
+                        center_y - half_height,
+                        center_y + half_height,
+                    )
+                )
+        super().resizeEvent(event)
 
     def check_nearest_point(self, mouse_pos):
-        """Identify if a point is close to the mouse cursor, and emit interactive linking signal."""
+        """Return and emit the nearest hover point within the activation radius."""
         closest_dist = 15.0  # Activation radius in pixels
         closest_pt = None  # (series, index, x, y)
         
@@ -310,7 +566,8 @@ class PlotWidget(QWidget):
                 indices = [indices]
                 
             for idx in indices:
-                if idx >= len(self._tree_metadata): continue
+                if idx >= len(self._tree_metadata):
+                    continue
                 s_name, local_idx, x_val, y_val = self._tree_metadata[idx]
                 px, py = self.data_to_pixel(x_val, y_val)
                 dist = math.hypot(mouse_pos.x() - px, mouse_pos.y() - py)
@@ -337,11 +594,28 @@ class PlotWidget(QWidget):
                     
         if closest_pt:
             s_name, idx, x_val, y_val = closest_pt
-            if self.selected_point != (s_name, idx):
-                self.selected_point = (s_name, idx)
+            if self.hovered_point != (s_name, idx):
+                self.hovered_point = (s_name, idx)
+                self.point_hovered.emit(
+                    s_name,
+                    int(idx),
+                    float(x_val),
+                    float(y_val),
+                )
                 self.point_selected.emit(s_name, int(idx), float(x_val), float(y_val))
         else:
-            self.selected_point = None
+            self._clear_hovered_point()
+        return closest_pt
+
+    def _clear_hovered_point(self) -> None:
+        if self.hovered_point is None:
+            return
+        self.hovered_point = None
+        self.point_hover_cleared.emit()
+
+    def _invalidate_hover(self) -> None:
+        self.hover_pos = None
+        self._clear_hovered_point()
 
     # Vector Export implementation
     def export_svg(self, filepath: str):
@@ -404,8 +678,10 @@ class PlotWidget(QWidget):
         def to_p(x_val, y_val):
             x_r = self.view_xmax - self.view_xmin
             y_r = self.view_ymax - self.view_ymin
-            if x_r == 0: x_r = 1.0
-            if y_r == 0: y_r = 1.0
+            if x_r == 0:
+                x_r = 1.0
+            if y_r == 0:
+                y_r = 1.0
             px = left + (x_val - self.view_xmin) / x_r * plot_w
             py = bottom - (y_val - self.view_ymin) / y_r * plot_h
             return px, py
@@ -440,7 +716,6 @@ class PlotWidget(QWidget):
                 line_pen = QPen(s.color, s.width, s.style)
                 painter.setPen(line_pen)
                 
-                in_line = False
                 poly = QPolygonF()
                 
                 for x_val, y_val in zip(sx, sy):
@@ -448,7 +723,6 @@ class PlotWidget(QWidget):
                         if len(poly) > 1:
                             painter.drawPolyline(poly)
                         poly.clear()
-                        in_line = False
                         continue
                         
                     px, py = to_p(x_val, y_val)
@@ -483,9 +757,9 @@ class PlotWidget(QWidget):
             painter.drawText(self.hover_pos.x() + 10, self.hover_pos.y() - 10, lbl_txt)
             painter.restore()
             
-        # Draw selected/linked hover point highlight ring
-        if self.selected_point is not None:
-            s_name, idx = self.selected_point
+        # Draw nearest hover point highlight ring
+        if self.hovered_point is not None:
+            s_name, idx = self.hovered_point
             series = next((s for s in self.series_list if s.name == s_name), None)
             if series is not None and 0 <= idx < len(series.x):
                 px, py = to_p(series.x[idx], series.y[idx])
@@ -493,6 +767,25 @@ class PlotWidget(QWidget):
                 painter.setPen(QPen(self.highlight_color, 2, Qt.SolidLine))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawEllipse(QPointF(px, py), 9.0, 9.0)
+                painter.restore()
+
+        # Draw caller-owned selected point and its label independently of hover.
+        if self.selected_point is not None:
+            s_name, idx = self.selected_point
+            series = next((s for s in self.series_list if s.name == s_name), None)
+            if series is not None and 0 <= idx < len(series.x):
+                px, py = to_p(series.x[idx], series.y[idx])
+                painter.save()
+                painter.setPen(QPen(self.axis_color, 3, Qt.SolidLine))
+                painter.setBrush(QBrush(self.highlight_color))
+                painter.drawEllipse(QPointF(px, py), 12.0, 12.0)
+                if self.selected_label:
+                    painter.setFont(QFont("Arial", 9, QFont.Bold))
+                    painter.setPen(self.highlight_color)
+                    painter.drawText(
+                        QPointF(px + 16.0, py - 12.0),
+                        self.selected_label,
+                    )
                 painter.restore()
 
         # Draw external highlighted/linked points (from bidirectional Map/Well selection)
