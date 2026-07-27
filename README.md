@@ -227,10 +227,19 @@ from geoviz import (
     PreviewCapabilities,
     PreviewKind,
     PreviewOptions,
+    PreviewRowIssue,
     PreviewRegistry,
     PreviewRequest,
+    PlotWidget,
+    XYPreviewDiagnostics,
+    XYPreviewPayload,
 )
 ```
+
+`PlotWidget` is the supported public Qt plot seam. Well-location preview
+payloads and their recoverable row diagnostics are public through
+`XYPreviewPayload`, `XYPreviewDiagnostics`, and `PreviewRowIssue`; consumers do
+not need to import private backend modules.
 
 `GeoVizEngine.supports()`, `capabilities()`, and `prepare()` do not create Qt
 objects and may run on a worker thread. Widget creation and rendering must occur

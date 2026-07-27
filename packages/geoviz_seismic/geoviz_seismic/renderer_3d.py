@@ -17,7 +17,7 @@ from OpenGL.GL import shaders as gl_shaders
 from .colormap import ColormapManager
 from .gpu_ops import (
     is_gpu_available, to_gpu, slice_volume_gpu,
-    sample_arbitrary_slice_gpu, sample_polyline_slice
+    sample_polyline_slice
 )
 
 logger = logging.getLogger(__name__)
@@ -79,10 +79,13 @@ class GLImageLutItem(gl.GLImageItem):
             #endif
             uniform sampler2D u_index;
             uniform sampler2D u_lut;
+            uniform float u_opacity;
             varying vec2 v_texcoord;
             void main() {
                 float idx = texture2D(u_index, v_texcoord).r;
-                gl_FragColor = texture2D(u_lut, vec2(idx, 0.5));
+                vec4 color = texture2D(u_lut, vec2(idx, 0.5));
+                color.a *= u_opacity;
+                gl_FragColor = color;
             }
         """,
     }
@@ -104,11 +107,14 @@ class GLImageLutItem(gl.GLImageItem):
             #endif
             uniform sampler2D u_index;
             uniform sampler2D u_lut;
+            uniform float u_opacity;
             in vec2 v_texcoord;
             out vec4 fragColor;
             void main() {
                 float idx = texture(u_index, v_texcoord).r;
-                fragColor = texture(u_lut, vec2(idx, 0.5));
+                vec4 color = texture(u_lut, vec2(idx, 0.5));
+                color.a *= u_opacity;
+                fragColor = color;
             }
         """,
     }
@@ -121,6 +127,15 @@ class GLImageLutItem(gl.GLImageItem):
         self._lut_tex = None
         self._lut_needs_upload = cmap_name is not None
         self._lut_shader_program = None
+        self._opacity = 1.0
+
+    def setOpacity(self, opacity: float) -> None:  # noqa: N802
+        """Set shared plane opacity without rebuilding the index texture."""
+        value = max(0.0, min(1.0, float(opacity)))
+        if value == self._opacity:
+            return
+        self._opacity = value
+        self.update()
 
     def setLut(self, cmap_name: str) -> None:
         """Update the colormap without re-uploading the index texture.
@@ -296,6 +311,8 @@ class GLImageLutItem(gl.GLImageItem):
             if self._lut_tex is not None:
                 loc_lut = GL.glGetUniformLocation(program, "u_lut")
                 GL.glUniform1i(loc_lut, 1)
+            loc_opacity = GL.glGetUniformLocation(program, "u_opacity")
+            GL.glUniform1f(loc_opacity, float(self._opacity))
             GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
 
         for loc in enabled_locs:
@@ -980,6 +997,15 @@ class Renderer3D(QWidget):
         self._il_pos = 0
         self._xl_pos = 0
         self._t_pos = 0
+        self._time_slice_positions: list[int] = []
+        self._time_slice_visibility: dict[int, bool] = {}
+        self._active_time_pos: int | None = None
+        # Standalone Renderer3D keeps its historical opaque plane; the joint
+        # scene explicitly supplies its product default (0.8).
+        self._time_slice_opacity = 1.0
+        self._time_slices_enabled = True
+        self._time_plane_items: dict[int, tuple[object, object]] = {}
+        self._planes_visible = True
         self._use_volume = False
         self._arb_polyline: list[tuple[float, float]] | None = None  # index-space waypoints
 
@@ -1022,6 +1048,7 @@ class Renderer3D(QWidget):
 
         # Controller layout for sliders
         ctrl = QWidget()
+        self._slice_controls = ctrl
         ctrl.setStyleSheet("background: #f8fafc;")
         cl = QHBoxLayout(ctrl)
         cl.setContentsMargins(8, 4, 8, 4)
@@ -1134,6 +1161,10 @@ class Renderer3D(QWidget):
         self._il_pos = ni // 2
         self._xl_pos = nx // 2
         self._t_pos = nt // 2
+        self._time_slice_positions = [self._t_pos]
+        self._time_slice_visibility = {self._t_pos: True}
+        self._active_time_pos = self._t_pos
+        self._time_slices_enabled = True
         
         # Setup spatial scaling
         si, sx, st = spacing
@@ -1283,7 +1314,16 @@ class Renderer3D(QWidget):
         # plane — no index re-computation or texture re-upload. Fall back to
         # the full rebuild only if the items don't exist yet (first build) or
         # aren't LUT items (e.g. the arbitrary curtain, still RGBA).
-        lut_items = [getattr(self, attr, None) for attr in ("_img_il", "_img_xl", "_img_t")]
+        lut_items = [
+            getattr(self, attr, None)
+            for attr in ("_img_il", "_img_xl")
+        ]
+        lut_items.extend(
+            image
+            for image, _line in getattr(
+                self, "_time_plane_items", {}
+            ).values()
+        )
         if all(isinstance(it, GLImageLutItem) for it in lut_items if it is not None):
             for it in lut_items:
                 if it is not None:
@@ -1482,8 +1522,9 @@ class Renderer3D(QWidget):
         self._overlay_volume_visual = None
 
     def _clear_visuals(self):
+        self._clear_time_plane_items()
         for v in (self._volume_visual, self._overlay_volume_visual, self._img_il, self._img_xl,
-                  self._img_t, self._img_arb, self._horizon_visual,
+                  self._img_arb, self._horizon_visual,
                   self._picks_visual, self._bbox_visual, self._cursor_sphere):
             if v is not None:
                 try:
@@ -1504,7 +1545,7 @@ class Renderer3D(QWidget):
                 pass
         self._axis_labels = []
         # Clear line items from borders
-        for attr in ('_line_il', '_line_xl', '_line_t', '_line_arb'):
+        for attr in ('_line_il', '_line_xl', '_line_arb'):
             v = getattr(self, attr, None)
             if v is not None:
                 try:
@@ -1926,29 +1967,119 @@ class Renderer3D(QWidget):
                 self._view.addItem(self._line_xl)
 
         elif axis == "time":
-            # 3. Time — Perpendicular to T axis (z)
-            t_raw = self._get_sliced_data(2, self._t_pos)
-            t_idx = ColormapManager.normalize_to_index(t_raw, lut_size=256, value_range=value_range)
+            self._sync_time_slice_planes(value_range=value_range)
 
-            if self._img_t is not None and self._line_t is not None:
-                # Fast In-Place Texture & Transform Update (Zero Scene Graph Overhead)
-                self._img_t.setData(t_idx)
-                self._img_t.resetTransform()
-                self._img_t.scale(si, sx, 1)
-                self._img_t.translate(0, 0, self._t_pos * st)
+    def _sync_time_slice_planes(
+        self, *, value_range: tuple[float, float] | None = None
+    ) -> None:
+        """Create/update all horizontal Time planes and their borders."""
+        if self._volume_data_cpu is None:
+            return
+        if value_range is None:
+            value_range = self._slice_value_range()
+        ni, nx, nt = self._volume_data_cpu.shape
+        si, sx, st = self._volume_spacing
+        positions = [
+            max(0, min(nt - 1, int(position)))
+            for position in self._time_slice_positions
+        ]
+        positions = sorted(dict.fromkeys(positions))[:8]
+        if not positions:
+            positions = [max(0, min(nt - 1, int(self._t_pos)))]
+        self._time_slice_positions = positions
+        self._time_slice_visibility = {
+            position: bool(self._time_slice_visibility.get(position, True))
+            for position in positions
+        }
+        if self._active_time_pos not in positions:
+            self._active_time_pos = positions[0]
+        self._t_pos = int(self._active_time_pos)
 
-                self._line_t.resetTransform()
-                self._line_t.translate(0, 0, self._t_pos * st)
+        for position in tuple(self._time_plane_items):
+            if position in positions:
+                continue
+            image, line = self._time_plane_items.pop(position)
+            for item in (image, line):
+                try:
+                    self._view.removeItem(item)
+                except Exception:
+                    pass
+
+        t_pts = np.array(
+            [
+                [0, 0, 0],
+                [ni * si, 0, 0],
+                [ni * si, nx * sx, 0],
+                [0, nx * sx, 0],
+                [0, 0, 0],
+            ]
+        )
+        for position in positions:
+            t_raw = self._get_sliced_data(2, position)
+            t_idx = ColormapManager.normalize_to_index(
+                t_raw,
+                lut_size=256,
+                value_range=value_range,
+            )
+            pair = self._time_plane_items.get(position)
+            if pair is None:
+                image = GLImageLutItem(
+                    t_idx, cmap_name=self._cmap_name
+                )
+                line = gl.GLLinePlotItem(
+                    pos=t_pts,
+                    color=(0.15, 0.55, 0.95, 1.0),
+                    width=1,
+                    antialias=True,
+                )
+                self._view.addItem(image)
+                self._view.addItem(line)
+                self._time_plane_items[position] = (image, line)
             else:
-                self._img_t = GLImageLutItem(t_idx, cmap_name=self._cmap_name)
-                self._img_t.scale(si, sx, 1)
-                self._img_t.translate(0, 0, self._t_pos * st)
-                self._view.addItem(self._img_t)
+                image, line = pair
+                image.setData(t_idx)
+            image.resetTransform()
+            image.scale(si, sx, 1)
+            image.translate(0, 0, position * st)
+            image.setOpacity(self._time_slice_opacity)
 
-                t_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, nx*sx, 0], [0, nx*sx, 0], [0, 0, 0]])
-                self._line_t = gl.GLLinePlotItem(pos=t_pts, color=(0, 0, 1, 1), width=2, antialias=True)
-                self._line_t.translate(0, 0, self._t_pos * st)
-                self._view.addItem(self._line_t)
+            active = position == self._active_time_pos
+            line.setData(
+                pos=t_pts,
+                color=(
+                    (1.0, 0.72, 0.12, 1.0)
+                    if active
+                    else (0.15, 0.55, 0.95, 0.9)
+                ),
+                width=3 if active else 1,
+                antialias=True,
+            )
+            line.resetTransform()
+            line.translate(0, 0, position * st)
+            visible = bool(
+                self._planes_visible
+                and self._time_slices_enabled
+                and self._time_slice_visibility.get(position, True)
+            )
+            image.setVisible(visible)
+            line.setVisible(visible)
+
+        self._img_t, self._line_t = self._time_plane_items[
+            int(self._active_time_pos)
+        ]
+
+    def _clear_time_plane_items(self) -> None:
+        for image, line in getattr(
+            self, "_time_plane_items", {}
+        ).values():
+            for item in (image, line):
+                try:
+                    self._view.removeItem(item)
+                except Exception:
+                    pass
+        self._time_plane_items = {}
+        self._img_t = None
+        self._line_t = None
 
     _PLANE_ATTRS = {
         "inline": ("_img_il", "_line_il"),
@@ -1966,9 +2097,10 @@ class Renderer3D(QWidget):
             axes = None  # fall through to full path
         if axes is None:
             # Original full-rebuild body (unchanged):
+            self._clear_time_plane_items()
             items_to_clean = (
-                getattr(self, "_img_il", None), getattr(self, "_img_xl", None), getattr(self, "_img_t", None), getattr(self, "_img_arb", None),
-                getattr(self, "_line_il", None), getattr(self, "_line_xl", None), getattr(self, "_line_t", None), getattr(self, "_line_arb", None)
+                getattr(self, "_img_il", None), getattr(self, "_img_xl", None), getattr(self, "_img_arb", None),
+                getattr(self, "_line_il", None), getattr(self, "_line_xl", None), getattr(self, "_line_arb", None)
             )
             for v in items_to_clean:
                 if v is not None:
@@ -2246,13 +2378,12 @@ class Renderer3D(QWidget):
         Overlay items (wells, fences) added by hosts stay under host control.
         """
         vis = bool(visible)
+        self._planes_visible = vis
         for attr in (
             "_img_il",
             "_img_xl",
-            "_img_t",
             "_line_il",
             "_line_xl",
-            "_line_t",
             "_volume_visual",
             "_img_arb",
             "_line_arb",
@@ -2264,6 +2395,20 @@ class Renderer3D(QWidget):
                 item.setVisible(vis)
             except Exception:
                 pass
+        time_items = getattr(self, "_time_plane_items", {})
+        for position, (image, line) in time_items.items():
+            time_visible = bool(
+                vis
+                and self._time_slices_enabled
+                and self._time_slice_visibility.get(position, True)
+            )
+            image.setVisible(time_visible)
+            line.setVisible(time_visible)
+        if not time_items:
+            for attr in ("_img_t", "_line_t"):
+                item = getattr(self, attr, None)
+                if item is not None:
+                    item.setVisible(vis)
         # Keep widget itself visible so host overlays remain on-screen
         try:
             self.setVisible(True)
@@ -2281,10 +2426,36 @@ class Renderer3D(QWidget):
         """
         if not self._loaded:
             return
+        if slice_type == "time":
+            current = self._active_time_pos
+            visibility = bool(
+                self._time_slice_visibility.get(
+                    int(current) if current is not None else int(position),
+                    True,
+                )
+            )
+            pairs = [
+                (sample, visible)
+                for sample, visible in self.get_time_slices()
+                if sample != current and sample != int(position)
+            ]
+            pairs.append((int(position), visibility))
+            self.set_time_slices(
+                pairs,
+                active=int(position),
+                opacity=self._time_slice_opacity,
+                enabled=self._time_slices_enabled,
+            )
+            slider = self._t_slider
+            slider.blockSignals(True)
+            slider.setValue(int(position))
+            slider._val_label.setText(str(int(position)))
+            slider.blockSignals(False)
+            self.slice_changed.emit(slice_type, int(position))
+            return
         slider_map = {
             "inline": (self._il_slider, "_il_pos"),
             "crossline": (self._xl_slider, "_xl_pos"),
-            "time": (self._t_slider, "_t_pos"),
         }
         entry = slider_map.get(slice_type)
         if entry is None:
@@ -2297,6 +2468,83 @@ class Renderer3D(QWidget):
         setattr(self, attr, position)
         # 3D slice planes rebuilt in the debounced handler, not here.
         self.slice_changed.emit(slice_type, position)
+
+    def set_slice_controls_visible(self, visible: bool) -> None:
+        """Show/hide the renderer's legacy three-slider control strip."""
+        controls = getattr(self, "_slice_controls", None)
+        if controls is not None:
+            controls.setVisible(bool(visible))
+
+    def get_time_slices(self) -> tuple[tuple[int, bool], ...]:
+        """Public render-state snapshot ordered by sample index."""
+        return tuple(
+            (
+                int(position),
+                bool(self._time_slice_visibility.get(position, True)),
+            )
+            for position in sorted(self._time_slice_positions)
+        )
+
+    def set_time_slices(
+        self,
+        slices: list[tuple[int, bool]]
+        | tuple[tuple[int, bool], ...],
+        *,
+        active: int | None = None,
+        opacity: float = 0.8,
+        enabled: bool = True,
+    ) -> None:
+        """Public: replace the horizontal Time plane render state."""
+        unique: dict[int, bool] = {}
+        for sample, visible in slices:
+            unique[int(sample)] = bool(visible)
+        positions = sorted(unique)[:8]
+        if not positions:
+            positions = [int(getattr(self, "_t_pos", 0) or 0)]
+            unique[positions[0]] = True
+        selected = int(active) if active is not None else positions[0]
+        if selected not in positions:
+            selected = positions[0]
+        self._time_slice_positions = positions
+        self._time_slice_visibility = {
+            position: unique[position] for position in positions
+        }
+        self._active_time_pos = selected
+        self._t_pos = selected
+        self._time_slice_opacity = max(
+            0.0, min(1.0, float(opacity))
+        )
+        self._time_slices_enabled = bool(enabled)
+        if getattr(self, "_loaded", False):
+            self._sync_time_slice_planes()
+            try:
+                self._view.update()
+            except Exception:
+                pass
+
+    def set_orthogonal_slices(
+        self,
+        il: int,
+        xl: int,
+        time_slices: tuple[tuple[int, bool], ...],
+        *,
+        active_time: int,
+        time_opacity: float,
+        time_enabled: bool = True,
+    ) -> None:
+        """Public host seam for one IL, one XL and many Time planes."""
+        if not self._loaded:
+            return
+        self.set_position_external("inline", int(il))
+        self.set_position_external("crossline", int(xl))
+        self.set_time_slices(
+            time_slices,
+            active=int(active_time),
+            opacity=float(time_opacity),
+            enabled=bool(time_enabled),
+        )
+        self._update_slice_planes_for({"inline", "crossline"})
+        self._view.update()
 
     def apply_slice_positions(
         self, il: int, xl: int, t: int, *, rebuild: bool = True

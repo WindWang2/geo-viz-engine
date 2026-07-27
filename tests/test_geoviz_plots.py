@@ -102,9 +102,13 @@ def test_plot_widget_emits_distinct_hover_and_click_events(qtbot):
 
     hovered = []
     clicked = []
+    legacy_selected = []
     hover_cleared = []
     widget.point_hovered.connect(lambda *point: hovered.append(point))
     widget.point_clicked.connect(lambda *point: clicked.append(point))
+    widget.point_selected.connect(
+        lambda *point: legacy_selected.append(point)
+    )
     widget.point_hover_cleared.connect(lambda: hover_cleared.append(True))
 
     px, py = widget.data_to_pixel(10.0, 30.0)
@@ -113,6 +117,7 @@ def test_plot_widget_emits_distinct_hover_and_click_events(qtbot):
 
     assert hovered == [("Well locations", 0, 10.0, 30.0)]
     assert clicked == []
+    assert legacy_selected == []
 
     qtbot.mouseClick(widget, Qt.LeftButton, pos=point)
 
@@ -228,6 +233,20 @@ def test_plot_widget_focus_is_equal_aspect_idempotent_and_resettable(qtbot):
         widget.view_ymin,
         widget.view_ymax,
     ) == pytest.approx(full_view)
+
+
+def test_plot_widget_public_view_snapshot_and_axis_labels(qtbot):
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 600)
+    widget.set_axis_labels("X (m)", "Y (m)")
+
+    widget.set_view_bounds((-5.0, 15.0, 20.0, 40.0))
+
+    assert widget.view_bounds() == pytest.approx(
+        (-5.0, 15.0, 20.0, 40.0)
+    )
+    assert widget.axis_labels() == ("X (m)", "Y (m)")
 
 
 def test_plot_widget_selected_point_is_independent_from_hover(qtbot):

@@ -26,7 +26,10 @@ class PlotWidget(QWidget):
     point_hovered = Signal(str, int, float, float)  # series_name, index, x, y
     point_hover_cleared = Signal()
     point_clicked = Signal(str, int, float, float)  # series_name, index, x, y
-    point_selected = Signal(str, int, float, float)  # series_name, index, x, y
+    # Deprecated compatibility attribute. It no longer emits because its
+    # historical hover semantics contradicted the name; use point_hovered or
+    # point_clicked according to intent.
+    point_selected = Signal(str, int, float, float)
     reset_requested = Signal()
     view_changed = Signal(float, float, float, float)  # xmin, xmax, ymin, ymax
 
@@ -60,6 +63,8 @@ class PlotWidget(QWidget):
         self.margin_right = 25
         self.margin_top = 25
         self.margin_bottom = 50
+        self._x_axis_label = ""
+        self._y_axis_label = ""
         
         # Interaction states
         self.last_mouse_pos = None
@@ -228,6 +233,35 @@ class PlotWidget(QWidget):
             self.autofit()
             return
         self._apply_view(self._full_view_bounds)
+
+    def view_bounds(self) -> tuple[float, float, float, float]:
+        """Return the exact current data viewport."""
+        return self._current_view()
+
+    def set_view_bounds(
+        self,
+        bounds: tuple[float, float, float, float],
+    ) -> None:
+        """Restore an exact data viewport previously returned by view_bounds."""
+        values = tuple(float(value) for value in bounds)
+        if (
+            len(values) != 4
+            or not all(math.isfinite(value) for value in values)
+            or values[0] >= values[1]
+            or values[2] >= values[3]
+        ):
+            raise ValueError("view bounds must be finite increasing ranges")
+        self._apply_view(values)
+
+    def set_axis_labels(self, x_label: str, y_label: str) -> None:
+        """Set caller-owned, domain-neutral X/Y axis titles."""
+        self._x_axis_label = str(x_label)
+        self._y_axis_label = str(y_label)
+        self.update()
+
+    def axis_labels(self) -> tuple[str, str]:
+        """Return the current X/Y axis titles."""
+        return self._x_axis_label, self._y_axis_label
 
     def _current_view(self) -> tuple[float, float, float, float]:
         return (
@@ -602,7 +636,6 @@ class PlotWidget(QWidget):
                     float(x_val),
                     float(y_val),
                 )
-                self.point_selected.emit(s_name, int(idx), float(x_val), float(y_val))
         else:
             self._clear_hovered_point()
         return closest_pt
@@ -616,6 +649,48 @@ class PlotWidget(QWidget):
     def _invalidate_hover(self) -> None:
         self.hover_pos = None
         self._clear_hovered_point()
+
+    def _resolve_point(self, reference):
+        if reference is None:
+            return None
+        series_name, index = reference
+        series = next(
+            (
+                candidate
+                for candidate in self.series_list
+                if candidate.name == series_name
+            ),
+            None,
+        )
+        if series is None or not 0 <= index < len(series.x):
+            return None
+        return float(series.x[index]), float(series.y[index])
+
+    def _draw_point_indicator(
+        self,
+        painter,
+        to_pixel,
+        reference,
+        *,
+        pen,
+        brush,
+        radii,
+        label="",
+    ):
+        point = self._resolve_point(reference)
+        if point is None:
+            return
+        px, py = to_pixel(*point)
+        painter.save()
+        painter.setPen(pen)
+        painter.setBrush(brush)
+        for radius in radii:
+            painter.drawEllipse(QPointF(px, py), radius, radius)
+        if label:
+            painter.setFont(QFont("Arial", 9, QFont.Bold))
+            painter.setPen(self.highlight_color)
+            painter.drawText(QPointF(px + 16.0, py - 12.0), label)
+        painter.restore()
 
     # Vector Export implementation
     def export_svg(self, filepath: str):
@@ -758,51 +833,41 @@ class PlotWidget(QWidget):
             painter.restore()
             
         # Draw nearest hover point highlight ring
-        if self.hovered_point is not None:
-            s_name, idx = self.hovered_point
-            series = next((s for s in self.series_list if s.name == s_name), None)
-            if series is not None and 0 <= idx < len(series.x):
-                px, py = to_p(series.x[idx], series.y[idx])
-                painter.save()
-                painter.setPen(QPen(self.highlight_color, 2, Qt.SolidLine))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(QPointF(px, py), 9.0, 9.0)
-                painter.restore()
+        self._draw_point_indicator(
+            painter,
+            to_p,
+            self.hovered_point,
+            pen=QPen(self.highlight_color, 2, Qt.SolidLine),
+            brush=Qt.NoBrush,
+            radii=(9.0,),
+        )
 
         # Draw caller-owned selected point and its label independently of hover.
-        if self.selected_point is not None:
-            s_name, idx = self.selected_point
-            series = next((s for s in self.series_list if s.name == s_name), None)
-            if series is not None and 0 <= idx < len(series.x):
-                px, py = to_p(series.x[idx], series.y[idx])
-                painter.save()
-                painter.setPen(QPen(self.axis_color, 3, Qt.SolidLine))
-                painter.setBrush(QBrush(self.highlight_color))
-                painter.drawEllipse(QPointF(px, py), 12.0, 12.0)
-                if self.selected_label:
-                    painter.setFont(QFont("Arial", 9, QFont.Bold))
-                    painter.setPen(self.highlight_color)
-                    painter.drawText(
-                        QPointF(px + 16.0, py - 12.0),
-                        self.selected_label,
-                    )
-                painter.restore()
+        self._draw_point_indicator(
+            painter,
+            to_p,
+            self.selected_point,
+            pen=QPen(self.axis_color, 3, Qt.SolidLine),
+            brush=QBrush(self.highlight_color),
+            radii=(12.0,),
+            label=self.selected_label,
+        )
 
         # Draw external highlighted/linked points (from bidirectional Map/Well selection)
         for s_name, indices in self.highlighted_points.items():
-            series = next((s for s in self.series_list if s.name == s_name), None)
-            if series is None:
-                continue
             for idx in indices:
-                if 0 <= idx < len(series.x):
-                    px, py = to_p(series.x[idx], series.y[idx])
-                    painter.save()
-                    painter.setPen(QPen(self.highlight_color, 1.5, Qt.SolidLine))
-                    # Draw a nice pulse indicator (concentric rings)
-                    painter.setBrush(Qt.NoBrush)
-                    painter.drawEllipse(QPointF(px, py), 6.0, 6.0)
-                    painter.drawEllipse(QPointF(px, py), 10.0, 10.0)
-                    painter.restore()
+                self._draw_point_indicator(
+                    painter,
+                    to_p,
+                    (s_name, idx),
+                    pen=QPen(
+                        self.highlight_color,
+                        1.5,
+                        Qt.SolidLine,
+                    ),
+                    brush=Qt.NoBrush,
+                    radii=(6.0, 10.0),
+                )
 
         # 6. Draw axis borders & tick labels (above plot data overlay)
         painter.save()
@@ -841,6 +906,27 @@ class PlotWidget(QWidget):
                 painter.setPen(self.text_color)
                 painter.drawText(left - lbl_w - 10, py + font_metrics.height() / 4, label)
                 painter.setPen(axis_pen)
+
+        if self._x_axis_label:
+            painter.setPen(self.text_color)
+            label_width = font_metrics.horizontalAdvance(
+                self._x_axis_label
+            )
+            painter.drawText(
+                left + (plot_w - label_width) / 2.0,
+                bottom + 42.0,
+                self._x_axis_label,
+            )
+        if self._y_axis_label:
+            painter.save()
+            painter.setPen(self.text_color)
+            label_width = font_metrics.horizontalAdvance(
+                self._y_axis_label
+            )
+            painter.translate(16.0, top + (plot_h + label_width) / 2.0)
+            painter.rotate(-90.0)
+            painter.drawText(0.0, 0.0, self._y_axis_label)
+            painter.restore()
                 
         painter.restore()
 

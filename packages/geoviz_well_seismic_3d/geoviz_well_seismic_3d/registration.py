@@ -65,6 +65,18 @@ class VolumeRegistration:
         full_nt = max(s.n_samples - 1, 1)
         return full_t / full_nt * max(self.n_sample - 1, 0)
 
+    def sample_idx_to_time_ms(self, sample_index: float) -> float:
+        """Map a loaded/preview sample index back to represented TWT ms."""
+        preview_nt = max(self.n_sample - 1, 1)
+        full_index = (
+            float(sample_index)
+            / preview_nt
+            * max(self.survey.n_samples - 1, 0)
+        )
+        return float(
+            self.survey.t0_ms + full_index * self.survey.dt_ms
+        )
+
     def clamp_indices(self, il_idx: float, xl_idx: float, t_idx: float) -> tuple[int, int, int]:
         return (
             int(max(0, min(self.n_inline - 1, round(il_idx)))),

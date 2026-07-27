@@ -2,16 +2,44 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING
 
 import numpy as np
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QLinearGradient,
+    QPainter,
+    QPixmap,
+)
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+
+from .color_scales import (
+    GR_COLOR_SCALES,
+    MISSING_GR_RGBA,
+    colorize_gr,
+)
+from .models import JointWellId
 
 if TYPE_CHECKING:
     from .scene import WellSeismicScene
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class WellOverlaySpec:
+    """Render-ready independent line segments for one GR-colored well."""
+
+    id: JointWellId
+    positions: np.ndarray
+    colors: np.ndarray
+    head_position: np.ndarray
+    head_color: tuple[float, float, float, float]
+    width_px: int
 
 
 class WellSeismicJointWidget(QWidget):
@@ -30,6 +58,7 @@ class WellSeismicJointWidget(QWidget):
         self._well_items: list = []
         self._curtain_items: list = []
         self._probe_item = None
+        self._gr_legend: QLabel | None = None
         self._status = QLabel("井震联合场景未加载")
         self._status.setStyleSheet("color: #64748b; padding: 4px 8px;")
 
@@ -43,7 +72,19 @@ class WellSeismicJointWidget(QWidget):
 
             self._gl = gl
             self._renderer = Renderer3D(self)
+            self._set_default_render_mode()
+            set_controls_visible = getattr(
+                self._renderer, "set_slice_controls_visible", None
+            )
+            if callable(set_controls_visible):
+                set_controls_visible(False)
             layout.addWidget(self._renderer, 1)
+            self._gr_legend = QLabel(self._renderer)
+            self._gr_legend.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents
+            )
+            self._gr_legend.setFixedSize(92, 150)
+            self._gr_legend.show()
         except Exception as exc:  # pragma: no cover
             logger.warning("Renderer3D unavailable: %s", exc)
             self._renderer = None
@@ -72,6 +113,66 @@ class WellSeismicJointWidget(QWidget):
     def profile_widget(self):
         """Public access to the fence 2D profile (may be reparented by hosts)."""
         return getattr(self, "_profile", None)
+
+    @property
+    def gr_legend_title(self) -> str:
+        return "GR (API)"
+
+    def well_overlay_specs(self) -> dict[JointWellId, WellOverlaySpec]:
+        """Return the exact GR segment colors and widths used by the 3D overlay."""
+        scene = self._scene
+        if scene is None:
+            return {}
+        value_range = scene.gr_value_range() or (0.0, 1.0)
+        settings = scene.display_settings
+        specs: dict[JointWellId, WellOverlaySpec] = {}
+        for well_id, track in scene.gr_well_trajectories(
+            visible_only=True
+        ).items():
+            pos = self._traj_to_render(track.points)
+            rgba = colorize_gr(
+                track.gr_values,
+                value_range=value_range,
+                color_scale=settings.gr_color_scale,
+            ).astype(np.float32) / 255.0
+            segment_pos = np.empty(
+                (max(len(pos) - 1, 0) * 2, 3), dtype=np.float32
+            )
+            segment_colors = np.empty(
+                (len(segment_pos), 4), dtype=np.float32
+            )
+            for index in range(max(len(pos) - 1, 0)):
+                segment_pos[index * 2 : index * 2 + 2] = pos[
+                    index : index + 2
+                ]
+                values = track.gr_values[index : index + 2]
+                if np.all(np.isfinite(values)):
+                    segment_colors[index * 2 : index * 2 + 2] = rgba[
+                        index : index + 2
+                    ]
+                else:
+                    segment_colors[index * 2 : index * 2 + 2] = (
+                        np.asarray(MISSING_GR_RGBA, dtype=np.float32)
+                        / 255.0
+                    )
+            head = (
+                tuple(float(value) for value in rgba[0])
+                if len(rgba)
+                else tuple(value / 255.0 for value in MISSING_GR_RGBA)
+            )
+            specs[well_id] = WellOverlaySpec(
+                id=well_id,
+                positions=segment_pos,
+                colors=segment_colors,
+                head_position=(
+                    pos[0]
+                    if len(pos)
+                    else np.zeros(3, dtype=np.float32)
+                ),
+                head_color=head,
+                width_px=settings.well_width_px,
+            )
+        return specs
 
     def take_profile_widget(self):
         """Detach fence 2D profile for embedding in a separate host panel."""
@@ -161,26 +262,54 @@ class WellSeismicJointWidget(QWidget):
         self._scene = scene
         self._sync_from_scene()
 
+    def _set_default_render_mode(self) -> None:
+        """Keep the joint workspace in orthogonal-slice mode by default."""
+        renderer = self._renderer
+        if renderer is None:
+            return
+        set_mode = getattr(renderer, "set_render_mode", None)
+        if callable(set_mode):
+            set_mode("planes")
+
     def set_well_trajectories(self, trajectories: dict) -> None:
-        """Public: replace well polylines from trajectory map name→WellTrajectory3D."""
+        """Public: replace wells with GR-colored, outlined trajectory segments."""
         self._clear_items(self._well_items)
         if self._renderer is None or self._gl is None or self._scene is None:
             return
         view = self._view()
         if view is None:
             return
-        for traj in trajectories.values():
-            pts = traj.points
-            if pts.size == 0:
+        allowed = set(trajectories)
+        for well_id, spec in self.well_overlay_specs().items():
+            if well_id not in allowed:
                 continue
-            pos = self._traj_to_render(pts)
-            color = (0.2, 0.9, 0.4, 1.0) if traj.has_td else (0.9, 0.7, 0.2, 1.0)
-            line = self._gl.GLLinePlotItem(pos=pos, color=color, width=2, antialias=True)
-            view.addItem(line)
-            self._well_items.append(line)
-            scatter = self._gl.GLScatterPlotItem(pos=pos[:1], color=color, size=8)
+            if len(spec.positions):
+                outline = self._gl.GLLinePlotItem(
+                    pos=spec.positions,
+                    color=(0.06, 0.09, 0.16, 1.0),
+                    width=spec.width_px + 2,
+                    mode="lines",
+                    antialias=True,
+                )
+                view.addItem(outline)
+                self._well_items.append(outline)
+                line = self._gl.GLLinePlotItem(
+                    pos=spec.positions,
+                    color=spec.colors,
+                    width=spec.width_px,
+                    mode="lines",
+                    antialias=True,
+                )
+                view.addItem(line)
+                self._well_items.append(line)
+            scatter = self._gl.GLScatterPlotItem(
+                pos=np.asarray([spec.head_position], dtype=np.float32),
+                color=spec.head_color,
+                size=spec.width_px + 7,
+            )
             view.addItem(scatter)
             self._well_items.append(scatter)
+        self._update_gr_legend()
 
     def set_fence_curtains(self, extractions: list) -> None:
         """Public: draw fence curtains from FenceExtraction list (or active only)."""
@@ -220,7 +349,21 @@ class WellSeismicJointWidget(QWidget):
         self._view().addItem(self._probe_item)
 
     def set_slice_indices(self, il: int, xl: int, sample: int) -> None:
-        """Drive orthogonal slices and rebuild plane geometry immediately."""
+        """Compatibility: move IL/XL and only the active Time slice."""
+        scene = self._scene
+        if scene is not None and scene.registration is not None:
+            try:
+                scene.set_orthogonal_slice_indices(
+                    inline_index=int(il),
+                    crossline_index=int(xl),
+                )
+                scene.move_active_time_slice_to_sample(int(sample))
+                self.sync_orthogonal_slices()
+                return
+            except Exception:
+                logger.debug(
+                    "scene slice-state update failed", exc_info=True
+                )
         r = self._renderer
         if r is None:
             return
@@ -246,6 +389,40 @@ class WellSeismicJointWidget(QWidget):
                 rebuild()
             except Exception:
                 pass
+
+    def set_active_time_sample(self, sample: int) -> None:
+        """Move ActiveTimeSlice without changing IL or XL."""
+        scene = self._scene
+        if scene is None:
+            return
+        try:
+            scene.move_active_time_slice_to_sample(int(sample))
+            self.sync_orthogonal_slices()
+        except Exception:
+            logger.debug("active Time slice update failed", exc_info=True)
+
+    def sync_orthogonal_slices(self) -> None:
+        """Render the scene-owned orthogonal slice state."""
+        scene = self._scene
+        renderer = self._renderer
+        if scene is None or renderer is None:
+            return
+        render_state = scene.orthogonal_slice_render_state()
+        if render_state is None:
+            return
+        il, xl, times, active, opacity = render_state
+        set_all = getattr(renderer, "set_orthogonal_slices", None)
+        if callable(set_all):
+            set_all(
+                il,
+                xl,
+                times,
+                active_time=active,
+                time_opacity=opacity,
+                time_enabled=scene.vertical_domain.value == "time",
+            )
+            return
+        renderer.apply_slice_positions(il, xl, active, rebuild=True)
 
     def set_camera_pose(
         self,
@@ -283,6 +460,55 @@ class WellSeismicJointWidget(QWidget):
             return None
         return getattr(self._renderer, "_view", None)
 
+    def _update_gr_legend(self) -> None:
+        if self._gr_legend is None or self._scene is None:
+            return
+        settings = self._scene.display_settings
+        value_range = self._scene.gr_value_range()
+        pix = QPixmap(self._gr_legend.size())
+        pix.fill(QColor(15, 23, 42, 224))
+        painter = QPainter(pix)
+        painter.setPen(QColor(226, 232, 240))
+        painter.drawText(8, 17, self.gr_legend_title)
+        top, bottom, left = 28, 128, 10
+        gradient = QLinearGradient(
+            float(left), float(bottom), float(left), float(top)
+        )
+        stops = GR_COLOR_SCALES.get(
+            settings.gr_color_scale, GR_COLOR_SCALES["viridis"]
+        )
+        for index, color in enumerate(stops):
+            gradient.setColorAt(
+                index / max(len(stops) - 1, 1), QColor(*color)
+            )
+        painter.fillRect(
+            QRectF(left, top, 14, bottom - top), QBrush(gradient)
+        )
+        painter.setPen(QColor(148, 163, 184))
+        painter.drawRect(QRectF(left, top, 14, bottom - top))
+        painter.setPen(QColor(226, 232, 240))
+        if value_range is None:
+            painter.drawText(29, 42, "无数据")
+        else:
+            painter.drawText(29, 38, f"{value_range[1]:.3g}")
+            painter.drawText(29, 128, f"{value_range[0]:.3g}")
+        painter.end()
+        self._gr_legend.setPixmap(pix)
+        self._position_gr_legend()
+
+    def _position_gr_legend(self) -> None:
+        if self._gr_legend is None or self._renderer is None:
+            return
+        self._gr_legend.move(
+            max(self._renderer.width() - self._gr_legend.width() - 8, 0),
+            8,
+        )
+        self._gr_legend.raise_()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._position_gr_legend()
+
     def _sync_from_scene(self) -> None:
         scene = self._scene
         if scene is None:
@@ -294,7 +520,9 @@ class WellSeismicJointWidget(QWidget):
             data = getattr(vol, "data", None)
             if data is not None:
                 try:
+                    self._set_default_render_mode()
                     self._renderer.load_volume(np.asarray(data, dtype=np.float32))
+                    self.sync_orthogonal_slices()
                 except Exception as exc:
                     logger.warning("load_volume failed: %s", exc)
 
@@ -319,7 +547,7 @@ class WellSeismicJointWidget(QWidget):
             self.set_probe_marker(scene.world_to_render_xyz(p.x, p.y, p.z))
             idx = scene.probe_slice_indices()
             if idx is not None:
-                self.set_slice_indices(*idx)
+                self.set_active_time_sample(idx[2])
 
         survey = scene.survey
         survey_txt = (
@@ -351,7 +579,7 @@ class WellSeismicJointWidget(QWidget):
                 self.set_probe_marker(self._scene.world_to_render_xyz(p.x, p.y, p.z))
                 idx = self._scene.probe_slice_indices()
                 if idx is not None:
-                    self.set_slice_indices(*idx)
+                    self.set_active_time_sample(idx[2])
         except Exception as exc:
             logger.debug("probe failed: %s", exc)
 

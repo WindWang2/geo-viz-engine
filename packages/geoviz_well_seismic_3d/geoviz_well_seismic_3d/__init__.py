@@ -10,9 +10,13 @@ from .depth_transform import (
 )
 from .fence import FenceExtraction, FenceSection, extract_fence_strip, well_to_well_path
 from .models import (
+    JointDisplaySettings,
     JointWellId,
+    OrthogonalSliceState,
     TimeDepthTable,
+    TimeSliceState,
     VerticalDomain,
+    WellGrTrajectory,
     WellHead,
     WellTrajectory3D,
 )
@@ -36,15 +40,19 @@ __all__ = [
     "FenceExtraction",
     "FenceSection",
     "InMemoryVolumeAccess",
+    "JointDisplaySettings",
     "JointWellPresentation",
     "JointWellId",
+    "OrthogonalSliceState",
     "ProbeState",
     "ProfileWellHit",
     "SurveySpec",
     "TimeDepthTable",
+    "TimeSliceState",
     "VerticalDomain",
     "VolumeAccess",
     "VolumeRegistration",
+    "WellGrTrajectory",
     "WellHead",
     "WellSeismicScene",
     "WellTrajectory3D",

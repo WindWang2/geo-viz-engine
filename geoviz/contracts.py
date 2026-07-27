@@ -21,6 +21,10 @@ class PreviewRequest:
     semantic_type: str
     format: str
     label: str = ""
+    source_version: str = ""
+    source_crs: str = ""
+    coordinate_units: str = ""
+    comparison_crs: str = ""
 
     @property
     def normalized_format(self) -> str:

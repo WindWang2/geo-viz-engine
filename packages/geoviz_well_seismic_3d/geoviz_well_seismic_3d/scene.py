@@ -9,9 +9,14 @@ import numpy as np
 from .depth_transform import DepthTransformState, select_depth_transform
 from .fence import FenceExtraction, FenceSection, extract_fence_strip, well_to_well_path
 from .models import (
+    JointDisplaySettings,
     JointWellId,
+    MAX_TIME_SLICES,
+    OrthogonalSliceState,
     TimeDepthTable,
+    TimeSliceState,
     VerticalDomain,
+    WellGrTrajectory,
     WellHead,
     WellTrajectory3D,
 )
@@ -36,6 +41,7 @@ class ProfileWellHit:
     tops: list[tuple[str, float]]  # (top_name, z in active domain)
     curve_name: str | None = None
     curve_md: np.ndarray | None = None
+    curve_z: np.ndarray | None = None
     curve_values: np.ndarray | None = None
 
 
@@ -55,6 +61,9 @@ class WellSeismicScene:
     def __init__(self) -> None:
         self._survey: SurveySpec | None = None
         self._domain: VerticalDomain = VerticalDomain.TIME
+        self._display_settings = JointDisplaySettings()
+        self._orthogonal_slice_state = OrthogonalSliceState()
+        self._slice_state_warning = ""
         self._wells: list[WellHead] = []
         self._well_ids: list[JointWellId] = []
         self._well_visibility: dict[JointWellId, bool] = {}
@@ -88,6 +97,7 @@ class WellSeismicScene:
         self._invalidate_traj()
         self._extract_cache.clear()
         self._rebuild_registration()
+        self._reconcile_orthogonal_slice_state()
 
     def set_survey_from_corners(
         self,
@@ -142,6 +152,324 @@ class WellSeismicScene:
     @property
     def vertical_domain(self) -> VerticalDomain:
         return self._domain
+
+    @property
+    def display_settings(self) -> JointDisplaySettings:
+        return self._display_settings
+
+    def set_display_settings(self, settings: JointDisplaySettings) -> None:
+        self._display_settings = settings
+
+    @property
+    def orthogonal_slice_state(self) -> OrthogonalSliceState:
+        return self._orthogonal_slice_state
+
+    @property
+    def slice_state_warning(self) -> str:
+        return self._slice_state_warning
+
+    def restore_orthogonal_slice_state(
+        self, state: OrthogonalSliceState
+    ) -> None:
+        """Restore project state now; reconcile once survey/volume are ready."""
+        self._orthogonal_slice_state = state
+        self._reconcile_orthogonal_slice_state()
+
+    def set_orthogonal_slice_indices(
+        self,
+        *,
+        inline_index: int | None = None,
+        crossline_index: int | None = None,
+    ) -> None:
+        state = self._orthogonal_slice_state
+        il = state.inline_index if inline_index is None else int(inline_index)
+        xl = (
+            state.crossline_index
+            if crossline_index is None
+            else int(crossline_index)
+        )
+        registration = self._registration
+        if registration is not None:
+            il = max(0, min(registration.n_inline - 1, int(il or 0)))
+            xl = max(0, min(registration.n_crossline - 1, int(xl or 0)))
+        self._orthogonal_slice_state = OrthogonalSliceState(
+            inline_index=il,
+            crossline_index=xl,
+            time_slices=state.time_slices,
+            active_time_ms=state.active_time_ms,
+            time_opacity=state.time_opacity,
+        )
+
+    def add_time_slice(self, time_ms: float) -> float:
+        """Add or activate a snapped Time slice; raise at the eight-item cap."""
+        snapped = self._snap_time_ms(time_ms)
+        state = self._orthogonal_slice_state
+        existing = self._find_time_slice(snapped)
+        if existing is not None:
+            self._replace_slice_state(active_time_ms=existing.time_ms)
+            return existing.time_ms
+        if len(state.time_slices) >= MAX_TIME_SLICES:
+            raise ValueError(
+                f"Time slice stack is limited to {MAX_TIME_SLICES} items"
+            )
+        slices = tuple(
+            sorted(
+                (*state.time_slices, TimeSliceState(snapped)),
+                key=lambda item: item.time_ms,
+            )
+        )
+        self._replace_slice_state(
+            time_slices=slices,
+            active_time_ms=snapped,
+        )
+        return snapped
+
+    def update_time_slice(
+        self, current_time_ms: float, new_time_ms: float
+    ) -> float:
+        """Move one slice, merging with an existing slice after snapping."""
+        state = self._orthogonal_slice_state
+        current = self._find_time_slice(current_time_ms)
+        if current is None:
+            raise KeyError(current_time_ms)
+        snapped = self._snap_time_ms(new_time_ms)
+        target = self._find_time_slice(snapped)
+        remaining = tuple(
+            item
+            for item in state.time_slices
+            if item is not current and item is not target
+        )
+        moved = target or TimeSliceState(snapped, visible=current.visible)
+        slices = tuple(
+            sorted((*remaining, moved), key=lambda item: item.time_ms)
+        )
+        self._replace_slice_state(
+            time_slices=slices,
+            active_time_ms=moved.time_ms,
+        )
+        return moved.time_ms
+
+    def remove_time_slice(self, time_ms: float) -> bool:
+        state = self._orthogonal_slice_state
+        current = self._find_time_slice(time_ms)
+        if current is None or len(state.time_slices) <= 1:
+            return False
+        slices = tuple(item for item in state.time_slices if item is not current)
+        active = state.active_time_ms
+        if self._same_time(active, current.time_ms):
+            active = slices[0].time_ms
+        self._replace_slice_state(
+            time_slices=slices,
+            active_time_ms=active,
+        )
+        return True
+
+    def set_time_slice_visible(
+        self, time_ms: float, visible: bool
+    ) -> None:
+        current = self._find_time_slice(time_ms)
+        if current is None:
+            raise KeyError(time_ms)
+        slices = tuple(
+            TimeSliceState(item.time_ms, bool(visible))
+            if item is current
+            else item
+            for item in self._orthogonal_slice_state.time_slices
+        )
+        self._replace_slice_state(time_slices=slices)
+
+    def set_active_time_slice(self, time_ms: float) -> None:
+        current = self._find_time_slice(time_ms)
+        if current is None:
+            raise KeyError(time_ms)
+        self._replace_slice_state(active_time_ms=current.time_ms)
+
+    def set_time_slice_opacity(self, opacity: float) -> None:
+        self._replace_slice_state(
+            time_opacity=max(0.0, min(1.0, float(opacity)))
+        )
+
+    def move_active_time_slice_to_sample(self, sample_index: int) -> float:
+        """Compatibility/probe seam: move only ActiveTimeSlice."""
+        registration = self._registration
+        state = self._orthogonal_slice_state
+        if registration is None or state.active_time_ms is None:
+            raise RuntimeError("Time slice stack is not ready")
+        sample = max(0, min(registration.n_sample - 1, int(sample_index)))
+        return self.update_time_slice(
+            state.active_time_ms,
+            registration.sample_idx_to_time_ms(sample),
+        )
+
+    def orthogonal_slice_render_state(
+        self,
+    ) -> tuple[
+        int,
+        int,
+        tuple[tuple[int, bool], ...],
+        int,
+        float,
+    ] | None:
+        """Return renderer-ready preview indices for the orthogonal planes."""
+        registration = self._registration
+        state = self._orthogonal_slice_state
+        if (
+            registration is None
+            or state.inline_index is None
+            or state.crossline_index is None
+            or not state.time_slices
+            or state.active_time_ms is None
+        ):
+            return None
+        times = tuple(
+            (
+                registration.clamp_indices(
+                    state.inline_index,
+                    state.crossline_index,
+                    registration.time_ms_to_sample_idx(item.time_ms),
+                )[2],
+                item.visible,
+            )
+            for item in state.time_slices
+        )
+        active = registration.clamp_indices(
+            state.inline_index,
+            state.crossline_index,
+            registration.time_ms_to_sample_idx(state.active_time_ms),
+        )[2]
+        return (
+            state.inline_index,
+            state.crossline_index,
+            times,
+            active,
+            state.time_opacity,
+        )
+
+    def _replace_slice_state(self, **changes) -> None:
+        state = self._orthogonal_slice_state
+        values = {
+            "inline_index": state.inline_index,
+            "crossline_index": state.crossline_index,
+            "time_slices": state.time_slices,
+            "active_time_ms": state.active_time_ms,
+            "time_opacity": state.time_opacity,
+        }
+        values.update(changes)
+        self._orthogonal_slice_state = OrthogonalSliceState(**values)
+
+    def _find_time_slice(
+        self, time_ms: float | None
+    ) -> TimeSliceState | None:
+        if time_ms is None:
+            return None
+        for item in self._orthogonal_slice_state.time_slices:
+            if self._same_time(item.time_ms, time_ms):
+                return item
+        return None
+
+    @staticmethod
+    def _same_time(left: float | None, right: float | None) -> bool:
+        if left is None or right is None:
+            return False
+        return bool(np.isclose(float(left), float(right), atol=1e-7))
+
+    def _snap_time_ms(self, time_ms: float) -> float:
+        registration = self._registration
+        if registration is None:
+            if not np.isfinite(float(time_ms)):
+                raise ValueError("time_ms must be finite")
+            return float(time_ms)
+        sample = registration.clamp_indices(
+            0,
+            0,
+            registration.time_ms_to_sample_idx(float(time_ms)),
+        )[2]
+        return registration.sample_idx_to_time_ms(sample)
+
+    def _reconcile_orthogonal_slice_state(self) -> None:
+        registration = self._registration
+        if registration is None:
+            return
+        state = self._orthogonal_slice_state
+        il = (
+            registration.n_inline // 2
+            if state.inline_index is None
+            else max(
+                0,
+                min(registration.n_inline - 1, int(state.inline_index)),
+            )
+        )
+        xl = (
+            registration.n_crossline // 2
+            if state.crossline_index is None
+            else max(
+                0,
+                min(registration.n_crossline - 1, int(state.crossline_index)),
+            )
+        )
+        survey = registration.survey
+        lower = float(survey.t0_ms)
+        upper = float(
+            survey.t0_ms
+            + max(survey.n_samples - 1, 0) * survey.dt_ms
+        )
+        dropped = 0
+        by_sample: dict[int, TimeSliceState] = {}
+        for item in state.time_slices:
+            if not lower <= item.time_ms <= upper:
+                dropped += 1
+                continue
+            sample = registration.clamp_indices(
+                il,
+                xl,
+                registration.time_ms_to_sample_idx(item.time_ms),
+            )[2]
+            snapped = registration.sample_idx_to_time_ms(sample)
+            if sample not in by_sample:
+                by_sample[sample] = TimeSliceState(
+                    snapped, visible=item.visible
+                )
+        slices = tuple(
+            sorted(by_sample.values(), key=lambda item: item.time_ms)
+        )[:MAX_TIME_SLICES]
+        if not slices:
+            middle = registration.n_sample // 2
+            slices = (
+                TimeSliceState(
+                    registration.sample_idx_to_time_ms(middle)
+                ),
+            )
+        active = state.active_time_ms
+        active_item = None
+        if active is not None and lower <= active <= upper:
+            active_sample = registration.clamp_indices(
+                il,
+                xl,
+                registration.time_ms_to_sample_idx(active),
+            )[2]
+            active_ms = registration.sample_idx_to_time_ms(active_sample)
+            active_item = next(
+                (
+                    item
+                    for item in slices
+                    if self._same_time(item.time_ms, active_ms)
+                ),
+                None,
+            )
+        if active_item is None:
+            active_item = slices[0]
+        self._orthogonal_slice_state = OrthogonalSliceState(
+            inline_index=il,
+            crossline_index=xl,
+            time_slices=slices,
+            active_time_ms=active_item.time_ms,
+            time_opacity=state.time_opacity,
+        )
+        self._slice_state_warning = (
+            f"已丢弃 {dropped} 张越界 Time 切片"
+            if dropped
+            else ""
+        )
 
     @property
     def depth_transform(self) -> DepthTransformState:
@@ -269,6 +597,77 @@ class WellSeismicScene:
         """curves_by_well[well][curve] = (md, values)."""
         self._curves_by_well = curves_by_well
 
+    def gr_value_range(self) -> tuple[float, float] | None:
+        """Return one robust P2–P98 GR range shared by all loaded wells."""
+        samples: list[np.ndarray] = []
+        for curves in self._curves_by_well.values():
+            curve = _find_gr_curve(curves)
+            if curve is None:
+                continue
+            values = np.asarray(curve[1], dtype=np.float64).reshape(-1)
+            finite = values[np.isfinite(values)]
+            if finite.size:
+                samples.append(finite)
+        if not samples:
+            return None
+        values = np.concatenate(samples)
+        lo, hi = np.nanpercentile(values, [2.0, 98.0])
+        return float(lo), float(hi)
+
+    def gr_well_trajectories(
+        self, *, visible_only: bool = False
+    ) -> dict[JointWellId, WellGrTrajectory]:
+        """Return well paths sampled at GR measurement depths."""
+        tracks: dict[JointWellId, WellGrTrajectory] = {}
+        base_trajectories = self.well_trajectories()
+        for presentation, well in zip(
+            self.well_presentations(), self._wells, strict=True
+        ):
+            if visible_only and not presentation.visible:
+                continue
+            curves = self._curves_by_well.get(
+                presentation.id,
+                self._curves_by_well.get(well.name, {}),
+            )
+            curve = _find_gr_curve(curves)
+            td = self._td_tables.get(
+                str(presentation.id), self._td_tables.get(well.name)
+            )
+            if curve is None or (
+                self._domain is VerticalDomain.TIME and td is None
+            ):
+                points = base_trajectories[presentation.id].points
+                values = np.full(len(points), np.nan, dtype=np.float64)
+            else:
+                md = np.asarray(curve[0], dtype=np.float64).reshape(-1)
+                values = np.asarray(curve[1], dtype=np.float64).reshape(-1)
+                count = min(md.size, values.size)
+                md, values = md[:count], values[:count]
+                keep = (
+                    np.isfinite(md)
+                    & (md >= 0.0)
+                    & (md <= float(well.total_depth_m))
+                )
+                md, values = md[keep], values[keep]
+                order = np.argsort(md, kind="stable")
+                md, values = md[order], values[order]
+                frac = md / max(float(well.total_depth_m), 1e-12)
+                x = well.x + frac * (well.bottom_x - well.x)
+                y = well.y + frac * (well.bottom_y - well.y)
+                if self._domain is VerticalDomain.TIME:
+                    z = np.asarray(td.md_to_time_ms(md), dtype=np.float64)
+                else:
+                    z = md
+                points = np.column_stack([x, y, z])
+            tracks[presentation.id] = WellGrTrajectory(
+                id=presentation.id,
+                name=well.name,
+                display_name=presentation.display_name,
+                points=points,
+                gr_values=values,
+            )
+        return tracks
+
     def set_curve_names(self, names: list[str]) -> None:
         self._curve_names = list(names)[:2]
 
@@ -283,6 +682,7 @@ class WellSeismicScene:
         self._volume = access
         self._extract_cache.clear()
         self._rebuild_registration()
+        self._reconcile_orthogonal_slice_state()
 
     @property
     def volume_access(self) -> VolumeAccess | None:
@@ -445,10 +845,13 @@ class WellSeismicScene:
     # Active 2D assembly (#62)
     # ------------------------------------------------------------------
 
-    def assemble_active_profile_wells(self) -> list[ProfileWellHit]:
+    def assemble_active_profile_wells(
+        self, *, domain: VerticalDomain | None = None
+    ) -> list[ProfileWellHit]:
         fence = self.active_fence()
         if fence is None:
             return []
+        use_domain = domain if domain is not None else self._domain
         hits: list[ProfileWellHit] = []
         verts = fence.vertices_xy
         for presentation, well in zip(
@@ -462,6 +865,19 @@ class WellSeismicScene:
             curve_name, cmd, cval = self._pick_curve(
                 presentation.id, fallback_name=well.name
             )
+            curve_z = None
+            if cmd is not None:
+                if use_domain is VerticalDomain.DEPTH:
+                    curve_z = np.asarray(cmd, dtype=np.float64)
+                else:
+                    td = self._td_tables.get(
+                        str(presentation.id),
+                        self._td_tables.get(well.name),
+                    )
+                    if td is not None:
+                        curve_z = np.asarray(
+                            td.md_to_time_ms(cmd), dtype=np.float64
+                        )
             hits.append(
                 ProfileWellHit(
                     id=presentation.id,
@@ -477,6 +893,7 @@ class WellSeismicScene:
                     ),
                     curve_name=curve_name,
                     curve_md=cmd,
+                    curve_z=curve_z,
                     curve_values=cval,
                 )
             )
@@ -556,6 +973,16 @@ class WellSeismicScene:
 
     def _invalidate_traj(self) -> None:
         self._traj_cache = None
+
+
+def _find_gr_curve(
+    curves: dict[str, tuple[np.ndarray, np.ndarray]],
+) -> tuple[np.ndarray, np.ndarray] | None:
+    aliases = {"GR", "GAMMA", "SGR", "CGR"}
+    for name, curve in curves.items():
+        if name.upper() in aliases:
+            return curve
+    return None
 
 
 def _project_point_to_polyline(

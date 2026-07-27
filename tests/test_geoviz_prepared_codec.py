@@ -6,7 +6,9 @@ import pytest
 
 from geoviz import (
     PreparedPreview,
+    PreviewRowIssue,
     PreviewKind,
+    XYPreviewDiagnostics,
     decode_prepared_preview,
     encode_prepared_preview,
 )
@@ -21,6 +23,15 @@ def test_roundtrip_xy_scatter():
         y=np.array([3.0, 4.0]),
         resource_id="resource-7",
         record_ids=(4, 9),
+        source_rows=(12, 18),
+        source_version="sha256:v1",
+        source_crs="EPSG:32648",
+        coordinate_units="m",
+        diagnostics=XYPreviewDiagnostics(
+            total_records=3,
+            valid_records=2,
+            issues=(PreviewRowIssue(15, "井名为空"),),
+        ),
     )
     prepared = PreparedPreview(
         kind=PreviewKind.XY_SCATTER,
@@ -37,6 +48,11 @@ def test_roundtrip_xy_scatter():
     assert list(restored.payload.names) == ["A1", "B2"]
     assert restored.payload.resource_id == "resource-7"
     assert restored.payload.record_ids == (4, 9)
+    assert restored.payload.source_rows == (12, 18)
+    assert restored.payload.source_version == "sha256:v1"
+    assert restored.payload.source_crs == "EPSG:32648"
+    assert restored.payload.coordinate_units == "m"
+    assert restored.payload.diagnostics == payload.diagnostics
     np.testing.assert_array_equal(restored.payload.x, payload.x)
     np.testing.assert_array_equal(restored.payload.y, payload.y)
 

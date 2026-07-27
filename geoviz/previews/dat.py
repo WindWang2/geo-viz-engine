@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import shlex
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -45,12 +45,37 @@ _MAX_HEADER_CHARS = 64 * 1_024
 
 
 @dataclass(frozen=True)
+class PreviewRowIssue:
+    source_row: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class XYPreviewDiagnostics:
+    total_records: int = 0
+    valid_records: int = 0
+    issues: tuple[PreviewRowIssue, ...] = ()
+    omitted_issue_count: int = 0
+
+    @property
+    def skipped_count(self) -> int:
+        return self.total_records - self.valid_records
+
+
+@dataclass(frozen=True)
 class XYPreviewPayload:
     names: tuple[str, ...]
     x: np.ndarray
     y: np.ndarray
     resource_id: str = ""
     record_ids: tuple[int, ...] = ()
+    source_rows: tuple[int, ...] = ()
+    source_version: str = ""
+    source_crs: str = ""
+    coordinate_units: str = ""
+    diagnostics: XYPreviewDiagnostics = field(
+        default_factory=XYPreviewDiagnostics
+    )
 
 
 @dataclass(frozen=True)
@@ -68,6 +93,10 @@ class SurfacePreviewPayload:
 
 
 class _DatSchemaError(ValueError):
+    pass
+
+
+class _WellResourceLimitError(_DatSchemaError):
     pass
 
 
@@ -208,6 +237,46 @@ def _unit_declarations(header: tuple[str, ...]) -> dict[str, str]:
             raise _DatSchemaError("conflicting field units")
         units[field] = unit
     return units
+
+
+def _source_crs_declaration(header: tuple[str, ...]) -> str:
+    declarations = []
+    for line in header:
+        body = line.lstrip("#").strip()
+        if ":" not in body:
+            continue
+        key, value = body.split(":", 1)
+        if _normalized_column(key) not in {"crs", "sourcecrs"}:
+            continue
+        value = value.strip()
+        if not value:
+            raise _DatSchemaError("empty SourceCRS declaration")
+        declarations.append(value)
+    if not declarations:
+        return ""
+    if any(
+        declaration.casefold() != declarations[0].casefold()
+        for declaration in declarations[1:]
+    ):
+        raise _DatSchemaError("conflicting SourceCRS declarations")
+    return declarations[0]
+
+
+def _merge_declared_metadata(
+    explicit: str,
+    declared: str,
+    *,
+    name: str,
+) -> str:
+    explicit = explicit.strip()
+    declared = declared.strip()
+    if (
+        explicit
+        and declared
+        and explicit.casefold() != declared.casefold()
+    ):
+        raise _DatSchemaError(f"conflicting {name} declarations")
+    return explicit or declared
 
 
 def _registered_depth_type(header: tuple[str, ...]) -> str | None:
@@ -375,6 +444,27 @@ def _iter_rows(path: str):
                 yield row
 
 
+def _iter_rows_with_source(path: str):
+    record_id = 0
+    with open(path, "r", encoding="utf-8-sig") as stream:
+        for source_row, raw_line in enumerate(stream, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            row = _split_data_line(line)
+            if row:
+                yield record_id, source_row, row
+                record_id += 1
+
+
+def _iter_data_lines_with_source(path: str):
+    with open(path, "r", encoding="utf-8-sig") as stream:
+        for source_row, raw_line in enumerate(stream, start=1):
+            line = raw_line.strip()
+            if line and not line.startswith("#"):
+                yield source_row, line
+
+
 def _selected_rows(path: str, indices: np.ndarray, parse_row) -> list[tuple]:
     selected = []
     selected_position = 0
@@ -417,40 +507,127 @@ def _prepare_error(error: Exception) -> GeoVizError:
 
 def _well_head_payload(
     path: str,
-    options: PreviewOptions,
+    _options: PreviewOptions,
     *,
     resource_id: str = "",
+    source_version: str = "",
+    source_crs: str = "",
+    coordinate_units: str = "",
 ) -> XYPreviewPayload:
-    header, row_count, row_width = _scan_dat(path)
+    header = _read_header(path)
     if not any(_WELL_HEAD_MARKER in line for line in header):
         raise _DatSchemaError("missing well-head marker")
     mapping = _column_mapping(
         header,
         _WELL_HEAD_COLUMNS,
         allowed_extras=_WELL_HEAD_EXTRA_COLUMNS,
-        row_width=row_width,
     )
     if mapping is None:
         raise _DatSchemaError("missing well-head column declaration")
+    declaration_widths = {
+        len(tokens)
+        for line in header
+        if (tokens := _header_tokens(line))
+        and set(mapping.values()).issubset(range(len(tokens)))
+        and all(
+            _normalized_column(token)
+            in _WELL_HEAD_EXTRA_COLUMNS.union(
+                *(_WELL_HEAD_COLUMNS.values())
+            )
+            for token in tokens
+        )
+    }
+    if len(declaration_widths) != 1:
+        raise _DatSchemaError("ambiguous well-head column width")
+    row_width = declaration_widths.pop()
+
+    declared_crs = _source_crs_declaration(header)
+    units = _unit_declarations(header)
+    declared_x_unit = units.get("x", "")
+    declared_y_unit = units.get("y", "")
+    if (
+        declared_x_unit
+        and declared_y_unit
+        and declared_x_unit != declared_y_unit
+    ):
+        raise _DatSchemaError("conflicting X/Y coordinate units")
+    declared_units = declared_x_unit or declared_y_unit
+    source_crs = _merge_declared_metadata(
+        source_crs,
+        declared_crs,
+        name="SourceCRS",
+    )
+    coordinate_units = _merge_declared_metadata(
+        coordinate_units,
+        declared_units,
+        name="coordinate unit",
+    )
 
     def parse_row(row):
         name = _value_at(row, mapping["name"])
         if not name:
-            raise _DatSchemaError("empty well name")
+            raise _DatSchemaError("井名为空")
+        try:
+            x = _finite_float(_value_at(row, mapping["x"]))
+        except _DatSchemaError as error:
+            raise _DatSchemaError("X 坐标不是有限数值") from error
+        try:
+            y = _finite_float(_value_at(row, mapping["y"]))
+        except _DatSchemaError as error:
+            raise _DatSchemaError("Y 坐标不是有限数值") from error
         return (
             name,
-            _finite_float(_value_at(row, mapping["x"])),
-            _finite_float(_value_at(row, mapping["y"])),
+            x,
+            y,
         )
 
-    indices = representative_indices(row_count, _sample_limit(options))
-    selected = _selected_rows(path, indices, parse_row)
+    selected = []
+    record_ids = []
+    source_rows = []
+    issues = []
+    omitted_issue_count = 0
+    row_count = 0
+    for source_row, line in _iter_data_lines_with_source(path):
+        record_id = row_count
+        row_count += 1
+        try:
+            row = _split_data_line(line)
+            if len(row) != row_width:
+                raise _DatSchemaError("列数与声明不一致")
+            parsed = parse_row(row)
+        except _DatSchemaError as error:
+            if len(issues) < 20:
+                issues.append(PreviewRowIssue(source_row, str(error)))
+            else:
+                omitted_issue_count += 1
+            continue
+        selected.append(parsed)
+        record_ids.append(record_id)
+        source_rows.append(source_row)
+        if len(selected) > _MAX_POINTS:
+            raise _WellResourceLimitError(
+                f"井位数据超过 {_MAX_POINTS:,} 个有效记录的显示上限"
+            )
+    if row_count == 0:
+        raise _DatSchemaError("no data rows")
+    if not selected:
+        raise _DatSchemaError("no renderable well locations")
     return XYPreviewPayload(
         names=tuple(row[0] for row in selected),
         x=np.ascontiguousarray([row[1] for row in selected], dtype=np.float64),
         y=np.ascontiguousarray([row[2] for row in selected], dtype=np.float64),
         resource_id=str(resource_id),
-        record_ids=tuple(int(index) for index in indices),
+        record_ids=tuple(record_ids),
+        source_rows=tuple(source_rows),
+        source_version=str(source_version),
+        source_crs=str(source_crs),
+        coordinate_units=str(coordinate_units),
+        diagnostics=XYPreviewDiagnostics(
+            total_records=row_count,
+            valid_records=len(selected),
+            issues=tuple(issues),
+            omitted_issue_count=omitted_issue_count,
+        ),
     )
 
 
@@ -647,19 +824,54 @@ class XYScatterBackend:
                 request.path,
                 options,
                 resource_id=request.resource_id,
+                source_version=request.source_version,
+                source_crs=request.source_crs,
+                coordinate_units=request.coordinate_units,
             )
         except (OSError, UnicodeError, _DatSchemaError) as error:
+            if isinstance(error, _WellResourceLimitError):
+                raise GeoVizError(
+                    ErrorCode.RESOURCE_LIMIT,
+                    str(error),
+                ) from error
             raise _prepare_error(error) from error
+        diagnostics = payload.diagnostics
+        warnings = []
+        if diagnostics.skipped_count:
+            warnings.append(
+                f"{diagnostics.skipped_count} 行已跳过；"
+                f"有效 {diagnostics.valid_records}/"
+                f"{diagnostics.total_records}"
+            )
+        if not payload.source_crs:
+            warnings.append("SourceCRS 未声明")
+        elif (
+            request.comparison_crs
+            and payload.source_crs.casefold()
+            != request.comparison_crs.casefold()
+        ):
+            warnings.append(
+                f"SourceCRS {payload.source_crs} 与参考 CRS "
+                f"{request.comparison_crs} 不同（未转换）"
+            )
+        if not payload.coordinate_units:
+            warnings.append("坐标单位未知")
         return PreparedPreview(
             kind=self.kind,
             title=request.label or Path(request.path).stem,
             payload=payload,
-            summary_rows=(("井数", str(len(payload.names))),),
+            summary_rows=(
+                ("有效井数", str(len(payload.names))),
+                ("源记录", str(diagnostics.total_records)),
+            ),
+            warning=" · ".join(warnings),
             estimated_bytes=payload.x.nbytes
             + payload.y.nbytes
             + sum(len(name.encode("utf-8")) for name in payload.names)
             + sys.getsizeof(payload.record_ids)
-            + sum(sys.getsizeof(record_id) for record_id in payload.record_ids),
+            + sum(sys.getsizeof(record_id) for record_id in payload.record_ids)
+            + sys.getsizeof(payload.source_rows)
+            + sum(sys.getsizeof(row) for row in payload.source_rows),
         )
 
     def create_widget(self, parent: QWidget | None = None) -> QWidget:
@@ -669,6 +881,12 @@ class XYScatterBackend:
         if not isinstance(widget, PlotWidget) or not isinstance(preview.payload, XYPreviewPayload):
             raise GeoVizError(ErrorCode.RENDER_ERROR, "无法渲染井位散点数据")
         widget.clear()
+        unit_suffix = (
+            f" ({preview.payload.coordinate_units})"
+            if preview.payload.coordinate_units
+            else ""
+        )
+        widget.set_axis_labels(f"X{unit_suffix}", f"Y{unit_suffix}")
         widget.add_series(ScatterSeries(preview.payload.x, preview.payload.y, name=preview.title))
         widget.autofit()
 

@@ -45,6 +45,11 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "WellTieCanvas": ("geoviz_well_tie.canvas", "WellTieCanvas"),
     "PlotWidget": ("geoviz_plots", "PlotWidget"),
     "SurfaceWidget": ("geoviz_plots", "SurfaceWidget"),
+    "PreviewRowIssue": ("geoviz.previews.dat", "PreviewRowIssue"),
+    "XYPreviewDiagnostics": (
+        "geoviz.previews.dat",
+        "XYPreviewDiagnostics",
+    ),
     "XYPreviewPayload": ("geoviz.previews.dat", "XYPreviewPayload"),
     "interpolate_idw": ("geoviz_plots", "interpolate_idw"),
     "interpolate_scipy": ("geoviz_plots", "interpolate_scipy"),
@@ -77,10 +82,16 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "get_isosurface_extractor": ("geoviz_seismic.isosurface", "get_isosurface_extractor"),
     # Well–seismic joint 3D analysis (geoviz_well_seismic_3d).
     "WellSeismicScene": ("geoviz_well_seismic_3d", "WellSeismicScene"),
+    "JointDisplaySettings": ("geoviz_well_seismic_3d", "JointDisplaySettings"),
     "JointWellId": ("geoviz_well_seismic_3d", "JointWellId"),
+    "OrthogonalSliceState": (
+        "geoviz_well_seismic_3d",
+        "OrthogonalSliceState",
+    ),
     "WellSeismicJointWidget": ("geoviz_well_seismic_3d", "WellSeismicJointWidget"),
     "WellHead": ("geoviz_well_seismic_3d", "WellHead"),
     "TimeDepthTable": ("geoviz_well_seismic_3d", "TimeDepthTable"),
+    "TimeSliceState": ("geoviz_well_seismic_3d", "TimeSliceState"),
     "InMemoryVolumeAccess": ("geoviz_well_seismic_3d", "InMemoryVolumeAccess"),
     "VerticalDomain": ("geoviz_well_seismic_3d", "VerticalDomain"),
     "FenceSection": ("geoviz_well_seismic_3d", "FenceSection"),

@@ -6,7 +6,7 @@ import numpy as np
 
 from .contracts import PreparedPreview, PreviewKind
 
-PAYLOAD_SCHEMA_VERSION = 2
+PAYLOAD_SCHEMA_VERSION = 3
 CACHEABLE_KINDS = frozenset(
     {PreviewKind.XY_SCATTER, PreviewKind.SURFACE, PreviewKind.FORMATION_TOPS}
 )
@@ -48,6 +48,24 @@ def encode_prepared_preview(
         meta["names"] = list(payload.names)
         meta["resource_id"] = payload.resource_id
         meta["record_ids"] = list(payload.record_ids)
+        meta["source_rows"] = list(payload.source_rows)
+        meta["source_version"] = payload.source_version
+        meta["source_crs"] = payload.source_crs
+        meta["coordinate_units"] = payload.coordinate_units
+        meta["diagnostics"] = {
+            "total_records": payload.diagnostics.total_records,
+            "valid_records": payload.diagnostics.valid_records,
+            "issues": [
+                {
+                    "source_row": issue.source_row,
+                    "reason": issue.reason,
+                }
+                for issue in payload.diagnostics.issues
+            ],
+            "omitted_issue_count": (
+                payload.diagnostics.omitted_issue_count
+            ),
+        }
         arrays["x"] = np.asarray(payload.x)
         arrays["y"] = np.asarray(payload.y)
     elif preview.kind is PreviewKind.SURFACE:
@@ -89,12 +107,39 @@ def decode_prepared_preview(
     summary = tuple((str(a), str(b)) for a, b in meta.get("summary_rows", ()))
     if kind is PreviewKind.XY_SCATTER:
         _, XYPreviewPayload = _dat_payload_types()
+        from .previews.dat import PreviewRowIssue, XYPreviewDiagnostics
+
+        diagnostics = meta.get("diagnostics") or {}
         payload = XYPreviewPayload(
             names=tuple(meta["names"]),
             x=np.asarray(arrays["x"]),
             y=np.asarray(arrays["y"]),
             resource_id=str(meta.get("resource_id") or ""),
             record_ids=tuple(int(value) for value in meta.get("record_ids", ())),
+            source_rows=tuple(
+                int(value) for value in meta.get("source_rows", ())
+            ),
+            source_version=str(meta.get("source_version") or ""),
+            source_crs=str(meta.get("source_crs") or ""),
+            coordinate_units=str(meta.get("coordinate_units") or ""),
+            diagnostics=XYPreviewDiagnostics(
+                total_records=int(
+                    diagnostics.get("total_records") or 0
+                ),
+                valid_records=int(
+                    diagnostics.get("valid_records") or 0
+                ),
+                issues=tuple(
+                    PreviewRowIssue(
+                        source_row=int(row["source_row"]),
+                        reason=str(row["reason"]),
+                    )
+                    for row in diagnostics.get("issues", ())
+                ),
+                omitted_issue_count=int(
+                    diagnostics.get("omitted_issue_count") or 0
+                ),
+            ),
         )
     elif kind is PreviewKind.SURFACE:
         SurfacePreviewPayload, _ = _dat_payload_types()
