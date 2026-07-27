@@ -17,7 +17,7 @@ from .models import (
 )
 from .probe import ProbeState, probe_from_fence_s
 from .registration import VolumeRegistration
-from .scene import ProfileWellHit, WellSeismicScene
+from .scene import JointWellPresentation, ProfileWellHit, WellSeismicScene
 from .segy_survey import (
     align_horizon_corners_to_loader_axes,
     horizon_corners_from_dat,
@@ -35,6 +35,7 @@ __all__ = [
     "FenceExtraction",
     "FenceSection",
     "InMemoryVolumeAccess",
+    "JointWellPresentation",
     "ProbeState",
     "ProfileWellHit",
     "SurveySpec",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 import numpy as np
@@ -22,13 +23,25 @@ DEFAULT_CURVE_FALLBACK = ("GR", "DT", "RHOB")
 class ProfileWellHit:
     """Well projected onto active fence for 2D assembly."""
 
+    id: str
     name: str
+    display_name: str
     s_m: float
     distance_m: float
     tops: list[tuple[str, float]]  # (top_name, z in active domain)
     curve_name: str | None = None
     curve_md: np.ndarray | None = None
     curve_values: np.ndarray | None = None
+
+
+@dataclass(frozen=True)
+class JointWellPresentation:
+    """Stable well identity and user-facing label for joint-workbench chrome."""
+
+    id: str
+    name: str
+    display_name: str
+    visible: bool
 
 
 class WellSeismicScene:
@@ -38,6 +51,8 @@ class WellSeismicScene:
         self._survey: SurveySpec | None = None
         self._domain: VerticalDomain = VerticalDomain.TIME
         self._wells: list[WellHead] = []
+        self._well_ids: list[str] = []
+        self._well_visibility: dict[str, bool] = {}
         self._td_tables: dict[str, TimeDepthTable] = {}
         self._volume: VolumeAccess | None = None
         self._traj_cache: dict[str, WellTrajectory3D] | None = None
@@ -151,15 +166,57 @@ class WellSeismicScene:
         wells: list[WellHead],
         td_tables: dict[str, TimeDepthTable] | None = None,
     ) -> None:
+        previous_visibility = dict(self._well_visibility)
         self._wells = list(wells)
+        counts = Counter(well.name for well in self._wells)
+        occurrences: Counter[str] = Counter()
+        self._well_ids = []
+        for well in self._wells:
+            occurrences[well.name] += 1
+            if counts[well.name] == 1:
+                self._well_ids.append(well.name)
+            else:
+                self._well_ids.append(f"{well.name}#{occurrences[well.name]}")
+        self._well_visibility = {
+            well_id: previous_visibility.get(well_id, True)
+            for well_id in self._well_ids
+        }
         self._td_tables = dict(td_tables or {})
         self._invalidate_traj()
 
-    def well_trajectories(self) -> dict[str, WellTrajectory3D]:
+    def well_presentations(self) -> list[JointWellPresentation]:
+        """Return wells in source order with stable identities and unique labels."""
+        counts = Counter(well.name for well in self._wells)
+        occurrences: Counter[str] = Counter()
+        presentations: list[JointWellPresentation] = []
+        for well_id, well in zip(self._well_ids, self._wells, strict=True):
+            occurrences[well.name] += 1
+            display_name = well.name
+            if counts[well.name] > 1:
+                display_name = f"{well.name} ({occurrences[well.name]})"
+            presentations.append(
+                JointWellPresentation(
+                    id=well_id,
+                    name=well.name,
+                    display_name=display_name,
+                    visible=self._well_visibility.get(well_id, True),
+                )
+            )
+        return presentations
+
+    def set_well_visibility(self, well_id: str, visible: bool) -> None:
+        """Set one well's presentation visibility without altering analysis data."""
+        if well_id not in self._well_visibility:
+            raise KeyError(well_id)
+        self._well_visibility[well_id] = bool(visible)
+
+    def well_trajectories(
+        self, *, visible_only: bool = False
+    ) -> dict[str, WellTrajectory3D]:
         if self._traj_cache is None:
             self._traj_cache = {}
-            for well in self._wells:
-                td = self._td_tables.get(well.name)
+            for well_id, well in zip(self._well_ids, self._wells, strict=True):
+                td = self._td_tables.get(well_id, self._td_tables.get(well.name))
                 traj = project_well_trajectory(well, domain=self._domain, td=td)
                 if self._domain is VerticalDomain.DEPTH and traj.has_td is False:
                     # Depth path uses MD; reproject with domain DEPTH
@@ -172,8 +229,14 @@ class WellSeismicScene:
                 if self._domain is VerticalDomain.DEPTH and td is not None:
                     # Rebuild Z from MD via constant (MD as depth) already done
                     pass
-                self._traj_cache[well.name] = traj
-        return self._traj_cache
+                self._traj_cache[well_id] = traj
+        if visible_only:
+            return {
+                well_id: trajectory
+                for well_id, trajectory in self._traj_cache.items()
+                if self._well_visibility.get(well_id, True)
+            }
+        return dict(self._traj_cache)
 
     def set_formation_tops(self, tops_by_well: dict[str, list[tuple[str, float]]]) -> None:
         """Tops as (name, z) already in active domain units (ms or m)."""
@@ -287,14 +350,20 @@ class WellSeismicScene:
         raise KeyError(fence_id)
 
     def add_well_to_well_fence(
-        self, well_names: list[str], *, name: str = "Wells"
+        self, well_refs: list[str], *, name: str = "Wells"
     ) -> FenceSection:
         xy = []
-        by_name = {w.name: w for w in self._wells}
-        for n in well_names:
-            w = by_name.get(n)
+        by_id = dict(zip(self._well_ids, self._wells, strict=True))
+        name_counts = Counter(well.name for well in self._wells)
+        by_unique_name = {
+            well.name: well
+            for well in self._wells
+            if name_counts[well.name] == 1
+        }
+        for ref in well_refs:
+            w = by_id.get(ref, by_unique_name.get(ref))
             if w is None:
-                raise KeyError(n)
+                raise KeyError(ref)
             xy.append((w.x, w.y))
         fence = FenceSection(name=name, vertices_xy=well_to_well_path(xy))
         return self.add_fence(fence, activate=True)
@@ -361,17 +430,30 @@ class WellSeismicScene:
             return []
         hits: list[ProfileWellHit] = []
         verts = fence.vertices_xy
-        for well in self._wells:
+        for presentation, well in zip(
+            self.well_presentations(), self._wells, strict=True
+        ):
+            if not self._well_visibility.get(presentation.id, True):
+                continue
             s, dist = _project_point_to_polyline(well.x, well.y, verts)
             if dist > self._near_well_m:
                 continue
-            curve_name, cmd, cval = self._pick_curve(well.name)
+            curve_name, cmd, cval = self._pick_curve(
+                presentation.id, fallback_name=well.name
+            )
             hits.append(
                 ProfileWellHit(
+                    id=presentation.id,
                     name=well.name,
+                    display_name=presentation.display_name,
                     s_m=s,
                     distance_m=dist,
-                    tops=list(self._tops_by_well.get(well.name, [])),
+                    tops=list(
+                        self._tops_by_well.get(
+                            presentation.id,
+                            self._tops_by_well.get(well.name, []),
+                        )
+                    ),
                     curve_name=curve_name,
                     curve_md=cmd,
                     curve_values=cval,
@@ -381,9 +463,11 @@ class WellSeismicScene:
         return hits
 
     def _pick_curve(
-        self, well_name: str
+        self, well_id: str, *, fallback_name: str
     ) -> tuple[str | None, np.ndarray | None, np.ndarray | None]:
-        curves = self._curves_by_well.get(well_name, {})
+        curves = self._curves_by_well.get(
+            well_id, self._curves_by_well.get(fallback_name, {})
+        )
         # Prefer configured names, then GR→DT→RHOB
         order = list(self._curve_names) + [c for c in DEFAULT_CURVE_FALLBACK if c not in self._curve_names]
         for name in order:

@@ -136,7 +136,9 @@ class WellSeismicJointWidget(QWidget):
         # Rebuild overlays according to flags
         if scene is not None:
             if wells:
-                self.set_well_trajectories(scene.well_trajectories())
+                self.set_well_trajectories(
+                    scene.well_trajectories(visible_only=True)
+                )
             else:
                 self.set_well_trajectories({})
             if fences:
@@ -296,7 +298,9 @@ class WellSeismicJointWidget(QWidget):
                 except Exception as exc:
                     logger.warning("load_volume failed: %s", exc)
 
-        self.set_well_trajectories(scene.well_trajectories())
+        self.set_well_trajectories(
+            scene.well_trajectories(visible_only=True)
+        )
         ext = scene.extract_active_fence()
         curtains = []
         if ext is not None:
@@ -330,8 +334,10 @@ class WellSeismicJointWidget(QWidget):
             else ""
         )
         preview = " · preview" if scene.preview_mode else ""
+        visible_wells = len(scene.well_trajectories(visible_only=True))
+        total_wells = len(scene.well_trajectories())
         self._status.setText(
-            f"域={scene.vertical_domain.value} · wells={len(scene.well_trajectories())} "
+            f"域={scene.vertical_domain.value} · wells={visible_wells}/{total_wells} "
             f"· fences={len(scene.fences)} · {survey_txt}{reg_txt}{preview}"
         )
 

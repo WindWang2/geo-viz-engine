@@ -74,7 +74,7 @@ class FenceProfile2D(QWidget):
             x = int(hit.s_m / self._smax * (w - 1))
             painter.setPen(QPen(QColor(80, 255, 120), 2))
             painter.drawLine(x, 0, x, h - 1)
-            painter.drawText(x + 2, 12, hit.name)
+            painter.drawText(x + 2, 12, hit.display_name)
             # tops
             painter.setPen(QPen(QColor(255, 200, 80), 1))
             for tname, tz in hit.tops:
