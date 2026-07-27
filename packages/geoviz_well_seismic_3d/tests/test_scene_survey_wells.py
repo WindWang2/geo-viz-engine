@@ -7,6 +7,7 @@ import pytest
 
 from geoviz_well_seismic_3d import (
     InMemoryVolumeAccess,
+    JointWellId,
     TimeDepthTable,
     VerticalDomain,
     WellHead,
@@ -85,6 +86,7 @@ def test_well_trajectory_time_domain_with_td():
         bottom_y=8219.94,
         total_depth_m=2000.0,
         kb_m=0.0,
+        id=JointWellId("source:a1"),
     )
     scene.set_wells([well], td_tables={"A1": td})
 
@@ -110,6 +112,7 @@ def test_well_trajectory_missing_td_safe_behaviour():
         bottom_x=1000.0,
         bottom_y=2000.0,
         total_depth_m=2100.0,
+        id=JointWellId("source:a2"),
     )
     scene.set_wells([well], td_tables={})
 
@@ -138,6 +141,7 @@ def test_deviated_well_head_to_bottom_xy():
         bottom_x=10457.533,
         bottom_y=11189.500,
         total_depth_m=2000.0,
+        id=JointWellId("source:a10"),
     )
     scene.set_wells([well], td_tables={"A10": td})
     pts = next(iter(scene.well_trajectories().values())).points

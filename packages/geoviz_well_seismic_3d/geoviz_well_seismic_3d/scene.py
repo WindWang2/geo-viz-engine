@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from hashlib import sha256
-
 import numpy as np
 
 from .depth_transform import DepthTransformState, select_depth_transform
@@ -175,20 +173,25 @@ class WellSeismicScene:
     ) -> None:
         previous_visibility = dict(self._well_visibility)
         self._wells = list(wells)
-        identity_bases = [_joint_well_identity_base(well) for well in self._wells]
-        counts = Counter(identity_bases)
-        occurrences: Counter[JointWellId] = Counter()
-        self._well_ids = []
-        for identity_base in identity_bases:
-            occurrences[identity_base] += 1
-            if counts[identity_base] == 1:
-                self._well_ids.append(identity_base)
-            else:
-                self._well_ids.append(
-                    JointWellId(
-                        f"{identity_base}#{occurrences[identity_base]}"
-                    )
-                )
+        missing_ids = [well.name for well in self._wells if not well.id]
+        if missing_ids:
+            raise ValueError(
+                "Every joint well requires a stable source JointWellId; "
+                f"missing for: {', '.join(missing_ids)}"
+            )
+        self._well_ids = [
+            JointWellId(str(well.id)) for well in self._wells if well.id
+        ]
+        duplicate_ids = [
+            well_id
+            for well_id, count in Counter(self._well_ids).items()
+            if count > 1
+        ]
+        if duplicate_ids:
+            raise ValueError(
+                "JointWellId values must be unique; duplicates: "
+                + ", ".join(duplicate_ids)
+            )
         self._well_visibility = {
             well_id: previous_visibility.get(well_id, True)
             for well_id in self._well_ids
@@ -552,25 +555,6 @@ class WellSeismicScene:
 
     def _invalidate_traj(self) -> None:
         self._traj_cache = None
-
-
-def _joint_well_identity_base(well: WellHead) -> JointWellId:
-    """Use source identity when available; otherwise fingerprint non-name geometry."""
-    if well.id is not None and str(well.id):
-        return JointWellId(str(well.id))
-    geometry = "|".join(
-        f"{float(value):.17g}"
-        for value in (
-            well.x,
-            well.y,
-            well.bottom_x,
-            well.bottom_y,
-            well.total_depth_m,
-            well.kb_m,
-        )
-    )
-    digest = sha256(geometry.encode("utf-8")).hexdigest()[:20]
-    return JointWellId(f"geometry:{digest}")
 
 
 def _project_point_to_polyline(
