@@ -77,6 +77,7 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "get_isosurface_extractor": ("geoviz_seismic.isosurface", "get_isosurface_extractor"),
     # Well–seismic joint 3D analysis (geoviz_well_seismic_3d).
     "WellSeismicScene": ("geoviz_well_seismic_3d", "WellSeismicScene"),
+    "JointWellId": ("geoviz_well_seismic_3d", "JointWellId"),
     "WellSeismicJointWidget": ("geoviz_well_seismic_3d", "WellSeismicJointWidget"),
     "WellHead": ("geoviz_well_seismic_3d", "WellHead"),
     "TimeDepthTable": ("geoviz_well_seismic_3d", "TimeDepthTable"),

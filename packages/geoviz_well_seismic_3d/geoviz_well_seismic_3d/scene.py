@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from hashlib import sha256
 
 import numpy as np
 
 from .depth_transform import DepthTransformState, select_depth_transform
 from .fence import FenceExtraction, FenceSection, extract_fence_strip, well_to_well_path
-from .models import TimeDepthTable, VerticalDomain, WellHead, WellTrajectory3D
+from .models import (
+    JointWellId,
+    TimeDepthTable,
+    VerticalDomain,
+    WellHead,
+    WellTrajectory3D,
+)
 from .probe import ProbeState, probe_from_fence_s
 from .registration import VolumeRegistration
 from .survey import Corner, SurveySpec, survey_from_corners
@@ -23,7 +30,7 @@ DEFAULT_CURVE_FALLBACK = ("GR", "DT", "RHOB")
 class ProfileWellHit:
     """Well projected onto active fence for 2D assembly."""
 
-    id: str
+    id: JointWellId
     name: str
     display_name: str
     s_m: float
@@ -38,7 +45,7 @@ class ProfileWellHit:
 class JointWellPresentation:
     """Stable well identity and user-facing label for joint-workbench chrome."""
 
-    id: str
+    id: JointWellId
     name: str
     display_name: str
     visible: bool
@@ -51,11 +58,11 @@ class WellSeismicScene:
         self._survey: SurveySpec | None = None
         self._domain: VerticalDomain = VerticalDomain.TIME
         self._wells: list[WellHead] = []
-        self._well_ids: list[str] = []
-        self._well_visibility: dict[str, bool] = {}
+        self._well_ids: list[JointWellId] = []
+        self._well_visibility: dict[JointWellId, bool] = {}
         self._td_tables: dict[str, TimeDepthTable] = {}
         self._volume: VolumeAccess | None = None
-        self._traj_cache: dict[str, WellTrajectory3D] | None = None
+        self._traj_cache: dict[JointWellId, WellTrajectory3D] | None = None
         self._fences: list[FenceSection] = []
         self._active_fence_id: str | None = None
         # Key: (fence_id, VerticalDomain value, n_along) so Time/Depth extracts coexist
@@ -168,15 +175,20 @@ class WellSeismicScene:
     ) -> None:
         previous_visibility = dict(self._well_visibility)
         self._wells = list(wells)
-        counts = Counter(well.name for well in self._wells)
-        occurrences: Counter[str] = Counter()
+        identity_bases = [_joint_well_identity_base(well) for well in self._wells]
+        counts = Counter(identity_bases)
+        occurrences: Counter[JointWellId] = Counter()
         self._well_ids = []
-        for well in self._wells:
-            occurrences[well.name] += 1
-            if counts[well.name] == 1:
-                self._well_ids.append(well.name)
+        for identity_base in identity_bases:
+            occurrences[identity_base] += 1
+            if counts[identity_base] == 1:
+                self._well_ids.append(identity_base)
             else:
-                self._well_ids.append(f"{well.name}#{occurrences[well.name]}")
+                self._well_ids.append(
+                    JointWellId(
+                        f"{identity_base}#{occurrences[identity_base]}"
+                    )
+                )
         self._well_visibility = {
             well_id: previous_visibility.get(well_id, True)
             for well_id in self._well_ids
@@ -204,19 +216,24 @@ class WellSeismicScene:
             )
         return presentations
 
-    def set_well_visibility(self, well_id: str, visible: bool) -> None:
+    def set_well_visibility(
+        self, well_id: JointWellId | str, visible: bool
+    ) -> None:
         """Set one well's presentation visibility without altering analysis data."""
-        if well_id not in self._well_visibility:
-            raise KeyError(well_id)
-        self._well_visibility[well_id] = bool(visible)
+        identity = JointWellId(str(well_id))
+        if identity not in self._well_visibility:
+            raise KeyError(identity)
+        self._well_visibility[identity] = bool(visible)
 
     def well_trajectories(
         self, *, visible_only: bool = False
-    ) -> dict[str, WellTrajectory3D]:
+    ) -> dict[JointWellId, WellTrajectory3D]:
         if self._traj_cache is None:
             self._traj_cache = {}
             for well_id, well in zip(self._well_ids, self._wells, strict=True):
-                td = self._td_tables.get(well_id, self._td_tables.get(well.name))
+                td = self._td_tables.get(
+                    str(well_id), self._td_tables.get(well.name)
+                )
                 traj = project_well_trajectory(well, domain=self._domain, td=td)
                 if self._domain is VerticalDomain.DEPTH and traj.has_td is False:
                     # Depth path uses MD; reproject with domain DEPTH
@@ -350,7 +367,7 @@ class WellSeismicScene:
         raise KeyError(fence_id)
 
     def add_well_to_well_fence(
-        self, well_refs: list[str], *, name: str = "Wells"
+        self, well_refs: list[JointWellId | str], *, name: str = "Wells"
     ) -> FenceSection:
         xy = []
         by_id = dict(zip(self._well_ids, self._wells, strict=True))
@@ -463,7 +480,7 @@ class WellSeismicScene:
         return hits
 
     def _pick_curve(
-        self, well_id: str, *, fallback_name: str
+        self, well_id: JointWellId | str, *, fallback_name: str
     ) -> tuple[str | None, np.ndarray | None, np.ndarray | None]:
         curves = self._curves_by_well.get(
             well_id, self._curves_by_well.get(fallback_name, {})
@@ -535,6 +552,25 @@ class WellSeismicScene:
 
     def _invalidate_traj(self) -> None:
         self._traj_cache = None
+
+
+def _joint_well_identity_base(well: WellHead) -> JointWellId:
+    """Use source identity when available; otherwise fingerprint non-name geometry."""
+    if well.id is not None and str(well.id):
+        return JointWellId(str(well.id))
+    geometry = "|".join(
+        f"{float(value):.17g}"
+        for value in (
+            well.x,
+            well.y,
+            well.bottom_x,
+            well.bottom_y,
+            well.total_depth_m,
+            well.kb_m,
+        )
+    )
+    digest = sha256(geometry.encode("utf-8")).hexdigest()[:20]
+    return JointWellId(f"geometry:{digest}")
 
 
 def _project_point_to_polyline(

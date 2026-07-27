@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import NewType
 
 import numpy as np
+
+JointWellId = NewType("JointWellId", str)
 
 
 class VerticalDomain(str, Enum):
@@ -26,6 +29,7 @@ class WellHead:
     bottom_y: float
     total_depth_m: float
     kb_m: float = 0.0
+    id: JointWellId | None = None
 
 
 @dataclass

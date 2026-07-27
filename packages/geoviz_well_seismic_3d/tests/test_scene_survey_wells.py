@@ -88,7 +88,7 @@ def test_well_trajectory_time_domain_with_td():
     )
     scene.set_wells([well], td_tables={"A1": td})
 
-    traj = scene.well_trajectories()["A1"]
+    traj = next(iter(scene.well_trajectories().values()))
     assert traj.has_td is True
     assert traj.warning is None
     assert traj.points.shape[1] == 3
@@ -113,7 +113,7 @@ def test_well_trajectory_missing_td_safe_behaviour():
     )
     scene.set_wells([well], td_tables={})
 
-    traj = scene.well_trajectories()["A2"]
+    traj = next(iter(scene.well_trajectories().values()))
     assert traj.has_td is False
     assert traj.warning is not None
     # Only surface/wellhead point — no fabricated full-depth path in Time
@@ -140,7 +140,7 @@ def test_deviated_well_head_to_bottom_xy():
         total_depth_m=2000.0,
     )
     scene.set_wells([well], td_tables={"A10": td})
-    pts = scene.well_trajectories()["A10"].points
+    pts = next(iter(scene.well_trajectories().values())).points
     assert pts[0, 0] == pytest.approx(10547.09)
     assert pts[0, 1] == pytest.approx(11754.19)
     assert pts[-1, 0] == pytest.approx(10457.533)

@@ -10,6 +10,7 @@ from .depth_transform import (
 )
 from .fence import FenceExtraction, FenceSection, extract_fence_strip, well_to_well_path
 from .models import (
+    JointWellId,
     TimeDepthTable,
     VerticalDomain,
     WellHead,
@@ -36,6 +37,7 @@ __all__ = [
     "FenceSection",
     "InMemoryVolumeAccess",
     "JointWellPresentation",
+    "JointWellId",
     "ProbeState",
     "ProfileWellHit",
     "SurveySpec",
