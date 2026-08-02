@@ -871,7 +871,18 @@ class XYScatterBackend:
             + sys.getsizeof(payload.record_ids)
             + sum(sys.getsizeof(record_id) for record_id in payload.record_ids)
             + sys.getsizeof(payload.source_rows)
-            + sum(sys.getsizeof(row) for row in payload.source_rows),
+            + sum(sys.getsizeof(row) for row in payload.source_rows)
+            + sys.getsizeof(payload.diagnostics)
+            + sys.getsizeof(payload.diagnostics.issues)
+            + sum(
+                sys.getsizeof(issue.source_row)
+                + len(issue.reason.encode("utf-8"))
+                for issue in payload.diagnostics.issues
+            )
+            + len(payload.resource_id.encode("utf-8"))
+            + len(payload.source_version.encode("utf-8"))
+            + len(payload.source_crs.encode("utf-8"))
+            + len(payload.coordinate_units.encode("utf-8")),
         )
 
     def create_widget(self, parent: QWidget | None = None) -> QWidget:

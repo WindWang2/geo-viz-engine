@@ -271,6 +271,36 @@ def test_well_head_prepare_blocks_conflicting_coordinate_metadata(
     assert "conflicting" in caught.value.detail
 
 
+def test_well_head_prepare_identifies_file_and_asset_crs_conflict(
+    tmp_path: Path,
+):
+    path = tmp_path / "conflicting-crs.dat"
+    path.write_text(
+        "\n".join(
+            (
+                "#WellHead File From SMI",
+                "#SourceCRS: EPSG:32648",
+                "#Name X Y",
+                "A1 100 200",
+            )
+        ),
+        encoding="utf-8",
+    )
+    request = PreviewRequest(
+        resource_id="asset-1",
+        path=str(path),
+        semantic_type="well_head",
+        format="dat",
+        source_crs="EPSG:4326",
+    )
+
+    with pytest.raises(GeoVizError) as caught:
+        GeoVizEngine.default().prepare(request, PreviewOptions.local())
+
+    assert caught.value.code is ErrorCode.INVALID_DATA
+    assert "conflicting SourceCRS declarations" in caught.value.detail
+
+
 def test_well_head_prepare_reports_explicit_resource_limit(tmp_path: Path):
     path = tmp_path / "too-many-wells.dat"
     rows = "\n".join(
@@ -290,6 +320,35 @@ def test_well_head_prepare_reports_explicit_resource_limit(tmp_path: Path):
 
     assert caught.value.code is ErrorCode.RESOURCE_LIMIT
     assert "50,000" in str(caught.value)
+
+
+def test_well_head_prepare_keeps_every_supported_record_without_sampling(
+    tmp_path: Path,
+):
+    count = 50_000
+    path = tmp_path / "supported-scale-wells.dat"
+    path.write_text(
+        "#WellHead File From SMI\n"
+        "#Name X Y\n"
+        + "\n".join(
+            f"W{index} {index} {index + 0.5}"
+            for index in range(count)
+        ),
+        encoding="utf-8",
+    )
+
+    preview = GeoVizEngine.default().prepare(
+        _request(path, "well_head"),
+        PreviewOptions(max_points=1),
+    )
+
+    assert len(preview.payload.names) == count
+    assert preview.payload.names[0] == "W0"
+    assert preview.payload.names[count // 2] == "W25000"
+    assert preview.payload.names[-1] == "W49999"
+    assert preview.payload.record_ids == tuple(range(count))
+    assert preview.payload.source_rows[0] == 3
+    assert preview.payload.source_rows[-1] == count + 2
 
 
 def test_well_head_prepare_preserves_explicit_source_metadata(
