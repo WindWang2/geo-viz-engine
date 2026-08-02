@@ -45,6 +45,21 @@ def encode_prepared_preview(
         payload = preview.payload
         if not isinstance(payload, XYPreviewPayload):
             raise ValueError("XY_SCATTER payload type mismatch")
+        identity_fields = (
+            bool(payload.resource_id),
+            bool(payload.record_ids),
+            bool(payload.source_rows),
+            bool(payload.source_version),
+        )
+        if any(identity_fields) and not all(identity_fields):
+            raise ValueError("XY identity metadata must be entirely present or absent")
+        parallel_lengths = [len(payload.names), len(payload.x), len(payload.y)]
+        if all(identity_fields):
+            parallel_lengths.extend(
+                (len(payload.record_ids), len(payload.source_rows))
+            )
+        if len(set(parallel_lengths)) != 1:
+            raise ValueError("XY metadata and arrays must have matching parallel lengths")
         meta["names"] = list(payload.names)
         meta["resource_id"] = payload.resource_id
         meta["record_ids"] = list(payload.record_ids)
@@ -110,16 +125,36 @@ def decode_prepared_preview(
         from .previews.dat import PreviewRowIssue, XYPreviewDiagnostics
 
         diagnostics = meta.get("diagnostics") or {}
+        resource_id = str(meta.get("resource_id") or "")
+        record_ids = tuple(int(value) for value in meta.get("record_ids", ()))
+        source_rows = tuple(
+            int(value) for value in meta.get("source_rows", ())
+        )
+        source_version = str(meta.get("source_version") or "")
+        identity_fields = (
+            bool(resource_id),
+            bool(record_ids),
+            bool(source_rows),
+            bool(source_version),
+        )
+        if any(identity_fields) and not all(identity_fields):
+            raise ValueError("XY identity metadata must be entirely present or absent")
+        names = tuple(meta["names"])
+        x = np.asarray(arrays["x"])
+        y = np.asarray(arrays["y"])
+        parallel_lengths = [len(names), len(x), len(y)]
+        if all(identity_fields):
+            parallel_lengths.extend((len(record_ids), len(source_rows)))
+        if len(set(parallel_lengths)) != 1:
+            raise ValueError("XY metadata and arrays must have matching parallel lengths")
         payload = XYPreviewPayload(
-            names=tuple(meta["names"]),
-            x=np.asarray(arrays["x"]),
-            y=np.asarray(arrays["y"]),
-            resource_id=str(meta.get("resource_id") or ""),
-            record_ids=tuple(int(value) for value in meta.get("record_ids", ())),
-            source_rows=tuple(
-                int(value) for value in meta.get("source_rows", ())
-            ),
-            source_version=str(meta.get("source_version") or ""),
+            names=names,
+            x=x,
+            y=y,
+            resource_id=resource_id,
+            record_ids=record_ids,
+            source_rows=source_rows,
+            source_version=source_version,
             source_crs=str(meta.get("source_crs") or ""),
             coordinate_units=str(meta.get("coordinate_units") or ""),
             diagnostics=XYPreviewDiagnostics(

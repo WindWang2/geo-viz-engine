@@ -57,6 +57,123 @@ def test_roundtrip_xy_scatter():
     np.testing.assert_array_equal(restored.payload.y, payload.y)
 
 
+def test_decode_keeps_compatible_identity_free_xy_payloads():
+    prepared = PreparedPreview(
+        kind=PreviewKind.XY_SCATTER,
+        title="wells",
+        payload=XYPreviewPayload(
+            names=("A1",),
+            x=np.array([1.0]),
+            y=np.array([2.0]),
+            source_crs="EPSG:32648",
+            coordinate_units="m",
+        ),
+    )
+    meta, arrays = encode_prepared_preview(prepared)
+    for field in ("resource_id", "record_ids", "source_rows", "source_version"):
+        meta.pop(field)
+
+    restored = decode_prepared_preview(meta, arrays)
+
+    assert restored.payload.resource_id == ""
+    assert restored.payload.record_ids == ()
+    assert restored.payload.source_rows == ()
+    assert restored.payload.source_version == ""
+    assert restored.payload.source_crs == "EPSG:32648"
+    assert restored.payload.coordinate_units == "m"
+    np.testing.assert_array_equal(restored.payload.x, np.array([1.0]))
+    np.testing.assert_array_equal(restored.payload.y, np.array([2.0]))
+
+
+def test_decode_rejects_partially_present_xy_identity():
+    prepared = PreparedPreview(
+        kind=PreviewKind.XY_SCATTER,
+        title="wells",
+        payload=XYPreviewPayload(
+            names=("A1",),
+            x=np.array([1.0]),
+            y=np.array([2.0]),
+        ),
+    )
+    meta, arrays = encode_prepared_preview(prepared)
+    meta["resource_id"] = "resource-7"
+
+    with pytest.raises(ValueError, match="identity metadata"):
+        decode_prepared_preview(meta, arrays)
+
+
+def test_encode_rejects_partially_present_xy_identity():
+    prepared = PreparedPreview(
+        kind=PreviewKind.XY_SCATTER,
+        title="wells",
+        payload=XYPreviewPayload(
+            names=("A1",),
+            x=np.array([1.0]),
+            y=np.array([2.0]),
+            resource_id="resource-7",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="identity metadata"):
+        encode_prepared_preview(prepared)
+
+
+@pytest.mark.parametrize(
+    "shortened_field",
+    ("names", "x", "y", "record_ids", "source_rows"),
+)
+def test_encode_rejects_mismatched_xy_parallel_lengths(shortened_field: str):
+    names = ("A1",) if shortened_field == "names" else ("A1", "B2")
+    x = np.array([1.0]) if shortened_field == "x" else np.array([1.0, 2.0])
+    y = np.array([3.0]) if shortened_field == "y" else np.array([3.0, 4.0])
+    record_ids = (4,) if shortened_field == "record_ids" else (4, 9)
+    source_rows = (12,) if shortened_field == "source_rows" else (12, 18)
+    prepared = PreparedPreview(
+        kind=PreviewKind.XY_SCATTER,
+        title="wells",
+        payload=XYPreviewPayload(
+            names=names,
+            x=x,
+            y=y,
+            resource_id="resource-7",
+            record_ids=record_ids,
+            source_rows=source_rows,
+            source_version="sha256:v1",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="parallel lengths"):
+        encode_prepared_preview(prepared)
+
+
+@pytest.mark.parametrize(
+    "shortened_field",
+    ("names", "x", "y", "record_ids", "source_rows"),
+)
+def test_decode_rejects_mismatched_xy_parallel_lengths(shortened_field: str):
+    prepared = PreparedPreview(
+        kind=PreviewKind.XY_SCATTER,
+        title="wells",
+        payload=XYPreviewPayload(
+            names=("A1", "B2"),
+            x=np.array([1.0, 2.0]),
+            y=np.array([3.0, 4.0]),
+            resource_id="resource-7",
+            record_ids=(4, 9),
+            source_rows=(12, 18),
+            source_version="sha256:v1",
+        ),
+    )
+    meta, arrays = encode_prepared_preview(prepared)
+    if shortened_field in arrays:
+        arrays[shortened_field] = arrays[shortened_field][:-1]
+    else:
+        meta[shortened_field] = meta[shortened_field][:-1]
+
+    with pytest.raises(ValueError, match="parallel lengths"):
+        decode_prepared_preview(meta, arrays)
+
+
 def test_roundtrip_surface():
     payload = SurfacePreviewPayload(
         grid_x=np.array([0.0, 1.0]),
