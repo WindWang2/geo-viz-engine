@@ -6,7 +6,7 @@ import numpy as np
 
 from .contracts import PreparedPreview, PreviewKind
 
-PAYLOAD_SCHEMA_VERSION = 3
+PAYLOAD_SCHEMA_VERSION = 4
 CACHEABLE_KINDS = frozenset(
     {PreviewKind.XY_SCATTER, PreviewKind.SURFACE, PreviewKind.FORMATION_TOPS}
 )
@@ -67,6 +67,18 @@ def encode_prepared_preview(
         meta["source_version"] = payload.source_version
         meta["source_crs"] = payload.source_crs
         meta["coordinate_units"] = payload.coordinate_units
+        meta["coordinate_status"] = {
+            "source_crs_provenance": (
+                payload.coordinate_status.source_crs_provenance
+            ),
+            "coordinate_units_provenance": (
+                payload.coordinate_status.coordinate_units_provenance
+            ),
+            "comparison_crs": payload.coordinate_status.comparison_crs,
+            "comparison_matches_source": (
+                payload.coordinate_status.comparison_matches_source
+            ),
+        }
         meta["diagnostics"] = {
             "total_records": payload.diagnostics.total_records,
             "valid_records": payload.diagnostics.valid_records,
@@ -122,9 +134,14 @@ def decode_prepared_preview(
     summary = tuple((str(a), str(b)) for a, b in meta.get("summary_rows", ()))
     if kind is PreviewKind.XY_SCATTER:
         _, XYPreviewPayload = _dat_payload_types()
-        from .previews.dat import PreviewRowIssue, XYPreviewDiagnostics
+        from .previews.dat import (
+            PreviewRowIssue,
+            SourceCoordinateStatus,
+            XYPreviewDiagnostics,
+        )
 
         diagnostics = meta.get("diagnostics") or {}
+        coordinate_status = meta.get("coordinate_status") or {}
         resource_id = str(meta.get("resource_id") or "")
         record_ids = tuple(int(value) for value in meta.get("record_ids", ()))
         source_rows = tuple(
@@ -157,6 +174,25 @@ def decode_prepared_preview(
             source_version=source_version,
             source_crs=str(meta.get("source_crs") or ""),
             coordinate_units=str(meta.get("coordinate_units") or ""),
+            coordinate_status=SourceCoordinateStatus(
+                source_crs_provenance=str(
+                    coordinate_status.get("source_crs_provenance")
+                    or "undeclared"
+                ),
+                coordinate_units_provenance=str(
+                    coordinate_status.get("coordinate_units_provenance")
+                    or "unknown"
+                ),
+                comparison_crs=str(
+                    coordinate_status.get("comparison_crs") or ""
+                ),
+                comparison_matches_source=(
+                    coordinate_status.get("comparison_matches_source")
+                    if coordinate_status.get("comparison_matches_source")
+                    in {True, False}
+                    else None
+                ),
+            ),
             diagnostics=XYPreviewDiagnostics(
                 total_records=int(
                     diagnostics.get("total_records") or 0

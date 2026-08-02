@@ -12,7 +12,11 @@ from geoviz import (
     decode_prepared_preview,
     encode_prepared_preview,
 )
-from geoviz.previews.dat import SurfacePreviewPayload, XYPreviewPayload
+from geoviz.previews.dat import (
+    SourceCoordinateStatus,
+    SurfacePreviewPayload,
+    XYPreviewPayload,
+)
 from geoviz_cross_well import FormationTop
 
 
@@ -27,6 +31,12 @@ def test_roundtrip_xy_scatter():
         source_version="sha256:v1",
         source_crs="EPSG:32648",
         coordinate_units="m",
+        coordinate_status=SourceCoordinateStatus(
+            source_crs_provenance="asset+file",
+            coordinate_units_provenance="asset",
+            comparison_crs="EPSG:3857",
+            comparison_matches_source=False,
+        ),
         diagnostics=XYPreviewDiagnostics(
             total_records=3,
             valid_records=2,
@@ -52,6 +62,7 @@ def test_roundtrip_xy_scatter():
     assert restored.payload.source_version == "sha256:v1"
     assert restored.payload.source_crs == "EPSG:32648"
     assert restored.payload.coordinate_units == "m"
+    assert restored.payload.coordinate_status == payload.coordinate_status
     assert restored.payload.diagnostics == payload.diagnostics
     np.testing.assert_array_equal(restored.payload.x, payload.x)
     np.testing.assert_array_equal(restored.payload.y, payload.y)

@@ -50,6 +50,10 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
         "geoviz.previews.dat",
         "XYPreviewDiagnostics",
     ),
+    "SourceCoordinateStatus": (
+        "geoviz.previews.dat",
+        "SourceCoordinateStatus",
+    ),
     "XYPreviewPayload": ("geoviz.previews.dat", "XYPreviewPayload"),
     "interpolate_idw": ("geoviz_plots", "interpolate_idw"),
     "interpolate_scipy": ("geoviz_plots", "interpolate_scipy"),
