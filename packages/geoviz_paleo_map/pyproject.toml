@@ -10,6 +10,10 @@ dependencies = [
     "PySide6",
     "pydantic",
     "geoviz-common",
+    # Phase-2 T3: FilledContourLayer consumes BandedFill produced by
+    # geoviz_plots.surface.marching_squares.extract_filled_contours. Acyclic -
+    # geoviz_plots does not depend on geoviz_paleo_map.
+    "geoviz-plots",
 ]
 
 [project.optional-dependencies]

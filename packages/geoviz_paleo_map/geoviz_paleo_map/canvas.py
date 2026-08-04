@@ -16,6 +16,7 @@ from geoviz_paleo_map.hierarchy import FaciesHierarchy, FaciesNode, FaciesFeatur
 from geoviz_paleo_map.layers.background import BackgroundLayer
 from geoviz_paleo_map.layers.base import PaleoLayer
 from geoviz_paleo_map.layers.facies_polygons import FaciesPolygonsLayer
+from geoviz_paleo_map.layers.filled_contour import FilledContourLayer
 from geoviz_paleo_map.layers.legend import LegendLayer
 from geoviz_paleo_map.layers.north_arrow import NorthArrowLayer
 from geoviz_paleo_map.layers.region_labels import RegionLabelsLayer
@@ -65,17 +66,12 @@ class PaleoMapCanvas(QWidget):
         self._wells_layer = WellsScatterLayer([])
         self._title_layer = TitleLayer("")
         self._legend_layer = LegendLayer(set(), self._resolver)
+        # Filled-contour overlay (Phase-2 T3). None until a caller passes
+        # filled_bands to load_features / load_hierarchy; absent from the
+        # layer list when None so the cache rebuild stays consistent.
+        self._filled_contour_layer: FilledContourLayer | None = None
 
-        self._layers: list[PaleoLayer] = [
-            BackgroundLayer(),
-            self._facies_layer,
-            self._labels_layer,
-            self._wells_layer,
-            self._title_layer,
-            NorthArrowLayer(),
-            ScaleBarLayer(),
-            self._legend_layer,
-        ]
+        self._layers: list[PaleoLayer] = self._compose_layers()
         self._rebuild_layer_caches()
         self._current_hover: str | None = None
         self._hierarchy: FaciesHierarchy | None = None
@@ -116,6 +112,30 @@ class PaleoMapCanvas(QWidget):
     def layers(self) -> list[PaleoLayer]:
         """Public read-only access to the composite layer list."""
         return list(self._layers)
+
+    def _compose_layers(self) -> list[PaleoLayer]:
+        """Build the ordered layer list with the filled-contour overlay.
+
+        The filled-contour layer (if any) sits directly after the background
+        so facies polygons, labels, wells, and chrome paint on top of it.
+        Kept as one helper so all three composition sites (__init__,
+        load_features, load_hierarchy, _update_active_layers) agree on the
+        slot position - a structural gap (T3 / #247) that a per-site
+        add_layer would paper over rather than fix.
+        """
+        stack: list[PaleoLayer] = [BackgroundLayer()]
+        if self._filled_contour_layer is not None:
+            stack.append(self._filled_contour_layer)
+        stack.extend([
+            self._facies_layer,
+            self._labels_layer,
+            self._wells_layer,
+            self._title_layer,
+            NorthArrowLayer(),
+            ScaleBarLayer(),
+            self._legend_layer,
+        ])
+        return stack
 
     def _rebuild_layer_caches(self) -> None:
         """Rebuild LayerPixmapCache wrappers for current layer list.
@@ -164,7 +184,9 @@ class PaleoMapCanvas(QWidget):
 
     def load_features(self, features: list[dict],
                       period_name: str = "",
-                      wells: list[dict] | None = None) -> None:
+                      wells: list[dict] | None = None,
+                      filled_bands: list | None = None,
+                      study_area_clip: list[tuple[float, float]] | None = None) -> None:
         """Rebuild the viewport contents from a list of GeoJSON features."""
         self._hierarchy = None
         self._level_groups = {}
@@ -173,6 +195,12 @@ class PaleoMapCanvas(QWidget):
         self._facies_layer = FaciesPolygonsLayer(features, self._resolver)
         self._labels_layer = RegionLabelsLayer(features, self._resolver)
         self._wells_layer = WellsScatterLayer(wells or [])
+        # Phase-2 T3: filled-contour overlay. None when no bands are supplied,
+        # which keeps it out of the layer stack entirely.
+        self._filled_contour_layer = (
+            FilledContourLayer(filled_bands, study_area_clip)
+            if filled_bands else None
+        )
 
         seen = set()
         for f in features:
@@ -184,16 +212,7 @@ class PaleoMapCanvas(QWidget):
         self._title_layer.set_text(f"{period_name}岩相古地理图" if period_name else "")
 
         # Replace layer instances in the list
-        self._layers = [
-            BackgroundLayer(),
-            self._facies_layer,
-            self._labels_layer,
-            self._wells_layer,
-            self._title_layer,
-            NorthArrowLayer(),
-            ScaleBarLayer(),
-            self._legend_layer,
-        ]
+        self._layers = self._compose_layers()
         self._period_name = period_name
         self._wells_data = wells or []
         self._locked_ids = {}
@@ -213,12 +232,20 @@ class PaleoMapCanvas(QWidget):
 
     def load_hierarchy(self, hierarchy: FaciesHierarchy,
                        period_name: str = "",
-                       wells: list[dict] | None = None) -> None:
+                       wells: list[dict] | None = None,
+                       filled_bands: list | None = None,
+                       study_area_clip: list[tuple[float, float]] | None = None) -> None:
         """Rebuild layers from a hierarchical facies model.
 
         Builds per-level layer groups so that zoom determines which level is shown.
         """
         self._hierarchy = hierarchy
+        # Phase-2 T3: a single filled-contour overlay shared across all level
+        # groups (bands are level-independent; re-clipping per level would
+        # be wasted work). When supplied, it slots after the background in
+        # every group.
+        filled_layer = FilledContourLayer(filled_bands, study_area_clip) if filled_bands else None
+        self._filled_contour_layer = filled_layer
 
         pens = {
             "facies": QPen(QColor("#1a202c"), 2.0),
@@ -249,7 +276,10 @@ class PaleoMapCanvas(QWidget):
             all_seen.update(seen)
             poly = FaciesPolygonsLayer(feats, self._resolver, default_pen=pens[level], hierarchy=hierarchy, active_level=level, locked_ids=self._locked_ids)
 
-            group: list[PaleoLayer] = [BackgroundLayer(), poly]
+            group: list[PaleoLayer] = [BackgroundLayer()]
+            if filled_layer is not None:
+                group.append(filled_layer)
+            group.append(poly)
             group.append(RegionLabelsLayer(feats, self._resolver,
                                            font_size=font_sizes[level],
                                            locked_ids=set(self._locked_ids.keys())))
@@ -481,16 +511,13 @@ class PaleoMapCanvas(QWidget):
         self._legend_layer.set_facies(seen)
         self._title_layer.set_text(title)
 
-        self._layers = [
-            BackgroundLayer(),
-            poly,
-            labels,
-            WellsScatterLayer(self._wells_data),
-            TitleLayer(title),
-            NorthArrowLayer(),
-            ScaleBarLayer(),
-            LegendLayer(seen, self._resolver),
-        ]
+        # Preserve the existing filled-contour overlay across level switches.
+        self._facies_layer = poly
+        self._labels_layer = labels
+        self._wells_layer = WellsScatterLayer(self._wells_data)
+        self._title_layer = TitleLayer(title)
+        self._legend_layer = LegendLayer(seen, self._resolver)
+        self._layers = self._compose_layers()
         self._rebuild_layer_caches()
 
     def _update_locked_panel(self) -> None:

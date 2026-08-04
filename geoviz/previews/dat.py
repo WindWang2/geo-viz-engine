@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import shlex
 import sys
 from dataclasses import dataclass, field
@@ -63,6 +64,20 @@ class XYPreviewDiagnostics:
 
 
 @dataclass(frozen=True)
+class SourceCoordinateStatus:
+    """Explicit metadata facts used to judge an XY preview's trust context."""
+
+    source_crs_provenance: str = "undeclared"
+    coordinate_units_provenance: str = "unknown"
+    comparison_crs: str = ""
+    comparison_matches_source: bool | None = None
+
+    @property
+    def comparison_mismatch(self) -> bool:
+        return self.comparison_matches_source is False
+
+
+@dataclass(frozen=True)
 class XYPreviewPayload:
     names: tuple[str, ...]
     x: np.ndarray
@@ -73,6 +88,9 @@ class XYPreviewPayload:
     source_version: str = ""
     source_crs: str = ""
     coordinate_units: str = ""
+    coordinate_status: SourceCoordinateStatus = field(
+        default_factory=SourceCoordinateStatus
+    )
     diagnostics: XYPreviewDiagnostics = field(
         default_factory=XYPreviewDiagnostics
     )
@@ -255,11 +273,22 @@ def _source_crs_declaration(header: tuple[str, ...]) -> str:
     if not declarations:
         return ""
     if any(
-        declaration.casefold() != declarations[0].casefold()
+        not _same_explicit_crs(declaration, declarations[0])
         for declaration in declarations[1:]
     ):
         raise _DatSchemaError("conflicting SourceCRS declarations")
     return declarations[0]
+
+
+def _canonical_explicit_crs(value: str) -> str:
+    """Normalize only explicit CRS syntax; never infer from coordinate values."""
+    normalized = " ".join(value.casefold().split())
+    match = re.search(r"\bepsg\s*:\s*(\d+)\b", normalized)
+    return f"epsg:{match.group(1)}" if match else normalized
+
+
+def _same_explicit_crs(left: str, right: str) -> bool:
+    return _canonical_explicit_crs(left) == _canonical_explicit_crs(right)
 
 
 def _merge_declared_metadata(
@@ -273,10 +302,20 @@ def _merge_declared_metadata(
     if (
         explicit
         and declared
-        and explicit.casefold() != declared.casefold()
+        and not _same_explicit_crs(explicit, declared)
     ):
         raise _DatSchemaError(f"conflicting {name} declarations")
     return explicit or declared
+
+
+def _metadata_provenance(explicit: str, declared: str, *, missing: str) -> str:
+    if explicit and declared:
+        return "asset+file"
+    if explicit:
+        return "asset"
+    if declared:
+        return "file"
+    return missing
 
 
 def _registered_depth_type(header: tuple[str, ...]) -> str | None:
@@ -513,6 +552,7 @@ def _well_head_payload(
     source_version: str = "",
     source_crs: str = "",
     coordinate_units: str = "",
+    comparison_crs: str = "",
 ) -> XYPreviewPayload:
     header = _read_header(path)
     if not any(_WELL_HEAD_MARKER in line for line in header):
@@ -523,7 +563,7 @@ def _well_head_payload(
         allowed_extras=_WELL_HEAD_EXTRA_COLUMNS,
     )
     if mapping is None:
-        raise _DatSchemaError("missing well-head column declaration")
+        raise _DatSchemaError("missing required Name/X/Y columns")
     declaration_widths = {
         len(tokens)
         for line in header
@@ -552,15 +592,22 @@ def _well_head_payload(
     ):
         raise _DatSchemaError("conflicting X/Y coordinate units")
     declared_units = declared_x_unit or declared_y_unit
+    asset_source_crs = source_crs
+    asset_coordinate_units = coordinate_units
     source_crs = _merge_declared_metadata(
-        source_crs,
+        asset_source_crs,
         declared_crs,
         name="SourceCRS",
     )
     coordinate_units = _merge_declared_metadata(
-        coordinate_units,
+        asset_coordinate_units,
         declared_units,
         name="coordinate unit",
+    )
+    comparison_matches_source = (
+        _same_explicit_crs(source_crs, comparison_crs)
+        if source_crs and comparison_crs
+        else None
     )
 
     def parse_row(row):
@@ -611,7 +658,16 @@ def _well_head_payload(
     if row_count == 0:
         raise _DatSchemaError("no data rows")
     if not selected:
-        raise _DatSchemaError("no renderable well locations")
+        causes = "; ".join(
+            f"source row {issue.source_row}: {issue.reason}"
+            for issue in issues
+        )
+        detail = "no renderable well locations"
+        if causes:
+            detail = f"{detail}; {causes}"
+        if omitted_issue_count:
+            detail = f"{detail}; {omitted_issue_count} additional rows omitted"
+        raise _DatSchemaError(detail)
     return XYPreviewPayload(
         names=tuple(row[0] for row in selected),
         x=np.ascontiguousarray([row[1] for row in selected], dtype=np.float64),
@@ -622,6 +678,20 @@ def _well_head_payload(
         source_version=str(source_version),
         source_crs=str(source_crs),
         coordinate_units=str(coordinate_units),
+        coordinate_status=SourceCoordinateStatus(
+            source_crs_provenance=_metadata_provenance(
+                asset_source_crs,
+                declared_crs,
+                missing="undeclared",
+            ),
+            coordinate_units_provenance=_metadata_provenance(
+                asset_coordinate_units,
+                declared_units,
+                missing="unknown",
+            ),
+            comparison_crs=str(comparison_crs),
+            comparison_matches_source=comparison_matches_source,
+        ),
         diagnostics=XYPreviewDiagnostics(
             total_records=row_count,
             valid_records=len(selected),
@@ -827,6 +897,7 @@ class XYScatterBackend:
                 source_version=request.source_version,
                 source_crs=request.source_crs,
                 coordinate_units=request.coordinate_units,
+                comparison_crs=request.comparison_crs,
             )
         except (OSError, UnicodeError, _DatSchemaError) as error:
             if isinstance(error, _WellResourceLimitError):
@@ -845,14 +916,10 @@ class XYScatterBackend:
             )
         if not payload.source_crs:
             warnings.append("SourceCRS 未声明")
-        elif (
-            request.comparison_crs
-            and payload.source_crs.casefold()
-            != request.comparison_crs.casefold()
-        ):
+        elif payload.coordinate_status.comparison_mismatch:
             warnings.append(
                 f"SourceCRS {payload.source_crs} 与参考 CRS "
-                f"{request.comparison_crs} 不同（未转换）"
+                f"{payload.coordinate_status.comparison_crs} 不同（未转换）"
             )
         if not payload.coordinate_units:
             warnings.append("坐标单位未知")
@@ -871,7 +938,26 @@ class XYScatterBackend:
             + sys.getsizeof(payload.record_ids)
             + sum(sys.getsizeof(record_id) for record_id in payload.record_ids)
             + sys.getsizeof(payload.source_rows)
-            + sum(sys.getsizeof(row) for row in payload.source_rows),
+            + sum(sys.getsizeof(row) for row in payload.source_rows)
+            + sys.getsizeof(payload.diagnostics)
+            + sys.getsizeof(payload.diagnostics.issues)
+            + sum(
+                sys.getsizeof(issue.source_row)
+                + len(issue.reason.encode("utf-8"))
+                for issue in payload.diagnostics.issues
+            )
+            + len(payload.resource_id.encode("utf-8"))
+            + len(payload.source_version.encode("utf-8"))
+            + len(payload.source_crs.encode("utf-8"))
+            + len(payload.coordinate_units.encode("utf-8"))
+            + sum(
+                len(value.encode("utf-8"))
+                for value in (
+                    payload.coordinate_status.source_crs_provenance,
+                    payload.coordinate_status.coordinate_units_provenance,
+                    payload.coordinate_status.comparison_crs,
+                )
+            ),
         )
 
     def create_widget(self, parent: QWidget | None = None) -> QWidget:

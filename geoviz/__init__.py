@@ -42,6 +42,9 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "export_professional_figure": ("geoviz_paleo_map", "export_professional_figure"),
     "CrossWellCanvas": ("geoviz_cross_well", "CrossWellCanvas"),
     "FormationTop": ("geoviz_cross_well.tops_model", "FormationTop"),
+    # Section-line auto-planner (Phase-2, T5 / #249): PCA / nearest-neighbor
+    # well ordering for section layout. Pure numpy, already in the package.
+    "plan_section": ("geoviz_cross_well", "plan_section"),
     "WellTieCanvas": ("geoviz_well_tie.canvas", "WellTieCanvas"),
     "PlotWidget": ("geoviz_plots", "PlotWidget"),
     "SurfaceWidget": ("geoviz_plots", "SurfaceWidget"),
@@ -49,6 +52,10 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "XYPreviewDiagnostics": (
         "geoviz.previews.dat",
         "XYPreviewDiagnostics",
+    ),
+    "SourceCoordinateStatus": (
+        "geoviz.previews.dat",
+        "SourceCoordinateStatus",
     ),
     "XYPreviewPayload": ("geoviz.previews.dat", "XYPreviewPayload"),
     "interpolate_idw": ("geoviz_plots", "interpolate_idw"),
@@ -64,6 +71,15 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "modified_z_scores": ("geoviz_plots", "modified_z_scores"),
     "extract_contour_lines": ("geoviz_plots", "extract_contour_lines"),
     "extract_filled_contours": ("geoviz_plots", "extract_filled_contours"),
+    # Banded filled-contour dataclass + layer (Phase-2, T3 / #247).
+    "BandedFill": ("geoviz_plots", "BandedFill"),
+    "FilledContourLayer": ("geoviz_paleo_map", "FilledContourLayer"),
+    # CRS facade helpers (Phase-2, T2 / #246). Workstation sets the project
+    # CRS once at startup and coerces well coords to it at draw-time.
+    "coerce_to_project_crs": ("geoviz_plots", "coerce_to_project_crs"),
+    "get_project_crs": ("geoviz_plots", "get_project_crs"),
+    "list_known_crs": ("geoviz_plots", "list_known_crs"),
+    "set_project_crs": ("geoviz_plots", "set_project_crs"),
     # Contour draft pure core (promoted from paleo_workbench/workflow/contour_draft.py).
     # The FactorMapTask/ProjectDocument-coupled adapter stays in Workbench.
     "ContourSegment": ("geoviz_plots", "ContourSegment"),

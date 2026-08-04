@@ -533,6 +533,7 @@ def test_async_interpolation(qtbot):
 
 
 from geoviz_plots.surface.marching_squares import extract_contour_lines, extract_filled_contours
+from geoviz_plots.surface.marching_squares import BandedFill
 
 def test_contour_extraction():
     """Verify that contour line and filled polygon extraction works correctly, including handling NaNs."""
@@ -544,21 +545,25 @@ def test_contour_extraction():
         [0.0, 1.0, float('nan')],  # Contains a NaN
         [0.0, 0.0, 0.0]
     ])
-    
+
     # 1. Test Line Extraction
     lines_dict = extract_contour_lines(grid_x, grid_y, grid_z, levels=[0.5])
     assert 0.5 in lines_dict
     assert isinstance(lines_dict[0.5], list)
-    
-    # 2. Test Filled Contour Extraction
-    filled_list = extract_filled_contours(grid_x, grid_y, grid_z, levels=[0.2, 0.8])
-    # Returns a list of tuples: (level_min, level_max, polygons, offsets)
-    assert len(filled_list) == 1
-    lev_min, lev_max, polys, offsets = filled_list[0]
-    assert lev_min == 0.2
-    assert lev_max == 0.8
-    assert isinstance(polys, list)
-    assert isinstance(offsets, list)
+
+    # 2. Test Filled Contour Extraction (Phase-2 T3: returns list[BandedFill])
+    bands = extract_filled_contours(grid_x, grid_y, grid_z, levels=[0.2, 0.8])
+    assert len(bands) == 1
+    band = bands[0]
+    assert isinstance(band, BandedFill)
+    assert band.level_min == 0.2
+    assert band.level_max == 0.8
+    assert isinstance(band.polygons, list)
+    assert isinstance(band.offsets, list)
+    # color is resolved against the default "viridis" palette at the band midpoint
+    assert band.color is not None
+    # label is "min-max"
+    assert band.label == "0.2-0.8"
 
 
 def test_contour_extraction_honours_cancellation_before_work():
@@ -576,6 +581,16 @@ def test_contour_extraction_honours_cancellation_before_work():
             grid_y,
             grid_z,
             levels=[0.5],
+            cancellation_token=CancelledToken(),
+        )
+
+    # Phase-2 T3: filled-contour extraction honours the same cancellation token.
+    with pytest.raises(RuntimeError, match="cancelled checkpoint"):
+        extract_filled_contours(
+            grid_x,
+            grid_y,
+            grid_z,
+            levels=[0.3, 0.7],
             cancellation_token=CancelledToken(),
         )
 

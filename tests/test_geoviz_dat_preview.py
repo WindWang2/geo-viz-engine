@@ -210,6 +210,40 @@ def test_well_head_prepare_treats_malformed_width_as_a_row_diagnostic(
     assert preview.payload.diagnostics.skipped_count == 2
 
 
+def test_well_head_blocking_errors_name_missing_columns_and_row_causes(
+    tmp_path: Path,
+):
+    missing_columns = tmp_path / "missing-columns.dat"
+    missing_columns.write_text(
+        "#WellHead File From SMI\n#Name X\nA1 10\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(GeoVizError) as missing:
+        GeoVizEngine.default().prepare(
+            _request(missing_columns, "well_head"),
+            PreviewOptions.local(),
+        )
+
+    assert missing.value.code is ErrorCode.INVALID_DATA
+    assert missing.value.detail == "missing required Name/X/Y columns"
+
+    invalid_rows = tmp_path / "invalid-rows.dat"
+    invalid_rows.write_text(
+        "#WellHead File From SMI\n#Name X Y\n\"\" 10 20\nA1 bad 20\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(GeoVizError) as no_locations:
+        GeoVizEngine.default().prepare(
+            _request(invalid_rows, "well_head"),
+            PreviewOptions.local(),
+        )
+
+    assert no_locations.value.code is ErrorCode.INVALID_DATA
+    assert "no renderable well locations" in no_locations.value.detail
+    assert "source row 3: 井名为空" in no_locations.value.detail
+    assert "source row 4: X 坐标不是有限数值" in no_locations.value.detail
+
+
 def test_well_head_prepare_reads_file_crs_and_matching_xy_units(
     tmp_path: Path,
 ):
@@ -237,6 +271,65 @@ def test_well_head_prepare_reads_file_crs_and_matching_xy_units(
     assert preview.payload.coordinate_units == "m"
     assert "SourceCRS 未声明" not in preview.warning
     assert "坐标单位未知" not in preview.warning
+
+
+def test_well_head_coordinate_status_tracks_explicit_provenance(
+    tmp_path: Path,
+):
+    path = tmp_path / "provenance.dat"
+    path.write_text(
+        "\n".join(
+            (
+                "#WellHead File From SMI",
+                "#SourceCRS: EPSG:32648",
+                "#X .m",
+                "#Y .m",
+                "#Name X Y",
+                "A1 10 20",
+            )
+        ),
+        encoding="utf-8",
+    )
+    request = PreviewRequest(
+        resource_id="asset-1",
+        path=str(path),
+        semantic_type="well_head",
+        format="dat",
+        source_crs="EPSG:32648",
+        coordinate_units="m",
+        comparison_crs="EPSG:3857",
+    )
+
+    preview = GeoVizEngine.default().prepare(request, PreviewOptions.local())
+
+    status = preview.payload.coordinate_status
+    assert status.source_crs_provenance == "asset+file"
+    assert status.coordinate_units_provenance == "asset+file"
+    assert status.comparison_crs == "EPSG:3857"
+    assert status.comparison_matches_source is False
+    assert "未转换" in preview.warning
+
+
+def test_well_head_comparison_canonicalizes_explicit_epsg_aliases(
+    tmp_path: Path,
+):
+    path = tmp_path / "epsg-alias.dat"
+    path.write_text(
+        "#WellHead File From SMI\n#SourceCRS: EPSG:4326\n#Name X Y\nA1 10 20\n",
+        encoding="utf-8",
+    )
+    request = PreviewRequest(
+        resource_id="asset-1",
+        path=str(path),
+        semantic_type="well_head",
+        format="dat",
+        comparison_crs="EPSG:4326 / WGS84",
+    )
+
+    preview = GeoVizEngine.default().prepare(request, PreviewOptions.local())
+
+    assert preview.payload.coordinate_status.comparison_matches_source is True
+    assert "未转换" not in preview.warning
 
 
 def test_well_head_prepare_blocks_conflicting_coordinate_metadata(
@@ -271,6 +364,36 @@ def test_well_head_prepare_blocks_conflicting_coordinate_metadata(
     assert "conflicting" in caught.value.detail
 
 
+def test_well_head_prepare_identifies_file_and_asset_crs_conflict(
+    tmp_path: Path,
+):
+    path = tmp_path / "conflicting-crs.dat"
+    path.write_text(
+        "\n".join(
+            (
+                "#WellHead File From SMI",
+                "#SourceCRS: EPSG:32648",
+                "#Name X Y",
+                "A1 100 200",
+            )
+        ),
+        encoding="utf-8",
+    )
+    request = PreviewRequest(
+        resource_id="asset-1",
+        path=str(path),
+        semantic_type="well_head",
+        format="dat",
+        source_crs="EPSG:4326",
+    )
+
+    with pytest.raises(GeoVizError) as caught:
+        GeoVizEngine.default().prepare(request, PreviewOptions.local())
+
+    assert caught.value.code is ErrorCode.INVALID_DATA
+    assert "conflicting SourceCRS declarations" in caught.value.detail
+
+
 def test_well_head_prepare_reports_explicit_resource_limit(tmp_path: Path):
     path = tmp_path / "too-many-wells.dat"
     rows = "\n".join(
@@ -290,6 +413,35 @@ def test_well_head_prepare_reports_explicit_resource_limit(tmp_path: Path):
 
     assert caught.value.code is ErrorCode.RESOURCE_LIMIT
     assert "50,000" in str(caught.value)
+
+
+def test_well_head_prepare_keeps_every_supported_record_without_sampling(
+    tmp_path: Path,
+):
+    count = 50_000
+    path = tmp_path / "supported-scale-wells.dat"
+    path.write_text(
+        "#WellHead File From SMI\n"
+        "#Name X Y\n"
+        + "\n".join(
+            f"W{index} {index} {index + 0.5}"
+            for index in range(count)
+        ),
+        encoding="utf-8",
+    )
+
+    preview = GeoVizEngine.default().prepare(
+        _request(path, "well_head"),
+        PreviewOptions(max_points=1),
+    )
+
+    assert len(preview.payload.names) == count
+    assert preview.payload.names[0] == "W0"
+    assert preview.payload.names[count // 2] == "W25000"
+    assert preview.payload.names[-1] == "W49999"
+    assert preview.payload.record_ids == tuple(range(count))
+    assert preview.payload.source_rows[0] == 3
+    assert preview.payload.source_rows[-1] == count + 2
 
 
 def test_well_head_prepare_preserves_explicit_source_metadata(
