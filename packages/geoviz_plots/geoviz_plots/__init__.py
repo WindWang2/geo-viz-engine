@@ -25,6 +25,8 @@ from geoviz_plots.analytics import (
 from geoviz_plots.surface.marching_squares import extract_contour_lines, extract_filled_contours
 from geoviz_plots.surface.surface_widget import SurfaceWidget
 
+from geoviz_plots.fence import CrossWellFenceGenerator, generate_fence_mesh
+
 __all__ = [
     "calculate_ticks",
     "nice_number",
@@ -48,4 +50,6 @@ __all__ = [
     "extract_contour_lines",
     "extract_filled_contours",
     "SurfaceWidget",
+    "CrossWellFenceGenerator",
+    "generate_fence_mesh",
 ]
