@@ -1048,3 +1048,108 @@ def test_map_edit_feature_editor_topology_rollback():
     ring = editor.features["f1"]["geometry"]["coordinates"][0]
     assert ring[0] == [0, 0]
 
+
+# --- Phase-2 T3: extract_filled_contours extensions (study_area_clip / palette) ---
+
+def test_extract_filled_contours_palette_resolves_band_color():
+    """The ``palette`` kwarg resolves each band's ``color`` against COLORMAPS."""
+    grid_x = np.linspace(0.0, 2.0, 4)
+    grid_y = np.linspace(0.0, 2.0, 4)
+    grid_z = np.add.outer(grid_y, grid_x)
+
+    bands_viridis = extract_filled_contours(
+        grid_x, grid_y, grid_z, levels=[1.0, 3.0, 5.0], palette="viridis",
+    )
+    bands_thermal = extract_filled_contours(
+        grid_x, grid_y, grid_z, levels=[1.0, 3.0, 5.0], palette="thermal",
+    )
+    assert len(bands_viridis) == 2 == len(bands_thermal)
+    # Same band midpoint -> different color under different palettes.
+    assert bands_viridis[0].color != bands_thermal[0].color
+    # Unknown palette falls back to viridis (SurfaceWidget default behavior).
+    bands_unknown = extract_filled_contours(
+        grid_x, grid_y, grid_z, levels=[1.0, 3.0, 5.0], palette="not_a_cmap",
+    )
+    assert bands_unknown[0].color == bands_viridis[0].color
+
+
+def test_extract_filled_contours_study_area_clip_returns_bands():
+    """``study_area_clip`` is accepted; with shapely it intersects band rings."""
+    grid_x = np.linspace(0.0, 4.0, 5)
+    grid_y = np.linspace(0.0, 4.0, 5)
+    grid_z = np.add.outer(grid_y, grid_x)
+
+    # Clip to a small square in the lower-left quadrant.
+    clip = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0), (0.0, 0.0)]
+    bands = extract_filled_contours(
+        grid_x, grid_y, grid_z, levels=[1.0, 5.0], study_area_clip=clip,
+    )
+    assert len(bands) == 1
+    band = bands[0]
+    assert isinstance(band, BandedFill)
+    assert band.level_min == 1.0 and band.level_max == 5.0
+    # Color + label still populated when clipping is on.
+    assert band.color is not None
+    assert band.label == "1-5"
+
+
+def test_extract_filled_contours_empty_levels_returns_empty():
+    bands = extract_filled_contours(
+        np.linspace(0, 1, 3), np.linspace(0, 1, 3),
+        np.zeros((3, 3)), levels=[],
+    )
+    assert bands == []
+
+
+def test_extract_filled_contours_fill_type_kwarg_accepted():
+    """``fill_type`` is passed through to contourpy without error."""
+    grid_x = np.linspace(0.0, 2.0, 4)
+    grid_y = np.linspace(0.0, 2.0, 4)
+    grid_z = np.add.outer(grid_y, grid_x)
+    bands = extract_filled_contours(
+        grid_x, grid_y, grid_z, levels=[1.0, 3.0], fill_type="OuterOffset",
+    )
+    assert len(bands) == 1
+
+
+# --- Phase-2 T2: CRS facade helpers ---
+
+def test_crs_helpers_list_known_crs_includes_cnpc_datums():
+    from geoviz_plots.crs import list_known_crs
+    codes = list_known_crs()
+    # WGS84 + CNPC-standard geodetic datums (T2 / #246 resolution).
+    assert "EPSG:4326" in codes   # WGS 84
+    assert "EPSG:4490" in codes   # CGCS2000
+    assert "EPSG:4610" in codes   # Beijing 1954
+    assert "EPSG:4612" in codes   # Xian 1980
+
+
+def test_crs_coerce_identity_when_source_equals_project():
+    from geoviz_plots.crs import coerce_to_project_crs
+    pts = np.array([[116.0, 30.0], [117.0, 31.0]])
+    out = coerce_to_project_crs(pts, "EPSG:4326")
+    assert np.allclose(out, pts)
+
+
+def test_crs_coerce_reprojects_wgs84_to_web_mercator():
+    from geoviz_plots.crs import set_project_crs, get_project_crs, coerce_to_project_crs
+    import pyproj
+    try:
+        set_project_crs("EPSG:3857")
+        assert get_project_crs() == "EPSG:3857"
+        out = coerce_to_project_crs([116.0, 30.0], "EPSG:4326")
+        # Cross-check against pyproj's own transformer.
+        t = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+        x_ref, y_ref = t.transform(116.0, 30.0)
+        assert abs(out[0] - x_ref) < 1e-6 and abs(out[1] - y_ref) < 1e-6
+    finally:
+        set_project_crs("EPSG:4326")  # reset to default
+
+
+def test_crs_set_project_crs_rejects_invalid_code():
+    from geoviz_plots.crs import set_project_crs
+    import pyproj
+    with pytest.raises(pyproj.exceptions.CRSError):
+        set_project_crs("NOT_A_CRS")
+
+
