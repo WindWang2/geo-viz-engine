@@ -89,6 +89,29 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "resolve_anisotropy_params": ("geoviz_plots", "resolve_anisotropy_params"),
     "snapshot_hash": ("geoviz_plots", "snapshot_hash"),
     "synthetic_sample_points": ("geoviz_plots", "synthetic_sample_points"),
+    # Map-edit geometry API + transactional feature editor (promoted from
+    # paleo_workbench/mapping/map_edit_api.py + feature_editor.py).
+    # The reference_layers.py adapter (MapReferenceLayer + GDAL) stays in
+    # Workbench; the C++ map_edit_core extension moves separately (T10 native).
+    "FeatureEditor": ("geoviz_plots", "FeatureEditor"),
+    "HAS_CPP": ("geoviz_plots", "HAS_CPP"),
+    "HAS_SHAPELY": ("geoviz_plots", "HAS_SHAPELY"),
+    "SnapCandidateIndex": ("geoviz_plots", "SnapCandidateIndex"),
+    "TopologyError": ("geoviz_plots", "TopologyError"),
+    "closest_edge": ("geoviz_plots", "closest_edge"),
+    "delete_vertex": ("geoviz_plots", "delete_vertex"),
+    "hit_test": ("geoviz_plots", "hit_test"),
+    "insert_vertex": ("geoviz_plots", "insert_vertex"),
+    "merge_rings": ("geoviz_plots", "merge_rings"),
+    "move_features": ("geoviz_plots", "move_features"),
+    "rebuild_topology": ("geoviz_plots", "rebuild_topology"),
+    "set_vertex": ("geoviz_plots", "set_vertex"),
+    "snap_point": ("geoviz_plots", "snap_point"),
+    "snap_point_indexed": ("geoviz_plots", "snap_point_indexed"),
+    "snap_shared_nodes": ("geoviz_plots", "snap_shared_nodes"),
+    "split_ring_by_line": ("geoviz_plots", "split_ring_by_line"),
+    "validate_adjacency": ("geoviz_plots", "validate_adjacency"),
+    "validate_ring": ("geoviz_plots", "validate_ring"),
     # Cross-well 3D fence mesh (promoted from paleo_workbench/viz/geomodel/fence_generator.py).
     "CrossWellFenceGenerator": ("geoviz_plots", "CrossWellFenceGenerator"),
     "generate_fence_mesh": ("geoviz_plots", "generate_fence_mesh"),

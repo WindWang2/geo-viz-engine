@@ -900,3 +900,136 @@ def test_factor_interpolate_factor_grid_idw():
     # grid_z cells are either float or None (JSON-serializable)
     assert all(isinstance(v, float) or v is None for row in result["grid_z"] for v in row)
 
+
+# ---------------------------------------------------------------------------
+# map_edit API smoke tests (pure-Python fallback path; no map_edit_core in CI)
+# ---------------------------------------------------------------------------
+
+
+def test_map_edit_hit_test_point_and_ring():
+    """hit_test finds a point feature by tolerance and a ring by point-in-polygon."""
+    from geoviz_plots.map_edit import hit_test
+
+    records = [
+        {"id": "p1", "coordinates": [50.0, 50.0]},  # point far from ring
+        {"id": "r1", "coordinates": [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]},  # closed square
+    ]
+    # Point hit within tolerance
+    assert hit_test(records, 50.1, 50.0, tolerance=0.5) == "p1"
+    # Ring hit: point inside the square (no point feature competes here)
+    assert hit_test(records, 5.0, 5.0, tolerance=0.0) == "r1"
+    # Miss: far away
+    assert hit_test(records, 100.0, 100.0, tolerance=0.5) is None
+
+
+def test_map_edit_set_vertex_syncs_closed_ring():
+    """set_vertex on a closed ring updates both the vertex and its closing duplicate."""
+    from geoviz_plots.map_edit import set_vertex
+
+    ring = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]  # closed
+    set_vertex(ring, 0, 1.0, 2.0)
+    assert ring[0] == [1.0, 2.0]
+    assert ring[-1] == [1.0, 2.0]  # closing duplicate synced
+
+
+def test_map_edit_insert_and_delete_vertex():
+    """insert_vertex adds a point; delete_vertex removes it, respecting min-size."""
+    from geoviz_plots.map_edit import insert_vertex, delete_vertex
+
+    ring = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]  # closed, 4 unique
+    insert_vertex(ring, 1, 5.0, 0.0)
+    assert len(ring) == 6  # 5 unique + close
+    assert ring[1] == [5.0, 0.0]
+
+    deleted = delete_vertex(ring, 1)
+    assert deleted is True
+    assert len(ring) == 5  # back to 4 unique + close
+
+
+def test_map_edit_snap_point_finds_nearest():
+    """snap_point returns the nearest candidate within tolerance."""
+    from geoviz_plots.map_edit import snap_point
+
+    candidates = [(0.0, 0.0), (10.0, 0.0), (5.0, 5.0)]
+    # Snap near (5, 5)
+    assert snap_point(candidates, 5.1, 5.0, tol=0.5) == (5.0, 5.0)
+    # No candidate within tolerance -> original point
+    assert snap_point(candidates, 100.0, 100.0, tol=0.5) == (100.0, 100.0)
+
+
+def test_map_edit_validate_ring_detects_self_intersection():
+    """validate_ring flags a bowtie (self-intersecting) polygon."""
+    from geoviz_plots.map_edit import validate_ring
+
+    # Bowtie: crosses itself at the center
+    bowtie = [[0, 0], [10, 10], [10, 0], [0, 10], [0, 0]]
+    issues = validate_ring(bowtie)
+    assert len(issues) >= 1
+    assert issues[0]["code"] == "self_intersection"
+
+    # Valid simple square -> no issues
+    square = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+    assert validate_ring(square) == []
+
+
+def test_map_edit_merge_rings_unions_two_squares():
+    """merge_rings (shapely-backed) unions two overlapping polygons into one."""
+    from geoviz_plots.map_edit import merge_rings, HAS_SHAPELY
+
+    if not HAS_SHAPELY:
+        pytest.skip("shapely not available")
+
+    ring_a = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+    ring_b = [[5, 0], [15, 0], [15, 10], [5, 10], [5, 0]]  # overlaps right half
+    merged = merge_rings(ring_a, ring_b)
+    assert merged is not None
+    assert len(merged) >= 4  # a valid exterior ring
+
+
+def test_map_edit_feature_editor_load_move_undo():
+    """FeatureEditor loads a layer, moves a vertex, and undoes the transaction."""
+    from geoviz_plots.map_edit import FeatureEditor
+
+    editor = FeatureEditor()
+    editor.load_layer({
+        "type": "FeatureCollection",
+        "features": [
+            {"id": "f1", "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]]}},
+        ],
+    })
+    # Select vertex 1 (10, 0) and move it
+    editor.on_pointer_down(10.0, 0.0, tolerance=1.0)
+    assert editor.selected_feature_id == "f1"
+    editor.on_pointer_move(12.0, 0.0, snap=False)
+    editor.on_pointer_up()  # commits
+
+    # Vertex should have moved
+    feat = editor.features["f1"]
+    ring = feat["geometry"]["coordinates"][0]
+    assert ring[1] == [12.0, 0.0]
+
+    # Undo restores
+    assert editor.undo() is True
+    ring = editor.features["f1"]["geometry"]["coordinates"][0]
+    assert ring[1] == [10.0, 0.0]
+
+
+def test_map_edit_feature_editor_topology_rollback():
+    """FeatureEditor auto-rollbacks when a move creates a self-intersection."""
+    from geoviz_plots.map_edit import FeatureEditor, TopologyError
+
+    editor = FeatureEditor()
+    editor.load_layer({
+        "type": "FeatureCollection",
+        "features": [
+            {"id": "f1", "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]]}},
+        ],
+    })
+    editor.on_pointer_down(0.0, 0.0, tolerance=1.0)
+    # Move vertex 0 (0,0) to (10,5) -> edges 1-2 and 3-0 properly intersect (bowtie)
+    with pytest.raises(TopologyError):
+        editor.on_pointer_move(10.0, 5.0, snap=False)
+    # Auto-rollback: vertex unchanged
+    ring = editor.features["f1"]["geometry"]["coordinates"][0]
+    assert ring[0] == [0, 0]
+
