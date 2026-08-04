@@ -71,7 +71,11 @@ def test_build_tracks_full_data(qtbot):
     assert "DepthTrack" in types
     assert "CurveTrack" in types
     assert "LithologyTrack" in types
-    assert "FaciesTrack" in types
+    # Commit a60b7b44 redesigned the top-level `data.facies` path to emit a flat
+    # IntervalTrack (沉积相 as flat items) instead of a nested FaciesTrack. The
+    # nested FaciesTrack is now only built from `data.intervals.facies`. This
+    # test feeds both, so the top-level path wins → IntervalTrack, not FaciesTrack.
+    assert "IntervalTrack" in types
     assert "SystemsTractTrack" in types
 
 

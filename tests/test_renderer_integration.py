@@ -37,8 +37,15 @@ def test_full_pipeline_svg_export(qtbot):
     canvas.add_track(DepthTrack(top_depth=data.top_depth, bottom_depth=data.bottom_depth))
     for c in data.curves:
         is_log = c.name in ("RT", "RXO")
-        canvas.add_track(CurveTrack(curves=[c], label=f"{c.name} ({c.unit})",
-                                    width=100, log_scale=is_log))
+        track = CurveTrack(curves=[c], label=f"{c.name} ({c.unit})",
+                           width=100, log_scale=is_log)
+        # CurveTrack defaults to depth range 0..100 (BaseTrack default); the
+        # curve data sits at 2500..2600. Set each track's range explicitly so
+        # _cached_path doesn't clip to an empty window. Note: canvas.set_depth_range
+        # is a no-op when the first track's range already matches (commit b7eb6507),
+        # so it cannot be relied on to propagate into tracks added later.
+        track.set_depth_range(data.top_depth, data.bottom_depth)
+        canvas.add_track(track)
     canvas.set_depth_range(data.top_depth, data.bottom_depth)
 
     # Export SVG
