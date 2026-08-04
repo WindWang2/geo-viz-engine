@@ -12,10 +12,25 @@ from geoviz_paleo_map.cartography.items.free.box_items import (
     FreeEllipseItem,
     FreeRectItem,
 )
+from geoviz_paleo_map.cartography.items.free.image_item import FreeImageItem
+from geoviz_paleo_map.cartography.items.free.line_items import (
+    FreeArrowItem,
+    FreePolygonItem,
+    FreehandItem,
+)
+from geoviz_paleo_map.cartography.items.free.symbol_items import (
+    NorthArrowItem,
+    ScaleBarItem,
+)
+from geoviz_paleo_map.cartography.items.free.text_item import FreeTextItem
 
 ITEM_CLASSES: dict[str, type[FreeGraphicsItem]] = {
     cls.kind: cls
-    for cls in (FreeRectItem, FreeEllipseItem)
+    for cls in (
+        FreeRectItem, FreeEllipseItem, FreeTextItem,
+        FreeArrowItem, FreePolygonItem, FreehandItem,
+        FreeImageItem, NorthArrowItem, ScaleBarItem,
+    )
 }
 
 
@@ -39,6 +54,13 @@ __all__ = [
     "FreeGraphicsItem",
     "FreeRectItem",
     "FreeEllipseItem",
+    "FreeTextItem",
+    "FreeArrowItem",
+    "FreePolygonItem",
+    "FreehandItem",
+    "FreeImageItem",
+    "NorthArrowItem",
+    "ScaleBarItem",
     "ITEM_CLASSES",
     "item_from_record",
 ]
