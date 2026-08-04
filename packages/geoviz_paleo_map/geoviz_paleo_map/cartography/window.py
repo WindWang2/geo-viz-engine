@@ -198,6 +198,14 @@ class CartographyLayoutWindow(QMainWindow):
         self._scene.addItem(item)
         return item
 
+    def scene(self):
+        """Public accessor replacing ``window._scene`` private access."""
+        return self._scene
+
+    def view(self):
+        """Public accessor replacing ``win._view`` private access."""
+        return self._view
+
     def figure_panels(self) -> list[FigurePanelGraphicsItem]:
         """Return all FigurePanelGraphicsItem instances on the paper."""
         return [
