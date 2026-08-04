@@ -671,3 +671,124 @@ def test_generate_fence_mesh_three_wells_two_segments():
     assert faces.shape == (16, 3)
     # All face indices must be within the vertex buffer.
     assert faces.max() < verts.shape[0]
+
+
+def test_contour_draft_suggest_levels_basic():
+    """suggest_levels returns interior levels excluding exact min/max."""
+    import numpy as np
+
+    from geoviz_plots.contour_draft import suggest_levels, DEFAULT_N_LEVELS
+
+    grid = np.array([[0.0, 5.0], [10.0, 15.0]])
+    levels = suggest_levels(grid, n_levels=4)
+    # n_levels=4 -> linspace(lo, hi, 6)[1:-1] = 4 interior levels
+    assert len(levels) == 4
+    assert all(0.0 < v < 15.0 for v in levels)
+    # Endpoints excluded
+    assert 0.0 not in levels
+    assert 15.0 not in levels
+
+
+def test_contour_draft_suggest_levels_degenerate():
+    """Flat / non-finite grids return degenerate level lists, not raise."""
+    import numpy as np
+
+    from geoviz_plots.contour_draft import suggest_levels
+
+    # All-NaN -> empty
+    assert suggest_levels(np.full((3, 3), np.nan)) == []
+    # Flat grid (lo == hi) -> single level
+    flat = np.full((3, 3), 7.5)
+    assert suggest_levels(flat) == [7.5]
+
+
+def test_contour_draft_coerce_grid_handles_none_cells():
+    """coerce_grid converts JSON-stored None cells to NaN."""
+    import numpy as np
+
+    from geoviz_plots.contour_draft import coerce_grid
+
+    params = {
+        "grid_x": [0.0, 1.0, 2.0],
+        "grid_y": [0.0, 1.0],
+        "grid_z": [[1.0, None, 3.0], [4.0, 5.0, 6.0]],
+    }
+    gx, gy, gz = coerce_grid(params)
+    assert gx.shape == (3,)
+    assert gy.shape == (2,)
+    assert gz.shape == (2, 3)
+    assert np.isnan(gz[0, 1])
+    assert gz[0, 0] == 1.0
+
+
+def test_contour_draft_coerce_grid_missing_raises():
+    """coerce_grid raises ValueError when grid arrays are absent."""
+    import pytest
+
+    from geoviz_plots.contour_draft import coerce_grid
+
+    with pytest.raises(ValueError, match="grid_x/grid_y/grid_z"):
+        coerce_grid({})
+    with pytest.raises(ValueError, match="grid_x/grid_y/grid_z"):
+        coerce_grid({"grid_x": [0.0], "grid_y": [0.0]})  # no grid_z
+
+
+def test_contour_draft_extract_segments_synthetic():
+    """extract_contour_segments returns ContourSegments for a simple peaked grid."""
+    import numpy as np
+
+    from geoviz_plots.contour_draft import extract_contour_segments, ContourSegment
+
+    # 9x9 grid with a single peak at the center; contourpy will draw rings.
+    xs = np.linspace(0.0, 8.0, 9)
+    ys = np.linspace(0.0, 8.0, 9)
+    X, Y = np.meshgrid(xs, ys)
+    Z = np.exp(-((X - 4) ** 2 + (Y - 4) ** 2) / 4.0)  # peak=1.0 at center
+    levels = [0.2, 0.5, 0.8]
+
+    segments = extract_contour_segments(xs, ys, Z, levels)
+    assert len(segments) >= 3  # at least one per level
+    assert all(isinstance(s, ContourSegment) for s in segments)
+    # Levels should be tagged on each segment
+    segment_levels = {round(s.level, 1) for s in segments}
+    assert {0.2, 0.5, 0.8}.issubset(segment_levels)
+    # Each segment has >= 2 coordinate pairs (a real polyline)
+    assert all(len(s.coordinates) >= 2 for s in segments)
+    # Closed rings expected around a peak (not strictly guaranteed by every
+    # level, but at least one should close)
+    assert any(s.closed for s in segments)
+
+
+def test_contour_draft_segments_to_line_features():
+    """segments_to_line_features emits role=contour line_feature dicts."""
+    from geoviz_plots.contour_draft import ContourSegment, segments_to_line_features
+
+    segments = [
+        ContourSegment(
+            level=5.0,
+            coordinates=[[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]],
+            closed=False,
+            properties={"level": 5.0},
+            id="seg-1",
+        ),
+        ContourSegment(
+            level=10.0,
+            coordinates=[[3.0, 3.0]],  # too short - should be skipped
+            closed=False,
+            id="seg-2",
+        ),
+    ]
+    features = segments_to_line_features(
+        segments, draft_id="draft-1", factor_type="sand", target_horizon="H1"
+    )
+    # Only the 2-point+ segment survives
+    assert len(features) == 1
+    feat = features[0]
+    assert feat["kind"] == "line"
+    assert feat["role"] == "contour"
+    assert feat["name"] == "L=5"
+    assert feat["properties"]["contour_draft_id"] == "draft-1"
+    assert feat["properties"]["factor_type"] == "sand"
+    assert feat["properties"]["target_horizon"] == "H1"
+    assert feat["properties"]["level"] == 5.0
+

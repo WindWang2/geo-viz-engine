@@ -27,6 +27,16 @@ from geoviz_plots.surface.surface_widget import SurfaceWidget
 
 from geoviz_plots.fence import CrossWellFenceGenerator, generate_fence_mesh
 
+from geoviz_plots.contour_draft import (
+    ContourSegment,
+    DEFAULT_N_LEVELS,
+    GENERATOR_VERSION,
+    coerce_grid,
+    extract_contour_segments,
+    segments_to_line_features,
+    suggest_levels,
+)
+
 __all__ = [
     "calculate_ticks",
     "nice_number",
@@ -52,4 +62,11 @@ __all__ = [
     "SurfaceWidget",
     "CrossWellFenceGenerator",
     "generate_fence_mesh",
+    "ContourSegment",
+    "DEFAULT_N_LEVELS",
+    "GENERATOR_VERSION",
+    "coerce_grid",
+    "extract_contour_segments",
+    "segments_to_line_features",
+    "suggest_levels",
 ]
