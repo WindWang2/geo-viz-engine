@@ -73,6 +73,22 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "extract_contour_segments": ("geoviz_plots", "extract_contour_segments"),
     "segments_to_line_features": ("geoviz_plots", "segments_to_line_features"),
     "suggest_levels": ("geoviz_plots", "suggest_levels"),
+    # Factor-map interpolation pure core (promoted from
+    # paleo_workbench/workflow/factor_interpolation.py + directional_trend.py).
+    # The FactorMapTask/ProjectDocument-mutating adapters stay in Workbench.
+    "DEFAULT_FACTOR_TYPES": ("geoviz_plots", "DEFAULT_FACTOR_TYPES"),
+    "DEFAULT_GRID_N": ("geoviz_plots", "DEFAULT_GRID_N"),
+    "DEFAULT_SEMI_MAJOR": ("geoviz_plots", "DEFAULT_SEMI_MAJOR"),
+    "DEFAULT_SEMI_MINOR": ("geoviz_plots", "DEFAULT_SEMI_MINOR"),
+    "MAX_LOO_SAMPLES": ("geoviz_plots", "MAX_LOO_SAMPLES"),
+    "extract_xy_values": ("geoviz_plots", "extract_xy_values"),
+    "extract_xy_z_weights": ("geoviz_plots", "extract_xy_z_weights"),
+    "interpolate_factor_grid": ("geoviz_plots", "interpolate_factor_grid"),
+    "method_to_backend": ("geoviz_plots", "method_to_backend"),
+    "mvp_note_for": ("geoviz_plots", "mvp_note_for"),
+    "resolve_anisotropy_params": ("geoviz_plots", "resolve_anisotropy_params"),
+    "snapshot_hash": ("geoviz_plots", "snapshot_hash"),
+    "synthetic_sample_points": ("geoviz_plots", "synthetic_sample_points"),
     # Cross-well 3D fence mesh (promoted from paleo_workbench/viz/geomodel/fence_generator.py).
     "CrossWellFenceGenerator": ("geoviz_plots", "CrossWellFenceGenerator"),
     "generate_fence_mesh": ("geoviz_plots", "generate_fence_mesh"),
