@@ -792,3 +792,111 @@ def test_contour_draft_segments_to_line_features():
     assert feat["properties"]["target_horizon"] == "H1"
     assert feat["properties"]["level"] == 5.0
 
+
+def test_factor_method_to_backend_and_mvp_note():
+    """method_to_backend resolves UI labels; mvp_note_for tags the kriging MVP."""
+    from geoviz_plots.factor import method_to_backend, mvp_note_for
+
+    assert method_to_backend("IDW") == "idw"
+    assert method_to_backend("克里金(MVP·线性)") == "linear"
+    assert method_to_backend("方向趋势") == "directional"
+    assert method_to_backend("unknown") == "idw"  # default fallback
+    assert "ISS-KRIG-01" in mvp_note_for("linear")
+    assert mvp_note_for("idw") is None
+
+
+def test_factor_extract_xy_values_accepts_lnglat():
+    """extract_xy_values accepts x/y or lng/lat, skips NaN and missing-value points."""
+    import numpy as np
+
+    from geoviz_plots.factor import extract_xy_values
+
+    pts = [
+        {"x": 1.0, "y": 2.0, "value": 10.0},
+        {"lng": 3.0, "lat": 4.0, "z": 20.0},
+        {"x": float("nan"), "y": 0, "value": 1.0},  # NaN -> skipped
+        {"x": 5.0, "y": 6.0},  # no value/z/v -> skipped
+    ]
+    x, y, z = extract_xy_values(pts)
+    assert len(z) == 2
+    assert list(z) == [10.0, 20.0]
+
+
+def test_factor_extract_xy_z_weights_skips_qc_flagged():
+    """extract_xy_z_weights skips qc_flagged points and defaults q/b_i to 1.0."""
+    import numpy as np
+
+    from geoviz_plots.factor import extract_xy_z_weights
+
+    pts = [
+        {"x": 1.0, "y": 2.0, "value": 10.0, "q": 0.5, "b_i": 2.0},
+        {"x": 3.0, "y": 4.0, "value": 20.0, "qc_flag": "bad"},  # skipped
+        {"x": 5.0, "y": 6.0, "value": 30.0},  # q/b_i default
+    ]
+    x, y, z, q, bi = extract_xy_z_weights(pts)
+    assert len(z) == 2
+    assert list(z) == [10.0, 30.0]
+    assert list(q) == [0.5, 1.0]
+    assert list(bi) == [2.0, 1.0]
+
+
+def test_factor_resolve_anisotropy_params():
+    """resolve_anisotropy_params returns defaults for empty/negative inputs."""
+    from geoviz_plots.factor import resolve_anisotropy_params, DEFAULT_SEMI_MAJOR, DEFAULT_SEMI_MINOR
+
+    assert resolve_anisotropy_params(None) == (0.0, DEFAULT_SEMI_MAJOR, DEFAULT_SEMI_MINOR)
+    assert resolve_anisotropy_params([{"azimuth_deg": 90, "semi_major": 2, "semi_minor": 0.5}]) == (90.0, 2.0, 0.5)
+    # Negative axes fall back to defaults
+    assert resolve_anisotropy_params([{"semi_major": -1}]) == (0.0, DEFAULT_SEMI_MAJOR, DEFAULT_SEMI_MINOR)
+
+
+def test_factor_synthetic_sample_points_deterministic():
+    """synthetic_sample_points is deterministic per (seed, factor_type)."""
+    from geoviz_plots.factor import synthetic_sample_points
+
+    s1 = synthetic_sample_points(seed=42, factor_type="砂岩含量", count=4)
+    s2 = synthetic_sample_points(seed=42, factor_type="砂岩含量", count=4)
+    assert s1 == s2
+    assert len(s1) == 4
+    assert all("x" in p and "y" in p and "value" in p for p in s1)
+    # Different factor_type -> different RNG seed -> different points
+    s3 = synthetic_sample_points(seed=42, factor_type="泥岩含量", count=4)
+    assert s3 != s1
+
+
+def test_factor_snapshot_hash_sorted_keys():
+    """snapshot_hash is stable regardless of dict key order."""
+    from geoviz_plots.factor import snapshot_hash
+
+    h1 = snapshot_hash({"a": 1, "b": 2})
+    h2 = snapshot_hash({"b": 2, "a": 1})
+    assert h1 == h2
+    assert len(h1) == 64  # SHA-256 hex
+
+
+def test_factor_interpolate_factor_grid_idw():
+    """interpolate_factor_grid produces a JSON-serializable grid dict via IDW backend."""
+    import math
+
+    from geoviz_plots.factor import interpolate_factor_grid
+
+    # 4 sample points forming a simple gradient
+    pts = [
+        {"x": 0.0, "y": 0.0, "value": 0.0},
+        {"x": 10.0, "y": 0.0, "value": 10.0},
+        {"x": 0.0, "y": 10.0, "value": 5.0},
+        {"x": 10.0, "y": 10.0, "value": 15.0},
+    ]
+    result = interpolate_factor_grid(pts, method="IDW", grid_n=10, power=2.0)
+    assert result["backend"] == "idw"
+    assert result["method"] == "IDW"
+    assert result["grid_n"] == 10
+    assert len(result["grid_x"]) == 10
+    assert len(result["grid_y"]) == 10
+    assert len(result["grid_z"]) == 10 and len(result["grid_z"][0]) == 10
+    assert result["n_points"] == 4
+    assert result["min"] <= result["mean"] <= result["max"]
+    assert result["r_squared"] is None or 0.0 <= result["r_squared"] <= 1.0
+    # grid_z cells are either float or None (JSON-serializable)
+    assert all(isinstance(v, float) or v is None for row in result["grid_z"] for v in row)
+

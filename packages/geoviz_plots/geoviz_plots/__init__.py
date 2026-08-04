@@ -37,6 +37,22 @@ from geoviz_plots.contour_draft import (
     suggest_levels,
 )
 
+from geoviz_plots.factor import (
+    DEFAULT_FACTOR_TYPES,
+    DEFAULT_GRID_N,
+    DEFAULT_SEMI_MAJOR,
+    DEFAULT_SEMI_MINOR,
+    MAX_LOO_SAMPLES,
+    extract_xy_values,
+    extract_xy_z_weights,
+    interpolate_factor_grid,
+    method_to_backend,
+    mvp_note_for,
+    resolve_anisotropy_params,
+    snapshot_hash,
+    synthetic_sample_points,
+)
+
 __all__ = [
     "calculate_ticks",
     "nice_number",
@@ -69,4 +85,17 @@ __all__ = [
     "extract_contour_segments",
     "segments_to_line_features",
     "suggest_levels",
+    "DEFAULT_FACTOR_TYPES",
+    "DEFAULT_GRID_N",
+    "DEFAULT_SEMI_MAJOR",
+    "DEFAULT_SEMI_MINOR",
+    "MAX_LOO_SAMPLES",
+    "extract_xy_values",
+    "extract_xy_z_weights",
+    "interpolate_factor_grid",
+    "method_to_backend",
+    "mvp_note_for",
+    "resolve_anisotropy_params",
+    "snapshot_hash",
+    "synthetic_sample_points",
 ]
