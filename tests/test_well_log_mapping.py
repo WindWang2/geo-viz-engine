@@ -65,7 +65,10 @@ def test_well_log_page_mapping(qtbot, mock_well_data, monkeypatch):
 
     assert "系" in track_labels
     assert "组" in track_labels
-    assert "岩性描述" in track_labels
+    # Commit d8a46041 renamed the lithology_desc track from "岩性描述" to the
+    # more descriptive "照片/文本描述" (it's an ImageTrack for core photos and
+    # text descriptions, not a plain lithology description track).
+    assert "照片/文本描述" in track_labels
     assert "沉积相" in track_labels
     assert "层序" in track_labels
 
