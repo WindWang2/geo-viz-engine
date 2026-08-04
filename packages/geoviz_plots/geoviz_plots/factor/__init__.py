@@ -34,6 +34,7 @@ from geoviz_plots.factor.interpolation import (
     interpolate_factor_grid,
     method_to_backend,
     mvp_note_for,
+    snapshot_hash,
     synthetic_sample_points,
 )
 
@@ -50,5 +51,6 @@ __all__ = [
     "method_to_backend",
     "mvp_note_for",
     "resolve_anisotropy_params",
+    "snapshot_hash",
     "synthetic_sample_points",
 ]
