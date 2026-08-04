@@ -22,8 +22,15 @@ from geoviz_plots.analytics import (
     modified_z_scores,
 )
 
-from geoviz_plots.surface.marching_squares import extract_contour_lines, extract_filled_contours
+from geoviz_plots.surface.marching_squares import extract_contour_lines, extract_filled_contours, BandedFill
 from geoviz_plots.surface.surface_widget import SurfaceWidget
+
+from geoviz_plots.crs import (
+    coerce_to_project_crs,
+    get_project_crs,
+    list_known_crs,
+    set_project_crs,
+)
 
 from geoviz_plots.fence import CrossWellFenceGenerator, generate_fence_mesh
 
@@ -97,7 +104,12 @@ __all__ = [
     "InterpolationWorker",
     "extract_contour_lines",
     "extract_filled_contours",
+    "BandedFill",
     "SurfaceWidget",
+    "coerce_to_project_crs",
+    "get_project_crs",
+    "list_known_crs",
+    "set_project_crs",
     "CrossWellFenceGenerator",
     "generate_fence_mesh",
     "ContourSegment",

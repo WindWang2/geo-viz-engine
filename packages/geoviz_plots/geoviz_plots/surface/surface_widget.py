@@ -9,34 +9,7 @@ from PySide6.QtPrintSupport import QPrinter
 
 from geoviz_plots.chart.axes import calculate_ticks
 from geoviz_plots.surface.marching_squares import extract_contour_lines, extract_filled_contours
-
-# Beautiful Elegant Academic Colormaps
-COLORMAPS = {
-    "viridis": [
-        (0.0, QColor(68, 1, 84)),
-        (0.25, QColor(59, 82, 139)),
-        (0.5, QColor(33, 145, 140)),
-        (0.75, QColor(94, 201, 98)),
-        (1.0, QColor(253, 231, 37))
-    ],
-    "cnpc_strat": [  # CNPC Geologic Standard: Shale (Gray) to Sand (Yellow) to Carbonate (Blue)
-        (0.0, QColor(100, 110, 120)),   # Shale
-        (0.35, QColor(160, 175, 155)),  # Silty mudstone
-        (0.7, QColor(255, 220, 95)),    # Sandstone
-        (1.0, QColor(90, 175, 255))     # Carbonate / Limestone
-    ],
-    "cnpc_fluid": [  # CNPC Fluid standard
-        (0.0, QColor(40, 115, 255)),    # Water (Blue)
-        (0.5, QColor(50, 220, 100)),    # Oil (Green)
-        (1.0, QColor(255, 55, 55))      # Gas (Red)
-    ],
-    "thermal": [
-        (0.0, QColor(0, 0, 150)),
-        (0.33, QColor(0, 200, 200)),
-        (0.66, QColor(220, 220, 0)),
-        (1.0, QColor(255, 0, 0))
-    ]
-}
+from geoviz_plots.surface.colormaps import COLORMAPS, sample_colormap
 
 
 class SurfaceWidget(QWidget):
@@ -283,36 +256,7 @@ class SurfaceWidget(QWidget):
         """Linearly interpolate color from the active colormap according to the Z value range."""
         if not self.levels:
             return QColor(100, 100, 100)
-            
-        vmin = self.levels[0]
-        vmax = self.levels[-1]
-        
-        if vmax == vmin:
-            fraction = 0.0
-        else:
-            fraction = (val - vmin) / (vmax - vmin)
-            
-        fraction = max(0.0, min(1.0, fraction))
-        
-        cmap = COLORMAPS.get(self.colormap_name, COLORMAPS["viridis"])
-        
-        # Find adjacent control points
-        for i in range(len(cmap) - 1):
-            t1, c1 = cmap[i]
-            t2, c2 = cmap[i+1]
-            if t1 <= fraction <= t2:
-                # Interpolate
-                t_range = t2 - t1
-                if t_range == 0.0:
-                    return c1
-                w = (fraction - t1) / t_range
-                
-                r = int(c1.red() + w * (c2.red() - c1.red()))
-                g = int(c1.green() + w * (c2.green() - c1.green()))
-                b = int(c1.blue() + w * (c2.blue() - c1.blue()))
-                return QColor(r, g, b)
-                
-        return cmap[-1][1]
+        return sample_colormap(self.colormap_name, val, self.levels[0], self.levels[-1])
 
     # Vector Exports
     def export_svg(self, filepath: str):
@@ -385,32 +329,32 @@ class SurfaceWidget(QWidget):
         
         # 3. Draw Filled Contours (Color blocks)
         try:
-            filled_contours = extract_filled_contours(self.grid_x, self.grid_y, self.grid_z, self.levels)
-            for min_val, max_val, polys, offsets in filled_contours:
-                color = self.get_color((min_val + max_val) / 2.0)
+            bands = extract_filled_contours(self.grid_x, self.grid_y, self.grid_z, self.levels)
+            for band in bands:
+                color = QColor(band.color)
                 color.setAlpha(180)  # Standard clean alpha transparency
-                
+
                 painter.setBrush(QBrush(color))
                 painter.setPen(Qt.NoPen)
-                
-                for poly_coords, offset_arr in zip(polys, offsets):
+
+                for poly_coords, offset_arr in zip(band.polygons, band.offsets):
                     path = QPainterPath()
                     path.setFillRule(Qt.OddEvenFill)
-                    
+
                     for j in range(len(offset_arr) - 1):
                         start_idx = offset_arr[j]
                         end_idx = offset_arr[j+1]
                         ring_pts = poly_coords[start_idx:end_idx]
                         if len(ring_pts) < 3:
                             continue
-                            
+
                         px, py = to_p(ring_pts[0][0], ring_pts[0][1])
                         path.moveTo(px, py)
                         for pt in ring_pts[1:]:
                             px, py = to_p(pt[0], pt[1])
                             path.lineTo(px, py)
                         path.closeSubpath()
-                        
+
                     painter.drawPath(path)
         except Exception:
             pass  # Fail-safe protection
