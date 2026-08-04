@@ -64,6 +64,9 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "modified_z_scores": ("geoviz_plots", "modified_z_scores"),
     "extract_contour_lines": ("geoviz_plots", "extract_contour_lines"),
     "extract_filled_contours": ("geoviz_plots", "extract_filled_contours"),
+    # Cross-well 3D fence mesh (promoted from paleo_workbench/viz/geomodel/fence_generator.py).
+    "CrossWellFenceGenerator": ("geoviz_plots", "CrossWellFenceGenerator"),
+    "generate_fence_mesh": ("geoviz_plots", "generate_fence_mesh"),
     # Well-log interval models used when attaching facies/lithology tracks.
     "FaciesData": ("geoviz_well_log.models", "FaciesData"),
     "FaciesInterval": ("geoviz_well_log.models", "FaciesInterval"),

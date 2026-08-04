@@ -611,3 +611,63 @@ def test_surface_widget_basic(qtbot):
     dx, dy = widget.pixel_to_data(px, py)
     assert dx == pytest.approx(5.0)
     assert dy == pytest.approx(5.0)
+
+
+def test_generate_fence_mesh_two_wells():
+    """Verify the cross-well fence mesh builds a per-segment quad strip between two wells."""
+    import numpy as np
+
+    from geoviz_plots.fence import generate_fence_mesh
+
+    wells = [
+        {"name": "A", "x": 0.0, "y": 0.0, "depth": 100.0},
+        {"name": "B", "x": 200.0, "y": 50.0, "depth": 150.0},
+    ]
+    verts, faces, colors = generate_fence_mesh(wells, nz_samples=10)
+
+    # Two vertical lines × 10 samples per well = 20 vertices.
+    assert verts.shape == (20, 3)
+    assert verts.dtype == np.float32
+    # (nz_samples - 1) quads × 2 triangles = 18 faces for one segment.
+    assert faces.shape == (18, 3)
+    assert faces.dtype == np.int32
+    # One RGBA color per face.
+    assert colors.shape == (18, 4)
+    assert colors.dtype == np.float32
+    # Depth axis should be non-positive (z from 0 → -depth).
+    assert verts[:, 2].max() == pytest.approx(0.0)
+    assert verts[:, 2].min() < 0.0
+
+
+def test_generate_fence_mesh_single_well_returns_empty():
+    """A single well cannot form a fence segment — expect empty arrays, not a raise."""
+    import numpy as np
+
+    from geoviz_plots.fence import generate_fence_mesh
+
+    verts, faces, colors = generate_fence_mesh(
+        [{"name": "A", "x": 0.0, "y": 0.0, "depth": 100.0}],
+    )
+    assert verts.shape == (0, 3)
+    assert faces.shape == (0, 3)
+    assert colors.shape == (0, 4)
+
+
+def test_generate_fence_mesh_three_wells_two_segments():
+    """Three wells produce two independent segments; offsets must not collide."""
+    import numpy as np
+
+    from geoviz_plots.fence import generate_fence_mesh
+
+    wells = [
+        {"name": "A", "x": 0.0, "y": 0.0, "depth": 100.0},
+        {"name": "B", "x": 100.0, "y": 0.0, "depth": 100.0},
+        {"name": "C", "x": 200.0, "y": 0.0, "depth": 100.0},
+    ]
+    verts, faces, _ = generate_fence_mesh(wells, nz_samples=5)
+    # 3 wells → 2 segments × (2 lines × 5 samples) = 20 vertices.
+    assert verts.shape == (20, 3)
+    # 2 segments × (5-1) quads × 2 triangles = 16 faces.
+    assert faces.shape == (16, 3)
+    # All face indices must be within the vertex buffer.
+    assert faces.max() < verts.shape[0]
