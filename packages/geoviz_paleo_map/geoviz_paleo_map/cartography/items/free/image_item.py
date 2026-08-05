@@ -43,7 +43,7 @@ class FreeImageItem(FreeGraphicsItem):
     def paint_content(self, painter) -> None:
         r = self.rect()
         if self._pixmap is not None and not self._pixmap.isNull():
-            painter.drawPixmap(r, self._pixmap)
+            painter.drawPixmap(r, self._pixmap, QRectF(self._pixmap.rect()))
         else:
             painter.setPen(QPen(QColor("#94a3b8"), 0.5, Qt.PenStyle.DashLine))
             painter.setBrush(Qt.BrushStyle.NoBrush)
