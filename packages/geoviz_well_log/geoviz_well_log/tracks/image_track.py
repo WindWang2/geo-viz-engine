@@ -78,7 +78,11 @@ class ImageTrack(BaseTrack):
             photo_rect = QRectF(rect.left() + 2, y_top, rect.width() - 4, h)
 
             if photo.pixmap and not photo.pixmap.isNull():
-                painter.drawPixmap(photo_rect.toRect(), photo.pixmap)
+                painter.drawPixmap(
+                    photo_rect.toRect(),
+                    photo.pixmap,
+                    QRectF(photo.pixmap.rect()).toRect(),
+                )
             else:
                 # Placeholder rendering
                 painter.fillRect(photo_rect, QColor(220, 230, 245))
