@@ -89,7 +89,9 @@ class FigurePanelGraphicsItem(LayoutGraphicsItem):
             target = QRectF(
                 r.x() + 1.5, r.y() + 1.5, r.width() - 3.0, r.height() - 3.0
             )
-            painter.drawPixmap(target, self._snapshot_pixmap)
+            painter.drawPixmap(
+                target, self._snapshot_pixmap, QRectF(self._snapshot_pixmap.rect())
+            )
         elif self.render_mode == "snapshot":
             # Snapshot mode but no pixmap yet: placeholder.
             painter.setPen(QPen(QColor("#94a3b8"), 1.0, Qt.PenStyle.DashLine))

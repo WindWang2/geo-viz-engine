@@ -49,6 +49,28 @@ class CartographyLayoutWindow(QMainWindow):
 
         # Build Toolbar
         self._build_toolbar()
+
+        # Placement controller for free graphics (Task 7).
+        from geoviz_paleo_map.cartography.placement import PlacementController
+        self._placement = PlacementController(self._scene, parent_window=self)
+        self._tool_mode = "select"
+        self._build_free_toolbar()
+        # Route view mouse/key events to the placement controller. The
+        # viewport receives the raw widget mouse events (QGraphicsView
+        # converts them to scene events internally); filtering both keeps
+        # placement working regardless of which event flavour Qt delivers.
+        self._view.installEventFilter(self)
+        self._view.viewport().installEventFilter(self)
+
+        # Property panel in the sidebar (Task 8).
+        from geoviz_paleo_map.cartography.properties import PropertyPanel
+        self._property_panel = PropertyPanel()
+        # Insert into the existing sidebar (built by _build_sidebar), before
+        # the trailing stretch.
+        sidebar_layout: QVBoxLayout = self._sidebar_layout
+        sidebar_layout.insertWidget(sidebar_layout.count() - 1, self._property_panel)
+        self._scene.selectionChanged.connect(self._on_selection_changed)
+
         self._view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
     def _build_toolbar(self):
@@ -86,6 +108,7 @@ class CartographyLayoutWindow(QMainWindow):
         sidebar.setFixedWidth(240)
         sidebar.setStyleSheet("background: #ffffff; border-left: 1px solid #e2e8f0;")
         s_layout = QVBoxLayout(sidebar)
+        self._sidebar_layout = s_layout
         s_layout.setContentsMargins(12, 12, 12, 12)
         s_layout.setSpacing(12)
 
@@ -175,6 +198,14 @@ class CartographyLayoutWindow(QMainWindow):
         self._scene.addItem(item)
         return item
 
+    def scene(self):
+        """Public accessor replacing ``window._scene`` private access."""
+        return self._scene
+
+    def view(self):
+        """Public accessor replacing ``win._view`` private access."""
+        return self._view
+
     def figure_panels(self) -> list[FigurePanelGraphicsItem]:
         """Return all FigurePanelGraphicsItem instances on the paper."""
         return [
@@ -182,6 +213,63 @@ class CartographyLayoutWindow(QMainWindow):
             for item in self._scene.items()
             if isinstance(item, FigurePanelGraphicsItem)
         ]
+
+    # -- free-graphics public API (spec §3.6, Task 9) ------------------
+
+    def add_free_graphic(self, record: dict) -> str | None:
+        """Validate ``record`` and add the item to the scene.
+
+        Returns the item id on success, None when the record is unknown /
+        malformed (host counts and reports these). Unknown kinds are
+        silently skipped — the host reports a count to the user.
+        """
+        from geoviz_paleo_map.cartography.items.free import item_from_record
+        item = item_from_record(record)
+        if item is None:
+            return None
+        self._scene.addItem(item)
+        return item.id
+
+    def free_graphics(self) -> list[dict]:
+        """Return ``to_record()`` dicts for every free graphic on the paper."""
+        from geoviz_paleo_map.cartography.items.free.base import FreeGraphicsItem
+        return [
+            it.to_record()
+            for it in self._scene.items()
+            if isinstance(it, FreeGraphicsItem)
+        ]
+
+    def remove_free_graphic(self, item_id: str) -> bool:
+        """Remove the free graphic with ``item_id``; True when found."""
+        from geoviz_paleo_map.cartography.items.free.base import FreeGraphicsItem
+        for it in list(self._scene.items()):
+            if isinstance(it, FreeGraphicsItem) and it.id == item_id:
+                self._scene.removeItem(it)
+                return True
+        return False
+
+    def panels(self) -> list[dict]:
+        """Read back panel geometry as plain dicts for host persistence.
+
+        Each dict: ``{plot_id, slot, source_plot_type, rect_mm, render_mode}``.
+        """
+        result = []
+        for panel in self.figure_panels():
+            r = panel.rect()
+            p = panel.pos()
+            result.append({
+                "plot_id": panel.source_plot_id,
+                "slot": "main",
+                "source_plot_type": panel.source_plot_type,
+                "rect_mm": [
+                    round(p.x() + r.x(), 2),
+                    round(p.y() + r.y(), 2),
+                    round(r.width(), 2),
+                    round(r.height(), 2),
+                ],
+                "render_mode": panel.render_mode,
+            })
+        return result
 
     def _on_add_figure_panel(self) -> None:
         source = self._panel_source_combo.currentText()
@@ -251,3 +339,131 @@ class CartographyLayoutWindow(QMainWindow):
         painter.end()
 
         return file_path
+
+    # -- free-graphics tool bar + placement (Task 7) -------------------
+
+    _TOOL_MODES = (
+        ("select", "选择"),
+        ("text", "文本"),
+        ("arrow", "箭头"),
+        ("rect", "矩形"),
+        ("ellipse", "椭圆"),
+        ("polygon", "多边形"),
+        ("freehand", "手绘"),
+        ("image", "图片"),
+        ("north_arrow", "指北针"),
+        ("scale_bar", "比例尺"),
+    )
+
+    def _build_free_toolbar(self) -> None:
+        tb = self.addToolBar("Free Graphics")
+        tb.addWidget(QLabel(" 工具："))
+        self._tool_combo = QComboBox()
+        for mode_id, label in self._TOOL_MODES:
+            self._tool_combo.addItem(label, mode_id)
+        self._tool_combo.currentIndexChanged.connect(self._on_tool_changed)
+        tb.addWidget(self._tool_combo)
+
+    def _on_tool_changed(self) -> None:
+        mode = self._tool_combo.currentData()
+        self.set_tool_mode(mode)
+
+    def current_tool_mode(self) -> str:
+        return self._tool_mode
+
+    def set_tool_mode(self, mode: str) -> None:
+        self._tool_mode = mode
+        self._placement.set_mode(mode)
+        idx = next(
+            (i for i, (m, _) in enumerate(self._TOOL_MODES) if m == mode), 0
+        )
+        self._tool_combo.blockSignals(True)
+        self._tool_combo.setCurrentIndex(idx)
+        self._tool_combo.blockSignals(False)
+        # In placement mode the view must not steal clicks for selection.
+        for item in self._scene.items():
+            item.setFlag(
+                item.GraphicsItemFlag.ItemIsMovable, mode == "select"
+            )
+
+    def _pick_image_path(self) -> str:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择图片", "", "Images (*.png *.jpg *.jpeg *.bmp *.svg)"
+        )
+        return path or ""
+
+    def _scene_pos_from_event(self, event) -> QPointF | None:
+        """Scene-coordinate position of a mouse event.
+
+        PySide6: ``QGraphicsSceneMouseEvent`` carries ``scenePos()`` directly
+        (its ``pos()`` is item-relative), while raw widget mouse events must
+        be mapped through the view.
+        """
+        scene_pos = getattr(event, "scenePos", None)
+        if scene_pos is not None:
+            return scene_pos()
+        pos = getattr(event, "pos", None)
+        if pos is not None:
+            return self._view.mapToScene(pos())
+        return None
+
+    def eventFilter(self, obj, event) -> bool:
+        from PySide6.QtCore import QEvent
+        if obj is not self._view and obj is not self._view.viewport():
+            return False
+        et = event.type()
+        ctrl = self._placement
+        if ctrl.mode == "select":
+            return False
+        if et in (QEvent.Type.GraphicsSceneMousePress, QEvent.Type.MouseButtonPress):
+            button = event.button() if hasattr(event, "button") else Qt.MouseButton.NoButton
+            if button != Qt.MouseButton.LeftButton:
+                return False  # right-click keeps the item context menu
+            pos = self._scene_pos_from_event(event)
+            if pos is not None:
+                ctrl.begin_click(pos)
+                return True
+        elif et in (QEvent.Type.GraphicsSceneMouseMove, QEvent.Type.MouseMove):
+            pos = self._scene_pos_from_event(event)
+            if pos is not None:
+                ctrl.add_point(pos)
+                return True
+        elif et in (QEvent.Type.GraphicsSceneMouseRelease, QEvent.Type.MouseButtonRelease):
+            pos = self._scene_pos_from_event(event)
+            if pos is not None:
+                ctrl.end_click(pos)
+                return True
+        elif et in (QEvent.Type.GraphicsSceneMouseDoubleClick, QEvent.Type.MouseButtonDblClick):
+            ctrl.finish_polygon()
+            return True
+        return False
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self._placement.cancel()
+            self.set_tool_mode("select")
+            return
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._placement.finish_polygon()
+            return
+        if event.key() == Qt.Key.Key_Delete:
+            for it in list(self._scene.selectedItems()):
+                self._scene.removeItem(it)
+            return
+        super().keyPressEvent(event)
+
+    # -- property panel selection sync (Task 8) ------------------------
+
+    def _on_selection_changed(self) -> None:
+        # Guard against the scene's C++ object being destroyed while the
+        # window is being torn down (shiboken would raise RuntimeError on a
+        # deleted wrapper when selectionChanged fires during destruction).
+        import shiboken6
+        if not shiboken6.isValid(self._scene):
+            return
+        from geoviz_paleo_map.cartography.items.free.base import FreeGraphicsItem
+        free_items = [
+            it for it in self._scene.selectedItems()
+            if isinstance(it, FreeGraphicsItem)
+        ]
+        self._property_panel.set_item(free_items[0] if free_items else None)
