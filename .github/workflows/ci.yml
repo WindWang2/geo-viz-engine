@@ -44,10 +44,13 @@ jobs:
       - name: Run fast test suite (no OpenGL/WebEngine)
         env:
           QT_QPA_PLATFORM: offscreen
-        # Exit code 134 (SIGABRT) is tolerated: it comes from PySide6/Qt's
-        # atexit EGL teardown on headless CI, AFTER pytest has printed its
-        # "N passed" summary. The pytest result itself is what we gate on;
-        # capture its exit code, treat 134 as a benign shutdown signal.
+          PYTHONFAULTHANDLER: "1"
+        # Exit-code handling: ONLY 134 (SIGABRT) is tolerated — it comes
+        # from PySide6/Qt's atexit EGL teardown on headless CI, AFTER pytest
+        # has printed its "N passed" summary, and is benign. Any other
+        # non-zero exit — notably 139 (SIGSEGV) — is a real crash and MUST
+        # fail the gate (#272). PYTHONFAULTHANDLER=1 ensures the Python
+        # stack is printed on a crash so the root cause is traceable.
         run: |
           set +e
           uv run pytest -m "not slow" -q --tb=short --maxfail=5 --timeout=60
