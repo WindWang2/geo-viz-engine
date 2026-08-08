@@ -167,6 +167,11 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
         "geoviz_well_seismic_3d",
         "offset_curve_along_trajectory",
     ),
+    # 3D synthetic-seismogram wiggle track beside a well (companion to the above).
+    "build_synthetic_seismogram_overlay": (
+        "geoviz_well_seismic_3d",
+        "build_synthetic_seismogram_overlay",
+    ),
     # Well-log interval models used when attaching facies/lithology tracks.
     "FaciesData": ("geoviz_well_log.models", "FaciesData"),
     "FaciesInterval": ("geoviz_well_log.models", "FaciesInterval"),
