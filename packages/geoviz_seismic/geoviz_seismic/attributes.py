@@ -323,6 +323,47 @@ def fuse_rgb(
     return np.stack([r, g, b], axis=-1)
 
 
+def blend_rgba(
+    r_channel: np.ndarray,
+    g_channel: np.ndarray,
+    b_channel: np.ndarray,
+    *,
+    alpha: float = 0.85,
+) -> np.ndarray:
+    """Blend three attribute arrays into a float32 RGBA array with a constant alpha.
+
+    Promoted from ``paleo_workbench/viz/geomodel/well_seismic.py::RGBAttributeFusion``.
+    Unlike :func:`fuse_rgb` (percentile-clipped uint8, meant for 2-D image display),
+    this keeps float32 in ``[0, 1]`` and appends an alpha channel — the form the
+    ``pyqtgraph.opengl`` per-vertex / per-face ``colors=`` arguments expect.
+
+    Normalization is plain min-max per channel with no percentile clipping, so a
+    single outlier compresses the rest of that channel. Prefer :func:`fuse_rgb` when
+    robust scaling matters.
+
+    Args:
+        r_channel: Attribute mapped to red. Any shape.
+        g_channel: Attribute mapped to green, same shape as ``r_channel``.
+        b_channel: Attribute mapped to blue, same shape as ``r_channel``.
+        alpha: Constant opacity written to the A channel.
+
+    Returns:
+        ``(..., 4)`` float32 array, one RGBA tuple per input element.
+    """
+    def _minmax(arr: np.ndarray) -> np.ndarray:
+        arr = np.asarray(arr, dtype=np.float32)
+        lo, hi = np.min(arr), np.max(arr)
+        if hi - lo < 1e-8:
+            return np.zeros_like(arr, dtype=np.float32)
+        return (arr - lo) / (hi - lo)
+
+    r = _minmax(r_channel)
+    g = _minmax(g_channel)
+    b = _minmax(b_channel)
+    a = np.full_like(r, fill_value=alpha, dtype=np.float32)
+    return np.stack([r, g, b, a], axis=-1)
+
+
 def compute_dip(
     data: np.ndarray,
     axis_il: int = 0,

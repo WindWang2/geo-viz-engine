@@ -56,3 +56,48 @@ def auto_tie_with_quality(
         cc = float(corr[peak_idx] / norm)
 
     return -lag, cc
+
+
+def correlate_synthetic_to_trace(
+    synthetic: np.ndarray,
+    seismic_trace: np.ndarray,
+) -> tuple[int, float]:
+    """Cross-correlate a synthetic against a field trace, on mean-removed z-scores.
+
+    Promoted from ``paleo_workbench/viz/geomodel/well_seismic.py::
+    WellSeismicTieCalibration.auto_correlate``.
+
+    Differs from :func:`auto_tie_with_quality` in three ways, which is why both
+    exist: this one (a) removes the mean before correlating, so a DC offset in the
+    field trace cannot dominate the peak, (b) does **not** truncate the two inputs
+    to a common length, and (c) takes ``argmax`` of the signed correlation rather
+    than its absolute value, so it will not lock onto a polarity-reversed match.
+
+    Args:
+        synthetic: Synthetic trace ``(M,)``.
+        seismic_trace: Real seismic trace ``(N,)``.
+
+    Returns:
+        ``(shift_samples, correlation_coefficient)``. Positive shift means the
+        synthetic should move later in time to line up with the field trace. Both
+        values are ``(0, 0.0)`` when either input is empty or effectively constant.
+    """
+    synthetic = np.asarray(synthetic, dtype=np.float64)
+    seismic_trace = np.asarray(seismic_trace, dtype=np.float64)
+    if len(synthetic) == 0 or len(seismic_trace) == 0:
+        return 0, 0.0
+
+    s_std = np.std(synthetic)
+    t_std = np.std(seismic_trace)
+    if s_std < 1e-10 or t_std < 1e-10:
+        return 0, 0.0
+
+    s_norm = (synthetic - np.mean(synthetic)) / s_std
+    t_norm = (seismic_trace - np.mean(seismic_trace)) / t_std
+
+    corr = np.correlate(t_norm, s_norm, mode="full")
+    corr /= max(len(s_norm), len(t_norm))
+
+    best_idx = int(np.argmax(corr))
+    shift = best_idx - (len(s_norm) - 1)
+    return shift, min(float(corr[best_idx]), 1.0)

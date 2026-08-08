@@ -8,6 +8,7 @@ Works in any PySide6 project: ``pip install geoviz-seismic``.
 
 from .cache import SeismicCache
 from .colormap import ColormapManager
+from .crossplot import analyze_lithology_crossplot
 from .horizon import HorizonParser, HorizonAxes, extract_along_horizon
 from .loader import SeismicLoader
 from .models import SeismicVolumeMeta, SliceInfo, HorizonData, BinGridGeometry
@@ -22,6 +23,14 @@ from .preview_widget import (
 )
 from . import attributes
 from . import attribute_pipeline
+from .attributes import blend_rgba, fuse_rgb
+from . import stratal
+from .stratal import (
+    build_proportional_surfaces,
+    extract_stratal_slice,
+    stratal_slice_volume,
+    validate_horizon_pair,
+)
 
 __version__ = "0.1.2"
 
@@ -47,16 +56,34 @@ __all__ = [
     "attributes",
     "attribute_pipeline",
     "extract_along_horizon",
+    "analyze_lithology_crossplot",
+    "blend_rgba",
+    "fuse_rgb",
+    # Stratal / proportional slicing (pure-numpy engine core)
+    "stratal",
+    "build_proportional_surfaces",
+    "extract_stratal_slice",
+    "stratal_slice_volume",
+    "validate_horizon_pair",
+    # Qt/OpenGL — lazily imported so headless consumers can skip the GL stack.
+    "ClippedGLMeshItem",
+    "ClippedGLVolumeItem",
 ]
 
 
+_LAZY_GL: dict[str, tuple[str, str]] = {
+    "Renderer3D": (".renderer_3d", "Renderer3D"),
+    "SeismicView": (".seismic_view", "SeismicView"),
+    "ClippedGLMeshItem": (".gl_clipping", "ClippedGLMeshItem"),
+    "ClippedGLVolumeItem": (".gl_clipping", "ClippedGLVolumeItem"),
+}
+
+
 def __getattr__(name: str):
-    if name == "Renderer3D":
-        from .renderer_3d import Renderer3D
+    if name in _LAZY_GL:
+        import importlib
 
-        return Renderer3D
-    if name == "SeismicView":
-        from .seismic_view import SeismicView
-
-        return SeismicView
+        module_name, attr = _LAZY_GL[name]
+        return getattr(importlib.import_module(module_name, __name__), attr)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+

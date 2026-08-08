@@ -34,6 +34,16 @@ from geoviz_plots.crs import (
 
 from geoviz_plots.fence import CrossWellFenceGenerator, generate_fence_mesh
 
+from geoviz_plots.geomodel import (
+    BoreholeTraceGenerator,
+    FaultCuttingEngine,
+    TunnelMeshGenerator,
+    generate_cylinder_geometry,
+    generate_fault_geometry,
+    generate_tube_geometry,
+    get_seam_boundaries,
+)
+
 from geoviz_plots.contour_draft import (
     ContourSegment,
     DEFAULT_N_LEVELS,
@@ -112,6 +122,13 @@ __all__ = [
     "set_project_crs",
     "CrossWellFenceGenerator",
     "generate_fence_mesh",
+    "BoreholeTraceGenerator",
+    "FaultCuttingEngine",
+    "TunnelMeshGenerator",
+    "generate_cylinder_geometry",
+    "generate_fault_geometry",
+    "generate_tube_geometry",
+    "get_seam_boundaries",
     "ContourSegment",
     "DEFAULT_N_LEVELS",
     "GENERATOR_VERSION",

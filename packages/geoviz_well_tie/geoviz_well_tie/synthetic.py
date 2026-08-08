@@ -106,3 +106,55 @@ def generate_synthetic_twt(
         w = ricker_wavelet(n_wavelet, dt=dt_sec, peak_freq=peak_freq)
 
     return generate_synthetic(reflectivity, w)
+
+
+DEFAULT_SONIC_CLIP = (10.0, 1000.0)
+DEFAULT_WAVELET_HALF_LENGTH_S = 0.064
+
+
+def synthetic_from_logs(
+    sonic: np.ndarray,
+    density: np.ndarray,
+    *,
+    wavelet_freq: float = 30.0,
+    dt_s: float = 0.002,
+    half_length_s: float = DEFAULT_WAVELET_HALF_LENGTH_S,
+    sonic_clip: tuple[float, float] | None = DEFAULT_SONIC_CLIP,
+) -> np.ndarray:
+    """One-call sonic+density → Ricker synthetic seismogram.
+
+    Convenience composition of :func:`compute_reflectivity`,
+    :func:`~geoviz_well_tie.wavelet.ricker_wavelet` and :func:`generate_synthetic`,
+    promoted from ``paleo_workbench/viz/geomodel/well_seismic.py::
+    WellSeismicTieCalibration.compute_synthetic``.
+
+    Args:
+        sonic: Sonic transit time in µs/m (slowness). Shape ``(N,)``.
+        density: Bulk density in g/cm³, aligned with ``sonic``.
+        wavelet_freq: Ricker peak frequency in Hz.
+        dt_s: Sample interval in **seconds** (the rest of this package mostly
+            speaks milliseconds).
+        half_length_s: Ricker half-length in seconds; the wavelet spans
+            ``[-half_length_s, +half_length_s]``.
+        sonic_clip: ``(min, max)`` µs/m clamp applied before the velocity
+            reciprocal, guarding against zero/negative sonic samples. Pass
+            ``None`` to disable.
+
+    Returns:
+        ``(N-1,)`` float32 synthetic trace, or an empty array when fewer than two
+        log samples are supplied.
+    """
+    from .wavelet import ricker_wavelet
+
+    sonic = np.asarray(sonic, dtype=np.float64)
+    density = np.asarray(density, dtype=np.float64)
+    if len(sonic) <= 1:
+        return np.empty(0, dtype=np.float32)
+
+    if sonic_clip is not None:
+        sonic = np.clip(sonic, sonic_clip[0], sonic_clip[1])
+
+    reflectivity = compute_reflectivity(sonic, density)
+    n_wavelet = int(round(2.0 * half_length_s / dt_s)) + 1
+    wavelet = ricker_wavelet(n_wavelet, dt=dt_s, peak_freq=wavelet_freq)
+    return generate_synthetic(reflectivity, wavelet)

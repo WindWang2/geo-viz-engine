@@ -62,3 +62,67 @@ def _project_depth(well: WellHead, *, n_samples: int) -> WellTrajectory3D:
     # Z = MD as depth proxy (TVDSS refinement lands with DepthTransform ticket).
     pts = np.column_stack([xs, ys, md])
     return WellTrajectory3D(name=well.name, points=pts, has_td=True, warning=None)
+
+
+def offset_curve_along_trajectory(
+    well_path: np.ndarray,
+    curve_values: np.ndarray,
+    *,
+    scale: float = 0.1,
+) -> np.ndarray:
+    """Offset a log curve sideways off a well path, for a 3D "curve beside the well" track.
+
+    Promoted from ``paleo_workbench/viz/geomodel/well_seismic.py::
+    WellCurve3DGenerator.generate_curve_mesh``. The result is a polyline ready for
+    ``pyqtgraph.opengl.GLLinePlotItem(pos=...)``.
+
+    At each station the offset direction is the horizontal normal to the trajectory
+    tangent — i.e. ``(-ty, tx, 0)`` — so the curve always stays in plan view and never
+    tips into the vertical. Perfectly vertical wells have no horizontal tangent, so
+    they fall back to offsetting along +X.
+
+    Args:
+        well_path: ``(N, 3)`` trajectory points in scene XYZ.
+        curve_values: ``(N,)`` log values, one per trajectory point.
+        scale: Metres of lateral offset per unit of ``curve_values``. Normalize or
+            pre-scale the log yourself — this applies no auto-ranging.
+
+    Returns:
+        ``(N, 3)`` float32 offset polyline. Empty ``(0, 3)`` for an empty path.
+
+    Raises:
+        ValueError: If ``curve_values`` is shorter than ``well_path``.
+    """
+    well_path = np.asarray(well_path, dtype=np.float32)
+    curve_values = np.asarray(curve_values, dtype=np.float32)
+
+    n_pts = len(well_path)
+    if n_pts == 0:
+        return np.empty((0, 3), dtype=np.float32)
+    if len(curve_values) < n_pts:
+        raise ValueError(
+            f"curve_values has {len(curve_values)} samples but well_path has {n_pts} points"
+        )
+
+    # Forward differences, with the last station reusing the previous segment.
+    tangents = np.empty_like(well_path)
+    tangents[:-1] = well_path[1:] - well_path[:-1]
+    tangents[-1] = tangents[-2] if n_pts > 1 else (0.0, 0.0, 1.0)
+
+    # Normalize first so the "is this well vertical?" threshold below is independent
+    # of station spacing.
+    tangent_norm = np.linalg.norm(tangents, axis=1)
+    tangents /= np.where(tangent_norm < 1e-5, 1.0, tangent_norm)[:, None]
+
+    # Horizontal normal: rotate the tangent's XY part by 90°, drop Z.
+    perp = np.column_stack(
+        [-tangents[:, 1], tangents[:, 0], np.zeros(n_pts, dtype=np.float32)]
+    )
+    perp_norm = np.linalg.norm(perp, axis=1)
+    vertical = perp_norm < 1e-5
+    perp[vertical] = (1.0, 0.0, 0.0)
+    perp_norm[vertical] = 1.0
+    perp /= perp_norm[:, None]
+
+    return (well_path + perp * (curve_values[:n_pts, None] * scale)).astype(np.float32)
+
