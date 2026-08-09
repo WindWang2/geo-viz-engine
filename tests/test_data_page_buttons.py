@@ -2,10 +2,17 @@
 import pytest
 
 
-def test_data_page_import_data_button_has_handler(qtbot):
+def test_data_page_import_data_button_has_handler(qtbot, monkeypatch):
     """'导入数据' button must be connected."""
     from src.pages.data.page import DataPage
     from src.data.cache import DataCache
+    # The button opens a modal QFileDialog (getOpenFileName), which would block
+    # forever on headless CI. Patch it to cancel immediately — the test intent
+    # is that the click does not crash.
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getOpenFileName",
+        lambda *a, **kw: ("", ""),
+    )
     cache = DataCache()
     page = DataPage(cache)
     qtbot.addWidget(page)
@@ -35,10 +42,16 @@ def test_data_page_delete_button_has_handler(qtbot):
     # Should not crash
 
 
-def test_data_page_import_excel_does_not_pass(qtbot):
+def test_data_page_import_excel_does_not_pass(qtbot, monkeypatch):
     """Import Excel should not just 'pass' — it should show a dialog or load."""
     from src.pages.data.page import DataPage
     from src.data.cache import DataCache
+    # Same modal-dialog guard as the import-data test: cancel the file dialog
+    # immediately so the click cannot block headless CI.
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getOpenFileName",
+        lambda *a, **kw: ("", ""),
+    )
     cache = DataCache()
     page = DataPage(cache)
     qtbot.addWidget(page)
