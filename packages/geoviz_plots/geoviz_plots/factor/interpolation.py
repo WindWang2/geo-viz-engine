@@ -140,6 +140,8 @@ def _run_grid(
         from geoviz_plots.factor.kriging import kriging_grid
 
         grid_z, grid_var = kriging_grid(x, y, z, grid_x, grid_y)
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
         if want_variance:
             return grid_z, grid_var
         return grid_z
