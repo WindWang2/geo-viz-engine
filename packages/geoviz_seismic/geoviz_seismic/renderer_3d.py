@@ -19,6 +19,7 @@ from .gpu_ops import (
     is_gpu_available, to_gpu, slice_volume_gpu,
     sample_polyline_slice
 )
+from .stratal import extract_stratal_slice
 
 logger = logging.getLogger(__name__)
 
@@ -1006,6 +1007,17 @@ class Renderer3D(QWidget):
         self._time_slices_enabled = True
         self._time_plane_items: dict[int, tuple[object, object]] = {}
         self._planes_visible = True
+        # Stratal / proportional slices (horizon-relative, non-planar surfaces).
+        # ``_stratal_surfaces`` is a list of (nI, nX) float sample-index grids
+        # produced by geoviz_seismic.stratal; ``_stratal_plane_items`` maps the
+        # surface index -> (GLImageLutItem, GLLinePlotItem) like the time planes.
+        self._stratal_surfaces: list[np.ndarray] = []
+        self._stratal_visibility: list[bool] = []
+        self._stratal_labels: list[str] = []
+        self._stratal_active: int | None = None
+        self._stratal_opacity = 0.8
+        self._stratal_enabled = True
+        self._stratal_plane_items: dict[int, tuple[object, object]] = {}
         self._use_volume = False
         self._arb_polyline: list[tuple[float, float]] | None = None  # index-space waypoints
 
@@ -1864,6 +1876,10 @@ class Renderer3D(QWidget):
         # 4. Polyline-driven arbitrary curtain (if set)
         self._render_polyline_curtain(ni, nx, nt, si, sx, st, lut)
 
+        # 5. Stratal / proportional slices (horizon-relative)
+        if getattr(self, "_stratal_surfaces", None):
+            self._sync_stratal_planes(value_range=value_range)
+
     def set_slice_clip_percentile(self, pct: float) -> None:
         """Match 2D ProfileVD clip: use P(100-pct)..P(pct) for plane colouring."""
         pct = float(max(50.0, min(99.9, pct)))
@@ -2081,6 +2097,110 @@ class Renderer3D(QWidget):
         self._img_t = None
         self._line_t = None
 
+    # ------------------------------------------------------------------
+    # Stratal / proportional slices (horizon-relative, non-planar)
+    # ------------------------------------------------------------------
+
+    def _sync_stratal_planes(
+        self, *, value_range: tuple[float, float] | None = None
+    ) -> None:
+        """Create/update all stratal (proportional) slice planes.
+
+        Each stratal surface is a non-planar ``(nI, nX)`` grid of sample
+        positions. The slice *image* is sampled through
+        :func:`geoviz_seismic.stratal.extract_stratal_slice` (linear T
+        interpolation), colour-mapped via the same LUT pipeline as the time
+        planes, and laid flat in the XY plane at the surface's mean depth so it
+        reads as a geological-time attribute map. A contour line marks the
+        surface footprint at that mean depth.
+        """
+        if self._volume_data_cpu is None:
+            return
+        if not getattr(self, "_stratal_surfaces", None):
+            self._clear_stratal_plane_items()
+            return
+        if value_range is None:
+            value_range = self._slice_value_range()
+        ni, nx, nt = self._volume_data_cpu.shape
+        si, sx, st = self._volume_spacing
+
+        n_surf = len(self._stratal_surfaces)
+        # Prune items beyond the current surface count.
+        for idx in list(self._stratal_plane_items):
+            if idx >= n_surf:
+                image, line = self._stratal_plane_items.pop(idx)
+                for item in (image, line):
+                    try:
+                        self._view.removeItem(item)
+                    except Exception:
+                        pass
+
+        for idx, surface in enumerate(self._stratal_surfaces):
+            amp = extract_stratal_slice(self._volume_data_cpu, surface)
+            idx_img = ColormapManager.normalize_to_index(
+                amp, lut_size=256, value_range=value_range,
+            )
+            # Representative depth = finite mean of the surface (sample units).
+            finite = np.isfinite(surface)
+            if finite.any():
+                mean_t = float(np.nanmean(surface[finite]))
+            else:
+                mean_t = 0.0
+            mean_t = max(0.0, min(nt - 1, mean_t))
+
+            pair = self._stratal_plane_items.get(idx)
+            if pair is None:
+                image = GLImageLutItem(idx_img, cmap_name=self._cmap_name)
+                line = gl.GLLinePlotItem(
+                    pos=np.array(
+                        [[0, 0, 0], [ni * si, 0, 0],
+                         [ni * si, nx * sx, 0], [0, nx * sx, 0], [0, 0, 0]],
+                        dtype=np.float32,
+                    ),
+                    color=(0.85, 0.45, 0.95, 1.0),
+                    width=1,
+                    antialias=True,
+                )
+                self._view.addItem(image)
+                self._view.addItem(line)
+                self._stratal_plane_items[idx] = (image, line)
+            else:
+                image, line = pair
+                image.setData(idx_img)
+
+            image.resetTransform()
+            image.scale(si, sx, 1)
+            image.translate(0, 0, mean_t * st)
+            image.setOpacity(self._stratal_opacity)
+
+            active = idx == self._stratal_active
+            line.setData(
+                color=(
+                    (1.0, 0.72, 0.12, 1.0) if active
+                    else (0.85, 0.45, 0.95, 0.9)
+                ),
+                width=3 if active else 1,
+                antialias=True,
+            )
+            line.resetTransform()
+            line.translate(0, 0, mean_t * st)
+            visible = bool(
+                self._planes_visible
+                and self._stratal_enabled
+                and self._stratal_visibility[idx]
+            )
+            image.setVisible(visible)
+            line.setVisible(visible)
+
+    def _clear_stratal_plane_items(self) -> None:
+        for image, line in getattr(self, "_stratal_plane_items", {}).values():
+            for item in (image, line):
+                try:
+                    self._view.removeItem(item)
+                except Exception:
+                    pass
+        self._stratal_plane_items = {}
+
     _PLANE_ATTRS = {
         "inline": ("_img_il", "_line_il"),
         "crossline": ("_img_xl", "_line_xl"),
@@ -2098,6 +2218,7 @@ class Renderer3D(QWidget):
         if axes is None:
             # Original full-rebuild body (unchanged):
             self._clear_time_plane_items()
+            self._clear_stratal_plane_items()
             items_to_clean = (
                 getattr(self, "_img_il", None), getattr(self, "_img_xl", None), getattr(self, "_img_arb", None),
                 getattr(self, "_line_il", None), getattr(self, "_line_xl", None), getattr(self, "_line_arb", None)
@@ -2517,6 +2638,113 @@ class Renderer3D(QWidget):
         self._time_slices_enabled = bool(enabled)
         if getattr(self, "_loaded", False):
             self._sync_time_slice_planes()
+            try:
+                self._view.update()
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # Stratal / proportional slice public API
+    # ------------------------------------------------------------------
+
+    def get_stratal_slices(self) -> tuple[tuple[str, bool, float], ...]:
+        """Snapshot of the stratal (proportional) slice state.
+
+        Returns:
+            One ``(label, visible, mean_depth)`` tuple per active surface, in
+            registration order. ``mean_depth`` is the surface's mean sample
+            index (the Z the plane is drawn at).
+        """
+        out: list[tuple[str, bool, float]] = []
+        for idx, surface in enumerate(getattr(self, "_stratal_surfaces", [])):
+            finite = np.isfinite(surface)
+            mean_t = float(np.nanmean(surface[finite])) if finite.any() else 0.0
+            out.append((
+                self._stratal_labels[idx] if idx < len(self._stratal_labels)
+                else f"stratal_{idx}",
+                bool(self._stratal_visibility[idx])
+                if idx < len(self._stratal_visibility) else True,
+                mean_t,
+            ))
+        return tuple(out)
+
+    def set_stratal_slices(
+        self,
+        surfaces: list[np.ndarray] | tuple[np.ndarray, ...],
+        *,
+        labels: list[str] | tuple[str, ...] | None = None,
+        visibility: list[bool] | tuple[bool, ...] | None = None,
+        active: int | None = None,
+        opacity: float = 0.8,
+        enabled: bool = True,
+    ) -> None:
+        """Public: replace the stratal (proportional) slice render state.
+
+        Args:
+            surfaces: One or more ``(nI, nX)`` grids of **sample-index**
+                positions (float OK; NaN masks absent picks). Built by
+                :func:`geoviz_seismic.stratal.build_proportional_surfaces` or
+                :func:`geoviz_seismic.stratal.stratal_slice_volume`.
+            labels: Optional display name per surface (defaults to
+                ``stratal_0``, ``stratal_1`` ...).
+            visibility: Optional on/off per surface (default all visible).
+            active: Index of the highlighted surface (default 0; or the first
+                visible one).
+            opacity: Shared opacity for all stratal planes.
+            enabled: Global on/off for all stratal planes.
+        """
+        surfaces = [np.asarray(s, dtype=float) for s in surfaces]
+        if not surfaces:
+            self.clear_stratal_slices()
+            return
+        n = len(surfaces)
+        if labels is None:
+            self._stratal_labels = [f"stratal_{i}" for i in range(n)]
+        else:
+            labels = list(labels)
+            if len(labels) < n:
+                labels += [f"stratal_{i}" for i in range(len(labels), n)]
+            self._stratal_labels = labels[:n]
+        if visibility is None:
+            self._stratal_visibility = [True] * n
+        else:
+            vis = list(visibility)
+            if len(vis) < n:
+                vis += [True] * (n - len(vis))
+            self._stratal_visibility = [bool(v) for v in vis][:n]
+        sel = int(active) if active is not None else 0
+        if sel not in range(n):
+            sel = 0
+        self._stratal_active = sel
+        self._stratal_surfaces = surfaces
+        self._stratal_opacity = max(0.0, min(1.0, float(opacity)))
+        self._stratal_enabled = bool(enabled)
+        if getattr(self, "_loaded", False):
+            self._sync_stratal_planes()
+            try:
+                self._view.update()
+            except Exception:
+                pass
+
+    def set_stratal_visible(self, enabled: bool) -> None:
+        """Toggle all stratal planes without clearing them."""
+        self._stratal_enabled = bool(enabled)
+        if getattr(self, "_loaded", False):
+            self._sync_stratal_planes()
+            try:
+                self._view.update()
+            except Exception:
+                pass
+
+    def clear_stratal_slices(self) -> None:
+        """Remove all stratal planes and their state."""
+        self._stratal_surfaces = []
+        self._stratal_visibility = []
+        self._stratal_labels = []
+        self._stratal_active = None
+        self._stratal_enabled = True
+        self._clear_stratal_plane_items()
+        if getattr(self, "_loaded", False):
             try:
                 self._view.update()
             except Exception:

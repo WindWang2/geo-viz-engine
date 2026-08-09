@@ -124,3 +124,22 @@ def resample_to_seismic_grid(
     target_twt = np.arange(n_samples, dtype=np.float64) * dt_ms + t0_ms
     result = np.interp(target_twt, src_twt, values, left=0.0, right=0.0)
     return result.astype(np.float32)
+
+
+def shift_depths(depths: np.ndarray, depth_shift: float) -> np.ndarray:
+    """Apply a bulk depth offset to a depth axis.
+
+    Promoted from ``paleo_workbench/viz/geomodel/well_seismic.py::
+    WellSeismicTieCalibration.align_twt_depth``. Used after
+    :func:`~geoviz_well_tie.auto_tie.correlate_synthetic_to_trace` has converted a
+    sample lag into a physical depth offset, to slide the log depth axis onto the
+    seismic. Returns a new array; the input is not modified.
+
+    Args:
+        depths: Depth axis (any unit).
+        depth_shift: Offset added to every sample, in the same unit as ``depths``.
+
+    Returns:
+        Shifted depth axis, same shape as ``depths``.
+    """
+    return np.asarray(depths) + depth_shift

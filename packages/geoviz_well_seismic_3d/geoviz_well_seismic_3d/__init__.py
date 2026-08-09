@@ -30,6 +30,11 @@ from .segy_survey import (
 )
 from .survey import SurveySpec, survey_from_corners
 from .volume_access import InMemoryVolumeAccess, VolumeAccess
+from .well_geometry import (
+    build_synthetic_seismogram_overlay,
+    offset_curve_along_trajectory,
+    project_well_trajectory,
+)
 
 __version__ = "0.1.0"
 
@@ -59,7 +64,10 @@ __all__ = [
     "extract_fence_strip",
     "align_horizon_corners_to_loader_axes",
     "horizon_corners_from_dat",
+    "offset_curve_along_trajectory",
+    "build_synthetic_seismogram_overlay",
     "probe_from_fence_s",
+    "project_well_trajectory",
     "select_depth_transform",
     "survey_corners_from_segy",
     "survey_from_corners",

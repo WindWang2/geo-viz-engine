@@ -131,6 +131,47 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     # Cross-well 3D fence mesh (promoted from paleo_workbench/viz/geomodel/fence_generator.py).
     "CrossWellFenceGenerator": ("geoviz_plots", "CrossWellFenceGenerator"),
     "generate_fence_mesh": ("geoviz_plots", "generate_fence_mesh"),
+    # --- 阶段 1 engine sink-down (docs/agents/geo-viz-boundary.md) ---
+    # Headless 3D geological-model geometry, promoted from
+    # paleo_workbench/viz/geomodel/{engine,borehole_tunnel,fault_dislocation}.py.
+    # The advisor + FLAC3D/Abaqus exporters stay in Workbench (business layer).
+    "BoreholeTraceGenerator": ("geoviz_plots", "BoreholeTraceGenerator"),
+    "FaultCuttingEngine": ("geoviz_plots", "FaultCuttingEngine"),
+    "TunnelMeshGenerator": ("geoviz_plots", "TunnelMeshGenerator"),
+    "generate_cylinder_geometry": ("geoviz_plots", "generate_cylinder_geometry"),
+    "generate_fault_geometry": ("geoviz_plots", "generate_fault_geometry"),
+    "generate_tube_geometry": ("geoviz_plots", "generate_tube_geometry"),
+    "get_seam_boundaries": ("geoviz_plots", "get_seam_boundaries"),
+    # GL three-way clipping items, promoted from viz/geomodel/engine.py.
+    "ClippedGLMeshItem": ("geoviz_seismic", "ClippedGLMeshItem"),
+    "ClippedGLVolumeItem": ("geoviz_seismic", "ClippedGLVolumeItem"),
+    # RGB multi-attribute blend + lithology crossplot stats, promoted from
+    # viz/geomodel/well_seismic.py.
+    "blend_rgba": ("geoviz_seismic", "blend_rgba"),
+    "analyze_lithology_crossplot": ("geoviz_seismic", "analyze_lithology_crossplot"),
+    # Stratal / proportional slicing (pure-numpy engine core).
+    "build_proportional_surfaces": ("geoviz_seismic", "build_proportional_surfaces"),
+    "extract_stratal_slice": ("geoviz_seismic", "extract_stratal_slice"),
+    "stratal_slice_volume": ("geoviz_seismic", "stratal_slice_volume"),
+    "validate_horizon_pair": ("geoviz_seismic", "validate_horizon_pair"),
+    # Horizon parsing (.dat → (nI,nX) grid), needed by the stratal workbench
+    # adapter to build proportional surfaces between two horizons.
+    "HorizonParser": ("geoviz_seismic", "HorizonParser"),
+    "HorizonAxes": ("geoviz_seismic", "HorizonAxes"),
+    # Well-tie core algorithms, promoted from viz/geomodel/well_seismic.py.
+    "synthetic_from_logs": ("geoviz_well_tie", "synthetic_from_logs"),
+    "correlate_synthetic_to_trace": ("geoviz_well_tie", "correlate_synthetic_to_trace"),
+    "shift_depths": ("geoviz_well_tie", "shift_depths"),
+    # 3D log-curve-beside-well polyline, promoted from viz/geomodel/well_seismic.py.
+    "offset_curve_along_trajectory": (
+        "geoviz_well_seismic_3d",
+        "offset_curve_along_trajectory",
+    ),
+    # 3D synthetic-seismogram wiggle track beside a well (companion to the above).
+    "build_synthetic_seismogram_overlay": (
+        "geoviz_well_seismic_3d",
+        "build_synthetic_seismogram_overlay",
+    ),
     # Well-log interval models used when attaching facies/lithology tracks.
     "FaciesData": ("geoviz_well_log.models", "FaciesData"),
     "FaciesInterval": ("geoviz_well_log.models", "FaciesInterval"),

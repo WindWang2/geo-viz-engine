@@ -24,6 +24,7 @@ dependencies = [
     "geoviz-paleo-map",
     "geoviz-cross-well",
     "geoviz-well-tie",
+    "geoviz-well-seismic-3d",
     "geoviz-plots",
     "geoviz-common",
 ]
