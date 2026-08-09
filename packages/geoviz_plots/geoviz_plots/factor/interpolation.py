@@ -1,4 +1,4 @@
-"""Factor-map interpolation core: IDW / SciPy / directional-trend dispatch.
+"""Factor-map interpolation core: IDW / SciPy / directional-trend / kriging dispatch.
 
 Promoted from ``paleo_workbench/workflow/factor_interpolation.py`` (Phase-2
 promote-down). Pure numpy + the ``geoviz`` facade; the
@@ -29,13 +29,15 @@ DEFAULT_GRID_N = 50
 MAX_LOO_SAMPLES = 64
 
 # UI labels (tokens.INTERPOLATION_METHODS) -> engine backends.
-# ISS-KRIG-01: 克里金 / 克里金(MVP·线性) map to SciPy linear triangulation,
-# NOT full variogram kriging. T3 (paleo-workbench#247) confirmed this stays.
+# ISS-KRIG-01: 克里金 / 克里金(MVP·线性) still map to SciPy linear triangulation
+# (labeled MVP placeholder); a REAL variogram-based ordinary-kriging backend
+# is available under the engine name "kriging" (geoviz_plots.factor.kriging).
 _METHOD_BACKEND: dict[str, str] = {
     "IDW": "idw",
     "idw": "idw",
     "克里金": "linear",
     "克里金(MVP·线性)": "linear",
+    "kriging": "kriging",
     "样条": "cubic",
     "方向趋势": "directional",
     "directional": "directional",
@@ -130,9 +132,19 @@ def _run_grid(
     q: np.ndarray | None = None,
     b_i: np.ndarray | None = None,
     cancellation_token=None,
-) -> np.ndarray:
+    want_variance: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
+    if backend == "kriging":
+        from geoviz_plots.factor.kriging import kriging_grid
+
+        grid_z, grid_var = kriging_grid(x, y, z, grid_x, grid_y)
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
+        if want_variance:
+            return grid_z, grid_var
+        return grid_z
     if backend == "directional":
         from geoviz import directional_trend_grid
 
@@ -229,7 +241,10 @@ def interpolate_factor_grid(
 
     Returns a JSON-serializable dict with axes, values, and quality stats.
     Optional *fault_polylines* are passed to IDW as break barriers (ISS-ALG-03).
-    Method ``方向趋势`` uses directional weights (ISS-ALG-02).
+    Method ``方向趋势`` uses directional weights (ISS-ALG-02). Backend
+    ``kriging`` runs real ordinary kriging (variogram fit + OK solve) and
+    additionally returns ``grid_var`` (kriging variance per cell) plus
+    ``variance_min`` / ``variance_max``.
     """
     backend = method_to_backend(method)
     q = b_i = None
@@ -240,13 +255,16 @@ def interpolate_factor_grid(
     if len(z) < 2:
         raise ValueError("插值至少需要 2 个有效采样点")
     grid_x, grid_y = _grid_axes(x, y, grid_n)
-    grid_z = _run_grid(
+    want_variance = backend == "kriging"
+    grid_out = _run_grid(
         x, y, z, grid_x, grid_y,
         backend=backend, power=power,
         fault_polylines=fault_polylines if backend == "idw" else None,
         azimuth_deg=azimuth_deg, semi_major=semi_major, semi_minor=semi_minor,
         q=q, b_i=b_i, cancellation_token=cancellation_token,
+        want_variance=want_variance,
     )
+    grid_z, grid_var = grid_out if want_variance else (grid_out, None)
     finite = grid_z[np.isfinite(grid_z)]
     if finite.size == 0:
         raise ValueError("插值结果全为无效值")
@@ -274,6 +292,14 @@ def interpolate_factor_grid(
         "mean": float(np.mean(finite)),
         "r_squared": None if r2 is None else round(float(r2), 4),
     }
+    if grid_var is not None:
+        var_flat = grid_var[np.isfinite(grid_var)]
+        out["grid_var"] = [
+            [None if not math.isfinite(float(v)) else float(v) for v in row]
+            for row in grid_var
+        ]
+        out["variance_min"] = float(np.min(var_flat)) if var_flat.size else None
+        out["variance_max"] = float(np.max(var_flat)) if var_flat.size else None
     note = mvp_note_for(backend)
     if note:
         out["mvp_note"] = note
