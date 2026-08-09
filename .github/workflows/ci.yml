@@ -114,4 +114,9 @@ jobs:
           QTWEBENGINE_CHROMIUM_FLAGS: "--no-sandbox --disable-gpu --disable-dev-shm-usage"
         # Per-test timeout: a single stuck WebEngine/GL test must fail with a
         # traceback rather than block the whole job until the job timeout.
-        run: uv run pytest -m slow -q --tb=short --maxfail=3 --timeout=600
+        # Note: pytest-timeout's signal cannot interrupt a modal Qt dialog
+        # (QFileDialog/QMessageBox exec loops in C++), so the job-level
+        # timeout-minutes above is the ultimate backstop for those.
+        # -v + unbuffered output: if a test does hang, the log shows the last
+        # test that started instead of an opaque empty step.
+        run: uv run python -u -m pytest -m slow -v --tb=short --maxfail=3 --timeout=600
