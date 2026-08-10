@@ -40,6 +40,9 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "PaleoMapCanvas": ("geoviz_paleo_map", "PaleoMapCanvas"),
     "validate_polygon_geometry": ("geoviz_paleo_map.topology", "validate_polygon_geometry"),
     "export_professional_figure": ("geoviz_paleo_map", "export_professional_figure"),
+    # Multiscale facies hierarchy (相/亚相/微相) consumed by the workbench map
+    # host to drive PaleoMapCanvas.load_hierarchy zoom-based level switching.
+    "FaciesHierarchy": ("geoviz_paleo_map.hierarchy", "FaciesHierarchy"),
     "CrossWellCanvas": ("geoviz_cross_well", "CrossWellCanvas"),
     "FormationTop": ("geoviz_cross_well.tops_model", "FormationTop"),
     # Section-line auto-planner (Phase-2, T5 / #249): PCA / nearest-neighbor
