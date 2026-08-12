@@ -521,10 +521,31 @@ class WellSeismicJointWidget(QWidget):
             if data is not None:
                 try:
                     self._set_default_render_mode()
-                    self._renderer.load_volume(np.asarray(data, dtype=np.float32))
+                    # Progressive LOD upgrades must not reset the camera.
+                    already = bool(getattr(self._renderer, "_loaded", False))
+                    load_kw = {}
+                    try:
+                        # Keyword supported on Stage-7 renderer; ignore if older.
+                        import inspect
+
+                        if "preserve_camera" in inspect.signature(
+                            self._renderer.load_volume
+                        ).parameters:
+                            load_kw["preserve_camera"] = already
+                    except Exception:
+                        pass
+                    self._renderer.load_volume(
+                        np.asarray(data, dtype=np.float32), **load_kw
+                    )
                     self.sync_orthogonal_slices()
                 except Exception as exc:
                     logger.warning("load_volume failed: %s", exc)
+            else:
+                # Source-backed access without dense display yet: scene still
+                # has shape/slices for wells/fences; GL waits for L0 brick.
+                logger.debug(
+                    "volume access has no dense display data yet; defer GL load"
+                )
 
         self.set_well_trajectories(
             scene.well_trajectories(visible_only=True)
