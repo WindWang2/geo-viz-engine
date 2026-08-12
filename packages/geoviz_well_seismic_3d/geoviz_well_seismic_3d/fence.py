@@ -52,14 +52,29 @@ def extract_fence_strip(
 
     Prefer ``registration`` (VolumeRegistration) when the cube is a preview so
     indices scale to the loaded shape. Legacy il/xl params remain for tests.
+
+    Supports dense ndarray, objects with ``.data``, and source-backed
+    :class:`VolumeAccess` (``shape`` + slice/sample methods) without forcing a
+    full-cube materialisation.
     """
-    if hasattr(volume, "data"):
-        data = np.asarray(volume.data)
+    dense = None
+    if hasattr(volume, "data") and getattr(volume, "data") is not None:
+        dense = np.asarray(volume.data)
+        if dense.ndim != 3:
+            dense = None
+    elif isinstance(volume, np.ndarray):
+        dense = np.asarray(volume)
+        if dense.ndim != 3:
+            raise ValueError("volume must be 3-D")
+
+    if dense is not None:
+        ni, nx, nt = (int(x) for x in dense.shape)
     else:
-        data = np.asarray(volume)
-    if data.ndim != 3:
-        raise ValueError("volume must be 3-D")
-    ni, nx, nt = data.shape
+        shape = getattr(volume, "shape", None)
+        if shape is None or len(shape) != 3:
+            raise ValueError("volume must be 3-D or VolumeAccess with shape")
+        ni, nx, nt = (int(x) for x in shape)
+
     verts = fence.vertices_xy
     seg = np.diff(verts, axis=0)
     seg_len = np.linalg.norm(seg, axis=1)
@@ -74,6 +89,7 @@ def extract_fence_strip(
         samples_xy[i] = verts[j] + local * (verts[j + 1] - verts[j])
 
     amp = np.zeros((n_along, nt), dtype=np.float32)
+    sample_trace = getattr(volume, "sample_trace", None)
     for i, (x, y) in enumerate(samples_xy):
         if registration is not None:
             vi, vx = registration.xy_to_volume_idx(float(x), float(y))
@@ -85,7 +101,14 @@ def extract_fence_strip(
             xi = int(round((xl - xline_start) / (xline_step or 1)))
             ii = max(0, min(ni - 1, ii))
             xi = max(0, min(nx - 1, xi))
-        amp[i, :] = data[ii, xi, :]
+        if dense is not None:
+            amp[i, :] = dense[ii, xi, :]
+        elif callable(sample_trace):
+            amp[i, :] = np.asarray(sample_trace(ii, xi), dtype=np.float32)
+        else:
+            # VolumeAccess without sample_trace: one inline read per column.
+            line = np.asarray(volume.slice_inline(ii), dtype=np.float32)
+            amp[i, :] = line[min(xi, line.shape[0] - 1), :]
 
     if sample_axis is None:
         sample_axis = np.arange(nt, dtype=np.float64)

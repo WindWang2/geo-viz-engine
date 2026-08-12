@@ -1149,8 +1149,27 @@ class Renderer3D(QWidget):
             )
 
     def load_volume(self, data: np.ndarray, origin=(0, 0, 0),
-                    spacing=(1, 1, 1)):
-        """Load volume into renderer, automatically syncing to GPU if available."""
+                    spacing=(1, 1, 1), *, preserve_camera: bool = False):
+        """Load volume into renderer, automatically syncing to GPU if available.
+
+        preserve_camera:
+            When True (LOD upgrade path), keep the current camera center /
+            distance / elevation / azimuth instead of recentering on the cube.
+        """
+        # Capture camera before teardown when refining LOD.
+        cam_snapshot = None
+        if preserve_camera and getattr(self, "_view", None) is not None:
+            try:
+                opts = self._view.opts
+                cam_snapshot = {
+                    "center": opts.get("center"),
+                    "distance": opts.get("distance"),
+                    "elevation": opts.get("elevation"),
+                    "azimuth": opts.get("azimuth"),
+                }
+            except Exception:
+                cam_snapshot = None
+
         self._volume_data_cpu = data
         self._slice_range_cache = None  # invalidate; recomputed on next slice build
         self._volume_spacing = spacing
@@ -1170,24 +1189,47 @@ class Renderer3D(QWidget):
         self._clear_visuals()
 
         ni, nx, nt = data.shape
-        self._il_pos = ni // 2
-        self._xl_pos = nx // 2
-        self._t_pos = nt // 2
-        self._time_slice_positions = [self._t_pos]
-        self._time_slice_visibility = {self._t_pos: True}
-        self._active_time_pos = self._t_pos
-        self._time_slices_enabled = True
+        if not preserve_camera:
+            self._il_pos = ni // 2
+            self._xl_pos = nx // 2
+            self._t_pos = nt // 2
+            self._time_slice_positions = [self._t_pos]
+            self._time_slice_visibility = {self._t_pos: True}
+            self._active_time_pos = self._t_pos
+            self._time_slices_enabled = True
+        else:
+            # Keep slice indices; clamp to new shape.
+            self._il_pos = int(max(0, min(ni - 1, getattr(self, "_il_pos", ni // 2))))
+            self._xl_pos = int(max(0, min(nx - 1, getattr(self, "_xl_pos", nx // 2))))
+            self._t_pos = int(max(0, min(nt - 1, getattr(self, "_t_pos", nt // 2))))
+            self._active_time_pos = int(
+                max(0, min(nt - 1, getattr(self, "_active_time_pos", self._t_pos)))
+            )
         
         # Setup spatial scaling
         si, sx, st = spacing
-        
-        # Center the camera dynamically based on volume size
         cx = (ni * si) / 2
         cy = (nx * sx) / 2
         cz = (nt * st) / 2
-        self._view.opts['center'] = QVector3D(cx, cy, cz)
-        self._view.setCameraPosition(distance=max(ni*si, nx*sx, nt*st) * 1.5)
-        
+
+        if preserve_camera and cam_snapshot is not None:
+            try:
+                if cam_snapshot.get("center") is not None:
+                    self._view.opts["center"] = cam_snapshot["center"]
+                else:
+                    self._view.opts["center"] = QVector3D(cx, cy, cz)
+                self._view.setCameraPosition(
+                    distance=cam_snapshot.get("distance"),
+                    elevation=cam_snapshot.get("elevation"),
+                    azimuth=cam_snapshot.get("azimuth"),
+                )
+            except Exception:
+                self._view.opts["center"] = QVector3D(cx, cy, cz)
+        else:
+            # Center the camera dynamically based on volume size
+            self._view.opts["center"] = QVector3D(cx, cy, cz)
+            self._view.setCameraPosition(distance=max(ni * si, nx * sx, nt * st) * 1.5)
+
         # Update grid to floor aligned with volume bounds
         max_grid_len = max(ni * si, nx * sx) * 1.5
         self._base_grid.setSize(max_grid_len, max_grid_len)
