@@ -47,23 +47,11 @@ class SeismicView(QWidget):
         self._loader: SeismicLoader | None = None
         self._segy_path: str | None = None
         self._cache = SeismicCache(max_slices=50)
-        self._slice_worker_stopped = False
-        # Unparented + retained: parenting the QThread to this widget aborts
-        # the process ("QThread: Destroyed while still running") when the
-        # widget wrapper is garbage-collected without cleanup() being called.
-        self._slice_worker = SliceReadWorker()
-        self._slice_worker.slice_ready.connect(self._on_slice_ready)
-        self._slice_worker.prefetch_ready.connect(self._on_prefetch_ready)
-        self._slice_worker.read_error.connect(self._on_slice_read_error)
-        retain_background_worker(self._slice_worker)
-        self._slice_worker.start()
-        # Views discarded without cleanup() would otherwise leak a running
-        # worker thread that aborts the process at interpreter teardown
-        # (retain_background_worker's shutdown only interrupts; the worker's
-        # condition-variable wait needs stop() to wake it).
-        app = QCoreApplication.instance()
-        if app is not None:
-            app.aboutToQuit.connect(self._slice_worker.stop)
+        # A slice reader is only useful once a real SEGY is opened.  Deferring
+        # it avoids a permanent QThread per unopened/project-hidden view and
+        # keeps ordinary project/session teardown bounded.
+        self._slice_worker_stopped = True
+        self._slice_worker: SliceReadWorker | None = None
         self._meta: SeismicVolumeMeta | None = None
         self._horizon_grids: dict[str, np.ndarray] = {}
         self._ds_factor: tuple[int, int, int] = (1, 1, 1)
@@ -255,11 +243,23 @@ class SeismicView(QWidget):
 
     def _stop_slice_worker(self) -> None:
         """Stop the slice-read worker exactly once (idempotent)."""
-        if not self._slice_worker_stopped:
+        if self._slice_worker is not None and not self._slice_worker_stopped:
             self._slice_worker_stopped = True
             self._slice_worker.stop()
 
     def _ensure_slice_worker(self) -> None:
+        if self._slice_worker is None:
+            # Keep the QThread unparented but retained until it stops: parenting
+            # it to this widget aborts if QWidget disposal reaches it first.
+            worker = SliceReadWorker()
+            worker.slice_ready.connect(self._on_slice_ready)
+            worker.prefetch_ready.connect(self._on_prefetch_ready)
+            worker.read_error.connect(self._on_slice_read_error)
+            retain_background_worker(worker)
+            app = QCoreApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(worker.stop)
+            self._slice_worker = worker
         self._slice_worker_stopped = False
         self._slice_worker.ensure_running()
 
