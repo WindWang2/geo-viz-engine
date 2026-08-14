@@ -277,6 +277,13 @@ class SeismicView(QWidget):
         """Invalidate SEGY callbacks and cooperatively stop active file loads."""
         self._segy_generation += 1
         self._segy_path = None
+        # Slice cache entries belong to the OLD volume: drop them so a later
+        # volume with the same inline/crossline numbering can never be served
+        # the previous survey's slices (H10 cross-volume contamination).
+        try:
+            self._cache.clear()
+        except Exception:
+            pass
         for worker in tuple(self._segy_workers):
             if worker.isRunning():
                 worker.requestInterruption()
@@ -1078,7 +1085,7 @@ class SeismicView(QWidget):
             else:
                 actual_pos = position * df[2]
 
-            cache_key = (slice_type, actual_pos)
+            cache_key = (self._segy_generation, slice_type, actual_pos)
             cached = self._cache.get(cache_key)
             if cached is not None:
                 # Record the user's current position so a late in-flight
@@ -1097,7 +1104,7 @@ class SeismicView(QWidget):
     def _on_slice_ready(self, slice_type: str, actual_pos: int, data, generation: int):
         if generation != self._segy_generation:
             return
-        self._cache.put((slice_type, actual_pos), data)
+        self._cache.put((self._segy_generation, slice_type, actual_pos), data)
         # Latest-wins applies to the queue only; an in-flight read for a
         # superseded same-generation position must not update the panel.
         latest = self._latest_slice_request.get(slice_type)
@@ -1114,7 +1121,7 @@ class SeismicView(QWidget):
     def _on_prefetch_ready(self, slice_type: str, actual_pos: int, data, generation: int):
         if generation != self._segy_generation:
             return
-        self._cache.put((slice_type, actual_pos), data)
+        self._cache.put((self._segy_generation, slice_type, actual_pos), data)
 
     def _update_profile_panel(self, slice_type: str, position: int, slice_2d: np.ndarray):
         """Route slice data to the correct profile panel and cache raw data for export."""
