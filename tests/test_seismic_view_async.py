@@ -140,7 +140,8 @@ def test_slice_ready_updates_panel_and_cache(qtbot, monkeypatch):
     data = np.ones((5, 6), dtype=np.float32)
     view._on_slice_ready("inline", 108, data, 7)
     assert applied == [("inline", 108)]
-    assert view._cache.get(("inline", 108)) is data
+    # Round-2 H10: cache keys are volume-scoped by the SEGY generation.
+    assert view._cache.get((7, "inline", 108)) is data
 
 
 def test_stale_generation_slice_ignored(qtbot, monkeypatch):
@@ -166,11 +167,14 @@ def test_prefetch_only_fills_cache(qtbot, monkeypatch):
     data = np.ones((4, 4), dtype=np.float32)
     view._on_prefetch_ready("time", 12, data, 3)
     assert applied == []
-    assert view._cache.get(("time", 12)) is data
+    assert view._cache.get((3, "time", 12)) is data
 
 
 def test_worker_restarts_after_cleanup(qtbot, monkeypatch):
     view, fake = _make_view(qtbot, monkeypatch)
+    # The slice worker must exist before cleanup can stop it (pre-existing
+    # gap: the test never ensured the worker, so fake.stopped stayed False).
+    view._ensure_slice_worker()
     # Simulate page-switch-away then back with a new SEGY
     view.cleanup()
     assert fake.stopped is True
@@ -198,7 +202,7 @@ def test_stale_inflight_slice_does_not_update_panel(qtbot, monkeypatch):
     # In-flight result for a superseded position: cached but panel not updated
     view._on_slice_ready("inline", 108, np.ones((2, 2), dtype=np.float32), 7)
     assert applied == []
-    assert view._cache.get(("inline", 108)) is not None
+    assert view._cache.get((7, "inline", 108)) is not None
     # Current position still updates
     view._on_slice_ready("inline", 110, np.ones((2, 2), dtype=np.float32), 7)
     assert applied == [("inline", 110)]
