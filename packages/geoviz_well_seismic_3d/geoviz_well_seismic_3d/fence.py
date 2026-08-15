@@ -35,6 +35,30 @@ class FenceExtraction:
     sample_axis: np.ndarray  # (n_sample,) vertical values in active domain units
 
 
+def sample_fence_polyline(vertices_xy, n_along: int) -> np.ndarray:
+    """Equal arc-length resample of a fence polyline (#51).
+
+    Returns ``(n_along, 2)`` XY positions at uniform cumulative distance along
+    the polyline. Shared by the 3D curtain (``joint_widget._curtain_mesh``)
+    and ``extract_fence_strip`` so the along-fence index always means the same
+    thing — never vertex-index fractions, which misalign on unequal-length
+    segments.
+    """
+    verts = np.asarray(vertices_xy, dtype=np.float64).reshape(-1, 2)
+    seg = np.diff(verts, axis=0)
+    seg_len = np.linalg.norm(seg, axis=1)
+    total = float(seg_len.sum()) or 1.0
+    cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+    targets = np.linspace(0.0, total, n_along)
+    samples = np.zeros((n_along, 2), dtype=np.float64)
+    for i, t in enumerate(targets):
+        j = int(np.searchsorted(cum, t, side="right") - 1)
+        j = max(0, min(j, len(seg_len) - 1))
+        local = (t - cum[j]) / (seg_len[j] if seg_len[j] > 1e-12 else 1.0)
+        samples[i] = verts[j] + local * (verts[j + 1] - verts[j])
+    return samples
+
+
 def extract_fence_strip(
     volume: np.ndarray | VolumeAccess,
     *,
@@ -52,28 +76,38 @@ def extract_fence_strip(
 
     Prefer ``registration`` (VolumeRegistration) when the cube is a preview so
     indices scale to the loaded shape. Legacy il/xl params remain for tests.
+
+    Supports dense ndarray, objects with ``.data``, and source-backed
+    :class:`VolumeAccess` (``shape`` + slice/sample methods) without forcing a
+    full-cube materialisation.
     """
-    if hasattr(volume, "data"):
-        data = np.asarray(volume.data)
+    dense = None
+    if hasattr(volume, "data") and getattr(volume, "data") is not None:
+        dense = np.asarray(volume.data)
+        if dense.ndim != 3:
+            dense = None
+    elif isinstance(volume, np.ndarray):
+        dense = np.asarray(volume)
+        if dense.ndim != 3:
+            raise ValueError("volume must be 3-D")
+
+    if dense is not None:
+        ni, nx, nt = (int(x) for x in dense.shape)
     else:
-        data = np.asarray(volume)
-    if data.ndim != 3:
-        raise ValueError("volume must be 3-D")
-    ni, nx, nt = data.shape
+        shape = getattr(volume, "shape", None)
+        if shape is None or len(shape) != 3:
+            raise ValueError("volume must be 3-D or VolumeAccess with shape")
+        ni, nx, nt = (int(x) for x in shape)
+
     verts = fence.vertices_xy
     seg = np.diff(verts, axis=0)
     seg_len = np.linalg.norm(seg, axis=1)
     total = float(seg_len.sum()) or 1.0
-    cum = np.concatenate([[0.0], np.cumsum(seg_len)])
     targets = np.linspace(0.0, total, n_along)
-    samples_xy = np.zeros((n_along, 2), dtype=np.float64)
-    for i, t in enumerate(targets):
-        j = int(np.searchsorted(cum, t, side="right") - 1)
-        j = max(0, min(j, len(seg_len) - 1))
-        local = (t - cum[j]) / (seg_len[j] if seg_len[j] > 1e-12 else 1.0)
-        samples_xy[i] = verts[j] + local * (verts[j + 1] - verts[j])
+    samples_xy = sample_fence_polyline(verts, n_along)
 
     amp = np.zeros((n_along, nt), dtype=np.float32)
+    sample_trace = getattr(volume, "sample_trace", None)
     for i, (x, y) in enumerate(samples_xy):
         if registration is not None:
             vi, vx = registration.xy_to_volume_idx(float(x), float(y))
@@ -85,7 +119,14 @@ def extract_fence_strip(
             xi = int(round((xl - xline_start) / (xline_step or 1)))
             ii = max(0, min(ni - 1, ii))
             xi = max(0, min(nx - 1, xi))
-        amp[i, :] = data[ii, xi, :]
+        if dense is not None:
+            amp[i, :] = dense[ii, xi, :]
+        elif callable(sample_trace):
+            amp[i, :] = np.asarray(sample_trace(ii, xi), dtype=np.float32)
+        else:
+            # VolumeAccess without sample_trace: one inline read per column.
+            line = np.asarray(volume.slice_inline(ii), dtype=np.float32)
+            amp[i, :] = line[min(xi, line.shape[0] - 1), :]
 
     if sample_axis is None:
         sample_axis = np.arange(nt, dtype=np.float64)

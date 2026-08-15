@@ -119,26 +119,29 @@ class PredictionWorker(QObject):
 
             df_ai = pd.DataFrame(records)
 
-            try:
-                import openpyxl
-                wb = openpyxl.load_workbook(self.xls_path)
-                if "AI预测结果" in wb.sheetnames:
-                    del wb["AI预测结果"]
-                wb.save(self.xls_path)
-                wb.close()
-            except Exception as e:
-                print(f"Failed to clear sheet using openpyxl: {e}")
+            # 预测结果写入独立输出文件（源文件只读不写）：
+            # 与源文件同目录的 "<源文件名>_AI预测结果.xlsx"
+            from pathlib import Path
+            import shutil
+            src_path = Path(self.xls_path)
+            out_path = src_path.with_name(f"{src_path.stem}_AI预测结果.xlsx")
+
+            # 输出文件已存在时先备份为 .bak，防止误操作覆盖历史预测结果
+            if out_path.exists():
+                shutil.copy2(out_path, out_path.with_name(out_path.name + ".bak"))
 
             try:
-                if not str(self.xls_path).lower().endswith(".xlsx"):
-                    raise ValueError("仅支持向 .xlsx 格式的 Excel 追加 AI 预测结果。请先转换为 .xlsx 格式！")
-
-                with pd.ExcelWriter(self.xls_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-                    df_ai.to_excel(writer, sheet_name="AI预测结果", index=False)
+                if out_path.exists():
+                    with pd.ExcelWriter(out_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+                        df_ai.to_excel(writer, sheet_name="AI预测结果", index=False)
+                else:
+                    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+                        df_ai.to_excel(writer, sheet_name="AI预测结果", index=False)
             except Exception as e:
-                print(f"Failed to append sheet: {e}")
-                raise RuntimeError(f"写入 Excel 失败（可能文件已被其他程序打开或格式不受支持）: {e}")
+                print(f"Failed to write AI prediction sheet: {e}")
+                raise RuntimeError(f"写入输出文件失败（可能文件已被其他程序打开）: {e}")
 
+            self.output_path = str(out_path)
             self.progress.emit(100, "完成")
             self.finished.emit(records)
         except Exception as e:
@@ -761,12 +764,20 @@ class WellLogPage(QWidget):
         self._progress.update_progress(val, msg)
 
     def _on_prediction_finished(self, records):
+        # 先取 worker 记录的输出文件路径，用于完成消息告知用户结果位置
+        out_path = getattr(self._pred_worker, "output_path", None)
         self._pred_thread = None
         self._pred_worker = None
         self._progress.hide_progress()
         self._well_combo.setEnabled(True)
         self._apply_ai_prediction(records)
-        QMessageBox.information(self, "AI 预测", "AI 预测完成！已成功渲染并写入 Excel。")
+        if out_path:
+            QMessageBox.information(
+                self, "AI 预测",
+                f"AI 预测完成！已成功渲染并写入输出文件：\n{out_path}\n（源文件未被修改）",
+            )
+        else:
+            QMessageBox.information(self, "AI 预测", "AI 预测完成！已成功渲染。")
 
     def _on_prediction_error(self, err_msg):
         self._pred_thread = None

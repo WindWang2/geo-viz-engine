@@ -169,6 +169,53 @@ def _run_grid(
     return result
 
 
+def _kriging_leave_one_out_r2(
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    cancellation_token=None,
+) -> float | None:
+    """LOO R² for the kriging backend via the closed-form single-inverse path.
+
+    The variogram is fitted once and the augmented system inverted once
+    (``kriging.leave_one_out_predictions``) instead of re-fitting the
+    variogram and re-solving a full system for every left-out point. Falls
+    back to ``None`` whenever the closed form cannot be formed (same contract
+    as the per-point loop).
+    """
+    from geoviz_plots.factor.kriging import leave_one_out_predictions
+
+    if cancellation_token is not None:
+        cancellation_token.raise_if_cancelled()
+    try:
+        preds, observed = leave_one_out_predictions(x, y, z)
+    except Exception as exc:
+        from geoviz import JobCancelled
+
+        if isinstance(exc, JobCancelled):
+            raise
+        return None
+    if cancellation_token is not None:
+        cancellation_token.raise_if_cancelled()
+    m = len(observed)
+    if m < 3 or not np.all(np.isfinite(preds)):
+        return None
+    if m > MAX_LOO_SAMPLES:
+        evaluation_indices = np.linspace(0, m - 1, MAX_LOO_SAMPLES, dtype=np.int64)
+    else:
+        evaluation_indices = np.arange(m, dtype=np.int64)
+    return _r_squared(observed[evaluation_indices], preds[evaluation_indices])
+
+
+def _r_squared(observed: np.ndarray, preds: np.ndarray) -> float:
+    """Coefficient of determination clamped to [0, 1]."""
+    ss_res = float(np.sum((observed - preds) ** 2))
+    ss_tot = float(np.sum((observed - np.mean(observed)) ** 2))
+    if ss_tot <= 1e-12:
+        return 1.0 if ss_res <= 1e-12 else 0.0
+    return max(0.0, min(1.0, 1.0 - ss_res / ss_tot))
+
+
 def _leave_one_out_r2(
     x: np.ndarray,
     y: np.ndarray,
@@ -184,10 +231,17 @@ def _leave_one_out_r2(
     b_i: np.ndarray | None = None,
     cancellation_token=None,
 ) -> float | None:
-    """Estimate LOO R² using at most ``MAX_LOO_SAMPLES`` observations."""
+    """Estimate LOO R² using at most ``MAX_LOO_SAMPLES`` observations.
+
+    The kriging backend uses the closed-form single-inverse LOO
+    (:func:`_kriging_leave_one_out_r2`); all other backends run one
+    interpolation per left-out point.
+    """
     n = len(z)
     if n < 3:
         return None
+    if backend == "kriging":
+        return _kriging_leave_one_out_r2(x, y, z, cancellation_token)
     evaluation_indices = (
         np.arange(n, dtype=np.int64)
         if n <= MAX_LOO_SAMPLES
@@ -218,11 +272,7 @@ def _leave_one_out_r2(
             return None
         preds[prediction_index] = val
     observed = z[evaluation_indices]
-    ss_res = float(np.sum((observed - preds) ** 2))
-    ss_tot = float(np.sum((observed - np.mean(observed)) ** 2))
-    if ss_tot <= 1e-12:
-        return 1.0 if ss_res <= 1e-12 else 0.0
-    return max(0.0, min(1.0, 1.0 - ss_res / ss_tot))
+    return _r_squared(observed, preds)
 
 
 def interpolate_factor_grid(

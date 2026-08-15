@@ -521,10 +521,31 @@ class WellSeismicJointWidget(QWidget):
             if data is not None:
                 try:
                     self._set_default_render_mode()
-                    self._renderer.load_volume(np.asarray(data, dtype=np.float32))
+                    # Progressive LOD upgrades must not reset the camera.
+                    already = bool(getattr(self._renderer, "_loaded", False))
+                    load_kw = {}
+                    try:
+                        # Keyword supported on Stage-7 renderer; ignore if older.
+                        import inspect
+
+                        if "preserve_camera" in inspect.signature(
+                            self._renderer.load_volume
+                        ).parameters:
+                            load_kw["preserve_camera"] = already
+                    except Exception:
+                        pass
+                    self._renderer.load_volume(
+                        np.asarray(data, dtype=np.float32), **load_kw
+                    )
                     self.sync_orthogonal_slices()
                 except Exception as exc:
                     logger.warning("load_volume failed: %s", exc)
+            else:
+                # Source-backed access without dense display yet: scene still
+                # has shape/slices for wells/fences; GL waits for L0 brick.
+                logger.debug(
+                    "volume access has no dense display data yet; defer GL load"
+                )
 
         self.set_well_trajectories(
             scene.well_trajectories(visible_only=True)
@@ -593,39 +614,39 @@ class WellSeismicJointWidget(QWidget):
         return out
 
     def _curtain_mesh(self, vertices_xy: np.ndarray, ext):
-        """Build a simple textured-ish mesh strip along fence in render space."""
+        """Amplitude-coloured curtain strip along fence (#51).
+
+        沿折线按等弧长重采样（与 extract_fence_strip 共用同一参数化，避免
+        非等长线段上顶点索引分数错位），振幅经 ColormapManager 的 seismic
+        色表映射为每顶点颜色，保留整体半透明。
+        """
         if self._gl is None or self._scene is None:
             return None
         try:
             from pyqtgraph.opengl import MeshData, GLMeshItem
         except Exception:
             return None
-        verts_xy = np.asarray(vertices_xy, dtype=np.float64)
-        n = len(verts_xy)
+        from geoviz_seismic.colormap import ColormapManager
+
+        from .fence import sample_fence_polyline
+
         nt = ext.amplitude.shape[1]
+        n_a = ext.amplitude.shape[0]
         # sample a few vertical levels
         n_v = min(32, nt)
         t_idx = np.linspace(0, nt - 1, n_v)
         z_vals = np.interp(t_idx, np.arange(nt), ext.sample_axis)
-        # resample path to match along samples of extract
-        n_a = ext.amplitude.shape[0]
-        # use extract arc points
+        # 等弧长重采样，沿向索引与 2D VD / extract_fence_strip 完全一致
+        samples_xy = sample_fence_polyline(vertices_xy, n_a)
         verts = []
-        faces = []
-        for i in range(n_a):
-            # position along polyline by arc fraction
-            frac = i / max(n_a - 1, 1)
-            # approximate XY by linear along original verts
-            # better: use same parameterization as extract — place via fence verts
-            idx_f = frac * (n - 1)
-            j = int(idx_f)
-            j = min(j, n - 2)
-            local = idx_f - j
-            xy = verts_xy[j] * (1 - local) + verts_xy[j + 1] * local
+        for i, xy in enumerate(samples_xy):
             for k, z in enumerate(z_vals):
-                rx, ry, rz = self._scene.world_to_render_xyz(float(xy[0]), float(xy[1]), float(z))
+                rx, ry, rz = self._scene.world_to_render_xyz(
+                    float(xy[0]), float(xy[1]), float(z)
+                )
                 verts.append([rx, ry, rz])
         verts = np.asarray(verts, dtype=np.float32)
+        faces = []
         for i in range(n_a - 1):
             for k in range(n_v - 1):
                 a = i * n_v + k
@@ -635,11 +656,30 @@ class WellSeismicJointWidget(QWidget):
                 faces.append([a, c, b])
                 faces.append([b, c, d])
         faces = np.asarray(faces, dtype=np.uint32)
-        md = MeshData(vertexes=verts, faces=faces)
+        # 振幅 → seismic 色表 → 每顶点 RGBA（GLMeshItem 支持 vertexColors）
+        amp = ext.amplitude
+        finite = np.isfinite(amp)
+        if not np.any(finite):
+            # 全缺失数据：退化为原固定半透明蓝
+            colors = np.full(
+                (n_a * n_v, 4), (0.3, 0.5, 0.9, 0.55), dtype=np.float32
+            )
+        else:
+            rgba = ColormapManager.apply_colormap(
+                amp, name=ColormapManager.SEISMIC
+            )
+            v_idx = t_idx.astype(int)
+            colors = (
+                rgba[:, v_idx, :].reshape(n_a * n_v, 4).astype(np.float32)
+                / 255.0
+            )
+            # 无振幅数据处镂空，其余保留整体半透明
+            mask = finite[:, v_idx].reshape(n_a * n_v)
+            colors[:, 3] = np.where(mask, 0.55, 0.0)
+        md = MeshData(vertexes=verts, faces=faces, vertexColors=colors)
         item = GLMeshItem(
             meshdata=md,
             smooth=False,
-            color=(0.3, 0.5, 0.9, 0.55),
             shader="balloon",
             glOptions="translucent",
         )

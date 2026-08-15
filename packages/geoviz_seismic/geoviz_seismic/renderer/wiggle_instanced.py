@@ -6,7 +6,6 @@ paired zero-baseline GL_TRIANGLE_STRIP instanced shader rendering, and offscreen
 """
 from __future__ import annotations
 
-import io
 import math
 from pathlib import Path
 from typing import Any
@@ -166,21 +165,17 @@ class WiggleTraceRenderer:
         }
 
     def render_export(self, dpi: int = 300) -> bytes:
-        """Offscreen High-DPI rasterization export returning PNG image bytes."""
-        # Generates offscreen raster bytes at specified DPI
-        scale = max(1, int(dpi / 100))
-        h = max(10, self.num_samples * scale)
-        w = max(10, self.num_traces * scale)
-        img_array = np.zeros((h, w, 4), dtype=np.uint8)
-        img_array[:, :, 3] = 255  # Alpha opaque
-        try:
-            from PIL import Image
-            img = Image.fromarray(img_array)
-            buf = io.BytesIO()
-            img.save(buf, format="PNG", dpi=(dpi, dpi))
-            return buf.getvalue()
-        except ImportError:
-            return img_array.tobytes()
+        """Offscreen High-DPI rasterization export returning PNG image bytes.
+
+        Not implemented: this renderer has no offscreen OpenGL context, so
+        rasterizing here would silently produce a blank PNG. Raise explicitly
+        instead of returning a zero-filled image.
+        """
+        raise NotImplementedError(
+            "Offscreen high-DPI raster export is not implemented for the "
+            "instanced wiggle renderer; render into a visible QOpenGLWidget "
+            "and grab its framebuffer instead."
+        )
 
     def set_positive_fill_color(self, color: tuple[float, float, float, float]) -> None:
         """Set positive amplitude fill color RGBA (0.0 to 1.0)."""

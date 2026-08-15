@@ -34,13 +34,15 @@ class TestAutoTie:
         rng = np.random.default_rng(42)
         trace = rng.standard_normal(n, dtype=np.float32)
         shift = 5
-        # Shift the synthetic by 5 samples (synthetic is late)
+        # Delay the synthetic by 5 samples (synthetic is late / down)
         synth = np.zeros(n, dtype=np.float32)
         synth[shift:] = trace[:-shift]
 
         detected = auto_tie(trace, synth)
-        # Positive shift means synthetic should move down (it's late)
-        assert detected == pytest.approx(shift, abs=1)
+        # #72 sign convention: positive shift means the synthetic should move
+        # DOWN to line up with the field trace. A late synthetic therefore
+        # needs a negative shift (move it up by the same amount).
+        assert detected == pytest.approx(-shift, abs=1)
 
     def test_auto_tie_correlation_coefficient(self):
         """Returns correlation coefficient for quality assessment."""

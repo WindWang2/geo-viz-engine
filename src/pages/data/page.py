@@ -439,19 +439,77 @@ class DataPage(QWidget):
                 self._load_imported_file(path, "JSON (*.json)")
 
     def _load_imported_file(self, path: str, filter_str: str):
-        """Load an imported file into the cache and refresh display."""
+        """Load an imported file into the cache and refresh display.
+
+        按扩展名分派：Excel 解析后登记；LAS 解析并登记井（坐标缺失时
+        提示补充或登记为无坐标井）；SEGY/JSON 及其它格式只登记路径，
+        如实提示「已登记但未解析」，不谎称导入完成。
+        """
+        p = Path(path)
+        ext = p.suffix.lower()
         try:
-            p = Path(path)
-            if "Excel" in filter_str:
+            if ext == ".las":
+                self._import_las_file(p)
+            elif ext in (".sgy", ".segy"):
+                # 地震数据：登记为数据条目（当前不做解析）
+                self.cache.put_file(path)
+                self._load_well_table()
+                self.refresh_kpis()
+                QMessageBox.information(self, "已登记", f"地震数据已登记为数据条目（未解析）:\n{path}")
+            elif ext in (".xlsx", ".xls"):
                 from src.data.loaders import load_well_log_from_excel
                 load_well_log_from_excel(p)
                 self.cache.catalog.register_well_file(p.stem, p)
-            self.cache.put_file(path)
-            self._load_well_table()
-            self.refresh_kpis()
-            QMessageBox.information(self, "导入完成", f"文件已成功导入:\n{path}")
+                self.cache.put_file(path)
+                self._load_well_table()
+                self.refresh_kpis()
+                QMessageBox.information(self, "导入完成", f"文件已成功导入:\n{path}")
+            else:
+                # JSON 及其它暂不支持解析的格式：只登记路径
+                self.cache.put_file(path)
+                self._load_well_table()
+                self.refresh_kpis()
+                QMessageBox.information(self, "已登记", f"文件已登记但未解析:\n{path}")
         except Exception as e:
             QMessageBox.warning(self, "导入失败", f"无法加载文件:\n{path}\n\n{e}")
+
+    def _import_las_file(self, p: Path):
+        """解析 LAS 文件并登记井位；坐标缺失时提示补充或登记为无坐标井。"""
+        from geoviz_well_log.las_preview import load_las_preview
+
+        from src.utils.paths import get_data_dir
+
+        data = load_las_preview(str(p))
+        well_name = data.well_name or p.stem
+
+        coords_file = get_data_dir() / "well_coordinates.json"
+        known = {w.name for w in self.cache.get_well_coordinates(coords_file)}
+        if well_name not in known:
+            # 坐标缺失：先提示用户补充，取消则登记为无坐标井
+            lat, lat_ok = QInputDialog.getDouble(
+                self, "补充井位坐标", f"井 '{well_name}' 缺少坐标，请输入纬度:", 0.0, -90.0, 90.0, 6,
+            )
+            lon, lon_ok = QInputDialog.getDouble(
+                self, "补充井位坐标", f"井 '{well_name}' 缺少坐标，请输入经度:", 0.0, -180.0, 180.0, 6,
+            ) if lat_ok else (0.0, False)
+            if lat_ok and lon_ok:
+                self.cache.catalog.add_or_update_well(well_name, lat, lon, p)
+                coord_note = "，坐标已补充登记"
+            else:
+                self.cache.catalog.register_well_file(well_name, p)
+                coord_note = "，未登记坐标（可在井详情中补充）"
+        else:
+            self.cache.catalog.register_well_file(well_name, p)
+            coord_note = ""
+
+        self.cache.put_file(str(p))
+        self._load_well_table()
+        self.refresh_kpis()
+        QMessageBox.information(
+            self, "导入完成",
+            f"LAS 已解析并登记井 '{well_name}'{coord_note}:\n"
+            f"{len(data.curves)} 条曲线，深度 {data.top_depth:.1f} ~ {data.bottom_depth:.1f} m\n{p}",
+        )
 
     def _on_rename_well(self):
         """Rename the currently selected well in the detail panel."""

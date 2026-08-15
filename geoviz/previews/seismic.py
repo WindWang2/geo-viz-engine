@@ -60,6 +60,7 @@ def _prepare_slices(path: str, limit: int) -> tuple[SeismicPreviewPayload, Seism
             source_path=str(path),
             max_slice_axis=limit,
             axes=axis_specs_from_meta(meta),
+            meta=meta,
         )
         return payload, meta
     finally:
@@ -82,20 +83,6 @@ class SeismicPreviewBackend:
         return PreviewCapabilities(
             self.kind, ("slice_switch", "slice_scrub", "zoom", "pan")
         )
-
-    @staticmethod
-    def _show_profiles_only(widget: QWidget) -> None:
-        """Keep the preview host in orthogonal-slice mode.
-
-        The full ``SeismicView`` still supports 3-D volume mode in the main app,
-        but preview tabs should stay on the 2-D profile surface.
-        """
-        if hasattr(widget, "set_render_mode"):
-            widget.set_render_mode("planes")
-            return
-        mode_combo = getattr(widget, "_3d_mode_combo", None)
-        if mode_combo is not None and hasattr(mode_combo, "setCurrentIndex"):
-            mode_combo.setCurrentIndex(0)
 
     def prepare(self, request: PreviewRequest, options: PreviewOptions) -> PreparedPreview:
         try:
@@ -128,31 +115,30 @@ class SeismicPreviewBackend:
         )
 
     def create_widget(self, parent: QWidget | None = None) -> QWidget:
-        # Import only after the user has activated the visualization tab: the
-        # full view imports the 3-D renderer and owns the async SEGY worker.
-        from geoviz_seismic import SeismicView
+        # Lightweight 2-D preview widget: no 3-D renderer, no async volume load.
+        from geoviz_seismic import SeismicPreviewWidget
 
-        widget = SeismicView(parent=parent, auto_load=False)
-        self._show_profiles_only(widget)
-        return widget
+        return SeismicPreviewWidget(parent=parent)
 
     def render(self, widget: QWidget, preview: PreparedPreview) -> None:
-        from geoviz_seismic import SeismicView
+        from geoviz_seismic import SeismicPreviewWidget
 
         payload = preview.payload
         if (
-            not isinstance(widget, SeismicView)
+            not isinstance(widget, SeismicPreviewWidget)
             or not isinstance(payload, SeismicPreviewPayload)
             or not payload.source_path
         ):
             raise GeoVizError(ErrorCode.RENDER_ERROR, "无法渲染 SEGY 地震切片")
-        widget.load_segy_async(payload.source_path)
-        self._show_profiles_only(widget)
+        # Directly reuse the middle slices prepared in prepare(); no reload of
+        # the whole volume here.  Scrubbing past the preloaded positions is
+        # served asynchronously by the widget's background slice reader.
+        widget.set_slices(payload)
 
     def release(self, widget: QWidget) -> None:
-        from geoviz_seismic import SeismicView
+        from geoviz_seismic import SeismicPreviewWidget
 
-        if not isinstance(widget, SeismicView):
+        if not isinstance(widget, SeismicPreviewWidget):
             raise GeoVizError(ErrorCode.RENDER_ERROR, "无法释放 SEGY 地震切片")
         widget.cleanup()
 

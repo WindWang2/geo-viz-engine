@@ -2,7 +2,7 @@
 """Cross-well correlation page using CrossWellCanvas with picking workflow."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QObject, QThread, Signal, QEvent
+from PySide6.QtCore import Qt, QObject, QThread, QEventLoop, Signal, QEvent
 from PySide6.QtGui import QWheelEvent, QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -183,6 +183,59 @@ class _WellLoadWorker(QObject):
         self.finished.emit(result)
 
 
+class _DTWPropagateWorker(QObject):
+    """Background worker that runs DTW propagation off the UI thread.
+
+    The page collects the per-well curve arrays on the UI thread and hands
+    them here, so the worker never touches widgets or the picks model.
+    """
+
+    progress = Signal(int, str)
+    finished = Signal(list)
+    error = Signal(str)
+
+    def __init__(
+        self,
+        work_items: list[tuple[str, float, str]],
+        wells: list[str],
+        curve_data: dict[str, tuple],
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._work_items = work_items
+        self._wells = list(wells)
+        self._curve_data = curve_data
+
+    def run(self):
+        try:
+            from geoviz_cross_well.dtw_engine import DTWEngine
+            engine = DTWEngine()
+            results: list[tuple[str, float, str]] = []
+            completed = 0
+            total = len(self._work_items) * max(0, len(self._wells) - 1)
+            for ref_well, ref_depth, formation in self._work_items:
+                ref_data = self._curve_data.get(ref_well)
+                for target_well in self._wells:
+                    if target_well == ref_well:
+                        continue
+                    completed += 1
+                    if ref_data is not None:
+                        tgt_data = self._curve_data.get(target_well)
+                        if tgt_data is not None:
+                            ref_depths, ref_values = ref_data
+                            tgt_depths, tgt_values = tgt_data
+                            result = engine.correlate(
+                                ref_values, ref_depths,
+                                tgt_values, tgt_depths,
+                                ref_depth=ref_depth,
+                            )
+                            results.append((target_well, result.suggested_depth, formation))
+                    self.progress.emit(completed, f"DTW 传播中... ({completed}/{total})")
+            self.finished.emit(results)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class CrossWellPage(QWidget):
     """Cross-well correlation page with grouped toolbar and picking workflow."""
 
@@ -197,6 +250,9 @@ class CrossWellPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker = None
+        self._dtw_thread = None
+        self._dtw_worker = None
+        self._dtw_running = False
         self._selected_labels: list[str] | None = None
         self._well_data_cache: dict[str, object] = {}
         self._all_track_labels: list[str] = []
@@ -722,7 +778,13 @@ class CrossWellPage(QWidget):
         self._cross_well.auto_link()
 
     def _on_dtw_propagate(self):
-        """Propagate every existing manual pick to all other wells via DTW."""
+        """Propagate every existing manual pick to all other wells via DTW.
+
+        The DTW computation runs in a background ``_DTWPropagateWorker`` so the
+        UI thread is never blocked and no ``processEvents()`` re-entrancy is
+        needed; the resulting ghost picks are backfilled on the UI thread once
+        the worker finishes.
+        """
         if self._cross_well.canvas_count < 2:
             QMessageBox.information(
                 self, "DTW 传播",
@@ -738,45 +800,94 @@ class CrossWellPage(QWidget):
                 "请先在某口井上手动拾取一个层位点，然后再用 DTW 传播到其他井。",
             )
             return
+        if self._dtw_running:
+            return  # a previous run is still in progress
+
+        # Collect per-well curve arrays on the UI thread; the worker only ever
+        # sees plain numpy arrays, never widgets or the picks model.
+        wells = self._cross_well._well_names
+        canvases = self._cross_well._canvases
+        curve_data: dict[str, tuple] = {}
+        for canvas, well_name in zip(canvases, wells):
+            data = self._canvas._extract_curve(canvas)
+            if data is not None:
+                curve_data[well_name] = data
+
+        # One anchor well per pick (the first connected well with a depth).
+        work_items: list[tuple[str, float, str]] = []
+        for pick in manual_picks:
+            for well in pick.connected_wells():
+                depth = pick.depth_for_well(well)
+                if depth is None:
+                    continue
+                work_items.append((well, depth, pick.formation_name))
+                break  # one anchor per pick is enough
 
         # Estimate total work = picks × other-well count for a single linear bar.
-        other_wells = max(0, self._cross_well.canvas_count - 1)
-        total_steps = len(manual_picks) * other_wells
+        total_steps = len(work_items) * max(0, len(wells) - 1)
+        self._set_dtw_running(True)
         self._progress.show_progress("DTW 传播中...", maximum=max(1, total_steps))
 
-        completed = [0]  # box for closure mutability
+        self._dtw_thread = QThread()
+        self._dtw_worker = _DTWPropagateWorker(work_items, wells, curve_data)
+        self._dtw_worker.moveToThread(self._dtw_thread)
 
-        def _on_well_done(well_step: int, well_total: int) -> None:
-            completed[0] += 1
-            self._progress.update_progress(
-                completed[0],
-                f"DTW 传播中... ({completed[0]}/{total_steps})",
-            )
-            from PySide6.QtWidgets import QApplication
-            QApplication.processEvents()
+        self._dtw_thread.started.connect(self._dtw_worker.run)
+        self._dtw_worker.progress.connect(self._on_dtw_progress)
+        self._dtw_worker.finished.connect(self._on_dtw_finished)
+        self._dtw_worker.error.connect(self._on_dtw_error)
+        self._dtw_worker.finished.connect(self._dtw_thread.quit)
+        self._dtw_worker.error.connect(self._dtw_thread.quit)
+        self._dtw_worker.finished.connect(self._dtw_worker.deleteLater)
+        self._dtw_worker.error.connect(self._dtw_worker.deleteLater)
+        self._dtw_thread.finished.connect(self._dtw_thread.deleteLater)
+        self._dtw_thread.finished.connect(self._on_dtw_thread_finished)
 
-        created_total = 0
+        # Wait for the worker inside a nested event loop so the DTW compute
+        # stays off the UI thread while progress/backfill run on it; this
+        # replaces the old per-step QApplication.processEvents() re-entrancy.
+        loop = QEventLoop(self)
+        self._dtw_worker.finished.connect(loop.quit)
+        self._dtw_worker.error.connect(loop.quit)
+        self._dtw_thread.start()
         try:
-            for pick in manual_picks:
-                for well in pick.connected_wells():
-                    depth = pick.depth_for_well(well)
-                    if depth is None:
-                        continue
-                    created = self._canvas.propagate_pick_via_dtw(
-                        well, depth, pick.formation_name,
-                        progress_callback=_on_well_done,
-                    )
-                    created_total += len(created)
-                    break  # one anchor per pick is enough
+            loop.exec()
         finally:
-            self._progress.hide_progress()
+            loop.deleteLater()
 
+    def _on_dtw_progress(self, completed: int, msg: str):
+        """Update the progress overlay while the DTW worker runs."""
+        self._progress.update_progress(completed, msg)
+
+    def _on_dtw_finished(self, results: list):
+        """Backfill the computed DTW ghost picks and restore the UI."""
+        created_total = 0
+        for well, depth, formation in results:
+            self._canvas.picks_model.add_pick(formation, well, depth, source="dtw")
+            created_total += 1
+        self._set_dtw_running(False)
+        self._progress.hide_progress()
         QMessageBox.information(
             self, "DTW 传播完成",
             f"已生成 {created_total} 个 DTW 候选点（灰色 ghost）。"
             f"\n左键点击确认为正式拾取，右键点击拒绝。",
         )
         self._update_status()
+
+    def _on_dtw_error(self, msg: str):
+        """Report a worker failure and restore the UI."""
+        self._set_dtw_running(False)
+        self._progress.hide_progress()
+        QMessageBox.warning(self, "DTW 传播失败", msg)
+
+    def _on_dtw_thread_finished(self):
+        self._progress.hide_progress()
+
+    def _set_dtw_running(self, running: bool):
+        """Disable actions that must not run concurrently with DTW."""
+        self._dtw_running = bool(running)
+        for btn in (self._dtw_btn, self._add_btn, self._clear_btn):
+            btn.setEnabled(not running)
 
     def _on_browse_mode(self):
         # Uncheck pick mode if it was active
@@ -928,17 +1039,19 @@ class CrossWellPage(QWidget):
         self._canvas.active_formation = name
 
     def cleanup(self):
-        """Stop well-loading thread when leaving this page."""
-        thread = getattr(self, "_thread", None)
-        if thread is not None:
-            try:
-                if thread.isRunning():
-                    thread.quit()
-                    thread.wait(1500)
-            except RuntimeError:
-                pass
-        self._thread = None
+        """Stop well-loading / DTW threads when leaving this page."""
+        for attr in ("_thread", "_dtw_thread"):
+            thread = getattr(self, attr, None)
+            if thread is not None:
+                try:
+                    if thread.isRunning():
+                        thread.quit()
+                        thread.wait(1500)
+                except RuntimeError:
+                    pass
+                setattr(self, attr, None)
         self._worker = None
+        self._dtw_worker = None
 
     def export_project_picks(self):
         from src.data.project import ProjectPick

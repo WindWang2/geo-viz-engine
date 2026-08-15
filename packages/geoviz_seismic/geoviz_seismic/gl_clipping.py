@@ -10,18 +10,55 @@ pyqtgraph's default (compatibility-profile) items already rely on::
     item = ClippedGLMeshItem(vertexes=v, faces=f, faceColors=c, smooth=True)
     item.set_clipping("z", enabled=True, val=-50.0, direction=1.0)
 
+**Limitation:** ``GL_CLIP_PLANE0..2`` are fixed-function state that only exists
+in compatibility-profile (or legacy no-profile) GL contexts. Under a **core
+profile** or GLES they are unavailable; :meth:`ThreeWayClipMixin.paint` detects
+that, logs a warning once and skips clipping (geometry renders unclipped)
+instead of raising a GL error.
+
 Importing this module requires Qt + PyOpenGL, so keep it off worker threads.
 """
 
 from __future__ import annotations
 
+import logging
+
 import pyqtgraph.opengl as gl
 from OpenGL import GL
-from PySide6.QtGui import QOpenGLContext
+from PySide6.QtGui import QOpenGLContext, QSurfaceFormat
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["ClippedGLMeshItem", "ClippedGLVolumeItem", "ThreeWayClipMixin"]
 
 _AXIS_SLOTS: dict[str, int] = {"x": 0, "y": 1, "z": 2}
+
+_FIXED_CLIP_WARNED = False
+
+
+def _core_profile_context() -> bool:
+    """Return ``True`` when the current context is an explicit core profile.
+
+    Fixed-function ``GL_CLIP_PLANE*`` are removed in core profile. A missing
+    current context or a ``NoProfile`` context (legacy default, treated as
+    compatibility-capable) reports ``False``.
+    """
+    ctx = QOpenGLContext.currentContext()
+    if ctx is None:
+        return False
+    return ctx.format().profile() == QSurfaceFormat.OpenGLContextProfile.CoreProfile
+
+
+def _warn_fixed_clip_once() -> None:
+    """Log the core-profile clipping limitation once per process."""
+    global _FIXED_CLIP_WARNED
+    if _FIXED_CLIP_WARNED:
+        return
+    _FIXED_CLIP_WARNED = True
+    logger.warning(
+        "OpenGL context is a core profile: fixed-function GL_CLIP_PLANE0..2 "
+        "are unavailable, clipping is disabled."
+    )
 
 
 class ThreeWayClipMixin:
@@ -42,10 +79,13 @@ class ThreeWayClipMixin:
 
         ``direction=1.0`` discards geometry with ``coord > val``; ``-1.0`` discards
         ``coord < val``. Unknown axis names are ignored, matching the previous
-        workbench behaviour.
+        workbench behaviour. In a core-profile context the planes are unavailable;
+        a warning is logged once and :meth:`paint` skips clipping.
         """
         if axis in self._clip:
             self._clip[axis] = (bool(enabled), float(val), float(direction))
+        if enabled and _core_profile_context():
+            _warn_fixed_clip_once()
         self.update()
 
     def clipping(self, axis: str) -> tuple[bool, float, float]:
@@ -54,6 +94,13 @@ class ThreeWayClipMixin:
 
     def paint(self):
         if QOpenGLContext.currentContext() is None:
+            super().paint()
+            return
+
+        if _core_profile_context():
+            # Fixed-function clip planes do not exist in core profile: skip
+            # clipping rather than feeding GL invalid enums.
+            _warn_fixed_clip_once()
             super().paint()
             return
 

@@ -54,6 +54,11 @@ def survey_from_corners(
     * **p1**: origin corner (il0, xl0, x0, y0)
     * **p2**: same inline as p1, opposite crossline (il0, xl1, x1, y1)
     * **p3**: same crossline as p2, opposite inline (il1, xl1, x2, y2)
+
+    The integer ``iline_step`` / ``xline_step`` are inferred from the corner
+    line-number ranges and edge distances (see the derivation below); corners
+    describing a fully-sampled grid yield step ±1, matching the previous
+    behaviour.
     """
     il0, xl0, x0, y0 = (float(v) for v in p1)
     il0b, xl1, x1, y1 = (float(v) for v in p2)
@@ -64,14 +69,39 @@ def survey_from_corners(
     if abs(xl1 - xl1b) > 1e-6:
         raise ValueError("p2 and p3 must share the same crossline number")
 
-    n_il_steps = max(1, int(round(abs(il1 - il0))))
-    n_xl_steps = max(1, int(round(abs(xl1 - xl0))))
-    iline_step = 1 if il1 >= il0 else -1
-    xline_step = 1 if xl1 >= xl0 else -1
+    il_delta = abs(il1 - il0)
+    xl_delta = abs(xl1 - xl0)
 
     # Distance along XL edge (p1→p2) and IL edge (p2→p3)
     xl_len = float(np_hypot(x1 - x0, y1 - y0))
     il_len = float(np_hypot(x2 - x1, y2 - y1))
+
+    # Integer line steps. With only three corners the physical bin size is not
+    # directly observable, so assume the axis spanning the larger line-number
+    # range is fully sampled (step ±1) and use its spacing per line number as
+    # the nominal bin size; the other axis's step is the rounded ratio of the
+    # two per-line-number spacings, clamped to >= 1 (e.g. a survey recorded on
+    # every 2nd line yields step 2). Fully-sampled grids (spacing ratio ~1)
+    # and degenerate corners fall back to step ±1, keeping the old behaviour.
+    il_unit = il_len / il_delta if il_delta > 0 else 0.0
+    xl_unit = xl_len / xl_delta if xl_delta > 0 else 0.0
+    ref_unit = xl_unit if xl_delta >= il_delta else il_unit
+    if ref_unit > 0.0 and il_len > 0 and il_delta > 0:
+        iline_step = max(1, round(il_delta * ref_unit / il_len))
+    else:
+        iline_step = 1
+    if ref_unit > 0.0 and xl_len > 0 and xl_delta > 0:
+        xline_step = max(1, round(xl_delta * ref_unit / xl_len))
+    else:
+        xline_step = 1
+    if il1 < il0:
+        iline_step = -iline_step
+    if xl1 < xl0:
+        xline_step = -xline_step
+
+    n_il_steps = max(1, round(il_delta / abs(iline_step))) if il_delta > 0 else 1
+    n_xl_steps = max(1, round(xl_delta / abs(xline_step))) if xl_delta > 0 else 1
+
     xl_spacing = xl_len / n_xl_steps if n_xl_steps else 1.0
     il_spacing = il_len / n_il_steps if n_il_steps else 1.0
 

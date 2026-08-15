@@ -32,9 +32,10 @@ class WellCatalog:
     def __init__(self, data_dir: Path | None = None):
         self._data_dir = data_dir or get_data_dir()
         self._coords_path = self._data_dir / "well_coordinates.json"
+        self._imported_files_path = self._data_dir / "imported_files.json"
         self._coords: list[WellCoordinates] | None = None
         self._registry: dict[str, Path] = {}
-        self._imported_files: list[str] = []
+        self._imported_files: list[str] = self._load_imported_files()
         self._rebuild_registry()
 
     @property
@@ -51,8 +52,16 @@ class WellCatalog:
 
     def _rebuild_registry(self) -> None:
         registry: dict[str, Path] = {}
-        registry["HZ25-10-1"] = self._data_dir / "HZ25-10-1-laolong.xlsx"
-        registry["老龙1"] = self._data_dir / "老龙1井-野外剖面数据整理 .xlsx"
+        coords_names = {w.name for w in self.get_coordinates()}
+        # 演示井仅当对应文件存在且在坐标 JSON 中有记录时才注册
+        demo_wells = (
+            ("HZ25-10-1", "HZ25-10-1-laolong.xlsx"),
+            ("老龙1", "老龙1井-野外剖面数据整理 .xlsx"),
+        )
+        for well_name, file_name in demo_wells:
+            f = self._data_dir / file_name
+            if well_name in coords_names and f.exists():
+                registry[well_name] = f
 
         for w in self.get_coordinates():
             if w.name in registry:
@@ -70,6 +79,10 @@ class WellCatalog:
             if stem not in registry:
                 registry[stem] = p
 
+        # register_well_file() 的显式登记在重建后保留（按存在性过滤）
+        for name, p in self._registry.items():
+            registry.setdefault(name, p)
+
         self._registry = {k: v for k, v in registry.items() if v.exists()}
 
     def get_well_file(self, well_name: str) -> Path | None:
@@ -82,10 +95,33 @@ class WellCatalog:
     def register_imported_file(self, path: str) -> None:
         if path not in self._imported_files:
             self._imported_files.append(path)
+            self._save_imported_files()
         self._rebuild_registry()
 
     def imported_files(self) -> list[str]:
         return list(self._imported_files)
+
+    def _load_imported_files(self) -> list[str]:
+        """读取 data_dir 下持久化的导入文件清单（启动时恢复）。"""
+        if not self._imported_files_path.exists():
+            return []
+        try:
+            with open(self._imported_files_path, encoding="utf-8") as f:
+                raw = json.load(f)
+        except (OSError, ValueError):
+            return []
+        if not isinstance(raw, list):
+            return []
+        return [str(item) for item in raw if item]
+
+    def _save_imported_files(self) -> None:
+        """将导入文件清单持久化到 data_dir 下的 JSON 文件。"""
+        try:
+            self._imported_files_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._imported_files_path, "w", encoding="utf-8") as f:
+                json.dump(self._imported_files, f, indent=2, ensure_ascii=False)
+        except OSError:
+            pass
 
     def rename_well(self, old_name: str, new_name: str) -> None:
         wells = self.get_coordinates()

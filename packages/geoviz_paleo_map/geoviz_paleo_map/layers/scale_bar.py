@@ -1,13 +1,15 @@
 """ScaleBarLayer — bottom-left bar + dynamic km label.
 
-The bar's pixel length is proportional to zoom (grows when zoomed in,
-shrinks when zoomed out), so it changes smoothly on every scroll tick.
+The bar's km value is a "nice" round length from the 0.5/1/2/5 x 10^n km
+series, chosen so the bar is ~100 px long on screen. Its pixel length is
+derived from that same km value and the real km-per-pixel rate of the visible
+extent, so the label always equals the actual bar length.
 """
 from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
 from geoviz_paleo_map.label_policy import chrome_font_size
@@ -18,6 +20,7 @@ from geoviz_paleo_map.viewport import PaleoMapViewport
 BAR_COLOR = QColor("#334155")
 BAR_MIN_PX = 40.0
 BAR_MAX_PX = 160.0
+BAR_TARGET_PX = 100.0
 
 
 def _smooth_scale_km(extent_km: float) -> float:
@@ -25,6 +28,22 @@ def _smooth_scale_km(extent_km: float) -> float:
     if extent_km <= 0:
         return 1.0
     return extent_km * 0.3
+
+
+def _nice_bar_km(target_km: float) -> float:
+    """Nearest length from the 0.5/1/2/5 x 10^n km series to the target."""
+    if target_km <= 0:
+        return 0.5
+    mag = 10 ** math.floor(math.log10(target_km))
+    best = 5.0 * mag
+    best_diff = float("inf")
+    for cand in (0.5, 1.0, 2.0, 5.0, 10.0):
+        val = cand * mag
+        diff = abs(val - target_km)
+        if diff < best_diff:
+            best_diff = diff
+            best = val
+    return best
 
 
 class ScaleBarLayer(PaleoLayer):
@@ -45,17 +64,19 @@ class ScaleBarLayer(PaleoLayer):
         mid_lat = (bbox[1] + bbox[3]) / 2
         deg_to_km = 111.32 * math.cos(math.radians(mid_lat))
         extent_km = (bbox[2] - bbox[0]) * deg_to_km
-        scale_km = _smooth_scale_km(extent_km)
 
-        if scale_km >= 1:
-            label = f"{scale_km:.1f} km"
+        # Real km-per-pixel of the visible extent. The label and the bar length
+        # both derive from this same rate, so the label always matches the bar.
+        km_per_px = extent_km / max(1.0, float(viewport.width))
+        if km_per_px <= 0:
+            return
+        bar_km = _nice_bar_km(BAR_TARGET_PX * km_per_px)
+        bar_px = bar_km / km_per_px
+
+        if bar_km >= 1:
+            label = f"{bar_km:g} km"
         else:
-            label = f"{scale_km * 1000:.0f} m"
-
-        # Bar length proportional to zoom: maps extent range to pixel range
-        # Extent 2000km → 40px, extent 100km → 160px
-        bar_px = BAR_MAX_PX - (extent_km - 100) / (2000 - 100) * (BAR_MAX_PX - BAR_MIN_PX)
-        bar_px = max(BAR_MIN_PX, min(BAR_MAX_PX, bar_px))
+            label = f"{bar_km * 1000:g} m"
 
         x0 = 16.0
         y0 = viewport.height - 24.0

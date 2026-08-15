@@ -17,8 +17,10 @@ def compute_robust_display_range(
     if arr.size == 0:
         return (0.0, 100.0)
 
-    # 1. Mask out non-finite (NaN, Inf) and negative null/outlier values (<= -100)
-    mask = np.isfinite(arr) & (arr > -100.0) & (arr < 1e6)
+    # 1. Mask out non-finite (NaN, Inf) samples only. Valid negative values
+    #    (e.g. SP curves around -100..50) must be kept — no numeric-range
+    #    truncation.
+    mask = np.isfinite(arr)
     if null_value is not None and np.isfinite(null_value):
         mask = mask & ~np.isclose(arr, null_value, atol=1e-3)
 

@@ -1,4 +1,4 @@
-"""RegionLabelsLayer — facies name centered at each polygon's bbox center
+"""RegionLabelsLayer — facies name centered at each polygon's centroid
 with contrast-aware text color."""
 from __future__ import annotations
 
@@ -36,6 +36,40 @@ def contrast_color(bg: QColor) -> QColor:
     return QColor("#2d3748") if _luminance(bg) > 0.5 else QColor("#f7fafc")
 
 
+def _ring_centroid(coords: list) -> tuple[float, float] | None:
+    """Shoelace-formula centroid of a ring; None for degenerate (zero-area) rings."""
+    n = len(coords)
+    if n < 3:
+        return None
+    area2 = 0.0
+    sum_x = 0.0
+    sum_y = 0.0
+    for i in range(n):
+        x0, y0 = coords[i][0], coords[i][1]
+        x1, y1 = coords[(i + 1) % n][0], coords[(i + 1) % n][1]
+        cross = x0 * y1 - x1 * y0
+        area2 += cross
+        sum_x += (x0 + x1) * cross
+        sum_y += (y0 + y1) * cross
+    if abs(area2) < 1e-12:
+        return None
+    return sum_x / (3.0 * area2), sum_y / (3.0 * area2)
+
+
+def _point_in_ring(px: float, py: float, coords: list) -> bool:
+    """Ray-casting point-in-polygon test for a (possibly unclosed) ring."""
+    inside = False
+    n = len(coords)
+    for i in range(n):
+        x0, y0 = coords[i][0], coords[i][1]
+        x1, y1 = coords[(i + 1) % n][0], coords[(i + 1) % n][1]
+        if (y0 > py) != (y1 > py):
+            x_at = x0 + (py - y0) * (x1 - x0) / (y1 - y0)
+            if px < x_at:
+                inside = not inside
+    return inside
+
+
 class RegionLabelsLayer(PaleoLayer):
     def __init__(self, features: list[dict], style_resolver: FaciesStyleResolver,
                  font_size: int = 9, locked_ids: set[str] | None = None):
@@ -65,7 +99,8 @@ class RegionLabelsLayer(PaleoLayer):
             if not text:
                 continue
             is_locked = (feature_id in self._locked_ids)
-            # Centroid = bbox center of outer ring
+            # Anchor = outer-ring centroid (shoelace); concave polygons whose
+            # centroid falls outside (or in a hole) fall back to bbox center.
             for poly in rings:
                 outer = poly[0] if poly else []
                 if len(outer) < 3:
@@ -74,8 +109,14 @@ class RegionLabelsLayer(PaleoLayer):
                 ys = [p[1] for p in outer]
                 min_x, max_x = min(xs), max(xs)
                 min_y, max_y = min(ys), max(ys)
-                cx = (min_x + max_x) / 2
-                cy = (min_y + max_y) / 2
+                centroid = _ring_centroid(outer)
+                if centroid is not None and _point_in_ring(centroid[0], centroid[1], outer) \
+                        and not any(_point_in_ring(centroid[0], centroid[1], hole)
+                                    for hole in poly[1:]):
+                    cx, cy = centroid
+                else:
+                    cx = (min_x + max_x) / 2
+                    cy = (min_y + max_y) / 2
                 world_pt = lnglat_to_world(cx, cy)
                 self._items.append(_LabelItem(text=text,
                                               centroid_world=world_pt,

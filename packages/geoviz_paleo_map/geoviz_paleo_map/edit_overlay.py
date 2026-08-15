@@ -154,10 +154,8 @@ class EditOverlayLayer(PaleoLayer):
     def _is_vertex_shared(self, vid: int) -> bool:
         if self._model is None:
             return False
-        for edge, fids in self._model._edge_index.items():
-            if vid in edge and len(fids) > 1:
-                return True
-        return False
+        # O(1) reverse-index lookup: shared = referenced by more than one feature
+        return len(self._model._vertex_to_features.get(vid, ())) > 1
 
     def hit_test_vertex(self, screen_pt: QPointF,
                         viewport: PaleoMapViewport) -> int | None:

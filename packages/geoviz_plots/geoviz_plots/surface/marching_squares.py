@@ -77,13 +77,14 @@ def _clip_polygons_to_study_area(
 ):
     """Clip packed OuterOffset contour rings to a study-area polygon.
 
-    Returns ``(clipped_polys, clipped_offsets)`` in the same packed shape.
+    Each packed polygon carries one exterior ring followed by its holes; the
+    holes are rebuilt as Polygon interiors so they survive the clip. Returns
+    ``(clipped_polys, clipped_offsets)`` in the same packed shape.
     Falls back to the input (no clip) when shapely is unavailable, matching
     the ``HAS_SHAPELY`` capability pattern in ``geoviz_plots.map_edit``.
     """
     try:
         from shapely.geometry import Polygon
-        from shapely.ops import unary_union
     except ImportError:
         return polys, offsets
 
@@ -94,31 +95,36 @@ def _clip_polygons_to_study_area(
     out_polys: list = []
     out_offsets: list = []
     for poly_coords, offset_arr in zip(polys, offsets):
-        rings = []
-        for j in range(len(offset_arr) - 1):
-            start_idx = offset_arr[j]
-            end_idx = offset_arr[j + 1]
-            ring_pts = poly_coords[start_idx:end_idx]
-            if len(ring_pts) >= 3:
-                rings.append(ring_pts)
-        if not rings:
+        # contourpy ``OuterOffset`` packs one exterior ring followed by its
+        # hole rings into a single points array; ``offset_arr`` delimits each
+        # ring. Rebuild the exterior/interiors relationship so holes survive
+        # the clip instead of being filled in by a union of all rings.
+        exterior = poly_coords[offset_arr[0]:offset_arr[1]]
+        if len(exterior) < 4:
             continue
-        # Union each ring as a polygon, then intersect with the clip polygon.
-        merged = unary_union([Polygon(r) for r in rings])
-        clipped = merged.intersection(clip_poly)
+        interiors = [
+            poly_coords[offset_arr[j]:offset_arr[j + 1]]
+            for j in range(1, len(offset_arr) - 1)
+            if offset_arr[j + 1] - offset_arr[j] >= 4
+        ]
+        poly = Polygon(exterior, interiors)
+        if not poly.is_valid:
+            continue
+        clipped = poly.intersection(clip_poly)
         if clipped.is_empty:
             continue
         geoms = list(clipped.geoms) if clipped.geom_type == "MultiPolygon" else [clipped]
         for g in geoms:
             if g.geom_type != "Polygon" or g.is_empty:
                 continue
-            ext = np.array(g.exterior.coords)
-            out_polys.append(ext)
-            offsets_for_poly = [0, len(ext)]
-            for interior in g.interiors:
-                int_pts = np.array(interior.coords)
-                out_polys.append(int_pts)
-                offsets_for_poly.append(offsets_for_poly[-1] + len(int_pts))
+            # Pack exterior + holes back into one points array per polygon,
+            # with offsets delimiting each ring (same shape as OuterOffset).
+            rings = [np.array(g.exterior.coords)]
+            rings.extend(np.array(interior.coords) for interior in g.interiors)
+            out_polys.append(np.concatenate(rings))
+            offsets_for_poly = [0]
+            for ring in rings:
+                offsets_for_poly.append(offsets_for_poly[-1] + len(ring))
             out_offsets.append(np.array(offsets_for_poly))
     return out_polys, out_offsets
 

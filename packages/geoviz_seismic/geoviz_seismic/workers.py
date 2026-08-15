@@ -209,6 +209,176 @@ class SegyLoadWorker(QThread):
             self.error.emit(failure)
 
 
+@dataclass(frozen=True)
+class AttrComputeRequest:
+    """One slice-attribute computation request.
+
+    Attributes:
+        generation: View-level submission generation; the per-panel latest
+            value supersedes older in-flight computations.
+        segy_generation: Volume generation — results from a superseded
+            volume must be dropped by the view.
+        slice_type: ``"inline"``, ``"crossline"`` or ``"time"``.
+        position: Survey position of the slice (line number or sample index).
+        attr_idx: Index into :data:`attribute_pipeline.ATTRIBUTES`.
+        data: 2-D raw slice (display orientation, as passed to the panel).
+        sample_interval_s: Sample interval in seconds (trace attributes).
+        rgb_channels: When not ``None``, compute an RGB fusion from these
+            three attribute indices instead of a single attribute.
+    """
+
+    generation: int
+    segy_generation: int
+    slice_type: str
+    position: int
+    attr_idx: int
+    data: np.ndarray
+    sample_interval_s: float
+    rgb_channels: tuple[int, int, int] | None = None
+
+    @property
+    def queue_key(self) -> tuple:
+        """Worker-side latest-wins key: one pending computation per panel+mode."""
+        return (self.slice_type, self.attr_idx, self.rgb_channels)
+
+
+@dataclass(frozen=True)
+class AttrComputeResult:
+    generation: int
+    segy_generation: int
+    slice_type: str
+    position: int
+    attr_idx: int
+    rgb_channels: tuple[int, int, int] | None
+    display: np.ndarray
+
+
+@dataclass(frozen=True)
+class AttrComputeError:
+    generation: int
+    segy_generation: int
+    slice_type: str
+    position: int
+    attr_idx: int
+    message: str
+
+
+_C3_ATTR_LABEL = "相干性(C3)"
+_C3_DOWNSAMPLE_MIN_PIXELS = 600
+
+
+def _compute_attr_display(request: AttrComputeRequest) -> np.ndarray:
+    """Run the requested attribute computation (worker thread; no GUI access).
+
+    C3 coherence is O(n_traces * n_t * window) per power-iteration row and
+    is the slowest attribute on large slices — stride the input ~4x and
+    block-upsample the result so the panel axis mapping and output shape
+    stay unchanged.
+    """
+    from . import attribute_pipeline as _ap
+    from . import attributes as _attr
+
+    si = request.sample_interval_s
+    if request.rgb_channels is not None:
+        r = _ap.apply(request.rgb_channels[0], request.data, sample_interval_s=si)
+        g = _ap.apply(request.rgb_channels[1], request.data, sample_interval_s=si)
+        b = _ap.apply(request.rgb_channels[2], request.data, sample_interval_s=si)
+        rgb = _attr.fuse_rgb(r, g, b)
+        alpha = np.full((*rgb.shape[:2], 1), 255, dtype=np.uint8)
+        return np.concatenate([rgb, alpha], axis=-1)
+
+    is_c3 = (
+        0 <= request.attr_idx < len(_ap.ATTRIBUTES)
+        and _ap.ATTRIBUTES[request.attr_idx].label == _C3_ATTR_LABEL
+    )
+    data = request.data
+    if is_c3 and data.ndim == 2 and max(data.shape) > _C3_DOWNSAMPLE_MIN_PIXELS:
+        stride = 2
+        small = data[::stride, ::stride]
+        out_small = _ap.apply(request.attr_idx, small, sample_interval_s=si)
+        upscaled = np.repeat(np.repeat(out_small, stride, axis=0), stride, axis=1)
+        data = upscaled[: request.data.shape[0], : request.data.shape[1]]
+    return _ap.apply(request.attr_idx, data, sample_interval_s=si)
+
+
+class AttrComputeWorker(QThread):
+    """Background thread for slice attribute computation.
+
+    C3 / curvature / RGB fusion take seconds on large slices and must not
+    run on the GUI thread.  Mirrors the ``SegyLoadWorker`` generation
+    pattern: the view bumps a per-panel generation on every submission and
+    drops results whose generation no longer matches.
+    """
+
+    done = Signal(object)   # AttrComputeResult
+    error = Signal(object)  # AttrComputeError
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._mutex = QMutex()
+        self._cond = QWaitCondition()
+        self._queue: dict[tuple, AttrComputeRequest] = {}
+        self._stop = False
+
+    # --- GUI-thread API ---
+
+    def submit(self, request: AttrComputeRequest) -> None:
+        with QMutexLocker(self._mutex):
+            # Latest wins: a newer request for the same panel+mode supersedes
+            # any queued (e.g. intermediate drag positions).
+            self._queue[request.queue_key] = request
+        self._cond.wakeAll()
+
+    def stop(self) -> None:
+        with QMutexLocker(self._mutex):
+            self._stop = True
+            self._queue.clear()
+        self._cond.wakeAll()
+        self.wait(1500)
+
+    def ensure_running(self) -> None:
+        """Restart the worker after a stop (e.g. view cleanup)."""
+        with QMutexLocker(self._mutex):
+            self._stop = False
+        if not self.isRunning():
+            self.start()
+
+    # --- worker thread ---
+
+    def _take_next(self) -> AttrComputeRequest | None:
+        with QMutexLocker(self._mutex):
+            if not self._queue:
+                return None
+            key = next(iter(self._queue))
+            return self._queue.pop(key)
+
+    def run(self):
+        while True:
+            with QMutexLocker(self._mutex):
+                if self._stop:
+                    return
+                if not self._queue:
+                    self._cond.wait(self._mutex)
+                    continue
+            request = self._take_next()
+            if request is None:
+                continue
+            try:
+                display = _compute_attr_display(request)
+            except Exception as exc:
+                self.error.emit(AttrComputeError(
+                    request.generation, request.segy_generation,
+                    request.slice_type, request.position, request.attr_idx,
+                    str(exc),
+                ))
+                continue
+            self.done.emit(AttrComputeResult(
+                request.generation, request.segy_generation,
+                request.slice_type, request.position, request.attr_idx,
+                request.rgb_channels, display,
+            ))
+
+
 class SliceReadWorker(QThread):
     """Long-lived background slice reader with a latest-wins queue and prefetch.
 
@@ -251,11 +421,19 @@ class SliceReadWorker(QThread):
         self._cond.wakeAll()
 
     def stop(self) -> None:
+        """Request cooperative shutdown without blocking the GUI thread.
+
+        The worker observes ``_stop`` / the interruption on its next
+        wake-up and exits; the global ``_ACTIVE_WORKERS`` registry keeps
+        the thread object alive and reaps it once ``finished`` fires
+        (detach semantics — a mid-read slice can not be interrupted, so
+        we only wait a short courtesy window instead of hanging the GUI).
+        """
         with QMutexLocker(self._mutex):
             self._stop = True
         self.requestInterruption()
         self._cond.wakeAll()
-        self.wait(5000)
+        self.wait(1500)
 
     def ensure_running(self) -> None:
         """Restart the worker if it was stopped (e.g. after view cleanup)."""
