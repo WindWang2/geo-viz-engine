@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Callable
+
 from PySide6.QtCore import Qt, QRectF, QSizeF, QSize, QPointF, Signal, QEvent, QTimer
 from PySide6.QtGui import QPainter, QColor, QPen, QPolygonF, QImage, QPageSize, QMouseEvent
 from PySide6.QtSvg import QSvgGenerator
@@ -62,6 +64,11 @@ class CrossWellWidget(QWidget):
         self._coalesce_timer.setSingleShot(True)
         self._coalesce_timer.setInterval(16)
         self._coalesce_timer.timeout.connect(self._on_coalesced_depth_changed)
+
+        # Optional callback painting interpretation overlays (tops/picks)
+        # into composite exports; registered by geoviz_cross_well's
+        # CrossWellCanvas, which owns the tops/picks models.
+        self._interpretation_painter: Callable[[QPainter], None] | None = None
 
     def _schedule_depth_changed(self):
         """Schedule a coalesced update for depth changes."""
@@ -251,6 +258,11 @@ class CrossWellWidget(QWidget):
 
     def eventFilter(self, watched, event) -> bool:
         """Intercept child canvas clicks when manual linking is active."""
+        # Guard against PySide6 re-creating the wrapper of a C++ object that
+        # outlived its Python instance (deletion-time event delivery), which
+        # would otherwise raise AttributeError here.
+        if not hasattr(self, "_manual_link_active") or not hasattr(self, "_canvases"):
+            return super().eventFilter(watched, event)
         if self._manual_link_active and watched in self._canvases:
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 pos = watched.mapTo(self, event.position().toPoint())
@@ -498,27 +510,51 @@ class CrossWellWidget(QWidget):
         painter.end()
         img.save(path)
 
+    def set_interpretation_painter(self, painter_fn: Callable[[QPainter], None] | None):
+        """Register a callback painting interpretation overlays (tops/picks)
+        into composite exports.
+
+        ``painter_fn(painter)`` is invoked after the correlation polygons in
+        a painter whose world transform maps widget coordinates to composite
+        coordinates (each canvas is drawn at ``translate(x_off, 0)``, i.e. the
+        well-name label and container margin are subtracted). Registered by
+        ``geoviz_cross_well.CrossWellCanvas`` so its tops/picks models appear
+        in exported sections.
+        """
+        self._interpretation_painter = painter_fn
+
     def _paint_composite(self, painter: QPainter, total_w: int, total_h: int):
-        """Paint all canvases at computed x-offsets, then overlay correlation polygons."""
+        """Paint all canvases at computed x-offsets, then correlation polygons
+        and any interpretation overlays (tops/picks)."""
         spacing = self._well_spacing
         x_off = 0
-        canvas_x_offsets: dict[int, float] = {}
-        canvas_right_edges: dict[int, float] = {}
 
         for canvas in self._canvases:
             painter.save()
             painter.translate(x_off, 0)
             canvas.paint_all(painter)
             painter.restore()
-            canvas_x_offsets[id(canvas)] = x_off
-            canvas_right_edges[id(canvas)] = x_off + canvas.width()
             x_off += canvas.width() + spacing
 
-        # Paint correlation polygons
         links = self._overlay.links
-        if links:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        if not links and self._interpretation_painter is None:
+            return
 
+        # Correlation polygons and interpretation overlays are computed in
+        # widget coordinates: the overlay helpers map through the canvases'
+        # positions inside this widget, which include the 28 px well-name
+        # label above each canvas and the container's left margin. The export
+        # draws each canvas at translate(x_off, 0) with no label, so shift
+        # from widget space into composite space here. Using the same
+        # transforms as the on-screen overlay keeps exported geometry exactly
+        # aligned with what the user sees (previously the 28 px label offset
+        # was left in, shifting every link polygon down by 28 px).
+        margins = self._container_layout.contentsMargins()
+        painter.save()
+        painter.translate(-margins.left(), -self.NAME_LABEL_HEIGHT)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        if links:
             name_to_canvas: dict[str, WellLogCanvas] = {}
             for i, c in enumerate(self._canvases):
                 if i < len(self._well_names):
@@ -545,8 +581,8 @@ class CrossWellWidget(QWidget):
                 ty1 = self._overlay.depth_to_y(target, tgt_top)
                 ty2 = self._overlay.depth_to_y(target, tgt_bot)
 
-                src_right = canvas_right_edges[id(source)]
-                tgt_left = canvas_x_offsets[id(target)]
+                src_right = self._overlay._canvas_right(source)
+                tgt_left = self._overlay._canvas_left(target)
 
                 polygon = QPolygonF([
                     QPointF(src_right, sy1),
@@ -560,3 +596,8 @@ class CrossWellWidget(QWidget):
                 painter.setPen(QPen(color.darker(120), 1))
                 painter.setBrush(color)
                 painter.drawPolygon(polygon)
+
+        if self._interpretation_painter is not None:
+            self._interpretation_painter(painter)
+
+        painter.restore()

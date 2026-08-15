@@ -240,6 +240,10 @@ class CrossWellCanvas(QWidget):
 
         self._overlay.set_models(self._tops_model, self._picks_model, self._widget)
         self._overlay.set_seismic_tie(self._seismic_tie)
+
+        # Export tops/picks (screen-visible interpretation) into composite
+        # exports — the workbench exports through CrossWellWidget.
+        self._widget.set_interpretation_painter(self._paint_interpretation_composite)
         
         # Repaint PickingOverlay when any underlying well canvas zooms or pans
         self._widget.canvas_depth_changed.connect(self._overlay.update)
@@ -286,6 +290,17 @@ class CrossWellCanvas(QWidget):
 
     def set_tops_visible(self, visible: bool):
         self._overlay.set_tops_visible(visible)
+
+    def _paint_interpretation_composite(self, painter: QPainter):
+        """Paint tops + picks into the composite export painter.
+
+        Invoked by CrossWellWidget._paint_composite in a painter whose world
+        transform maps widget coordinates to composite coordinates, so the
+        exact same drawing code as the on-screen PickingOverlay produces
+        screen-aligned output (labels, depths and x offsets all included).
+        """
+        self._overlay._paint_tops(painter)
+        self._overlay._paint_ties(painter)
 
     @property
     def pick_mode(self) -> bool:

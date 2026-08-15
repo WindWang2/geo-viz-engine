@@ -134,7 +134,7 @@ class CorrelationLayer:
 
                 path = QPainterPath()
                 path.moveTo(src_right, y1)
-                path.cubicTo(cp1, cp2, tgt_left, y2)
+                path.cubicTo(cp1, cp2, QPointF(tgt_left, y2))
                 painter.drawPath(path)
 
             CorrelationLayer._paint_pick_dots(
