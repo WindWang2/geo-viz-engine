@@ -138,10 +138,14 @@ class CurveTrack(BaseTrack):
                     rect: QRectF) -> float:
         lo, hi = display_range
         if self._log_scale:
-            if value <= 0:
-                value = lo
+            # Clamp the value with the same 1e-10 floor as the polyline
+            # render path (np.clip(values, max(lo, 1e-10), None)). The
+            # previous order assigned `value = lo` BEFORE lo was clamped, so
+            # a non-positive value replaced by a non-positive lo hit log10
+            # with a domain error inside paintEvent (WL-16).
             lo = max(lo, 1e-10)
             hi = max(hi, 1e-10)
+            value = max(value, 1e-10)
             if lo == hi:
                 t = 0.5
             else:
