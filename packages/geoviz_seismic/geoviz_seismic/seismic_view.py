@@ -18,6 +18,10 @@ from .cache import SeismicCache
 from .colorbar_widget import ColorbarWidget
 from .workers import (
     DEFAULT_MAX_PREVIEW_VOXELS,
+    AttrComputeError,
+    AttrComputeRequest,
+    AttrComputeResult,
+    AttrComputeWorker,
     SegyLoadWorker,
     SeismicLoadError,
     SeismicLoadResult,
@@ -59,6 +63,15 @@ class SeismicView(QWidget):
         self._segy_generation = 0
         self._segy_worker: SegyLoadWorker | None = None
         self._segy_workers: set[SegyLoadWorker] = set()
+
+        # Attribute computation runs off the GUI thread (C3 / curvature /
+        # RGB fusion take seconds on large slices).  Results are cached per
+        # (volume generation, slice_type, position, attr) so re-renders and
+        # back-and-forth attribute switches are instant after first compute.
+        self._attr_worker: AttrComputeWorker | None = None
+        self._attr_generation = 0
+        self._pending_attr: dict[str, int] = {}  # slice_type -> latest submission gen
+        self._attr_cache: dict[tuple, np.ndarray] = {}
 
         # Horizon picking state
         self._picked_points: list[tuple[float, float, float]] = []  # (il, xl, t)
@@ -240,6 +253,12 @@ class SeismicView(QWidget):
                 self._synth_worker.requestInterruption()
 
         self._stop_slice_worker()
+        self._stop_attr_worker()
+
+    def _stop_attr_worker(self) -> None:
+        """Stop the attribute worker if one was created (idempotent)."""
+        if self._attr_worker is not None:
+            self._attr_worker.stop()
 
     def _stop_slice_worker(self) -> None:
         """Stop the slice-read worker exactly once (idempotent)."""
@@ -265,11 +284,12 @@ class SeismicView(QWidget):
 
     def __del__(self):
         # Views are often dropped without cleanup() (tests, page switches);
-        # the long-lived worker thread must not outlive the process or it
-        # aborts at interpreter teardown ("QThread: Destroyed while still
+        # the long-lived worker threads must not outlive the process or they
+        # abort at interpreter teardown ("QThread: Destroyed while still
         # running").
         try:
             self._stop_slice_worker()
+            self._stop_attr_worker()
         except Exception:
             pass
 
@@ -284,6 +304,10 @@ class SeismicView(QWidget):
             self._cache.clear()
         except Exception:
             pass
+        # Same for attribute results: they are keyed by volume generation,
+        # and in-flight computations are invalidated by the pending guard.
+        self._attr_cache.clear()
+        self._pending_attr.clear()
         for worker in tuple(self._segy_workers):
             if worker.isRunning():
                 worker.requestInterruption()
@@ -926,18 +950,79 @@ class SeismicView(QWidget):
 
     @Slot()
     def _toggle_coord_mode(self):
-        """Toggle between Grid coordinates (IL/XL) and Geographic coordinates (Easting/Northing in meters)."""
+        """Toggle between Grid (IL/XL) and Geographic (Easting/Northing in meters) coordinates.
+
+        Drives the 3D renderer's ``set_coord_mode`` so axis labels, grid and
+        bounding box match the chosen mode.  Geo mode additionally hides the
+        orthogonal slice planes and disables 3D click-to-jump: the planes and
+        overlay markers are positioned in voxel space while the volume is
+        geo-transformed, so showing both would be inconsistent.
+        """
         if hasattr(self, "btn_coord") and self.btn_coord.isChecked():
-            self._coord_mode = "geo"
-            self.btn_coord.setText(" 🌐 地理(X/Y)")
+            mode = "geo"
         else:
-            self._coord_mode = "grid"
+            mode = "grid"
+        m = self._meta
+        calibrated = m is not None and m.bin_grid is not None
+        if mode == "geo" and not calibrated:
+            # No bin-grid calibration: geographic labels would be fake
+            # (#46).  Revert the button and surface an explicit message.
             if hasattr(self, "btn_coord"):
+                self.btn_coord.blockSignals(True)
+                self.btn_coord.setChecked(False)
+                self.btn_coord.blockSignals(False)
                 self.btn_coord.setText(" 📍 网格(IL/XL)")
+            self._coord_mode = "grid"
+            self._readout_label.setText("坐标未标定: 该数据没有 bin_grid 地理配准")
+            self._update_tb_slider_label("inline", self._renderer_3d._il_pos)
+            self._update_tb_slider_label("crossline", self._renderer_3d._xl_pos)
+            return
+        self._coord_mode = mode
+        if hasattr(self, "btn_coord"):
+            self.btn_coord.setText(" 🌐 地理(X/Y)" if mode == "geo" else " 📍 网格(IL/XL)")
+        # Actually drive the 3D renderer (labels / grid / bbox follow mode).
+        if hasattr(self, "_renderer_3d"):
+            self._renderer_3d.set_coord_mode(mode)
+            # Geo mode: orthogonal planes are still voxel-space while the
+            # volume is geo-transformed — hide them for a consistent view.
+            self._set_ortho_planes_visible(mode == "grid")
+            if mode == "grid":
+                # Re-push voxel-space overlays that were skipped in geo mode.
+                self._renderer_3d.set_horizon_picks(
+                    [self._survey_to_voxel(*p) for p in self._picked_points]
+                )
+                self._sync_annotations_to_3d()
         # Refresh current labels
         if hasattr(self, "_renderer_3d"):
             self._update_tb_slider_label("inline", self._renderer_3d._il_pos)
             self._update_tb_slider_label("crossline", self._renderer_3d._xl_pos)
+
+    def _set_ortho_planes_visible(self, visible: bool) -> None:
+        """Show/hide the orthogonal slice planes without touching the volume.
+
+        Unlike ``Renderer3D.set_planes_visible`` (which also hides the volume
+        visual), this only toggles the 2-D plane items so geo mode can keep
+        the geo-transformed volume on screen while dropping the misaligned
+        voxel-space planes.
+        """
+        vis = bool(visible)
+        r = self._renderer_3d
+        for attr in (
+            "_img_il", "_img_xl", "_img_t", "_img_arb",
+            "_line_il", "_line_xl", "_line_t", "_line_arb",
+        ):
+            item = getattr(r, attr, None)
+            if item is not None:
+                try:
+                    item.setVisible(vis)
+                except Exception:
+                    pass
+        for (image, line) in getattr(r, "_time_plane_items", {}).values():
+            try:
+                image.setVisible(vis)
+                line.setVisible(vis)
+            except Exception:
+                pass
 
     def _preview_to_survey_coords(
         self, slice_type: str, position: int
@@ -979,6 +1064,34 @@ class SeismicView(QWidget):
         t_ms = m.t0_ms + position * ft * m.dt_ms
         return float(il), float(xl), float(t_ms)
 
+    def _survey_to_voxel(
+        self, il_val: float, xl_val: float, t_val: float
+    ) -> tuple[float, float, float]:
+        """Convert survey coordinates (inline/crossline numbers, time ms) to
+        preview-volume voxel indices.
+
+        ``Renderer3D`` overlay APIs (``set_cursor_position`` /
+        ``set_horizon_picks`` / ``set_annotations``) operate in the preview
+        volume's voxel-index space (the same space as ``_il_pos`` and the
+        toolbar sliders), so survey values must be re-mapped through the
+        downsample factor before being handed over.
+        """
+        m = self._meta
+        if m is None:
+            return float(il_val), float(xl_val), float(t_val)
+        df = self._ds_factor or (1, 1, 1)
+        fi = max(int(df[0]), 1)
+        fx = max(int(df[1]), 1)
+        ft = max(int(df[2]), 1)
+        il_step = m.iline_step if m.iline_step else 1
+        xl_step = m.xline_step if m.xline_step else 1
+        dt = m.dt_ms if m.dt_ms else 1.0
+        return (
+            float((il_val - m.iline_start) / il_step / fi),
+            float((xl_val - m.xline_start) / xl_step / fx),
+            float((t_val - m.t0_ms) / dt / ft),
+        )
+
     def _update_tb_slider_label(self, slice_type: str, position: int):
         """Update the toolbar slider value label with actual survey coordinate."""
         m = self._meta
@@ -986,12 +1099,17 @@ class SeismicView(QWidget):
             return
         il, xl, t_ms = self._preview_to_survey_coords(slice_type, position)
         if getattr(self, "_coord_mode", "grid") == "geo":
+            # Geo labels require a bin-grid calibration; without one, show an
+            # explicit uncalibrated marker instead of fabricated coordinates (#46).
+            xy = m.il_xl_to_xy(il, xl) if m.bin_grid is not None else None
             if slice_type == "inline":
-                x_geo, _ = m.il_xl_to_xy(il, xl)
-                self._tb_il_label.setText(f"X {x_geo:.0f}m")
+                self._tb_il_label.setText(
+                    f"X {xy[0]:.0f}m" if xy is not None else "坐标未标定"
+                )
             elif slice_type == "crossline":
-                _, y_geo = m.il_xl_to_xy(il, xl)
-                self._tb_xl_label.setText(f"Y {y_geo:.0f}m")
+                self._tb_xl_label.setText(
+                    f"Y {xy[1]:.0f}m" if xy is not None else "坐标未标定"
+                )
             else:
                 self._tb_t_label.setText(f"T {t_ms:.0f}")
         else:
@@ -1054,6 +1172,10 @@ class SeismicView(QWidget):
             self._renderer_3d._update_slice_planes_for(set(pending))
         except (RuntimeError, AttributeError):
             return
+        # Geo mode keeps the orthogonal planes hidden — they are voxel-space
+        # while the volume is geo-transformed (see _toggle_coord_mode).
+        if getattr(self, "_coord_mode", "grid") == "geo":
+            self._set_ortho_planes_visible(False)
 
         # Demo mode: slice from cached volume data directly
         if self._loader is None:
@@ -1127,57 +1249,159 @@ class SeismicView(QWidget):
         """Route slice data to the correct profile panel and cache raw data for export."""
         info = self._build_slice_info(slice_type, position, slice_2d.shape)
         self._slice_data[slice_type] = slice_2d.copy()
-
-        display = self._apply_attr(slice_2d)
-
-        if slice_type == "inline":
-            self._profile_il.update_profile(display, slice_info=info)
-        elif slice_type == "crossline":
-            self._profile_xl.update_profile(display, slice_info=info)
-        else:
-            self._profile_t.update_profile(display, slice_info=info)
-
         self._slice_label.setText(f"{slice_type.capitalize()} {position}")
 
-    def _apply_attr(self, data: np.ndarray) -> np.ndarray:
-        """Apply the current attribute mode to slice data."""
+        self._request_profile_render(slice_type, position, slice_2d, info)
+
+    def _request_profile_render(
+        self,
+        slice_type: str,
+        position: int,
+        raw: np.ndarray,
+        info: SliceInfo,
+        *,
+        attr_idx: int | None = None,
+    ) -> None:
+        """Compute the displayed field for a slice and push it to its panel.
+
+        Cheap paths (振幅 passthrough) render synchronously; expensive ones
+        (C3 / curvature / RGB fusion are seconds on large slices) run on a
+        background worker with a generation guard so the UI thread stays
+        responsive, and the panel updates when the result lands.  Cached
+        results short-circuit the worker entirely.
+        """
         from . import attribute_pipeline as _ap
-        idx = self._attr_combo.currentIndex()
+
+        if attr_idx is None:
+            attr_idx = self._attr_combo.currentIndex()
+
+        if attr_idx == _ap.rgb_index():
+            rgb_channels = self._current_rgb_channels()
+            key = (self._segy_generation, slice_type, position, attr_idx, rgb_channels)
+            cached = self._attr_cache.get(key)
+            pw = self._profile_for(slice_type)
+            if cached is not None:
+                pw._vd.render_rgba(cached, slice_info=info)
+                return
+            self._submit_attr(
+                slice_type, position, raw, attr_idx,
+                rgb_channels=rgb_channels,
+            )
+            return
+
+        if attr_idx == 0:  # 振幅: passthrough, no compute needed
+            self._profile_for(slice_type).update_profile(raw, slice_info=info)
+            return
+
+        key = (self._segy_generation, slice_type, position, attr_idx, None)
+        cached = self._attr_cache.get(key)
+        if cached is not None:
+            self._profile_for(slice_type).update_profile(cached, slice_info=info)
+            return
+        self._submit_attr(slice_type, position, raw, attr_idx)
+
+    def _profile_for(self, slice_type: str) -> ProfileWidget:
+        """Return the profile panel for a slice type (defaults to Time)."""
+        pw_map = {
+            "inline": self._profile_il,
+            "crossline": self._profile_xl,
+            "time": self._profile_t,
+        }
+        return pw_map.get(slice_type, self._profile_t)
+
+    def _current_rgb_channels(self) -> tuple[int, int, int]:
+        """Map RGB channel combo indices to attribute_pipeline indices."""
+        from . import attribute_pipeline as _ap
+
+        channels = _ap.rgb_channel_indices()
+        return (
+            channels[self._rgb_r_combo.currentIndex()],
+            channels[self._rgb_g_combo.currentIndex()],
+            channels[self._rgb_b_combo.currentIndex()],
+        )
+
+    def _ensure_attr_worker(self) -> None:
+        """Lazily create (and restart) the retained attribute worker."""
+        if self._attr_worker is None:
+            worker = AttrComputeWorker()
+            worker.done.connect(self._on_attr_computed)
+            worker.error.connect(self._on_attr_error)
+            retain_background_worker(worker)
+            app = QCoreApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(worker.stop)
+            self._attr_worker = worker
+        self._attr_worker.ensure_running()
+
+    def _submit_attr(
+        self,
+        slice_type: str,
+        position: int,
+        raw: np.ndarray,
+        attr_idx: int,
+        *,
+        rgb_channels: tuple[int, int, int] | None = None,
+    ) -> None:
+        """Kick off an attribute computation on the background worker.
+
+        Every submission bumps the per-panel generation, so results of
+        superseded requests (attr switch, slider drag, volume reload) are
+        dropped by the slots below.
+        """
+        self._ensure_attr_worker()
+        self._attr_generation += 1
+        self._pending_attr[slice_type] = self._attr_generation
         si = self._meta.sample_interval if self._meta else 1.0
-        return _ap.apply(idx, data, sample_interval_s=si / 1000.0)
+        request = AttrComputeRequest(
+            generation=self._attr_generation,
+            segy_generation=self._segy_generation,
+            slice_type=slice_type,
+            position=position,
+            attr_idx=attr_idx,
+            data=raw.copy(),
+            sample_interval_s=si / 1000.0,
+            rgb_channels=rgb_channels,
+        )
+        self._attr_worker.submit(request)
 
-    def _get_attr_fn(self, combo_idx: int):
-        """Return the attribute function for a given RGB channel combo index."""
-        from . import attributes as _attr
-        _FN = [
-            _attr.compute_envelope,        # 0
-            _attr.compute_instantaneous_frequency,  # 1
-            _attr.compute_rms_amplitude,   # 2
-            _attr.compute_sweetness,       # 3
-            _attr.compute_relative_impedance,  # 4
-        ]
-        return _FN[combo_idx] if combo_idx < len(_FN) else _attr.compute_envelope
+    @Slot(object)
+    def _on_attr_computed(self, result: AttrComputeResult):
+        """Apply a background attribute result (guarded against staleness)."""
+        if result.segy_generation != self._segy_generation:
+            return
+        if self._pending_attr.get(result.slice_type) != result.generation:
+            return  # superseded by a newer request for the same panel
+        key = (
+            self._segy_generation, result.slice_type, result.position,
+            result.attr_idx, result.rgb_channels,
+        )
+        self._attr_cache[key] = result.display
+        pw = self._profile_for(result.slice_type)
+        info = self._build_slice_info(
+            result.slice_type, result.position, result.display.shape
+        )
+        from . import attribute_pipeline as _ap
+        if result.attr_idx == _ap.rgb_index():
+            pw._vd.render_rgba(result.display, slice_info=info)
+        else:
+            pw.update_profile(result.display, slice_info=info)
 
-    def _apply_rgb_fusion(self, data: np.ndarray) -> np.ndarray | None:
-        """Compute RGB fusion from three attribute channels. Returns (H,W,4) RGBA or None."""
-        from . import attributes as _attr
-        si = self._meta.sample_interval if self._meta else 1.0
-        si_s = si / 1000.0
-
-        def _compute(ch_combo_idx: int) -> np.ndarray:
-            fn = self._get_attr_fn(ch_combo_idx)
-            kwargs = {}
-            if fn in (_attr.compute_instantaneous_frequency, _attr.compute_sweetness):
-                kwargs["sample_interval"] = si_s
-            return fn(data, axis=0, **kwargs)
-
-        r_attr = _compute(self._rgb_r_combo.currentIndex())
-        g_attr = _compute(self._rgb_g_combo.currentIndex())
-        b_attr = _compute(self._rgb_b_combo.currentIndex())
-
-        rgb = _attr.fuse_rgb(r_attr, g_attr, b_attr)
-        alpha = np.full((*rgb.shape[:2], 1), 255, dtype=np.uint8)
-        return np.concatenate([rgb, alpha], axis=-1)
+    @Slot(object)
+    def _on_attr_error(self, error: AttrComputeError):
+        if error.segy_generation != self._segy_generation:
+            return
+        if self._pending_attr.get(error.slice_type) != error.generation:
+            return
+        self._log.warning(
+            "Attribute compute failed (%s %d): %s",
+            error.slice_type, error.attr_idx, error.message,
+        )
+        # Fall back to the raw slice so the panel is never left blank.
+        pw = self._profile_for(error.slice_type)
+        raw = self._slice_data.get(error.slice_type)
+        if raw is not None:
+            info = self._build_slice_info(error.slice_type, error.position, raw.shape)
+            pw.update_profile(raw, slice_info=info)
 
     def _export_slice(self, slice_type: str):
         """Export the current slice data or rendered image."""
@@ -1429,36 +1653,20 @@ class SeismicView(QWidget):
 
     def _apply_current_attr(self):
         """Re-render all cached slice data with the current attribute mode."""
-        from . import attribute_pipeline as _ap
-        attr_mode = self._attr_combo.currentIndex()
-        rgb_idx = _ap.rgb_index()
+        attr_idx = self._attr_combo.currentIndex()
         for st in ("inline", "crossline", "time"):
             raw = self._slice_data.get(st)
             if raw is None:
                 continue
-            info = self._build_slice_info(st, 0, raw.shape)
-            # Recover position from info stored in the profile widget
-            pw_map = {
-                "inline": self._profile_il,
-                "crossline": self._profile_xl,
-                "time": self._profile_t,
-            }
-            pw = pw_map[st]
+            # Recover the current slice position from the panel's slice_info.
+            pw = self._profile_for(st)
             existing_info = pw._vd.slice_info() if pw._vd else None
-            if existing_info:
-                info = existing_info
-
-            if attr_mode == rgb_idx:  # RGB fusion
-                rgba = self._apply_rgb_fusion(raw)
-                if rgba is not None:
-                    pw._vd.render_rgba(rgba, slice_info=info)
-                continue
-
-            display = raw
-            if attr_mode != 0:
-                display = self._apply_attr(raw)
-
-            pw.update_profile(display, slice_info=info)
+            if existing_info is None:
+                existing_info = self._build_slice_info(st, 0, raw.shape)
+            self._request_profile_render(
+                st, existing_info.position, raw, existing_info,
+                attr_idx=attr_idx,
+            )
 
     # --- Cross-hair cursor linking ---
 
@@ -1472,10 +1680,13 @@ class SeismicView(QWidget):
         il_pos, xl_pos, t_pos = self._current_il_xl_t()
         m = self._meta
 
-        # Convert slider positions to actual coordinate values
-        il_val = (m.iline_start + il_pos * m.iline_step) if m else float(il_pos)
-        xl_val = (m.xline_start + xl_pos * m.xline_step) if m else float(xl_pos)
-        t_val = (m.t0_ms + t_pos * m.dt_ms) if m else float(t_pos)
+        # Renderer positions are preview-voxel indices; map them to survey
+        # coordinates (scaled by the downsample factor) for the 2D panels —
+        # h_val/v_val are already in survey units.
+        if m is None:
+            il_val, xl_val, t_val = float(il_pos), float(xl_pos), float(t_pos)
+        else:
+            il_val, xl_val, t_val = self._preview_to_survey_coords("inline", il_pos)
 
         if slice_type == "inline":
             # h=xline, v=time, current il position
@@ -1495,13 +1706,20 @@ class SeismicView(QWidget):
         # XL panel: h=inline, v=time
         self._profile_il._vd.set_crosshair(xl_val, t_val)
         # T panel: h=inline, v=xline (already set above for IL→T and XL→T cases)
-        # Update 3D cursor sphere
-        self._renderer_3d.set_cursor_position(il_val, xl_val, t_val)
+        # Update 3D cursor sphere — Renderer3D expects preview-voxel indices,
+        # not survey coordinates.  Skipped in geo mode: the volume is
+        # geo-transformed while the cursor is voxel-space (see _toggle_coord_mode).
+        if getattr(self, "_coord_mode", "grid") != "geo":
+            self._renderer_3d.set_cursor_position(
+                *self._survey_to_voxel(il_val, xl_val, t_val)
+            )
 
     # --- 3D click-to-jump ---
 
     def _on_jump(self, il_idx: float, xl_idx: float, t_idx: float):
         """Handle 3D click-to-jump: navigate all panels to the clicked position."""
+        if getattr(self, "_coord_mode", "grid") == "geo":
+            return  # geo mode disables click-to-jump (planes hidden); see _toggle_coord_mode
         vol = self._renderer_3d._volume_data_cpu
         if vol is None:
             return
@@ -1515,11 +1733,13 @@ class SeismicView(QWidget):
         self._renderer_3d.set_position_external("crossline", xl_pos)
         self._renderer_3d.set_position_external("time", t_pos)
 
-        # Show crosshairs at the jump position
+        # Show crosshairs at the jump position.  The voxel positions must be
+        # scaled by the downsample factor to survey coordinates (#45).
         m = self._meta
-        il_val = (m.iline_start + il_pos * m.iline_step) if m else float(il_pos)
-        xl_val = (m.xline_start + xl_pos * m.xline_step) if m else float(xl_pos)
-        t_val = (m.t0_ms + t_pos * m.dt_ms) if m else float(t_pos)
+        if m is None:
+            il_val, xl_val, t_val = float(il_pos), float(xl_pos), float(t_pos)
+        else:
+            il_val, xl_val, t_val = self._preview_to_survey_coords("inline", il_pos)
         self._set_crosshairs(il_val, xl_val, t_val)
 
     # --- Amplitude readout ---
@@ -1546,12 +1766,14 @@ class SeismicView(QWidget):
         st = info.slice_type
         pos = info.position
 
+        # ``info.position`` is already the survey line number (or sample index
+        # for time slices) — do NOT re-scale it with iline_start+pos*step (#45).
         il_val, xl_val, t_val = 0.0, 0.0, 0.0
         if st == "inline":
-            il_val = float(m.iline_start + pos * m.iline_step) if m else float(pos)
+            il_val = float(pos)
             xl_val, t_val = h_val, v_val
         elif st == "crossline":
-            xl_val = float(m.xline_start + pos * m.xline_step) if m else float(pos)
+            xl_val = float(pos)
             il_val, t_val = h_val, v_val
         else:  # time
             t_val = float(m.t0_ms + pos * m.dt_ms) if m else float(pos)
@@ -1564,8 +1786,13 @@ class SeismicView(QWidget):
         self._profile_xl._vd.add_picked_point(il_val, t_val)
         self._profile_t._vd.add_picked_point(il_val, xl_val)
 
-        # Show in 3D
-        self._renderer_3d.set_horizon_picks(self._picked_points)
+        # Show in 3D — Renderer3D expects preview-voxel indices, not survey
+        # coordinates.  Skipped in geo mode (volume is geo-transformed); the
+        # picks are re-pushed when toggling back to grid (see _toggle_coord_mode).
+        if getattr(self, "_coord_mode", "grid") != "geo":
+            self._renderer_3d.set_horizon_picks(
+                [self._survey_to_voxel(*p) for p in self._picked_points]
+            )
 
         n = len(self._picked_points)
         self._readout_label.setText(f"已拾取 {n} 个点")
@@ -1687,8 +1914,11 @@ class SeismicView(QWidget):
         xl_pos = int(getattr(self._renderer_3d, "_xl_pos", 0))
         il_pos = int(getattr(self._renderer_3d, "_il_pos", 0))
         if m is not None:
-            xl_coord = float(m.xline_start + xl_pos * m.xline_step)
-            il_coord = float(m.iline_start + il_pos * m.iline_step)
+            # Renderer positions are preview-voxel indices: scale by the
+            # downsample factor to survey coordinates (#45).
+            df = self._ds_factor or (1, 1, 1)
+            xl_coord = float(m.xline_start + xl_pos * df[1] * m.xline_step)
+            il_coord = float(m.iline_start + il_pos * df[0] * m.iline_step)
         else:
             xl_coord = float(xl_pos)
             il_coord = float(il_pos)
@@ -1751,11 +1981,13 @@ class SeismicView(QWidget):
                 st = ann.slice_type
                 pos = ann.slice_position
 
+                # ``slice_position`` is already the survey line number / sample
+                # index — do NOT re-scale it with iline_start+pos*step (#45).
                 if st == "inline":
-                    il = float(m.iline_start + pos * m.iline_step)
+                    il = float(pos)
                     xl, t = ann.h_value, ann.v_value
                 elif st == "crossline":
-                    xl = float(m.xline_start + pos * m.xline_step)
+                    xl = float(pos)
                     il, t = ann.h_value, ann.v_value
                 else:
                     t = float(m.t0_ms + pos * m.dt_ms)
@@ -1763,4 +1995,11 @@ class SeismicView(QWidget):
 
                 all_3d.append((il, xl, t, ann.text))
 
-        self._renderer_3d.set_annotations(all_3d)
+        # Renderer3D expects preview-voxel indices, not survey coordinates.
+        # Skipped in geo mode (volume is geo-transformed); re-pushed when
+        # toggling back to grid (see _toggle_coord_mode).
+        if getattr(self, "_coord_mode", "grid") != "geo":
+            self._renderer_3d.set_annotations([
+                (*self._survey_to_voxel(il, xl, t), text)
+                for il, xl, t, text in all_3d
+            ])

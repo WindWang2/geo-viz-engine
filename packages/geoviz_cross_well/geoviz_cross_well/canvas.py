@@ -469,11 +469,29 @@ class CrossWellCanvas(QWidget):
             depth = CrossWellWidget._y_to_depth(canvas, local_pos.y())
             if depth is None:
                 continue
+            tolerance = self._pick_tolerance(canvas)
             for pick in self._picks_model.picks_for_well(well):
                 pick_depth = pick.depth_for_well(well)
-                if pick_depth is not None and abs(pick_depth - depth) < 5.0:
+                if pick_depth is not None and abs(pick_depth - depth) < tolerance:
                     return pick
         return None
+
+    def _pick_tolerance(self, canvas: WellLogCanvas) -> float:
+        """Depth hit-test tolerance for picks, scaled to the visible zoom.
+
+        Roughly 8 px worth of the currently visible depth span, so clicking
+        stays forgiving when zoomed out and precise when zoomed in. Falls
+        back to the legacy 5.0 depth units when the canvas layout or depth
+        span is not available yet.
+        """
+        if not canvas.tracks:
+            return 5.0
+        header_h = max((t.header_height for t in canvas.tracks), default=56)
+        content_h = canvas.height() - header_h
+        span = canvas.tracks[0].depth_span
+        if content_h <= 0 or span <= 0:
+            return 5.0
+        return span / content_h * 8.0
 
     def _extract_curve(self, canvas: WellLogCanvas, preferred: tuple[str, ...] = ("GR", "SP", "RT")) -> tuple[np.ndarray, np.ndarray] | None:
         """Return (depths, values) from the first CurveTrack matching `preferred` curve names, else first available curve."""

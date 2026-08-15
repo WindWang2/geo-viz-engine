@@ -20,6 +20,22 @@ def _get_icon_path(name: str) -> str:
     return str(get_resources_dir() / "icons" / name)
 
 
+def _detect_gpu_text() -> str:
+    """启动时探测 GPU 状态：有 CuPy 显示 CUDA 与显存，否则显示 CPU 模式（替代硬编码假状态）。"""
+    try:
+        import cupy as cp
+        total_bytes = cp.cuda.Device(0).mem_info[1]
+        try:
+            name = cp.cuda.runtime.getDeviceProperties(0).get("name", b"")
+            name = name.decode("utf-8", errors="replace") if isinstance(name, bytes) else str(name)
+        except Exception:
+            name = ""
+        prefix = f"GPU: CUDA · {name} · " if name else "GPU: CUDA · "
+        return f"{prefix}{total_bytes / (1024 ** 3):.1f} GB"
+    except Exception:
+        return "GPU: CPU 模式"
+
+
 PAGES = [
     ("map",       _get_icon_path("map.svg"),       "地图总览"),
     ("paleo_map", _get_icon_path("paleo.svg"),     "古地理图"),
@@ -34,50 +50,50 @@ PAGES = [
 PAGE_CONFIGS = {
     0: {
         "title": "地图总览",
-        "sub": "46 口井 · EPSG:4326",
-        "status": "地图就绪 · 中心 106.1°E 30.3°N · zoom 7",
+        "sub": "0 口井 · EPSG:4326",
+        "status": "地图就绪",
         "tools": ["layers", "ruler", "settings"]
     },
     1: {
         "title": "古地理图",
         "sub": "沧浪铺组 · Plate Carrée",
-        "status": "古地理图 · 6 相带 · 8 井投影",
+        "status": "古地理图 · 相带与井投影随工程加载",
         "tools": ["layers", "palette", "export"]
     },
     2: {
         "title": "老龙1",
         "sub": "DEPTH 2515–2610m",
-        "status": "老龙1 · 11 轨道 · 1:500",
+        "status": "老龙1 · 轨道与比例随加载数据更新",
         "tools": ["seg:测井图,数据", "layers"]
     },
     3: {
         "title": "连井对比",
-        "sub": "4 wells · PCA",
-        "status": "连井剖面 · 16 拾取点 · DTW 就绪",
+        "sub": "工程井 · PCA",
+        "status": "连井剖面 · 拾取点随数据加载 · DTW 就绪",
         "tools": ["undo", "redo", "export"]
     },
     4: {
         "title": "地震 3D",
-        "sub": "synthetic.sgy",
-        "status": "体渲染 · 512×384×600 · LRU 50",
+        "sub": "未加载地震体",
+        "status": "体渲染 · 加载数据后更新",
         "tools": ["grid3d", "palette", "settings"]
     },
     5: {
         "title": "平面图件",
         "sub": "砂体厚度 · IDW",
-        "status": "等值图 · 网格 200×200 · 22 控制点",
+        "status": "等值图 · 设置变更时实时计算",
         "tools": ["contour", "palette", "export"]
     },
     6: {
         "title": "数据管理",
-        "sub": "46 datasets",
-        "status": "缓存 231 MB · Calamine 引擎",
+        "sub": "0 datasets",
+        "status": "缓存实时统计 · Calamine 引擎",
         "tools": ["filter", "upload"]
     },
     7: {
         "title": "工具箱",
-        "sub": "6 工具",
-        "status": "工具箱 · 6 个可用工具",
+        "sub": "工具集",
+        "status": "工具箱 · 按需加载",
         "tools": ["settings"]
     },
     8: {
@@ -192,6 +208,8 @@ class MainWindow(QWidget):
         self.cache = DataCache()
         self.current_project = None
         self.current_project_path = None
+        # 超时未退出的页面线程，保留引用待其自然结束（detach 保护，避免销毁运行中的线程）
+        self._detached_threads: list = []
         self._build_ui()
 
     def _build_ui(self):
@@ -261,7 +279,7 @@ class MainWindow(QWidget):
         # Dynamic Header Context (Title & Subtitle)
         self.header_title = QLabel("地图总览")
         self.header_title.setStyleSheet("font-weight: 600; font-size: 13.5px; color: #1a2433;")
-        self.header_sub = QLabel("46 口井 · EPSG:4326")
+        self.header_sub = QLabel("0 口井 · EPSG:4326")
         self.header_sub.setStyleSheet("color: #92a0b0; font-size: 11.5px; font-family: monospace;")
         
         header_layout.addWidget(self.header_title)
@@ -504,15 +522,15 @@ class MainWindow(QWidget):
 
         footer_layout.addStretch()
 
-        # GPU info
-        self.gpu_info_label = QLabel("GPU: CUDA · 2.1 GB")
+        # GPU info（启动时探测：有 CuPy 显示 CUDA+显存，否则显示 CPU 模式）
+        self.gpu_info_label = QLabel(_detect_gpu_text())
         self.gpu_info_label.setStyleSheet("color: #92a0b0; font-size: 11px; font-family: monospace;")
         footer_layout.addWidget(self.gpu_info_label)
 
         footer_layout.addWidget(_footer_divider())
 
-        # Cache info
-        self.cache_info_label = QLabel("缓存 231 MB")
+        # Cache info（初始中性文案，_refresh_footer_stats 会填充真实缓存量）
+        self.cache_info_label = QLabel("缓存待统计")
         self.cache_info_label.setStyleSheet("color: #92a0b0; font-size: 11px; font-family: monospace;")
         footer_layout.addWidget(self.cache_info_label)
 
@@ -796,6 +814,8 @@ class MainWindow(QWidget):
                 return
 
     def _stop_page_threads(self, page):
+        """停止页面线程：协作式取消（cleanup/cancel 标志/quit），
+        超时未停则 detach 保留引用，不再 QThread.terminate() 强杀。"""
         if page is None:
             return
         if hasattr(page, "cleanup"):
@@ -808,13 +828,28 @@ class MainWindow(QWidget):
             if t is not None and hasattr(t, "isRunning"):
                 try:
                     if t.isRunning():
+                        # 优先线程安全 cancel 标志（若有），再请求事件循环退出
+                        token = getattr(t, "cancellation_token", None)
+                        if token is not None and hasattr(token, "cancel"):
+                            token.cancel()
                         if hasattr(t, "quit"):
                             t.quit()
                         if not t.wait(1500):
-                            t.terminate()
-                            t.wait(500)
+                            # 超时未停：detach，待其自然结束后再回收（不再 terminate）
+                            self._detached_threads.append(t)
+                            if hasattr(t, "finished"):
+                                t.finished.connect(lambda _t=t: self._release_detached_thread(_t))
                 except RuntimeError:
                     pass
+
+    def _release_detached_thread(self, thread):
+        """线程自然退出后从 detach 列表移除并安全回收。"""
+        try:
+            if thread in self._detached_threads:
+                self._detached_threads.remove(thread)
+            thread.deleteLater()
+        except RuntimeError:
+            pass
 
     def closeEvent(self, event):
         for page in (

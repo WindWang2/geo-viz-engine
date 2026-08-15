@@ -14,6 +14,50 @@ from PySide6.QtPrintSupport import QPrinter
 
 from geoviz_plots import SurfaceWidget, InterpolationWorker
 from geoviz_plots.chart.cross_plot_widget import CrossPlotWidget
+from geoviz_plots.interpolation.idw import interpolate_idw
+from geoviz_plots.interpolation.scipy_grid import interpolate_scipy
+
+from geoviz.jobs import CancellationToken, JobCancelled
+
+
+class _CancellableInterpolationWorker(InterpolationWorker):
+    """InterpolationWorker 的页面侧子类：通过 CancellationToken 协作式取消，替代 QThread.terminate()。
+
+    IDW 引擎 interpolate_idw 在分块循环内检查 token；SciPy 引擎不接受 token，
+    仅在调用前后检查，取消后页面会丢弃其结果。
+    """
+
+    def __init__(self, *args, cancellation_token=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cancellation_token = cancellation_token
+
+    def run(self):
+        token = self.cancellation_token
+        try:
+            if token is not None:
+                token.raise_if_cancelled()
+            if self.method == "idw":
+                grid_z = interpolate_idw(
+                    self.x, self.y, self.z,
+                    self.grid_x, self.grid_y,
+                    power=self.power,
+                    cancellation_token=token,
+                )
+            else:
+                grid_z = interpolate_scipy(
+                    self.x, self.y, self.z,
+                    self.grid_x, self.grid_y,
+                    method=self.method,
+                    mask_convex_hull=self.mask_convex_hull,
+                )
+            if token is not None:
+                token.raise_if_cancelled()
+            self.finished.emit(grid_z)
+        except JobCancelled:
+            pass  # 协作式取消：静默结束，不视为错误
+        except Exception as e:
+            self.error.emit(str(e))
+
 
 class PlotsPage(QWidget):
     """Page exposing the premium 2D plotting, IDW/SciPy spatial interpolation, contour mapping, and Cross-Plot Analytics."""
@@ -36,6 +80,8 @@ class PlotsPage(QWidget):
         
         # Active interpolation worker
         self._worker = None
+        # 超时未退出的旧 worker，保留引用待其自然结束（detach 保护，避免销毁运行中的线程）
+        self._retired_workers: list = []
 
         self._build_ui()
         self._generate_demo_data()
@@ -352,30 +398,62 @@ class PlotsPage(QWidget):
         grid_x = np.linspace(xmin, xmax, res)
         grid_y = np.linspace(ymin, ymax, res)
 
-        # Cancel active thread
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.terminate()
-            self._worker.wait()
+        # 协作式取消当前任务（替代原 QThread.terminate 强杀）
+        if self._worker is not None:
+            self._cancel_worker(self._worker)
 
         # Instantiate async worker
-        self._worker = InterpolationWorker(
+        worker = _CancellableInterpolationWorker(
             self.points_x, self.points_y, self.points_z,
             grid_x, grid_y, method=method,
-            mask_convex_hull=mask, power=power
+            mask_convex_hull=mask, power=power,
+            cancellation_token=CancellationToken(),
         )
-        self._worker.finished.connect(lambda grid_z, gx=grid_x, gy=grid_y: self._on_interpolation_complete(gx, gy, grid_z))
-        self._worker.error.connect(self._on_interpolation_error)
-        self._worker.start()
+        self._worker = worker
+        worker.finished.connect(lambda grid_z, w=worker, gx=grid_x, gy=grid_y: self._on_interpolation_complete(w, gx, gy, grid_z))
+        worker.error.connect(self._on_interpolation_error)
+        worker.finished.connect(lambda _g, w=worker: self._retire_worker(w))
+        worker.error.connect(lambda _m, w=worker: self._retire_worker(w))
+        worker.start()
+
+    def _cancel_worker(self, worker):
+        """请求 worker 协作式取消；等待有限时间，超时则 detach 保留引用（不 terminate）。"""
+        if worker is None:
+            return
+        try:
+            token = getattr(worker, "cancellation_token", None)
+            if token is not None:
+                token.cancel()
+            if worker.isRunning():
+                if not worker.wait(1500):
+                    # 超时未退出：detach，待其自然结束后再回收，避免销毁运行中的线程
+                    self._retired_workers.append(worker)
+            else:
+                worker.deleteLater()
+        except RuntimeError:
+            pass
+
+    def _retire_worker(self, worker):
+        """Worker 结束后回收：从 detach 列表移除；非当前 worker 可直接 deleteLater。"""
+        if worker in self._retired_workers:
+            self._retired_workers.remove(worker)
+        if worker is not self._worker:
+            worker.deleteLater()
 
     def cleanup(self):
-        """Stop interpolation worker when leaving this page."""
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.terminate()
-            self._worker.wait(1000)
+        """离开页面时停止插值 worker（协作式取消，不强制 terminate）。"""
+        worker = self._worker
         self._worker = None
+        if worker is not None:
+            self._cancel_worker(worker)
 
-    def _on_interpolation_complete(self, grid_x, grid_y, grid_z):
+    def _on_interpolation_complete(self, worker, grid_x, grid_y, grid_z):
         """Update the canvas plot bounds when background calculation thread finishes."""
+        if self._worker is not worker:
+            return  # 过期结果：任务已被新任务替换或页面已清理，丢弃
+        token = getattr(worker, "cancellation_token", None)
+        if token is not None and token.is_cancelled:
+            return  # 已取消任务的迟到结果，丢弃
         step = self.step_spin.value()
         
         # Clean grid_z values (handle NaNs cleanly)

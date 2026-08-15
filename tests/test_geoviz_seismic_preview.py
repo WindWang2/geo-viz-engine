@@ -273,30 +273,25 @@ def test_slice_preview_import_check_rejects_wrong_pythonpath(tmp_path: Path):
     )
 
 
-def test_backend_creates_full_view_lazily_and_delegates_async_load(
+def test_backend_creates_preview_widget_and_renders_via_set_slices(
     qtbot, monkeypatch, small_segy_path
 ):
     created = []
 
-    class FakeSeismicView(QWidget):
-        def __init__(self, parent=None, *, auto_load=True):
+    class FakePreviewWidget(QWidget):
+        def __init__(self, parent=None):
             super().__init__(parent)
-            self.auto_load = auto_load
-            self.render_modes = []
-            self.loaded_paths = []
+            self.slices_payloads = []
             self.cleaned_up = False
             created.append(self)
 
-        def set_render_mode(self, mode):
-            self.render_modes.append(mode)
-
-        def load_segy_async(self, path):
-            self.loaded_paths.append(path)
+        def set_slices(self, payload):
+            self.slices_payloads.append(payload)
 
         def cleanup(self):
             self.cleaned_up = True
 
-    monkeypatch.setattr(geoviz_seismic, "SeismicView", FakeSeismicView)
+    monkeypatch.setattr(geoviz_seismic, "SeismicPreviewWidget", FakePreviewWidget)
     preview = GeoVizEngine.default().prepare(
         _request(small_segy_path), PreviewOptions(max_slice_axis=16)
     )
@@ -304,15 +299,16 @@ def test_backend_creates_full_view_lazily_and_delegates_async_load(
     widget = engine.create_widget(preview.kind)
     qtbot.addWidget(widget)
 
-    assert isinstance(widget, FakeSeismicView)
+    # create_widget returns the lightweight SeismicPreviewWidget (no 3-D
+    # renderer, no async volume load), created lazily on first request.
+    assert isinstance(widget, FakePreviewWidget)
     assert created == [widget]
-    assert widget.auto_load is False
-    assert widget.render_modes == ["planes"]
-    assert widget.loaded_paths == []
+    assert widget.slices_payloads == []
 
+    # render() delegates to set_slices() with the middle slices already
+    # prepared in prepare(); it does not open the SEGY again.
     engine.render(widget, preview)
-    assert widget.render_modes == ["planes", "planes"]
-    assert widget.loaded_paths == [str(small_segy_path)]
+    assert widget.slices_payloads == [preview.payload]
 
     engine.release(widget)
     assert widget.cleaned_up is True

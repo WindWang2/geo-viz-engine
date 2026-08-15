@@ -13,6 +13,7 @@ CNPC-relevant CRS codes are registered by default (Beijing 1954 / Xian 1980
 from __future__ import annotations
 
 from pyproj import CRS, Transformer
+from pyproj.exceptions import CRSError
 
 # Project CRS is process-global: set once by the host (Workstation) at
 # startup, read on every coerce call. Defaults to EPSG:4326 (WGS84 lng/lat)
@@ -59,14 +60,32 @@ def list_known_crs() -> list[str]:
     return [code for code, _label in _KNOWN_CRS]
 
 
+def _crs_equivalent(a: str, b: str) -> bool:
+    """True when two CRS strings denote the same coordinate system.
+
+    Uses pyproj's ``CRS.equals`` semantics, which treats aliases
+    (e.g. ``"WGS 84"`` vs ``"EPSG:4326"``) and case differences
+    (``"epsg:4326"`` vs ``"EPSG:4326"``) as equivalent. Falls back to a
+    case-insensitive string comparison when either side cannot be parsed.
+    """
+    if a == b:
+        return True
+    try:
+        return CRS.from_user_input(a).equals(CRS.from_user_input(b))
+    except CRSError:
+        return a.lower() == b.lower()
+
+
 def coerce_to_project_crs(coords, source_crs: str):
     """Reproject an (N, 2) array of (x, y) from ``source_crs`` to the project CRS.
 
     ``coords`` may be any array-like of shape (N, 2) or (2,) for a single
     point; returns a numpy ``ndarray`` of the same trailing shape in the
     project CRS. When ``source_crs`` equals the project CRS the input is
-    returned as a float64 array unchanged (no transform). Raises
-    ``pyproj.exceptions.CRSError`` for unrecognized CRS strings.
+    returned as a float64 array unchanged (no transform). Equality is decided
+    by pyproj ``CRS.equals`` (aliases / case-insensitive) rather than raw
+    string comparison. Raises ``pyproj.exceptions.CRSError`` for unrecognized
+    CRS strings.
     """
     import numpy as np
 
@@ -76,7 +95,7 @@ def coerce_to_project_crs(coords, source_crs: str):
         coords = coords.reshape(1, 2)
 
     target = _project_crs
-    if source_crs == target:
+    if _crs_equivalent(source_crs, target):
         out = coords
     else:
         transformer = Transformer.from_crs(source_crs, target, always_xy=True)

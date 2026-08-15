@@ -40,6 +40,133 @@ def segments_intersect(
     )
 
 
+# Number of (cell, sample, fault) intersection tests below which the scalar
+# reference loop is cheaper than building broadcast arrays.
+_FAULT_REFERENCE_LIMIT = 65_536
+# Cap on temporary bytes for the broadcast orientation arrays (o1..o4).
+_FAULT_BATCH_BUDGET = 128 * 1024 * 1024
+
+
+def _apply_fault_barriers(
+    weights: np.ndarray,
+    node_x: np.ndarray,
+    node_y: np.ndarray,
+    sample_x: np.ndarray,
+    sample_y: np.ndarray,
+    fault_segments: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]],
+) -> None:
+    """Zero out weights for (node, sample) pairs blocked by fault segments, in place.
+
+    A pair is blocked when its straight segment intersects any fault segment,
+    using exactly the same test as ``segments_intersect`` (crossings, endpoint
+    touches and collinear overlap). Small inputs reuse the scalar reference
+    loop; larger inputs broadcast the orientation tests over
+    (cell, sample, fault) arrays, batching fault segments to bound memory.
+    """
+    tolerance = 1e-12
+    num_cells = len(node_x)
+    num_samples = len(sample_x)
+    num_faults = len(fault_segments)
+    if num_cells * num_samples * num_faults <= _FAULT_REFERENCE_LIMIT:
+        for local_cell, (nx, ny) in enumerate(zip(node_x, node_y)):
+            node = (float(nx), float(ny))
+            for sample_index, (sx_, sy_) in enumerate(zip(sample_x, sample_y)):
+                control = (float(sx_), float(sy_))
+                if any(
+                    segments_intersect(node, control, segment_start, segment_end)
+                    for segment_start, segment_end in fault_segments
+                ):
+                    weights[local_cell, sample_index] = 0.0
+        return
+
+    # Orientation formulas below mirror segments_intersect operation by
+    # operation, so broadcast results are bit-for-bit identical.
+    cx = np.asarray(node_x, dtype=np.float64)[:, None]
+    cy = np.asarray(node_y, dtype=np.float64)[:, None]
+    sx = np.asarray(sample_x, dtype=np.float64)
+    sy = np.asarray(sample_y, dtype=np.float64)
+    fx1 = np.array([seg[0][0] for seg in fault_segments], dtype=np.float64)
+    fy1 = np.array([seg[0][1] for seg in fault_segments], dtype=np.float64)
+    fx2 = np.array([seg[1][0] for seg in fault_segments], dtype=np.float64)
+    fy2 = np.array([seg[1][1] for seg in fault_segments], dtype=np.float64)
+
+    # (cell, sample) segment deltas and bounding boxes, shared by all batches.
+    dx = sx - cx  # control - node
+    dy = sy - cy
+    seg_x_min = np.minimum(cx, sx) - tolerance
+    seg_x_max = np.maximum(cx, sx) + tolerance
+    seg_y_min = np.minimum(cy, sy) - tolerance
+    seg_y_max = np.maximum(cy, sy) + tolerance
+
+    blocked = np.zeros((num_cells, num_samples), dtype=bool)
+    # Each broadcast batch holds 4 float64 orientation arrays per element.
+    fault_batch = max(
+        1, min(num_faults, _FAULT_BATCH_BUDGET // (num_cells * num_samples * 32))
+    )
+    for f0 in range(0, num_faults, fault_batch):
+        f1 = min(f0 + fault_batch, num_faults)
+        q1x = fx1[f0:f1][None, None, :]
+        q1y = fy1[f0:f1][None, None, :]
+        q2x = fx2[f0:f1][None, None, :]
+        q2y = fy2[f0:f1][None, None, :]
+
+        # o1/o2 = orient(node, control, fault_start/end): proper crossing and
+        # endpoint-touch tests on the (node, control) side.
+        o1 = dx[..., None] * (q1y - cy[..., None]) - dy[..., None] * (
+            q1x - cx[..., None]
+        )
+        o2 = dx[..., None] * (q2y - cy[..., None]) - dy[..., None] * (
+            q2x - cx[..., None]
+        )
+        node_cross = ((o1 > tolerance) & (o2 < -tolerance)) | (
+            (o1 < -tolerance) & (o2 > tolerance)
+        )
+        touch_node_side = (
+            (np.abs(o1) <= tolerance)
+            & (q1x >= seg_x_min[..., None])
+            & (q1x <= seg_x_max[..., None])
+            & (q1y >= seg_y_min[..., None])
+            & (q1y <= seg_y_max[..., None])
+        ) | (
+            (np.abs(o2) <= tolerance)
+            & (q2x >= seg_x_min[..., None])
+            & (q2x <= seg_x_max[..., None])
+            & (q2y >= seg_y_min[..., None])
+            & (q2y <= seg_y_max[..., None])
+        )
+
+        # o3/o4 = orient(fault_start, fault_end, node/control): proper
+        # crossing and collinear-overlap tests on the fault side.
+        dqx = q2x - q1x
+        dqy = q2y - q1y
+        o3 = dqx * (cy[..., None] - q1y) - dqy * (cx[..., None] - q1x)
+        o4 = dqx * (sy[None, :, None] - q1y) - dqy * (sx[None, :, None] - q1x)
+        fault_cross = ((o3 > tolerance) & (o4 < -tolerance)) | (
+            (o3 < -tolerance) & (o4 > tolerance)
+        )
+        fault_x_min = np.minimum(q1x, q2x) - tolerance
+        fault_x_max = np.maximum(q1x, q2x) + tolerance
+        fault_y_min = np.minimum(q1y, q2y) - tolerance
+        fault_y_max = np.maximum(q1y, q2y) + tolerance
+        touch_fault_side = (
+            (np.abs(o3) <= tolerance)
+            & (cx[..., None] >= fault_x_min)
+            & (cx[..., None] <= fault_x_max)
+            & (cy[..., None] >= fault_y_min)
+            & (cy[..., None] <= fault_y_max)
+        ) | (
+            (np.abs(o4) <= tolerance)
+            & (sx[None, :, None] >= fault_x_min)
+            & (sx[None, :, None] <= fault_x_max)
+            & (sy[None, :, None] >= fault_y_min)
+            & (sy[None, :, None] <= fault_y_max)
+        )
+
+        intersects = (node_cross & fault_cross) | touch_node_side | touch_fault_side
+        blocked |= intersects.any(axis=-1)
+    weights[blocked] = 0.0
+
+
 def interpolate_idw(
     x,
     y,
@@ -112,17 +239,14 @@ def interpolate_idw(
         distances = np.maximum(np.hypot(dx, dy), epsilon)
         weights = 1.0 / (distances**power)
         if fault_segments:
-            for local_cell, (node_x, node_y) in enumerate(
-                zip(cell_x[start:stop], cell_y[start:stop])
-            ):
-                node = (float(node_x), float(node_y))
-                for sample_index, (sample_x, sample_y) in enumerate(zip(x, y)):
-                    control = (float(sample_x), float(sample_y))
-                    if any(
-                        segments_intersect(node, control, segment_start, segment_end)
-                        for segment_start, segment_end in fault_segments
-                    ):
-                        weights[local_cell, sample_index] = 0.0
+            _apply_fault_barriers(
+                weights,
+                cell_x[start:stop],
+                cell_y[start:stop],
+                x,
+                y,
+                fault_segments,
+            )
         totals = np.sum(weights, axis=1)
         populated = totals > epsilon
         values = np.full(stop - start, np.nan, dtype=np.float64)

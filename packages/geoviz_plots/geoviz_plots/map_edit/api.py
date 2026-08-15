@@ -787,46 +787,56 @@ def validate_adjacency(
 
     issues: list[dict[str, Any]] = []
     tol = max(0.0, float(gap_tol))
-    for i in range(len(prepared)):
+    # Coarse filter: enumerate ring pairs whose tol-expanded bboxes overlap on
+    # both axes via an x-interval sweep (O(rings log rings + k), k = overlapping
+    # pairs) instead of an O(rings^2) scan. The sweep only narrows x; y-overlap
+    # is re-checked with the exact predicate below, so the candidate set is
+    # identical to the previous nested loop. Pairs are collected as a set and
+    # re-processed in index order to keep issue ordering unchanged.
+    candidate_pairs: set[tuple[int, int]] = set()
+    order = sorted(range(len(prepared)), key=lambda i: prepared[i][1][0])
+    active: list[int] = []
+    for i in order:
+        min_x = prepared[i][1][0]
+        # Drop rings whose tol-expanded max-x can no longer reach ring i.
+        active = [j for j in active if prepared[j][1][2] + tol >= min_x]
+        bb_i = prepared[i][1]
+        for j in active:
+            bb_j = prepared[j][1]
+            if not (bb_i[3] + tol < bb_j[1] or bb_j[3] + tol < bb_i[1]):
+                candidate_pairs.add((j, i) if j < i else (i, j))
+        active.append(i)
+    for i, j in sorted(candidate_pairs):
         pts_i, bb_i = prepared[i]
-        for j in range(i + 1, len(prepared)):
-            pts_j, bb_j = prepared[j]
-            # Expand bboxes by tol and test overlap.
-            if (
-                bb_i[2] + tol < bb_j[0]
-                or bb_j[2] + tol < bb_i[0]
-                or bb_i[3] + tol < bb_j[1]
-                or bb_j[3] + tol < bb_i[1]
-            ):
-                continue
-            # If any vertex pair is within tol, treat as connected/adjacent-ok.
-            connected = False
-            for ax, ay in pts_i:
-                for bx, by in pts_j:
-                    if (ax - bx) * (ax - bx) + (ay - by) * (ay - by) <= tol * tol:
-                        connected = True
-                        break
-                if connected:
+        pts_j, bb_j = prepared[j]
+        # If any vertex pair is within tol, treat as connected/adjacent-ok.
+        connected = False
+        for ax, ay in pts_i:
+            for bx, by in pts_j:
+                if (ax - bx) * (ax - bx) + (ay - by) * (ay - by) <= tol * tol:
+                    connected = True
                     break
-            # Core bbox overlap without expansion.
-            core_overlap = not (
-                bb_i[2] < bb_j[0]
-                or bb_j[2] < bb_i[0]
-                or bb_i[3] < bb_j[1]
-                or bb_j[3] < bb_i[1]
-            )
-            if core_overlap and not connected:
-                issues.append({
-                    "code": "adjacency_overlap",
-                    "message": f"Rings {i} and {j} may overlap without shared nodes",
-                    "pair": (i, j),
-                })
-            elif not core_overlap and not connected:
-                issues.append({
-                    "code": "adjacency_gap",
-                    "message": f"Rings {i} and {j} are near but not connected",
-                    "pair": (i, j),
-                })
+            if connected:
+                break
+        # Core bbox overlap without expansion.
+        core_overlap = not (
+            bb_i[2] < bb_j[0]
+            or bb_j[2] < bb_i[0]
+            or bb_i[3] < bb_j[1]
+            or bb_j[3] < bb_i[1]
+        )
+        if core_overlap and not connected:
+            issues.append({
+                "code": "adjacency_overlap",
+                "message": f"Rings {i} and {j} may overlap without shared nodes",
+                "pair": (i, j),
+            })
+        elif not core_overlap and not connected:
+            issues.append({
+                "code": "adjacency_gap",
+                "message": f"Rings {i} and {j} are near but not connected",
+                "pair": (i, j),
+            })
     return issues
 
 
@@ -846,6 +856,51 @@ def _ring_to_pts(ring: list[list[float]] | None) -> list[list[float]]:
             except (TypeError, ValueError):
                 continue
     return out
+
+
+def _near_vertex_pairs(
+    coords: list[list[float]],
+    tol: float,
+) -> list[tuple[int, int]]:
+    """Vertex index pairs ``(i, j)`` (``i < j``) within ``tol``.
+
+    Exact-scan semantics (inclusive boundary: ``dx*dx + dy*dy <= tol*tol``).
+    ``scipy.spatial.cKDTree.query_pairs`` over a slightly expanded radius is
+    used as a candidate filter, then each pair is re-verified with the exact
+    squared-distance predicate so the result matches the plain O(n^2) scan
+    bit-for-bit (including tolerance-boundary ties). Falls back to that scan
+    when scipy/numpy are unavailable.
+    """
+    n = len(coords)
+    if n < 2:
+        return []
+    tol2 = tol * tol
+    try:
+        import numpy as np
+        from scipy.spatial import cKDTree
+    except ImportError:  # pragma: no cover - env-dependent fallback
+        pairs: list[tuple[int, int]] = []
+        for i in range(n):
+            xi, yi = coords[i][0], coords[i][1]
+            for j in range(i + 1, n):
+                dx = xi - coords[j][0]
+                dy = yi - coords[j][1]
+                if dx * dx + dy * dy <= tol2:
+                    pairs.append((i, j))
+        return pairs
+    # Slightly expanded radius: the tree's own distance comparisons could judge
+    # an exact-boundary pair (distance == tol) as just out of range, so ask for
+    # a superset and let the exact predicate below decide.
+    query_r = tol * (1.0 + 1e-9) + 1e-9
+    pairs = []
+    for a, b in cKDTree(np.asarray(coords, dtype=np.float64)).query_pairs(
+        query_r, p=2.0, output_type="ndarray"
+    ):
+        dx = coords[a][0] - coords[b][0]
+        dy = coords[a][1] - coords[b][1]
+        if dx * dx + dy * dy <= tol2:
+            pairs.append((int(a), int(b)))
+    return pairs
 
 
 def snap_shared_nodes(
@@ -885,12 +940,11 @@ def snap_shared_nodes(
             parent[rb] = ra
 
     tol2 = tol * tol
-    for i in range(n):
-        for j in range(i + 1, n):
-            dx = coords[i][0] - coords[j][0]
-            dy = coords[i][1] - coords[j][1]
-            if dx * dx + dy * dy <= tol2:
-                union(i, j)
+    for i, j in _near_vertex_pairs(coords, tol):
+        dx = coords[i][0] - coords[j][0]
+        dy = coords[i][1] - coords[j][1]
+        if dx * dx + dy * dy <= tol2:
+            union(i, j)
 
     # Representative = mean of cluster.
     clusters: dict[int, list[int]] = {}

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap, QPixmapCache
 
 from geoviz_paleo_map.layers.base import PaleoLayer
 from geoviz_paleo_map.models import VectorPattern
@@ -258,13 +258,43 @@ class FaciesPolygonsLayer(PaleoLayer):
     def _bbox_overlaps(a, b) -> bool:
         return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
 
+    @staticmethod
+    def _vector_tile_pixmap(vp: VectorPattern, tile: float, dpr: float) -> QPixmap:
+        """Pre-render the vector pattern QPicture into a square QPixmap tile.
+
+        The picture records a 32×32 viewBox; played at ``tile / 32`` it spans
+        ``tile`` logical pixels, of which the pixmap keeps the integer part
+        (matching the old per-cell playback, which effectively clipped at the
+        cell boundary). Rendered once per (picture, tile, dpr) and cached in
+        the app-global QPixmapCache so painting never replays the QPicture.
+        """
+        tile_px = int(tile)
+        key = f"geoviz_facies_tile:{id(vp.picture)}:{tile_px}:{round(tile, 2)}:{dpr}"
+        pm = QPixmap()
+        if QPixmapCache.find(key, pm):
+            return pm
+        size = max(1, round(tile_px * dpr))
+        pm = QPixmap(size, size)
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.scale(tile / 32, tile / 32)
+        vp.picture.play(p)
+        p.end()
+        QPixmapCache.insert(key, pm)
+        return pm
+
     def _draw_vector_fill(self, painter: QPainter, screen_path: QPainterPath,
                           vp: VectorPattern, viewport_scale: float,
                           opacity: float = 1.0) -> None:
         """Fill a screen-space path with a tiled vector pattern.
 
         The tile grows with the square root of the viewport scale so the grain
-        stays visually stable across zoom levels, clipped to the path.
+        stays visually stable across zoom levels, clipped to the path. The
+        QPicture is pre-rendered once into a cached QPixmap tile and the fill
+        is a single ``drawTiledPixmap`` call (instead of replaying the picture
+        per tile cell, which was a double loop over every visible polygon).
         """
         import math
         painter.fillPath(screen_path, vp.base_color)
@@ -272,20 +302,16 @@ class FaciesPolygonsLayer(PaleoLayer):
         painter.setClipPath(screen_path, Qt.ClipOperation.IntersectClip)
         grain_scale = math.sqrt(max(1e-06, viewport_scale))
         tile = max(2, vp.tile_size * grain_scale)
-        pic_scale = tile / 32
+        dpr = painter.device().devicePixelRatioF()
+        tile_pm = self._vector_tile_pixmap(vp, tile, dpr)
         painter.setOpacity(vp.alpha * opacity)
         bbox = screen_path.boundingRect()
-        start_x = int(bbox.left() / tile) * tile
-        start_y = int(bbox.top() / tile) * tile
-        end_x = int(bbox.right()) + int(tile)
-        end_y = int(bbox.bottom()) + int(tile)
-        for y in range(int(start_y), end_y, int(tile)):
-            for x in range(int(start_x), end_x, int(tile)):
-                painter.save()
-                painter.translate(x, y)
-                painter.scale(pic_scale, pic_scale)
-                vp.picture.play(painter)
-                painter.restore()
+        # Keep the old grid phase: first cell at int(bbox.topLeft() / tile) * tile.
+        start_x = int(int(bbox.left() / tile) * tile)
+        start_y = int(int(bbox.top() / tile) * tile)
+        # drawTiledPixmap anchors the tile grid at rect.topLeft() - offset.
+        offset = QPointF(bbox.left() - start_x, bbox.top() - start_y)
+        painter.drawTiledPixmap(bbox, tile_pm, offset)
         painter.restore()
 
     def _resolve_lock_state(self, feature_id: str) -> tuple:

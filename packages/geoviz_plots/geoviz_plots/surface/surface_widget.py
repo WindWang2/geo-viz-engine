@@ -3,7 +3,7 @@ import numpy as np
 import math
 from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, QPointF, Signal, QRectF
-from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics, QBrush, QPainterPath
+from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics, QBrush, QPainterPath, QPolygonF
 from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtPrintSupport import QPrinter
 
@@ -69,6 +69,11 @@ class SurfaceWidget(QWidget):
         self.last_mouse_pos = None
         self.hover_pos = None
 
+        # Contour extraction cache (Issue #59): keyed by grid identity +
+        # levels + colormap, invalidated on set_grid_data/clear so hover
+        # repaints never re-run contourpy extraction.
+        self._contour_cache = {}
+
     def set_control_points(self, points: list):
         """Set scattered control points list: [{"id": str, "x": float, "y": float, "z": float}, ...]."""
         self.control_points = list(points)
@@ -100,6 +105,7 @@ class SurfaceWidget(QWidget):
         self.grid_z = np.asarray(grid_z, dtype=np.float64)
         self.levels = sorted(levels)
         self.colormap_name = colormap if colormap in COLORMAPS else "viridis"
+        self._contour_cache.clear()
         self.update()
 
     def clear(self) -> None:
@@ -112,6 +118,7 @@ class SurfaceWidget(QWidget):
         self.selected_contour_level = None
         self.view_xmin, self.view_xmax = 0.0, 1.0
         self.view_ymin, self.view_ymax = 0.0, 1.0
+        self._contour_cache.clear()
         self.update()
 
 
@@ -295,6 +302,24 @@ class SurfaceWidget(QWidget):
         self.render_surface(painter, self.width(), self.height())
         painter.end()
 
+    def _extraction_cache_key(self):
+        """Build the contour-extraction cache key (Issue #59).
+
+        Combines array identity (id), shape, and a content checksum of the
+        bound grid so both object replacement and in-place mutation of the
+        same array invalidate the cache, plus the contour levels and active
+        colormap. Returns ``None`` when there is no drawable grid.
+        """
+        if self.grid_x is None or self.grid_y is None or self.grid_z is None or not self.levels:
+            return None
+        return (
+            id(self.grid_x), id(self.grid_y), id(self.grid_z),
+            self.grid_x.shape, self.grid_y.shape, self.grid_z.shape,
+            hash(self.grid_x.tobytes()), hash(self.grid_y.tobytes()), hash(self.grid_z.tobytes()),
+            tuple(self.levels),
+            self.colormap_name,
+        )
+
     def render_surface(self, painter: QPainter, width: int, height: int):
         """Draw the filled contours, isolines, axes, and text labels on the painter."""
         # 1. Fill entire widget background
@@ -323,170 +348,206 @@ class SurfaceWidget(QWidget):
             py = bottom - (y_val - self.view_ymin) / y_r * plot_h
             return px, py
             
+        # Vectorized batch coordinate transform (Issue #59): maps a (N, 2)
+        # data-space point array to pixel space in one numpy pass instead of
+        # a per-point Python to_p loop.
+        x_r = self.view_xmax - self.view_xmin
+        y_r = self.view_ymax - self.view_ymin
+        if x_r == 0: x_r = 1.0
+        if y_r == 0: y_r = 1.0
+        sx = plot_w / x_r
+        sy = plot_h / y_r
+
+        def to_p_np(pts):
+            pts = np.asarray(pts, dtype=np.float64)
+            px = left + (pts[:, 0] - self.view_xmin) * sx
+            py = bottom - (pts[:, 1] - self.view_ymin) * sy
+            return np.column_stack((px, py))
+            
         # Clip painter to plotting rectangle boundary so rendering does not spill over margins
         painter.save()
         painter.setClipRect(QRectF(left, top, plot_w, plot_h))
         
         # 3. Draw Filled Contours (Color blocks)
-        try:
-            bands = extract_filled_contours(self.grid_x, self.grid_y, self.grid_z, self.levels)
+        # Extract once per (grid, levels, colormap) and cache: hover
+        # repaints and pan/zoom hit the cache instead of re-running
+        # contourpy (Issue #59).
+        key = self._extraction_cache_key()
+        cached = self._contour_cache.get(key) if key is not None else None
+        if cached is None:
+            try:
+                bands = extract_filled_contours(self.grid_x, self.grid_y, self.grid_z, self.levels)
+            except Exception:
+                bands = None  # Fail-safe protection
+            try:
+                lines_dict = extract_contour_lines(self.grid_x, self.grid_y, self.grid_z, self.levels)
+            except Exception:
+                lines_dict = None  # Fail-safe protection
+            if key is not None:
+                if len(self._contour_cache) >= 4:
+                    self._contour_cache.clear()
+                self._contour_cache[key] = (bands, lines_dict)
+        else:
+            bands, lines_dict = cached
+
+        if bands is not None:
             for band in bands:
-                color = QColor(band.color)
-                color.setAlpha(180)  # Standard clean alpha transparency
+                try:
+                    color = QColor(band.color)
+                    color.setAlpha(180)  # Standard clean alpha transparency
 
-                painter.setBrush(QBrush(color))
-                painter.setPen(Qt.NoPen)
+                    painter.setBrush(QBrush(color))
+                    painter.setPen(Qt.NoPen)
 
-                for poly_coords, offset_arr in zip(band.polygons, band.offsets):
-                    path = QPainterPath()
-                    path.setFillRule(Qt.OddEvenFill)
-
-                    for j in range(len(offset_arr) - 1):
-                        start_idx = offset_arr[j]
-                        end_idx = offset_arr[j+1]
-                        ring_pts = poly_coords[start_idx:end_idx]
-                        if len(ring_pts) < 3:
+                    for poly_coords, offset_arr in zip(band.polygons, band.offsets):
+                        if len(poly_coords) < 3:
                             continue
 
-                        px, py = to_p(ring_pts[0][0], ring_pts[0][1])
-                        path.moveTo(px, py)
-                        for pt in ring_pts[1:]:
-                            px, py = to_p(pt[0], pt[1])
-                            path.lineTo(px, py)
-                        path.closeSubpath()
+                        # 一次性向量化变换整条 packed 多边形坐标
+                        px_pts = to_p_np(poly_coords)
+                        path = QPainterPath()
+                        path.setFillRule(Qt.OddEvenFill)
 
-                    painter.drawPath(path)
-        except Exception:
-            pass  # Fail-safe protection
+                        for j in range(len(offset_arr) - 1):
+                            start_idx = offset_arr[j]
+                            end_idx = offset_arr[j + 1]
+                            if end_idx - start_idx < 3:
+                                continue
+                            ring_pts = px_pts[start_idx:end_idx]
+                            # 批量构环：addPolygon 一次构子路径并自动闭合
+                            path.addPolygon(QPolygonF([
+                                QPointF(x, y) for x, y in zip(
+                                    ring_pts[:, 0].tolist(), ring_pts[:, 1].tolist()
+                                )
+                            ]))
+
+                        painter.drawPath(path)
+                except Exception:
+                    pass  # Fail-safe protection
             
         # 4. Draw Vector Contour Isolines & Labels (with advanced text cut-outs)
-        try:
-            lines_dict = extract_contour_lines(self.grid_x, self.grid_y, self.grid_z, self.levels)
-            
-            painter.setFont(QFont("Arial", 8, QFont.Bold))
-            font_metrics = QFontMetrics(painter.font())
-            
-            sorted_levels = sorted(lines_dict.keys())
-            major_every = 5  # every 5th contour level is major
-            for level_index, lv in enumerate(sorted_levels):
-                lines = lines_dict[lv]
-                is_major = level_index % major_every == 0
-                line_pen = QPen(self.contour_line_color, 1.2 if is_major else 0.6, Qt.SolidLine)
-                painter.setPen(line_pen)
-                painter.setBrush(Qt.NoBrush)
+        if lines_dict is not None:
+            try:
+                painter.setFont(QFont("Arial", 8, QFont.Bold))
+                font_metrics = QFontMetrics(painter.font())
                 
-                label_txt = f"{lv:.1f}"
-                txt_w = font_metrics.horizontalAdvance(label_txt)
-                txt_h = font_metrics.height()
-                
-                for line in lines:
-                    if len(line) < 2:
-                        continue
-                        
-                    # Calculate total path length in pixels to determine if we should draw a label
-                    pixels = [to_p(pt[0], pt[1]) for pt in line]
-                    total_len = 0.0
-                    for k in range(len(pixels) - 1):
-                        total_len += math.hypot(pixels[k+1][0] - pixels[k][0], pixels[k+1][1] - pixels[k][1])
-                        
-                    # Draw text cut-out label if line path is long enough (> 130 pixels)
-                    if total_len > 130.0:
-                        # Find midpoint by pixel length
-                        half_len = total_len / 2.0
-                        cum_len = 0.0
-                        mid_idx = 0
-                        for k in range(len(pixels) - 1):
-                            d = math.hypot(pixels[k+1][0] - pixels[k][0], pixels[k+1][1] - pixels[k][1])
-                            if cum_len + d >= half_len:
-                                mid_idx = k
-                                break
-                            cum_len += d
+                sorted_levels = sorted(lines_dict.keys())
+                major_every = 5  # every 5th contour level is major
+                for level_index, lv in enumerate(sorted_levels):
+                    lines = lines_dict[lv]
+                    is_major = level_index % major_every == 0
+                    line_pen = QPen(self.contour_line_color, 1.2 if is_major else 0.6, Qt.SolidLine)
+                    painter.setPen(line_pen)
+                    painter.setBrush(Qt.NoBrush)
+                    
+                    label_txt = f"{lv:.1f}"
+                    txt_w = font_metrics.horizontalAdvance(label_txt)
+                    txt_h = font_metrics.height()
+                    
+                    for line in lines:
+                        if len(line) < 2:
+                            continue
                             
-                        # Mid segment points
-                        pt_mid = pixels[mid_idx]
-                        pt_next = pixels[mid_idx+1]
-                        
-                        # Direction angle of path segment
-                        dx = pt_next[0] - pt_mid[0]
-                        dy = pt_next[1] - pt_mid[1]
-                        angle = math.atan2(dy, dx)
-                        # Keep text facing upright
-                        if dx < 0:
-                            angle += math.pi
+                        # 向量化坐标变换与累计路径长度（避免逐点 to_p / hypot 循环）
+                        pts = to_p_np(line)
+                        seg_lens = np.hypot(pts[1:, 0] - pts[:-1, 0], pts[1:, 1] - pts[:-1, 1])
+                        total_len = float(seg_lens.sum())
                             
-                        # Determine indices for cut-out gap
-                        # Gap of text_width + 10 pixels padding
-                        gap_pixels = txt_w + 10.0
-                        half_gap = gap_pixels / 2.0
-                        
-                        # Loop through and split drawing at gap entrance/exit
-                        path_start = QPainterPath()
-                        path_end = QPainterPath()
-                        
-                        in_start = True
-                        in_gap = False
-                        
-                        cum_draw = 0.0
-                        for k in range(len(pixels)):
-                            if k == 0:
-                                path_start.moveTo(pixels[0][0], pixels[0][1])
-                                continue
+                        # Draw text cut-out label if line path is long enough (> 130 pixels)
+                        if total_len > 130.0:
+                            # 顶点累计路径长度
+                            half_len = total_len / 2.0
+                            dists = np.concatenate(([0.0], np.cumsum(seg_lens)))
+                            n_pts = len(pts)
+                            
+                            # Find midpoint segment by pixel length
+                            mid_idx = int(np.searchsorted(dists, half_len, side="left")) - 1
+                            mid_idx = max(0, min(mid_idx, n_pts - 2))
                                 
-                            seg_d = math.hypot(pixels[k][0] - pixels[k-1][0], pixels[k][1] - pixels[k-1][1])
-                            cum_draw += seg_d
+                            # Mid segment points
+                            pt_mid = pts[mid_idx]
+                            pt_next = pts[mid_idx + 1]
                             
-                            # Entering gap
-                            if in_start and cum_draw >= half_len - half_gap:
-                                in_start = False
-                                in_gap = True
-                                # Add line up to gap boundary
-                                w_ratio = (half_len - half_gap - (cum_draw - seg_d)) / seg_d
-                                gap_entry_x = pixels[k-1][0] + w_ratio * (pixels[k][0] - pixels[k-1][0])
-                                gap_entry_y = pixels[k-1][1] + w_ratio * (pixels[k][1] - pixels[k-1][1])
-                                path_start.lineTo(gap_entry_x, gap_entry_y)
-                                continue
+                            # Direction angle of path segment
+                            dx = pt_next[0] - pt_mid[0]
+                            dy = pt_next[1] - pt_mid[1]
+                            angle = math.atan2(dy, dx)
+                            # Keep text facing upright
+                            if dx < 0:
+                                angle += math.pi
                                 
-                            # Exiting gap
-                            if in_gap and cum_draw >= half_len + half_gap:
-                                in_gap = False
-                                # Resume drawing after gap boundary
-                                w_ratio = (half_len + half_gap - (cum_draw - seg_d)) / seg_d
-                                gap_exit_x = pixels[k-1][0] + w_ratio * (pixels[k][0] - pixels[k-1][0])
-                                gap_exit_y = pixels[k-1][1] + w_ratio * (pixels[k][1] - pixels[k-1][1])
+                            # Determine indices for cut-out gap
+                            # Gap of text_width + 10 pixels padding
+                            gap_pixels = txt_w + 10.0
+                            half_gap = gap_pixels / 2.0
+                            entry_target = half_len - half_gap
+                            exit_target = half_len + half_gap
+                            
+                            # 缺口进入/退出所在线段索引（向量化二分定位）
+                            entry_i = int(np.searchsorted(dists, entry_target, side="left"))
+                            entry_i = max(1, min(entry_i, n_pts - 1))
+                            exit_i = int(np.searchsorted(dists, exit_target, side="left"))
+                            exit_i = max(entry_i, min(exit_i, n_pts - 1))
+                            
+                            seg_entry = seg_lens[entry_i - 1]
+                            if seg_entry > 0:
+                                w_entry = (entry_target - dists[entry_i - 1]) / seg_entry
+                            else:
+                                w_entry = 0.0
+                            gap_entry_x = pts[entry_i - 1][0] + w_entry * (pts[entry_i][0] - pts[entry_i - 1][0])
+                            gap_entry_y = pts[entry_i - 1][1] + w_entry * (pts[entry_i][1] - pts[entry_i - 1][1])
+                            
+                            # Split drawing at gap entrance/exit
+                            path_start = QPainterPath()
+                            path_end = QPainterPath()
+                            
+                            xs = pts[:, 0].tolist()
+                            ys = pts[:, 1].tolist()
+                            
+                            path_start.moveTo(xs[0], ys[0])
+                            for i in range(1, entry_i):
+                                path_start.lineTo(xs[i], ys[i])
+                            path_start.lineTo(gap_entry_x, gap_entry_y)
+                            
+                            if exit_target < total_len:
+                                seg_exit = seg_lens[exit_i - 1]
+                                if seg_exit > 0:
+                                    w_exit = (exit_target - dists[exit_i - 1]) / seg_exit
+                                else:
+                                    w_exit = 0.0
+                                gap_exit_x = pts[exit_i - 1][0] + w_exit * (pts[exit_i][0] - pts[exit_i - 1][0])
+                                gap_exit_y = pts[exit_i - 1][1] + w_exit * (pts[exit_i][1] - pts[exit_i - 1][1])
                                 path_end.moveTo(gap_exit_x, gap_exit_y)
-                                path_end.lineTo(pixels[k][0], pixels[k][1])
-                                continue
-                                
-                            if in_start:
-                                path_start.lineTo(pixels[k][0], pixels[k][1])
-                            elif not in_gap:
-                                path_end.lineTo(pixels[k][0], pixels[k][1])
-                                
-                        painter.drawPath(path_start)
-                        painter.drawPath(path_end)
-                        
-                        # Render rotated text cleanly in the gap
-                        painter.save()
-                        painter.translate(pt_mid[0], pt_mid[1])
-                        painter.rotate(math.degrees(angle))
-                        
-                        # Text color
-                        painter.setPen(self.text_color)
-                        # Draw centered text
-                        painter.drawText(-txt_w / 2, txt_h / 4, label_txt)
-                        painter.restore()
-                        
-                        # Restore active isoline pen
-                        painter.setPen(line_pen)
-                    else:
-                        # Draw entire line without label cut-out for short isolines
-                        path = QPainterPath()
-                        path.moveTo(pixels[0][0], pixels[0][1])
-                        for pt in pixels[1:]:
-                            path.lineTo(pt[0], pt[1])
-                        painter.drawPath(path)
-        except Exception:
-            pass  # Fail-safe protection
+                                for i in range(exit_i, n_pts):
+                                    path_end.lineTo(xs[i], ys[i])
+                                    
+                            painter.drawPath(path_start)
+                            painter.drawPath(path_end)
+                            
+                            # Render rotated text cleanly in the gap
+                            painter.save()
+                            painter.translate(pt_mid[0], pt_mid[1])
+                            painter.rotate(math.degrees(angle))
+                            
+                            # Text color
+                            painter.setPen(self.text_color)
+                            # Draw centered text
+                            painter.drawText(-txt_w / 2, txt_h / 4, label_txt)
+                            painter.restore()
+                            
+                            # Restore active isoline pen
+                            painter.setPen(line_pen)
+                        else:
+                            # Draw entire line without label cut-out for short isolines
+                            path = QPainterPath()
+                            xs = pts[:, 0].tolist()
+                            ys = pts[:, 1].tolist()
+                            path.moveTo(xs[0], ys[0])
+                            for i in range(1, len(pts)):
+                                path.lineTo(xs[i], ys[i])
+                            painter.drawPath(path)
+            except Exception:
+                pass  # Fail-safe protection
             
         painter.restore()  # End clip rect
         

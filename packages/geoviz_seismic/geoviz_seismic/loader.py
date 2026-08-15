@@ -10,6 +10,11 @@ from .models import SeismicVolumeMeta
 
 logger = logging.getLogger(__name__)
 
+# Cap for the geometry auto-detection probe: header reads are the dominant
+# cost of _open's fallback path, so at most this many traces are sampled
+# instead of scanning the whole file.
+MAX_PROBE_TRACES = 512
+
 
 class SeismicLoader:
     """On-demand SEGY file reader built on segyio.
@@ -108,12 +113,15 @@ class SeismicLoader:
                 f"(available: {xlines[0] if len(xlines) > 0 else '?'}-{xlines[-1] if len(xlines) > 0 else '?'})."
             ) from e
 
-    def read_timeslice(self, sample_idx: int) -> np.ndarray:
+    def read_timeslice(self, sample_idx: int, *, cancellation_token=None) -> np.ndarray:
         """Read one time slice (zero-based index). Returns ``(n_inlines, n_xlines)``.
 
         Note: ``segyio`` ``depth_slice`` often returns ``(n_xlines, n_inlines)``
         for this geometry. We always normalize to volume axis order so 2D Time
         profiles match 3D horizontal planes (``volume[:, :, t]``).
+
+        ``cancellation_token`` (optional) is polled while reading; pass one to
+        abort the per-inline fallback early (it is O(volume) I/O).
         """
         try:
             t0 = time.monotonic()
@@ -123,8 +131,20 @@ class SeismicLoader:
             try:
                 data = np.asarray(f.depth_slice[sample_idx], dtype=np.float32)
             except (AttributeError, KeyError):
+                # Slow path: depth_slice is unavailable, so build the slice
+                # inline by inline. Every trace of the cube is read — warn and
+                # poll the cancellation token so callers can abort early.
+                logger.warning(
+                    "depth_slice unavailable for %s; reading time slice %d "
+                    "via per-inline fallback (O(volume) I/O)",
+                    self._path, sample_idx,
+                )
+                if cancellation_token is not None:
+                    cancellation_token.raise_if_cancelled()
                 data = np.empty(expected, dtype=np.float32)
                 for i, il in enumerate(f.ilines.tolist()):
+                    if cancellation_token is not None:
+                        cancellation_token.raise_if_cancelled()
                     line = np.asarray(f.iline[il], dtype=np.float32)
                     data[i, :] = line[:, sample_idx]
             data = self._normalize_timeslice_axes(data, meta)
@@ -166,16 +186,34 @@ class SeismicLoader:
         try:
             f = self._open()
             meta = self._meta or self.inspect()
-            # Use segyio's trace sorting to index efficiently
-            inline_data = np.asarray(f.iline[iline], dtype=np.float32)
+            il_idx = (iline - meta.iline_start) // meta.iline_step
             xl_idx = (xline - meta.xline_start) // meta.xline_step
-            if xl_idx < 0 or xl_idx >= inline_data.shape[0]:
+            if (
+                il_idx < 0 or il_idx >= meta.n_inlines
+                or xl_idx < 0 or xl_idx >= meta.n_crosslines
+            ):
                 raise ValueError(
-                    f"Crossline {xline} out of range "
-                    f"(available: {meta.xline_start}-{meta.xline_start + (meta.n_crosslines - 1) * meta.xline_step})."
+                    f"({iline}, {xline}) out of range "
+                    f"(inlines: {meta.iline_start}-{meta.iline_start + (meta.n_inlines - 1) * meta.iline_step}, "
+                    f"crosslines: {meta.xline_start}-{meta.xline_start + (meta.n_crosslines - 1) * meta.xline_step})."
                 )
+            # Fast path: address the trace directly instead of pulling a whole
+            # inline just for one trace. In structured mode segyio sorts traces
+            # inline-then-crossline (INLINE_SORTING) or crossline-then-inline
+            # (CROSSLINE_SORTING), so the global trace index is a simple stride
+            # computation (Issue #64).
+            sorting = getattr(f, "sorting", None)
+            if sorting == segyio.TraceSortingFormat.INLINE_SORTING:
+                global_idx = il_idx * meta.n_crosslines + xl_idx
+                return np.asarray(f.trace[global_idx], dtype=np.float32)
+            if sorting == segyio.TraceSortingFormat.CROSSLINE_SORTING:
+                global_idx = xl_idx * meta.n_inlines + il_idx
+                return np.asarray(f.trace[global_idx], dtype=np.float32)
+            # Fallback: read the whole inline (e.g. unknown sorting) and index
+            # the requested crossline column.
+            inline_data = np.asarray(f.iline[iline], dtype=np.float32)
             return inline_data[xl_idx, :]
-        except (KeyError, ValueError) as e:
+        except (KeyError, IndexError, ValueError) as e:
             raise ValueError(
                 f"Failed to read trace at ({iline}, {xline}) from {self._path}: {e}"
             ) from e
@@ -249,6 +287,18 @@ class SeismicLoader:
             self._f.close()
             self._f = None
 
+    @staticmethod
+    def _probe_trace_indices(n_traces: int, limit: int = MAX_PROBE_TRACES) -> list[int]:
+        """Evenly spaced trace indices for header probing (at most ``limit``).
+
+        The probe spans the whole trace range so geometry auto-detection sees
+        every region of the file, keeping header reads O(limit) instead of
+        O(n_traces) (Issue #64).
+        """
+        if n_traces <= limit:
+            return list(range(n_traces))
+        return [round(x) for x in np.linspace(0, n_traces - 1, limit)]
+
     def _open(self) -> segyio.SegyFile:
         if self._f is not None:
             return self._f
@@ -279,32 +329,44 @@ class SeismicLoader:
             (segyio.TraceField.CROSSLINE_3D, "Crossline3D"),
         ]
         
-        # Collect unique values for each candidate
+        # Probe an evenly spaced sample of at most MAX_PROBE_TRACES traces
+        # instead of scanning every header: the full scan is the dominant cost
+        # of this fallback on large cubes (Issue #64).
+        probe_idx = self._probe_trace_indices(n_traces)
+
+        # Collect unique values for each candidate from the probed traces
         field_info = {}
         for field, name in candidates:
-            vals = set()
-            for i in range(n_traces):
-                vals.add(self._f.header[i][field])
+            vals = {self._f.header[i][field] for i in probe_idx}
             if len(vals) > 1:
                 field_info[field] = (name, sorted(vals))
-        
-        # Find two fields whose product of unique counts equals n_traces
+
+        # Find two fields whose product of unique counts equals n_traces, and
+        # confirm the combination really grids the file: every probed trace
+        # must map to a distinct (il, xl) pair.
         found_il, found_xl = None, None
         fields = list(field_info.keys())
         for i in range(len(fields)):
             for j in range(i + 1, len(fields)):
                 n_a = len(field_info[fields[i]][1])
                 n_b = len(field_info[fields[j]][1])
-                if n_a * n_b == n_traces:
-                    # Determine which changes faster (that's the "fast" axis)
-                    v0 = self._f.header[0][fields[i]]
-                    v1 = self._f.header[1][fields[i]]
-                    if v0 != v1:
-                        # fields[i] changes every trace → it's the fast axis (iline in segyio terms)
-                        found_il, found_xl = fields[i], fields[j]
-                    else:
-                        found_il, found_xl = fields[j], fields[i]
-                    break
+                if n_a * n_b != n_traces:
+                    continue
+                combos = {
+                    (self._f.header[idx][fields[i]], self._f.header[idx][fields[j]])
+                    for idx in probe_idx
+                }
+                if len(combos) != len(probe_idx):
+                    continue
+                # Determine which changes faster (that's the "fast" axis)
+                v0 = self._f.header[0][fields[i]]
+                v1 = self._f.header[1][fields[i]]
+                if v0 != v1:
+                    # fields[i] changes every trace → it's the fast axis (iline in segyio terms)
+                    found_il, found_xl = fields[i], fields[j]
+                else:
+                    found_il, found_xl = fields[j], fields[i]
+                break
             if found_il is not None:
                 break
         

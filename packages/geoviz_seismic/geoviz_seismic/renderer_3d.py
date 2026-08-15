@@ -39,17 +39,6 @@ def compute_normal_map(data: np.ndarray) -> np.ndarray:
     # Map from [-1, 1] to [0, 255] for uint8 storage
     return ((N + 1.0) * 127.5).astype(np.uint8)
 
-class Renderer3DLODManager:
-    """Manages dynamic LOD level during active 3D camera interaction."""
-
-    def __init__(self, idle_debounce_ms: float = 50.0):
-        self.idle_debounce_ms = idle_debounce_ms
-
-    def get_render_lod(self, is_interacting: bool, idle_ms: float) -> int:
-        if is_interacting or idle_ms < self.idle_debounce_ms:
-            return 2  # 2x downsampled LOD
-        return 1  # Full resolution
-
 
 class GLImageLutItem(gl.GLImageItem):
     """A 2D textured quad that looks up colour through a 1-D LUT in-shader.
@@ -198,12 +187,38 @@ class GLImageLutItem(gl.GLImageItem):
         upload = np.ascontiguousarray(arr.T)
         return upload, sx, sy
 
+    @staticmethod
+    def _downsample_to_fit(data: np.ndarray, width: int, height: int,
+                           max_tex: int) -> tuple[np.ndarray, int, int]:
+        """Downsample ``data`` (shape ``(height, width)``) so both axes fit
+        within ``max_tex`` while preserving aspect ratio.
+
+        Returns ``(data, new_width, new_height)``; the caller keeps the
+        original geometry extents so the texture still spans the full plane.
+        """
+        scale = min(1.0, max_tex / width, max_tex / height)
+        new_w = max(1, int(width * scale))
+        new_h = max(1, int(height * scale))
+        rows = np.linspace(0, height - 1, new_h).astype(np.int64)
+        cols = np.linspace(0, width - 1, new_w).astype(np.int64)
+        return data[np.ix_(rows, cols)], new_w, new_h
+
     def _updateTexture(self) -> None:
         """Upload the uint8 index array as a single-channel GL_R8 texture.
 
         Overrides GLImageItem (RGBA) with GL_R8 / GL_RED, but **keeps** the
         same axis transpose so plane orientation matches 2D profiles.
+
+        Textures larger than ``GL_MAX_TEXTURE_SIZE`` are downsampled in place
+        (aspect ratio preserved) instead of raising, and any GL error during
+        the upload is logged — exceptions never escape into ``paint``.
         """
+        try:
+            self._uploadIndexTexture()
+        except Exception:
+            logger.exception("Failed to upload R8 index texture")
+
+    def _uploadIndexTexture(self) -> None:
         if self.texture is None:
             self.texture = GL.glGenTextures(1)
         GL.glBindTexture(GL.GL_TEXTURE_2D, self.texture)
@@ -214,18 +229,39 @@ class GLImageLutItem(gl.GLImageItem):
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
 
         data, width, height = self.prepare_r8_upload(self.data)
+        # Geometry quad keeps the ORIGINAL sample-space size so a downsampled
+        # texture still stretches over the full plane extent.
+        geom_w, geom_h = width, height
 
         context = QtGui.QOpenGLContext.currentContext()
-        if not context.isOpenGLES():
+        max_tex = 0
+        if context is not None and not context.isOpenGLES():
+            try:
+                max_tex = int(GL.glGetIntegerv(GL.GL_MAX_TEXTURE_SIZE))
+            except Exception:
+                max_tex = 0
+
+        if max_tex > 0 and (width > max_tex or height > max_tex):
+            data, width, height = self._downsample_to_fit(data, width, height, max_tex)
+            logger.warning(
+                "Index texture %dx%d exceeds GL_MAX_TEXTURE_SIZE %d; "
+                "downsampled to %dx%d for upload (geometry unchanged).",
+                geom_w, geom_h, max_tex, width, height,
+            )
+
+        if context is not None and not context.isOpenGLES():
             GL.glTexImage2D(
                 GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_R8, width, height, 0,
                 GL.GL_RED, GL.GL_UNSIGNED_BYTE, None,
             )
             if GL.glGetTexLevelParameteriv(GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_TEXTURE_WIDTH) == 0:
-                raise Exception(
-                    "OpenGL failed to create 2D R8 texture (%dx%d); too large."
-                    % (width, height)
+                logger.warning(
+                    "OpenGL rejected 2D R8 texture %dx%d; skipping upload "
+                    "(plane stays empty until a smaller slice arrives).",
+                    width, height,
                 )
+                GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+                return
 
         GL.glTexImage2D(
             GL.GL_TEXTURE_2D, 0, GL.GL_R8, width, height, 0,
@@ -233,8 +269,9 @@ class GLImageLutItem(gl.GLImageItem):
         )
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
 
-        # Geometry extents still follow pre-transpose shape (sx, sy)
-        x, y = width, height
+        # Geometry extents still follow the original (sx, sy) size so the
+        # plane spans the same world-space area regardless of texture size.
+        x, y = geom_w, geom_h
         pos = np.array([
             [0, 0, 0, 0],
             [x, 0, 1, 0],
@@ -357,11 +394,6 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         self._shading_enabled = False
         self._shading_light_dir = (1.0, 1.0, 1.0)
         self._shading_needs_upload = False
-
-    def get_lod_data(self, lod_level: int = 1) -> np.ndarray:
-        if lod_level <= 1 or self.data is None:
-            return self.data
-        return self.data[::lod_level, ::lod_level, ::lod_level]
 
     def setShading(self, enabled: bool, light_dir=(1.0, 1.0, 1.0)):
         self._shading_enabled = enabled
@@ -970,6 +1002,14 @@ class Renderer3D(QWidget):
 
     Leverages QOpenGLWidget for reliable composition and optional CuPy backend
     for accelerated slicing operations.
+
+    Memory strategy (#78): the CPU array (``_volume_data_cpu``) is the single
+    source of truth. A CuPy GPU mirror (``_volume_data_gpu``) is created
+    **lazily** on first GPU-backed slice access and only when CuPy is
+    available, so loading a volume that never slices (e.g. pure volume-mode
+    rendering) — or running on a CPU-only host — avoids a redundant
+    full-volume copy. The volume visual keeps the only other persistent copy:
+    a fixed 2x-downsampled combined GL texture.
     """
 
     slice_changed = Signal(str, int)  # (slice_type, position)
@@ -1032,6 +1072,11 @@ class Renderer3D(QWidget):
         self._sculpt_mode = "above"
         self._isosurface_item = None
         self._shading_enabled = False
+        # Normal-map cache for hillshading: (id(volume), volume_version, map).
+        # Keyed by volume identity + version so unrelated rebuilds (colormap /
+        # opacity changes) reuse it while a new volume recomputes it (#57).
+        self._normal_map_cache: tuple[int, int, np.ndarray] | None = None
+        self._volume_version = 0
 
         self._init_pyqtgraph(layout)
         self._plotter = True  # Keeps state parity with external API expectations
@@ -1129,9 +1174,21 @@ class Renderer3D(QWidget):
         self._view.update()
 
     def set_hillshading(self, enabled: bool):
+        """Toggle hillshading. Enabling on a volume that was built with
+        shading off triggers a rebuild so the normal map gets computed (and
+        cached for subsequent rebuilds) (#57)."""
         self._shading_enabled = enabled
         if self._volume_visual is not None and isinstance(self._volume_visual, DualGLVolumeItem):
+            # A volume built with shading off carries no normal texture; the
+            # shader would sample an unbound unit, so rebuild once to fetch it.
+            needs_normal_rebuild = (
+                enabled
+                and self._volume_data_cpu is not None
+                and self._normal_map_cache is None
+            )
             self._volume_visual.setShading(enabled)
+            if needs_normal_rebuild:
+                self._rebuild_volume_visual()
 
     def set_sculpting_surface(self, surface_z: np.ndarray | None, mode: str = "above"):
         self._sculpt_surface = surface_z
@@ -1171,20 +1228,17 @@ class Renderer3D(QWidget):
                 cam_snapshot = None
 
         self._volume_data_cpu = data
+        self._volume_version += 1  # invalidate normal-map / slice caches
         self._slice_range_cache = None  # invalidate; recomputed on next slice build
         self._volume_spacing = spacing
         self._volume_origin = origin
-        
-        # Transparently attempt mirroring to GPU for slicing acceleration
-        if is_gpu_available():
-            try:
-                self._volume_data_gpu = to_gpu(data)
-                logger.info("Seismic volume successfully cached on GPU via CuPy.")
-            except Exception as e:
-                logger.warning(f"Failed to push volume to GPU: {e}. Falling back to CPU slicing.")
-                self._volume_data_gpu = None
-        else:
-            self._volume_data_gpu = None
+
+        # The CuPy mirror is NOT created eagerly here (#78): it is materialized
+        # lazily on first GPU-backed slice access (see ``_ensure_gpu_mirror``),
+        # only when CuPy is available AND a slice actually uses the GPU path.
+        # This avoids a redundant full-volume copy for volume-only or
+        # CPU-only usage — see the class docstring memory notes.
+        self._volume_data_gpu = None
 
         self._clear_visuals()
 
@@ -1291,17 +1345,16 @@ class Renderer3D(QWidget):
 
         verts = np.dstack([xx, yy, horizon_data.astype(np.float32)])
 
-        faces = []
-        for i in range(nI - 1):
-            for j in range(nX - 1):
-                p0 = i * nX + j
-                p1 = p0 + 1
-                p2 = (i + 1) * nX + j
-                p3 = p2 + 1
-                faces.append([p0, p1, p2])
-                faces.append([p1, p3, p2])
-
-        faces = np.array(faces)
+        # Vectorized face construction (#57): each (i, j) quad corner maps to
+        # p0=i*nX+j, p1=p0+1, p2=p0+nX, p3=p2+1, split into two triangles
+        # (p0, p1, p2) and (p1, p3, p2) — same winding/order as the old
+        # double loop, generated in one pass from a grid of corner indices.
+        i_idx, j_idx = np.mgrid[0:nI - 1, 0:nX - 1]
+        p0 = i_idx * nX + j_idx
+        p1 = p0 + 1
+        p2 = p0 + nX
+        p3 = p2 + 1
+        faces = np.stack([p0, p1, p2, p1, p3, p2], axis=-1).reshape(-1, 3)
         verts_flat = verts.reshape(-1, 3)
 
         mesh = gl.GLMeshItem(
@@ -1439,12 +1492,16 @@ class Renderer3D(QWidget):
             return
 
         try:
-                        # Downsample and normalize primary volume data
+            # Downsample and normalize primary volume data
             primary_data = self._volume_data_cpu[::2, ::2, ::2]
             primary_normalized = ColormapManager.normalize_to_index(primary_data, lut_size=256)
-            
-            # Pre-compute normals for hillshading (Phase 2 Audit Task 2)
-            normal_data = compute_normal_map(primary_data)
+
+            # Normal map is only needed while hillshading is enabled; compute
+            # lazily and cache per volume (id + version) so unrelated rebuilds
+            # (colormap/opacity changes) don't recompute it (#57).
+            normal_data = None
+            if self._shading_enabled:
+                normal_data = self._get_normal_map(primary_data)
 
             # Downsample and normalize overlay volume data if available if available
             if self._overlay_volume_data_cpu is not None:
@@ -1493,6 +1550,21 @@ class Renderer3D(QWidget):
             self._view.update()
         except Exception as e:
             logger.warning(f"Rebuild volume visual failed: {e}", exc_info=True)
+
+    def _get_normal_map(self, primary_data: np.ndarray) -> np.ndarray:
+        """Return the cached hillshading normal map for the current volume.
+
+        Computed once per loaded volume (cache key = volume array id + version
+        counter, both bumped in ``load_volume``), then reused across rebuilds.
+        ``primary_data`` is the fixed ``[::2, ::2, ::2]`` downsample of the
+        loaded volume, so a single map per volume is sufficient (#57).
+        """
+        key = (id(self._volume_data_cpu), self._volume_version)
+        if self._normal_map_cache is not None and self._normal_map_cache[:2] == key:
+            return self._normal_map_cache[2]
+        normal_map = compute_normal_map(primary_data)
+        self._normal_map_cache = (key[0], key[1], normal_map)
+        return normal_map
 
     def load_overlay_volume(self, data: np.ndarray, colormap: str = "jet", opacity: float = 0.5):
         """Load an overlay attribute/property volume and display it superimposed with alpha blending."""
@@ -1572,6 +1644,7 @@ class Renderer3D(QWidget):
         self._volume_data_cpu = None
         self._slice_range_cache = None
         self._volume_data_gpu = None
+        self._normal_map_cache = None
         self._overlay_volume_data_cpu = None
         self._overlay_volume_visual = None
 
@@ -1887,9 +1960,32 @@ class Renderer3D(QWidget):
             except Exception:
                 pass
 
+    def _ensure_gpu_mirror(self):
+        """Lazily materialize the CuPy mirror of the CPU volume on first
+        GPU-backed slice access (#78).
+
+        The CPU array stays the single source of truth; the GPU copy is only
+        created when a slice actually requests it AND CuPy is available,
+        avoiding a redundant full-volume copy for volume-only or CPU-only
+        usage. Returns the mirror, or ``None`` to fall back to CPU.
+        """
+        if (
+            self._volume_data_gpu is None
+            and self._volume_data_cpu is not None
+            and is_gpu_available()
+        ):
+            try:
+                self._volume_data_gpu = to_gpu(self._volume_data_cpu)
+                logger.info("Seismic volume cached on GPU via CuPy (lazy).")
+            except Exception as e:
+                logger.warning(f"Failed to push volume to GPU: {e}. Falling back to CPU slicing.")
+                self._volume_data_gpu = None
+        return self._volume_data_gpu
+
     def _get_sliced_data(self, axis: int, index: int) -> np.ndarray:
         """Retrieves slice, prioritizing GPU cached volume memory if accessible."""
-        vol = self._volume_data_gpu if self._volume_data_gpu is not None else self._volume_data_cpu
+        mirror = self._ensure_gpu_mirror()
+        vol = mirror if mirror is not None else self._volume_data_cpu
         if vol is None:
             return np.zeros((1,1))
         # Optimization: Request to KEEP the array reference on the GPU device
@@ -2306,7 +2402,8 @@ class Renderer3D(QWidget):
             return
         
         try:
-            vol = self._volume_data_gpu if self._volume_data_gpu is not None else self._volume_data_cpu
+            mirror = self._ensure_gpu_mirror()
+            vol = mirror if mirror is not None else self._volume_data_cpu
             arb_data, cum_dist = sample_polyline_slice(vol, self._arb_polyline)
             
             if arb_data.shape[1] < 2:
@@ -2866,7 +2963,10 @@ class Renderer3D(QWidget):
         """Render manually picked horizon points as a 3D scatter plot.
 
         Args:
-            points: List of (inline_num, xline_num, time_ms) tuples.
+            points: List of ``(il_idx, xl_idx, t_idx)`` tuples — **preview
+                volume voxel indices** (float allowed for sub-voxel
+                placement, e.g. from 3D click-to-jump). Each position is
+                scaled by ``_volume_spacing`` into world coordinates.
         """
         if self._picks_visual is not None:
             self._view.removeItem(self._picks_visual)
@@ -2896,7 +2996,9 @@ class Renderer3D(QWidget):
         """Update the linked cursor sphere position in 3D space.
 
         Args:
-            il_val, xl_val, t_val: Coordinate values in seismic units.
+            il_val, xl_val, t_val: **Preview volume voxel indices** (float
+                allowed for sub-voxel positions). Each index is scaled by
+                ``_volume_spacing`` into world coordinates.
         """
         if not self._loaded:
             return
@@ -2915,7 +3017,10 @@ class Renderer3D(QWidget):
         """Render text annotations in 3D space.
 
         Args:
-            annotations: List of (il_val, xl_val, time_val, text) tuples.
+            annotations: List of ``(il_idx, xl_idx, t_idx, text)`` tuples —
+                **preview volume voxel indices** (float allowed for sub-voxel
+                placement). Each position is scaled by ``_volume_spacing``
+                into world coordinates.
         """
         for item in self._annotation_items:
             try:

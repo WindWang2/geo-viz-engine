@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QResizeEvent, QWheelEvent, QContextMenuEvent, QAction
 from PySide6.QtWidgets import QToolTip, QWidget, QMenu
@@ -82,6 +84,7 @@ class PaleoMapCanvas(QWidget):
         # State fields for dynamic layers and locking
         self._period_name = ""
         self._loaded_features: list[dict] = []
+        self._fit_bounds: tuple[float, float, float, float] | None = None
         self._viewport_fitted = False
         self._user_has_interacted = False
         self._wells_data: list[dict] = []
@@ -223,6 +226,7 @@ class PaleoMapCanvas(QWidget):
         self._rebuild_layer_caches()
 
         self._loaded_features = features
+        self._fit_bounds = self._compute_fit_bounds()
         self._viewport_fitted = False
         self._user_has_interacted = False
         self.fit_viewport_to_data()
@@ -309,6 +313,7 @@ class PaleoMapCanvas(QWidget):
                 {"geometry": ff.geometry}
                 for ff in hierarchy.get_features_at_level(level)
             ])
+        self._fit_bounds = self._compute_fit_bounds()
         self._viewport_fitted = False
         self._user_has_interacted = False
         self.fit_viewport_to_data()
@@ -367,7 +372,7 @@ class PaleoMapCanvas(QWidget):
         painter = QPainter(self)
         try:
             if self._hierarchy is not None:
-                current_level = self._resolve_level_name()
+                current_level = self._resolve_level()
                 if current_level != self._current_active_level:
                     self._current_active_level = current_level
                     self._update_active_layers()
@@ -406,14 +411,8 @@ class PaleoMapCanvas(QWidget):
         self._scheduler.schedule()
 
     def _resolve_level_name(self) -> str:
-        if self._locked_level:
-            return self._locked_level
-        z = self._viewport.zoom
-        thresholds = self.get_threshold_zooms()
-        for i, thr_zoom in enumerate(thresholds):
-            if z < thr_zoom:
-                return self._LEVEL_ORDER[i]
-        return self._LEVEL_ORDER[-1]
+        """Compatibility alias for the hysteresis-backed _resolve_level."""
+        return self._resolve_level()
 
     def _find_active_lock_in_subtree(self, node: FaciesNode) -> tuple[str, str] | None:
         if node.feature.id in self._locked_ids:
@@ -470,7 +469,7 @@ class PaleoMapCanvas(QWidget):
         if not self._hierarchy:
             return
 
-        active_level = self._resolve_level_name()
+        active_level = self._resolve_level()
         visible_features = []
         active_locked_ids = set()
         for root in self._hierarchy.roots:
@@ -568,6 +567,38 @@ class PaleoMapCanvas(QWidget):
             self._scale_slider.set_params(vp.width, kpd, self.get_threshold_zooms())
             self._scale_slider.set_zoom(vp.zoom)
 
+    def _compute_fit_bounds(self) -> tuple[float, float, float, float] | None:
+        """Bounding box (min_lng, max_lng, min_lat, max_lat) of all vertices.
+
+        Computed once at load time (load_features / load_hierarchy) with numpy
+        and cached in ``_fit_bounds``, so fit_viewport_to_data — which runs on
+        every resize — never re-walks the full vertex lists in Python.
+        """
+        pts: list[tuple[float, float]] = []
+        for feat in self._loaded_features:
+            geom = feat.get("geometry") or {}
+            gtype = geom.get("type")
+            coords = geom.get("coordinates")
+            if not coords:
+                continue
+            if gtype == "Polygon":
+                rings = coords
+            elif gtype == "MultiPolygon":
+                rings = [ring for poly in coords for ring in poly]
+            else:
+                continue
+            for ring in rings:
+                for pt in ring:
+                    if len(pt) >= 2:
+                        pts.append((pt[0], pt[1]))
+        if not pts:
+            return None
+        arr = np.asarray(pts, dtype=float)
+        lngs = arr[:, 0]
+        lats = arr[:, 1]
+        return (float(lngs.min()), float(lngs.max()),
+                float(lats.min()), float(lats.max()))
+
     def fit_viewport_to_data(self) -> None:
         """Fit the viewport center and zoom to the bounding box of the loaded data."""
         if not hasattr(self, "_loaded_features") or not self._loaded_features:
@@ -578,37 +609,13 @@ class PaleoMapCanvas(QWidget):
         if w <= 100 or h <= 100:
             return  # Wait for a proper resize event
 
-        lngs = []
-        lats = []
-        from geoviz_paleo_map.projection import lnglat_to_world
-
-        for feat in self._loaded_features:
-            geom = feat.get("geometry") or {}
-            gtype = geom.get("type")
-            coords = geom.get("coordinates")
-            if not coords:
-                continue
-            if gtype == "Polygon":
-                for ring in coords:
-                    for pt in ring:
-                        if len(pt) >= 2:
-                            lngs.append(pt[0])
-                            lats.append(pt[1])
-            elif gtype == "MultiPolygon":
-                for poly in coords:
-                    for ring in poly:
-                        for pt in ring:
-                            if len(pt) >= 2:
-                                lngs.append(pt[0])
-                                lats.append(pt[1])
-
-        if not lngs or not lats:
+        bounds = getattr(self, "_fit_bounds", None)
+        if bounds is None:
             return
 
-        min_lng = min(lngs)
-        max_lng = max(lngs)
-        min_lat = min(lats)
-        max_lat = max(lats)
+        from geoviz_paleo_map.projection import lnglat_to_world
+
+        min_lng, max_lng, min_lat, max_lat = bounds
 
         # Add a tiny margin if range is zero
         if max_lng - min_lng < 0.01:
@@ -629,7 +636,7 @@ class PaleoMapCanvas(QWidget):
         # scale = 2.0 ** (zoom - 1.0)
         # zoom = log2(scale) + 1.0
         zoom = math.log2(scale) + 1.0
-        
+
         # Clamp zoom to the slider/viewport limits
         zoom = max(0.1, min(10.0, zoom))
 
@@ -650,9 +657,12 @@ class PaleoMapCanvas(QWidget):
             self._update_slider_params()
         if hasattr(self, "_locked_panel"):
             self._locked_panel.setGeometry(16, 16, 240, 180)
-            
-        self.fit_viewport_to_data()
-            
+
+        # Only auto-fit while the user has not yet zoomed/panned; once they
+        # have interacted, the viewport is theirs and a resize must not clobber it.
+        if not self._user_has_interacted:
+            self.fit_viewport_to_data()
+
         super().resizeEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:

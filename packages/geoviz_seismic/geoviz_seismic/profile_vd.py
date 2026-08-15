@@ -823,6 +823,18 @@ class ProfileVD(QWidget):
             super().mouseMoveEvent(event)
             return
 
+        # Drag an existing annotation (annotation mode, left button held):
+        # update its seismic coordinates to the cursor position.
+        if self._annotation_drag_idx is not None:
+            result = self._pixel_to_seismic(event.position())
+            if result is not None:
+                h_val, v_val, _, _ = result
+                ann = self._annotations[self._annotation_drag_idx]
+                ann.h_value = h_val
+                ann.v_value = v_val
+                self.update()
+            return
+
         # Middle-button pan
         if self._panning and self._pan_last is not None:
             img_rect = self._image_rect()

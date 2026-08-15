@@ -119,13 +119,22 @@ class CurveTrack(BaseTrack):
         self._sorted_values: dict[str, np.ndarray] = {}
         self._range_strs: dict[str, str] = {}
         for c in self._curves:
-            if c.depth != sorted(c.depth):
-                pairs = sorted(zip(c.depth, c.values))
-                self._sorted_depths[c.name] = np.asarray([p[0] for p in pairs], dtype=np.float64)
-                self._sorted_values[c.name] = np.asarray([p[1] for p in pairs], dtype=np.float64)
-            else:
-                self._sorted_depths[c.name] = np.asarray(c.depth, dtype=np.float64)
-                self._sorted_values[c.name] = np.asarray(c.values, dtype=np.float64)
+            depths = np.asarray(c.depth, dtype=np.float64)
+            values = np.asarray(c.values, dtype=np.float64)
+            # Drop samples with non-finite depth (NaN/Inf) first: they make an
+            # "already sorted" comparison meaningless (NaN comparisons are
+            # always False and NaN order is undefined) and would later break
+            # the searchsorted-based viewport culling.
+            finite = np.isfinite(depths)
+            if not np.all(finite):
+                depths = depths[finite]
+                values = values[finite]
+            if depths.size and not bool(np.all(depths[1:] >= depths[:-1])):
+                order = np.argsort(depths, kind="stable")
+                depths = depths[order]
+                values = values[order]
+            self._sorted_depths[c.name] = depths
+            self._sorted_values[c.name] = values
             vals = self._sorted_values[c.name]
             if len(vals) and not np.all(np.isnan(vals)):
                 vmin = float(np.nanmin(vals))

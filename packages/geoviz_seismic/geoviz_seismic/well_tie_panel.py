@@ -51,6 +51,11 @@ class WellTiePanel(QWidget):
         self._density = None
         self._synthetic = None
         self._synthetic_twt = None
+        # Calibration whose TWT curve the currently stored synthetic is aligned
+        # with (snapshot taken at generation time). Auto-tie shifts this
+        # snapshot rather than the running calibration, so re-applying the
+        # same measurement is idempotent.
+        self._tie_synthetic_calibration = None
         self._shift_samples = None
         self._correlation_coeff = None
 
@@ -141,6 +146,10 @@ class WellTiePanel(QWidget):
         self._shift_label.setStyleSheet("font-size: 12px; color: #4a5568;")
         tie_layout.addWidget(self._shift_label)
 
+        self._tie_status_label = QLabel("")
+        self._tie_status_label.setStyleSheet("font-size: 12px; color: #2b6cb0;")
+        tie_layout.addWidget(self._tie_status_label)
+
         layout.addWidget(tie_group)
 
         # --- Export ---
@@ -166,6 +175,7 @@ class WellTiePanel(QWidget):
     def set_calibration(self, calibration):
         """Store a WellTieCalibration instance."""
         self._calibration = calibration
+        self._tie_synthetic_calibration = calibration
 
     def set_well_logs(self, depths, sonic, density):
         """Store well log arrays for synthetic generation."""
@@ -206,27 +216,33 @@ class WellTiePanel(QWidget):
 
         self._synthetic = synth
         self._synthetic_twt = np.arange(len(synth), dtype=np.float64) * dt_ms
+        # Snapshot the calibration this synthetic was generated from; auto-tie
+        # shifts this snapshot so repeated ties stay idempotent.
+        self._tie_synthetic_calibration = self._calibration
 
         self._shift_samples = None
         self._correlation_coeff = None
         self._cc_label.setText("CC: --")
         self._shift_label.setText("Shift: -- samples")
+        self._tie_status_label.setText("")
         self.synthetic_changed.emit(self._synthetic_twt, self._synthetic)
 
     def auto_tie(self, seismic_trace: np.ndarray):
         """Run auto-tie against a seismic trace and update readout.
 
-        On success, re-emits ``synthetic_changed`` with TWT shifted by the
-        estimated lag so host views can redraw the aligned overlay.
+        On success, applies the estimated bulk shift to the stored
+        calibration (so the exported T-D table matches the aligned overlay)
+        and re-emits ``synthetic_changed`` with TWT shifted by the estimated
+        lag so host views can redraw the aligned overlay.
         """
         if self._synthetic is None:
             return
 
         try:
-            from geoviz_well_tie.auto_tie import auto_tie_with_quality
+            from geoviz_well_tie.auto_tie import correlate_synthetic_to_trace
         except ImportError:
             return
-        shift, cc = auto_tie_with_quality(seismic_trace, self._synthetic)
+        shift, cc = correlate_synthetic_to_trace(self._synthetic, seismic_trace)
         self._shift_samples = int(shift)
         self._correlation_coeff = float(cc)
         self._cc_label.setText(f"CC: {cc:.3f}")
@@ -238,8 +254,33 @@ class WellTiePanel(QWidget):
                 dt = float(twt[1] - twt[0])
             else:
                 dt = 4.0
+            shift_ms = self._shift_samples * dt
             # Positive shift = synthetic moves later (down) in time.
-            self.synthetic_changed.emit(twt + self._shift_samples * dt, self._synthetic)
+            self._apply_calibration_shift(shift_ms)
+            self.synthetic_changed.emit(twt + shift_ms, self._synthetic)
+
+    def _apply_calibration_shift(self, shift_ms: float):
+        """Bulk-shift the calibration's TWT axis so exports match the screen.
+
+        Replaces the stored calibration with one whose TWT curve is offset by
+        the auto-tie estimate (in ms). The offset is applied to the calibration
+        snapshot the current synthetic was generated from (not the running
+        calibration), so re-running auto-tie on the same synthetic is
+        idempotent. The exported T-D table then agrees with the synthetic
+        overlay aligned on screen.
+        """
+        if self._calibration is None:
+            return
+        try:
+            from geoviz_well_tie.calibration import WellTieCalibration
+        except ImportError:
+            return
+        gen_cal = self._tie_synthetic_calibration or self._calibration
+        self._calibration = WellTieCalibration(
+            gen_cal.depths,
+            np.asarray(gen_cal.twt, dtype=np.float64) + shift_ms,
+        )
+        self._tie_status_label.setText("标定已更新：T-D 表已同步自动标定")
 
     def _on_auto_tie(self):
         """Handle auto-tie button click. Emits signal for SeismicView to provide trace."""

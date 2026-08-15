@@ -12,10 +12,14 @@ belt-and-suspenders guard for the no-shapely fallback path).
 
 Grid coordinates are mapped to world via the Plate Carrée identity
 (``lnglat_to_world``) and then to screen pixels via the viewport, matching
-``FaciesPolygonsLayer``.
+``FaciesPolygonsLayer``. The world->screen transform is numpy-vectorized
+over each ring and the resulting screen-space ``QPainterPath`` lists are
+cached on the exact viewport key, so unchanged repaints reuse them instead
+of re-transforming every vertex (Issue #53).
 """
 from __future__ import annotations
 
+import numpy as np
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPolygonF
 
@@ -46,9 +50,18 @@ class FilledContourLayer(PaleoLayer):
                 QPointF(*lnglat_to_world(lng, lat))
                 for lng, lat in study_area_clip
             ]
+        # Single-entry screen-path cache; see _screen_paths(). The key bakes
+        # in id(self._bands), so set_bands() must reset it (Issue #53).
+        self._cache_key: tuple | None = None
+        self._cache_bands: list[BandedFill] | None = None
+        self._cache_items: list[tuple[BandedFill, list[QPainterPath]]] | None = None
 
     def set_bands(self, bands: list[BandedFill] | None) -> None:
         self._bands = list(bands or [])
+        # Bands replaced: invalidate the cached screen paths.
+        self._cache_key = None
+        self._cache_bands = None
+        self._cache_items = None
 
     def paint(self, painter: QPainter, viewport: PaleoMapViewport) -> None:
         if not self._bands:
@@ -64,30 +77,78 @@ class FilledContourLayer(PaleoLayer):
                                      for p in self._study_area_clip])
             painter.setClipPath(clip_screen, Qt.ClipOperation.IntersectClip)
 
-        for band in self._bands:
+        for band, paths in self._screen_paths(viewport):
             color = QColor(band.color)
             color.setAlpha(180)
             painter.setBrush(QBrush(color))
 
-            for poly_coords, offset_arr in zip(band.polygons, band.offsets):
-                path = QPainterPath()
-                path.setFillRule(Qt.FillRule.OddEvenFill)
-
-                for j in range(len(offset_arr) - 1):
-                    start_idx = offset_arr[j]
-                    end_idx = offset_arr[j + 1]
-                    ring_pts = poly_coords[start_idx:end_idx]
-                    if len(ring_pts) < 3:
-                        continue
-
-                    wx, wy = lnglat_to_world(ring_pts[0][0], ring_pts[0][1])
-                    sp = viewport.world_to_screen(wx, wy)
-                    path.moveTo(sp)
-                    for pt in ring_pts[1:]:
-                        wx, wy = lnglat_to_world(pt[0], pt[1])
-                        path.lineTo(viewport.world_to_screen(wx, wy))
-                    path.closeSubpath()
-
+            for path in paths:
                 painter.drawPath(path)
 
         painter.restore()
+
+    def _screen_paths(self, viewport: PaleoMapViewport
+                      ) -> list[tuple[BandedFill, list[QPainterPath]]]:
+        """Bands with ready-to-draw screen-space paths for ``viewport``.
+
+        Exact-match cache keyed on ``(id(self._bands), viewport.scale,
+        viewport.center_world, viewport.width, viewport.height)`` - those five
+        values fully determine the world->screen transform, so a hit reuses
+        the very same QPainterPath objects instead of re-transforming every
+        vertex. ``set_bands()`` replaces the list (new id) and clears the
+        entry; the bands list is also retained by reference so an id collision
+        after garbage collection can never serve a stale hit. Bands whose
+        world-space bbox misses ``viewport.world_bbox()`` are culled before
+        any path building.
+        """
+        key = (id(self._bands), viewport.scale, viewport.center_world,
+               viewport.width, viewport.height)
+        if (self._cache_key == key and self._cache_bands is self._bands
+                and self._cache_items is not None):
+            return self._cache_items
+
+        s = viewport.scale
+        cx, cy = viewport.center_world
+        ox = viewport.width / 2.0
+        oy = viewport.height / 2.0
+        w_min_x, w_min_y, w_max_x, w_max_y = viewport.world_bbox()
+
+        items: list[tuple[BandedFill, list[QPainterPath]]] = []
+        for band in self._bands:
+            # Coarse band-level culling: nothing of the band can be on screen
+            # when its world bbox does not intersect the visible rect.
+            band_min = np.array([np.inf, np.inf])
+            band_max = np.array([-np.inf, -np.inf])
+            for coords in band.polygons:
+                if coords.size:
+                    band_min = np.minimum(band_min, coords.min(axis=0))
+                    band_max = np.maximum(band_max, coords.max(axis=0))
+            if (band_max[0] < w_min_x or band_min[0] > w_max_x
+                    or band_max[1] < w_min_y or band_min[1] > w_max_y):
+                continue
+
+            paths: list[QPainterPath] = []
+            for poly_coords, offset_arr in zip(band.polygons, band.offsets):
+                # Vectorized world->screen transform (Plate Carrée identity,
+                # so this one pass subsumes lnglat_to_world + world_to_screen).
+                screen = np.empty_like(poly_coords, dtype=np.float64)
+                screen[:, 0] = (poly_coords[:, 0] - cx) * s + ox
+                screen[:, 1] = (cy - poly_coords[:, 1]) * s + oy
+
+                path = QPainterPath()
+                path.setFillRule(Qt.FillRule.OddEvenFill)
+                for j in range(len(offset_arr) - 1):
+                    ring = screen[offset_arr[j]:offset_arr[j + 1]]
+                    if len(ring) < 3:
+                        continue
+                    path.addPolygon(QPolygonF(
+                        [QPointF(x, y) for x, y in ring]))
+                if not path.isEmpty():
+                    paths.append(path)
+            if paths:
+                items.append((band, paths))
+
+        self._cache_key = key
+        self._cache_bands = self._bands
+        self._cache_items = items
+        return items

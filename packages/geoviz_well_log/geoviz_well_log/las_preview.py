@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -223,35 +224,12 @@ def _selected_value(tokens: list[str], index: int, null_value: float) -> float:
     return value
 
 
-def read_sampled_ascii(
-    path: str,
-    header: LASPreviewHeader,
-    selected: tuple[LASCurveHeader, ...],
-    stride: int,
-    max_samples: int = 2_000,
-) -> tuple[np.ndarray, dict[int, np.ndarray]]:
-    """Read only depth and selected curve columns into bounded arrays."""
-
-    if stride < 1:
-        raise ValueError("LAS sample stride must be positive")
-    if max_samples < 2:
-        raise ValueError("LAS preview requires at least two samples")
-
-    selected_indices = {curve.index for curve in selected}
-    known_indices = {curve.index for curve in header.curves}
-    if not selected_indices <= known_indices or header.depth_index in selected_indices:
-        raise ValueError("LAS selected curves are invalid")
-
-    sampled_depths: list[float] = []
-    sampled_values: dict[int, list[float]] = {curve.index: [] for curve in selected}
+def _iter_valid_rows(
+    path: str, header: LASPreviewHeader
+) -> Iterator[tuple[float, list[str]]]:
+    """Yield ``(depth, raw tokens)`` for every valid ASCII row in file order."""
     section = ""
-    valid_index = 0
-    last_valid_index = -1
-    last_depth = math.nan
-    last_values: dict[int, float] = {}
-    last_sampled_index = -1
-    pending_tokens: list[str] = []
-
+    pending: list[str] = []
     with open(path, "r", encoding="utf-8", errors="replace") as stream:
         for raw_line in stream:
             line = raw_line.strip()
@@ -266,7 +244,7 @@ def read_sampled_ascii(
             tokens = _data_tokens(line, header.delimiter)
             for row in _logical_rows(
                 tokens,
-                pending_tokens,
+                pending,
                 len(header.curves),
                 header.wrapped,
             ):
@@ -278,35 +256,115 @@ def read_sampled_ascii(
                 )
                 if depth is None:
                     continue
+                yield depth, row
 
-                row_values = {
-                    curve.index: _selected_value(
-                        row,
-                        curve.index,
-                        header.null_value,
-                    )
-                    for curve in selected
-                }
-                last_valid_index = valid_index
-                last_depth = depth
-                last_values = row_values
 
-                if valid_index % stride == 0 and len(sampled_depths) < max_samples:
-                    sampled_depths.append(depth)
-                    for curve in selected:
-                        sampled_values[curve.index].append(row_values[curve.index])
-                    last_sampled_index = valid_index
-                valid_index += 1
+def _minmax_indices(reference: np.ndarray, max_samples: int) -> np.ndarray:
+    """Return up to ``max_samples`` row indices that keep curve extremes.
 
-    if last_valid_index >= 0 and last_sampled_index != last_valid_index:
-        if len(sampled_depths) < max_samples:
-            sampled_depths.append(last_depth)
-            for curve in selected:
-                sampled_values[curve.index].append(last_values[curve.index])
-        else:
-            sampled_depths[-1] = last_depth
-            for curve in selected:
-                sampled_values[curve.index][-1] = last_values[curve.index]
+    Rows are split into ``max_samples // 2`` equal bins; each bin emits its
+    min and max rows in index order (a bin whose min and max coincide emits
+    a single row), so peaks and spikes survive downsampling. NaN (null)
+    values rank as the maximum so data gaps stay visible, while the true
+    minimum ignores them.
+    """
+    n = reference.size
+    if n <= max_samples:
+        return np.arange(n, dtype=np.intp)
+
+    bin_count = max_samples // 2
+    step = math.ceil(n / bin_count)
+    n_bins = math.ceil(n / step)
+    # NaN outranks every finite value so argmin/argmax select gap rows.
+    ranked = np.where(np.isnan(reference), np.inf, reference)
+
+    parts: list[np.ndarray] = []
+    full_count = (n_bins - 1) * step
+    if n_bins > 1:
+        full = ranked[:full_count].reshape(n_bins - 1, step)
+        col_min = np.argmin(full, axis=1)
+        col_max = np.argmax(full, axis=1)
+        row_offsets = np.arange(n_bins - 1) * step
+        idx_min = row_offsets + col_min
+        idx_max = row_offsets + col_max
+        # Emit min then max, in index order within each bin (avoid zigzag).
+        min_first = idx_min <= idx_max
+        first = np.where(min_first, idx_min, idx_max)
+        second = np.where(min_first, idx_max, idx_min)
+        out = np.empty((n_bins - 1) * 2, dtype=np.intp)
+        out[0::2] = first
+        out[1::2] = second
+        parts.append(out)
+
+    if full_count < n:
+        chunk = ranked[full_count:]
+        lo = full_count + int(np.argmin(chunk))
+        hi = full_count + int(np.argmax(chunk))
+        lo, hi = (lo, hi) if lo <= hi else (hi, lo)
+        parts.append(np.asarray([lo, hi], dtype=np.intp))
+
+    return np.concatenate(parts) if parts else np.empty(0, dtype=np.intp)
+
+
+def read_sampled_ascii(
+    path: str,
+    header: LASPreviewHeader,
+    selected: tuple[LASCurveHeader, ...],
+    stride: int,
+    max_samples: int = 2_000,
+) -> tuple[np.ndarray, dict[int, np.ndarray]]:
+    """Read only depth and selected curve columns into bounded arrays.
+
+    Sampling uses min-max binning instead of a uniform ``stride`` so curve
+    spikes and null gaps survive downsampling; ``stride`` is validated but
+    kept only for API compatibility. ``max_samples`` bounds the output.
+    """
+
+    if stride < 1:
+        raise ValueError("LAS sample stride must be positive")
+    if max_samples < 2:
+        raise ValueError("LAS preview requires at least two samples")
+
+    selected_indices = {curve.index for curve in selected}
+    known_indices = {curve.index for curve in header.curves}
+    if not selected_indices <= known_indices or header.depth_index in selected_indices:
+        raise ValueError("LAS selected curves are invalid")
+
+    sampled_depths: list[float] = []
+    sampled_values: dict[int, list[float]] = {curve.index: [] for curve in selected}
+
+    indices: np.ndarray | None = None
+    if header.row_count > max_samples:
+        # Bounded read: pass one collects the reference column that drives
+        # the bin extrema (first selected curve, depth when none selected).
+        reference_index = selected[0].index if selected else header.depth_index
+        reference: list[float] = []
+        for _depth, tokens in _iter_valid_rows(path, header):
+            reference.append(
+                _selected_value(tokens, reference_index, header.null_value)
+            )
+        indices = _minmax_indices(np.asarray(reference, dtype=np.float64), max_samples)
+        n = len(reference)
+        if n > 0 and indices[-1] != n - 1:
+            # Keep the deepest valid row so bottom depth never truncates.
+            if indices.size < max_samples:
+                indices = np.append(indices, n - 1)
+            else:
+                indices[-1] = n - 1
+
+    target_pos = 0
+    for row_index, (depth, tokens) in enumerate(_iter_valid_rows(path, header)):
+        if indices is not None and row_index != indices[target_pos]:
+            continue
+        sampled_depths.append(depth)
+        for curve in selected:
+            sampled_values[curve.index].append(
+                _selected_value(tokens, curve.index, header.null_value)
+            )
+        if indices is not None:
+            target_pos += 1
+            if target_pos == indices.size:
+                break
 
     depth_array = np.asarray(sampled_depths, dtype=np.float64)
     value_arrays = {
@@ -314,6 +372,30 @@ def read_sampled_ascii(
         for index, values in sampled_values.items()
     }
     return depth_array, value_arrays
+
+
+def read_full_ascii(
+    path: str,
+    header: LASPreviewHeader,
+) -> tuple[np.ndarray, dict[int, np.ndarray]]:
+    """Read every valid ASCII row (no downsampling) into depth + value arrays.
+
+    Returns the complete dataset; prefer :func:`read_sampled_ascii` for
+    previews of large files. Used by the legacy
+    :mod:`geoviz_well_log.las_parser` compatibility API.
+    """
+    depths: list[float] = []
+    values: dict[int, list[float]] = {curve.index: [] for curve in header.curves}
+    for depth, tokens in _iter_valid_rows(path, header):
+        depths.append(depth)
+        for curve in header.curves:
+            values[curve.index].append(
+                _selected_value(tokens, curve.index, header.null_value)
+            )
+    return (
+        np.asarray(depths, dtype=np.float64),
+        {index: np.asarray(col, dtype=np.float64) for index, col in values.items()},
+    )
 
 
 def curve_data_from_arrays(
@@ -381,19 +463,25 @@ def _load_las_preview_fast(
 
     valid_arr = arr[valid_mask]
     n_valid = valid_arr.shape[0]
-    stride = max(1, math.ceil(n_valid / max_samples))
 
-    indices = np.arange(0, n_valid, stride)
+    selected = header.non_depth_curves[:max_curves]
+
+    # Min-max binning mirrors the pure-Python path: the first selected curve
+    # (depth when none) drives the bin extrema so both paths agree exactly.
+    reference_col = selected[0].index if selected else header.depth_index
+    reference = valid_arr[:, reference_col].copy()
+    null_mask = np.isclose(reference, header.null_value, atol=1e-6) | ~np.isfinite(reference)
+    reference[null_mask] = np.nan
+
+    indices = _minmax_indices(reference, max_samples)
     if indices[-1] != n_valid - 1:
-        if len(indices) < max_samples:
+        if indices.size < max_samples:
             indices = np.append(indices, n_valid - 1)
         else:
             indices[-1] = n_valid - 1
 
     sampled_arr = valid_arr[indices]
     depth_array = sampled_arr[:, header.depth_index]
-
-    selected = header.non_depth_curves[:max_curves]
 
     curves: list[CurveData] = []
     for item in selected:
@@ -478,6 +566,7 @@ __all__ = [
     "get_las_parser_provider",
     "inspect_las_file",
     "load_las_preview",
+    "read_full_ascii",
     "read_sampled_ascii",
     "set_las_parser_provider",
 ]

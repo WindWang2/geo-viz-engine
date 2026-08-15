@@ -85,32 +85,29 @@ class SeismicVolumeMeta(BaseModel):
     t0_ms: float = 0.0
     bin_grid: BinGridGeometry | None = None
 
-    def xy_to_il_xl(self, x: float, y: float) -> tuple[float, float]:
-        """Convert world (x, y) to absolute (inline_number, crossline_number)."""
+    def xy_to_il_xl(self, x: float, y: float) -> tuple[float, float] | None:
+        """Convert world (x, y) to absolute (inline_number, crossline_number).
+
+        Returns ``None`` when no ``bin_grid`` is available — the volume has
+        no geographic calibration, so fabricated default coordinates would
+        be misleading.  Callers must surface "未标定" instead of fake values.
+        """
         if self.bin_grid is None:
-            self.bin_grid = BinGridGeometry(
-                x_origin=500000.0,
-                y_origin=3000000.0,
-                il_azimuth_deg=0.0,
-                il_spacing_m=25.0,
-                xl_spacing_m=25.0,
-            )
+            return None
         il_frac, xl_frac = self.bin_grid.xy_to_il_xl(x, y)
         return (
             self.iline_start + il_frac * self.iline_step,
             self.xline_start + xl_frac * self.xline_step,
         )
 
-    def il_xl_to_xy(self, iline: float, xline: float) -> tuple[float, float]:
-        """Convert absolute (inline, crossline) numbers to world (x, y) coordinates."""
+    def il_xl_to_xy(self, iline: float, xline: float) -> tuple[float, float] | None:
+        """Convert absolute (inline, crossline) numbers to world (x, y) coordinates.
+
+        Returns ``None`` when no ``bin_grid`` is available (volume has no
+        geographic calibration).
+        """
         if self.bin_grid is None:
-            self.bin_grid = BinGridGeometry(
-                x_origin=500000.0,
-                y_origin=3000000.0,
-                il_azimuth_deg=0.0,
-                il_spacing_m=25.0,
-                xl_spacing_m=25.0,
-            )
+            return None
         il_step = self.iline_step if self.iline_step != 0 else 1
         xl_step = self.xline_step if self.xline_step != 0 else 1
         il_frac = (iline - self.iline_start) / il_step

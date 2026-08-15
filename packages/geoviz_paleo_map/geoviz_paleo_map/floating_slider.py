@@ -4,12 +4,32 @@ from __future__ import annotations
 import math
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from geoviz_paleo_map.label_policy import chrome_font_size
 
-# 96 DPI: 1 pixel = 0.02646 cm
-_CM_PER_PX = 0.02646
+# Fallback for headless runs / no primary screen: classic 96 DPI
+# (1 px = 0.02646 cm at 96 DPI).
+_CM_PER_PX_FALLBACK = 0.02646
+
+
+def _cm_per_px() -> float:
+    """CM per device pixel from the primary screen's physical DPI.
+
+    Falls back to 96 DPI (0.02646 cm/px) when no QApplication or primary
+    screen is available (offscreen rendering, headless tests).
+    """
+    app = QApplication.instance()
+    if app is None:
+        return _CM_PER_PX_FALLBACK
+    screen = app.primaryScreen()
+    if screen is None:
+        return _CM_PER_PX_FALLBACK
+    dpi = screen.physicalDotsPerInch()
+    if dpi <= 0.0 or not math.isfinite(dpi):
+        return _CM_PER_PX_FALLBACK
+    return 2.54 / dpi
+
 
 # Canvas zoom limits (must match ZoomPanHandler)
 _ZOOM_MIN = 0.1
@@ -91,10 +111,10 @@ class FloatingScaleSlider(QWidget):
         """Scale denominator at given zoom. Smaller = more zoomed in."""
         km_per_deg = self._kpd
         km_per_px = km_per_deg / (2 ** (zoom - 1))
-        return (km_per_px * 1e5) / _CM_PER_PX
+        return (km_per_px * 1e5) / _cm_per_px()
 
     def _scale_den_to_zoom(self, den: float) -> float:
-        km_per_px = (den * _CM_PER_PX) / 1e5
+        km_per_px = (den * _cm_per_px()) / 1e5
         km_per_deg = self._kpd
         return math.log2(km_per_deg / km_per_px) + 1.0
 

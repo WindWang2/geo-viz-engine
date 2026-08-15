@@ -13,6 +13,9 @@ Deterministic, pure-numpy geostatistical core (no Qt, no RNG):
 - :func:`ordinary_kriging` — builds the augmented covariance system and
   solves it with ``numpy.linalg``, returning the prediction AND the kriging
   variance per target point.
+- :func:`leave_one_out_predictions` — closed-form leave-one-out predictions
+  at each sample location from a single inversion of the augmented system
+  (fit the variogram once, invert once, no per-point re-solve).
 - :func:`kriging_grid` — 2D wrapper for regular grids (matches the
   ``(len(grid_y), len(grid_x))`` convention of the other backends).
 
@@ -379,6 +382,88 @@ def ordinary_kriging(
     return pred, variance
 
 
+def leave_one_out_predictions(
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    *,
+    variogram_model: str = "spherical",
+    range_: float | None = None,
+    sill: float | None = None,
+    nugget: float | None = None,
+    ridge: float = _DEFAULT_RIDGE,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Closed-form leave-one-out predictions at each sample location.
+
+    The variogram is fitted at most ONCE (any ``None`` parameter is resolved
+    from the full sample set), the augmented kriging system is built and
+    inverted once, and every leave-one-out prediction is derived from that
+    single inverse in O(n) each:
+
+    .. math:: yhat_i = - sum_{j != i} V[j, i] * z_j / V[i, i]
+
+    where ``V = M^{-1}`` and ``M = [[A, 1], [1^T, 0]]`` is the augmented
+    system of :func:`ordinary_kriging` (standard cross-validation in a unique
+    neighborhood, cf. Dubrule 1983). This avoids re-fitting the variogram and
+    re-solving an (n-1)-sized system for every left-out point.
+
+    Returns ``(predictions, z_dedup)`` aligned with the deduplicated samples
+    (exact duplicate locations are collapsed to their mean, exactly as in
+    :func:`ordinary_kriging`). Raises ``ValueError`` when the system stays
+    singular even after ridge regularization or no finite prediction can be
+    formed for a sample.
+    """
+    if variogram_model not in SUPPORTED_MODELS:
+        raise ValueError(f"unknown variogram model {variogram_model!r}; choose from {SUPPORTED_MODELS}")
+    x, y, z = _dedupe_points(x, y, z)
+    n = len(z)
+    if n < _MIN_SAMPLES:
+        raise ValueError("leave-one-out needs at least 2 distinct sample points")
+
+    if any(p is None for p in (range_, sill, nugget)):
+        fitted = fit_variogram(x, y, z, model=variogram_model)
+        if range_ is None:
+            range_ = fitted["range"]
+        if sill is None:
+            sill = fitted["sill"]
+        if nugget is None:
+            nugget = fitted["nugget"]
+    if range_ is None:
+        range_ = _default_params(x, y, z)["range"]
+    if sill is None:
+        sill = _default_params(x, y, z)["sill"]
+    if nugget is None:
+        nugget = 0.0
+    range_ = float(range_)
+    sill = float(sill)
+    nugget = float(nugget)
+    if range_ <= 0.0 or sill < 0.0 or nugget < 0.0:
+        raise ValueError("variogram parameters must satisfy range > 0, sill >= 0, nugget >= 0")
+    total_sill = sill + nugget
+
+    h = _pairwise_h(x, y)
+    a_mat = _covariance(h, variogram_model, range_, sill, nugget)
+    aug = np.empty((n + 1, n + 1), dtype=np.float64)
+    aug[:n, :n] = a_mat
+    aug[:n, n] = 1.0
+    aug[n, :n] = 1.0
+    aug[n, n] = 0.0
+
+    # Solving against the identity returns M^{-1} through the same
+    # ridge-fallback path as ordinary_kriging.
+    v = _solve_augmented(aug, np.eye(n + 1), total_sill, ridge)
+    b = v[:n, :n]
+    diag = np.diag(b)
+    if not np.all(np.abs(diag) > 1e-14):
+        raise ValueError("leave-one-out system degenerate: zero diagonal in the inverse")
+    # sum_{j != i} V[j, i] * z_j = (B^T z)_i - B[i, i] * z_i
+    numer = b.T @ z - diag * z
+    preds = -numer / diag
+    if not np.all(np.isfinite(preds)):
+        raise ValueError("leave-one-out predictions are not finite")
+    return preds, z
+
+
 def kriging_grid(
     x: np.ndarray,
     y: np.ndarray,
@@ -404,6 +489,7 @@ __all__ = [
     "empirical_variogram",
     "fit_variogram",
     "kriging_grid",
+    "leave_one_out_predictions",
     "ordinary_kriging",
     "variogram_model_value",
 ]

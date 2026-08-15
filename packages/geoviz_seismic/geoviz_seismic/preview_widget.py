@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QCoreApplication, Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from .loader import SeismicLoader
 from .models import SeismicVolumeMeta, SliceInfo
 from .profile_widget import ProfileWidget
+from .workers import SliceReadWorker, retain_background_worker
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class SeismicPreviewPayload:
     source_path: str = ""
     max_slice_axis: int = 512
     axes: dict[str, SeismicAxisSpec] = field(default_factory=dict)
+    meta: SeismicVolumeMeta | None = None
 
 
 _MODE_LABELS = {
@@ -128,6 +130,32 @@ def axis_specs_from_meta(meta: SeismicVolumeMeta) -> dict[str, SeismicAxisSpec]:
     }
 
 
+def _meta_from_axes(axes: dict[str, SeismicAxisSpec]) -> SeismicVolumeMeta | None:
+    """Best-effort metadata reconstructed from axis specs (payloads without ``meta``).
+
+    The time axis only encodes sample indices (t0=0, dt=1), so time-axis tick
+    labels degrade to sample numbers when the real metadata was not carried.
+    """
+    inline = axes.get("inline")
+    crossline = axes.get("crossline")
+    time = axes.get("time")
+    if inline is None or crossline is None or time is None:
+        return None
+    return SeismicVolumeMeta(
+        filename="",
+        n_inlines=inline.count,
+        n_crosslines=crossline.count,
+        n_samples=time.count,
+        sample_interval=float(time.step),
+        iline_start=inline.start,
+        iline_step=inline.step,
+        xline_start=crossline.start,
+        xline_step=crossline.step,
+        dt_ms=float(time.step),
+        t0_ms=float(time.start),
+    )
+
+
 def _read_raw_slice(loader: SeismicLoader, mode: str, position: int) -> np.ndarray:
     """Return display-oriented array (rows=vertical, cols=horizontal)."""
     if mode == "inline":
@@ -183,8 +211,16 @@ class SeismicPreviewWidget(QWidget):
         self._source_path: str = ""
         self._max_slice_axis: int = 512
         self._axes: dict[str, SeismicAxisSpec] = {}
-        self._loading = False
+        self._meta: SeismicVolumeMeta | None = None
         self._suppress_slider = False
+        # Background slice reader: owns a long-lived SeismicLoader inside a
+        # QThread so the UI thread never performs SEGY I/O.  ``_generation``
+        # invalidates in-flight/queued results after the volume or clear().
+        self._slice_worker: SliceReadWorker | None = None
+        self._slice_worker_stopped = True
+        self._generation = 0
+        self._latest_requests: dict[str, int] = {}
+        self._prefetch_cache: dict[tuple[str, int], SeismicSlice] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -233,6 +269,16 @@ class SeismicPreviewWidget(QWidget):
         self._source_path = str(payload.source_path or "")
         self._max_slice_axis = max(1, int(payload.max_slice_axis or 512))
         self._axes = dict(payload.axes or {})
+        self._meta = payload.meta or _meta_from_axes(self._axes)
+
+        # Point the background reader at this volume; the bumped generation
+        # discards queued/in-flight requests left over from a previous volume.
+        self._generation += 1
+        self._latest_requests = {}
+        self._prefetch_cache = {}
+        if self._source_path:
+            self._ensure_slice_worker()
+            self._slice_worker.set_volume(self._source_path, self._generation)
 
         initial_index = self.mode_combo.findData(payload.initial_mode)
         if initial_index < 0:
@@ -255,9 +301,14 @@ class SeismicPreviewWidget(QWidget):
 
     def clear(self) -> None:
         self._reload_timer.stop()
+        self._generation += 1
+        self._latest_requests = {}
+        self._prefetch_cache = {}
+        self._stop_slice_worker()
         self._slices = {}
         self._source_path = ""
         self._axes = {}
+        self._meta = None
         self._suppress_slider = True
         try:
             self.position_slider.setEnabled(False)
@@ -287,7 +338,7 @@ class SeismicPreviewWidget(QWidget):
 
     def _on_slider_changed(self, index: int) -> None:
         self._update_position_label(index)
-        if self._suppress_slider or self._loading:
+        if self._suppress_slider:
             return
         # Use preloaded slice immediately when it matches; otherwise debounce SEGY I/O.
         mode = self.mode_combo.currentData()
@@ -358,21 +409,108 @@ class SeismicPreviewWidget(QWidget):
         if preloaded is not None and int(preloaded.info.position) == position:
             self._apply_slice(preloaded)
             return
+        cached = self._prefetch_cache.pop((mode, position), None)
+        if cached is not None:
+            self._slices[mode] = cached
+            self._apply_slice(cached)
+            return
+        # Async: the worker keeps one SeismicLoader open and re-reads only the
+        # requested slice; results arrive via slice_ready on the UI thread.
+        self._ensure_slice_worker()
+        self._latest_requests[mode] = position
+        self._slice_worker.request(mode, position, self._generation)
 
-        self._loading = True
-        try:
-            seismic_slice = load_preview_slice(
-                self._source_path,
+    def _build_slice_from_raw(self, mode: str, position: int, data) -> SeismicSlice:
+        """Convert a worker-produced raw slice into a display SeismicSlice."""
+        if self._meta is None:
+            raise ValueError("missing volume metadata")
+        display_data = np.asarray(data).T
+        row_step, col_step = _sample_steps(display_data, self._max_slice_axis)
+        return SeismicSlice(
+            data=downsample_2d(display_data, self._max_slice_axis),
+            info=_slice_info(
                 mode,
-                position,
-                self._max_slice_axis,
-            )
-            self._slices[mode] = seismic_slice
-            self._apply_slice(seismic_slice)
+                int(position),
+                display_data,
+                self._meta,
+                row_step,
+                col_step,
+            ),
+        )
+
+    def _on_slice_ready(
+        self, slice_type: str, actual_pos: int, data, generation: int
+    ) -> None:
+        if generation != self._generation or not self._source_path:
+            return
+        if self._latest_requests.get(slice_type) != actual_pos:
+            return  # superseded by a newer position request
+        try:
+            seismic_slice = self._build_slice_from_raw(slice_type, actual_pos, data)
         except Exception as error:  # noqa: BLE001 — UI boundary
             self.profile.set_overlay_text(f"切片加载失败: {error}")
-        finally:
-            self._loading = False
+            return
+        self._slices[slice_type] = seismic_slice
+        if slice_type == self.mode_combo.currentData():
+            self._apply_slice(seismic_slice)
+
+    def _on_prefetch_ready(
+        self, slice_type: str, actual_pos: int, data, generation: int
+    ) -> None:
+        if generation != self._generation or not self._source_path:
+            return
+        try:
+            seismic_slice = self._build_slice_from_raw(slice_type, actual_pos, data)
+        except Exception:  # noqa: BLE001 — prefetch failure is non-fatal
+            return
+        if len(self._prefetch_cache) >= 32:
+            self._prefetch_cache.clear()
+        self._prefetch_cache[(slice_type, actual_pos)] = seismic_slice
+
+    def _on_slice_read_error(
+        self, slice_type: str, actual_pos: int, generation: int
+    ) -> None:
+        if generation != self._generation:
+            return
+        self.profile.set_overlay_text(f"切片加载失败: {slice_type} {actual_pos}")
+
+    def _ensure_slice_worker(self) -> None:
+        if self._slice_worker is None:
+            # Keep the QThread unparented but retained until it stops: parenting
+            # it to this widget aborts if QWidget disposal reaches it first.
+            worker = SliceReadWorker()
+            worker.slice_ready.connect(self._on_slice_ready)
+            worker.prefetch_ready.connect(self._on_prefetch_ready)
+            worker.read_error.connect(self._on_slice_read_error)
+            retain_background_worker(worker)
+            app = QCoreApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(worker.stop)
+            self._slice_worker = worker
+        self._slice_worker_stopped = False
+        self._slice_worker.ensure_running()
+
+    def _stop_slice_worker(self) -> None:
+        """Stop the slice-read worker exactly once (idempotent)."""
+        if self._slice_worker is not None and not self._slice_worker_stopped:
+            self._slice_worker_stopped = True
+            self._slice_worker.stop()
+
+    def cleanup(self) -> None:
+        """Stop the background reader and reset the widget (e.g. on release)."""
+        self._generation += 1
+        self._stop_slice_worker()
+        self.clear()
+
+    def __del__(self):
+        # Widgets are often dropped without cleanup() (tests, tab switches);
+        # the long-lived worker thread must not outlive the process or it
+        # aborts at interpreter teardown ("QThread: Destroyed while still
+        # running").
+        try:
+            self._stop_slice_worker()
+        except Exception:  # noqa: BLE001, S110 — best-effort teardown
+            pass
 
     def _apply_slice(self, seismic_slice: SeismicSlice) -> None:
         self.profile.set_overlay_text(None)

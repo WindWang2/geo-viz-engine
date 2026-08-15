@@ -167,8 +167,8 @@ class TestSeismicVolumeMetaSpatial:
         assert il == pytest.approx(1004.0, abs=0.5)
         assert xl == pytest.approx(2002.0, abs=0.5)
 
-    def test_xy_to_il_xl_no_bin_grid_uses_default(self):
-        """Calling xy_to_il_xl without bin_grid falls back to a default grid and returns il/xl."""
+    def test_xy_to_il_xl_without_bin_grid_returns_none(self):
+        """xy_to_il_xl without bin_grid returns None instead of a fabricated grid."""
         meta = SeismicVolumeMeta(
             filename="test.sgy",
             n_inlines=10,
@@ -181,14 +181,12 @@ class TestSeismicVolumeMetaSpatial:
             xline_step=1,
             dt_ms=4.0,
         )
-        # The API now auto-creates a default BinGridGeometry on first call
-        # (graceful fallback) instead of raising. The default grid is set as a
-        # side effect, and a deterministic (il, xl) pair is returned.
+        # #46 removed the implicit default-grid fallback: an uncalibrated
+        # volume must not fabricate coordinates, so the call fails explicitly
+        # (None) and leaves bin_grid untouched.
         assert meta.bin_grid is None
-        il, xl = meta.xy_to_il_xl(100.0, 200.0)
-        assert meta.bin_grid is not None
-        assert isinstance(il, float)
-        assert isinstance(xl, float)
+        assert meta.xy_to_il_xl(100.0, 200.0) is None
+        assert meta.bin_grid is None
 
 
 # ---------------------------------------------------------------------------
