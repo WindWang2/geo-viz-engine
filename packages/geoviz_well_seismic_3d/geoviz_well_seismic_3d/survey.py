@@ -48,12 +48,22 @@ def survey_from_corners(
     n_samples: int,
     dt_ms: float,
     t0_ms: float = 0.0,
+    iline_step: int | None = None,
+    xline_step: int | None = None,
+    n_inlines: int | None = None,
+    n_crosslines: int | None = None,
 ) -> SurveySpec:
     """Build a survey from three grid corners (horizon/SEGY text-header style).
 
     * **p1**: origin corner (il0, xl0, x0, y0)
     * **p2**: same inline as p1, opposite crossline (il0, xl1, x1, y1)
     * **p3**: same crossline as p2, opposite inline (il1, xl1, x2, y2)
+
+    Line numbering defaults to step ±1 between the corner numbers. Real SEGY
+    often numbers lines with a larger step (e.g. IL 1000, 1002, …): pass the
+    loader's actual ``iline_step``/``xline_step`` and counts so the grid has
+    the right number of bins — deriving them from the corner numbers alone
+    would double-count the axis and misregister every IL/XL↔XY conversion.
     """
     il0, xl0, x0, y0 = (float(v) for v in p1)
     il0b, xl1, x1, y1 = (float(v) for v in p2)
@@ -64,16 +74,37 @@ def survey_from_corners(
     if abs(xl1 - xl1b) > 1e-6:
         raise ValueError("p2 and p3 must share the same crossline number")
 
-    n_il_steps = max(1, int(round(abs(il1 - il0))))
-    n_xl_steps = max(1, int(round(abs(xl1 - xl0))))
-    iline_step = 1 if il1 >= il0 else -1
-    xline_step = 1 if xl1 >= xl0 else -1
+    def _resolve(
+        corner_span: float,
+        step: int | None,
+        count: int | None,
+        label: str,
+    ) -> tuple[int, int]:
+        if step is None:
+            step = 1 if corner_span >= 0 else -1
+        step = int(step) or 1
+        if count is None:
+            count = int(round(abs(corner_span))) + 1
+        count = max(1, int(count))
+        span = (count - 1) * abs(step)
+        if abs(int(round(abs(corner_span))) - span) > 1e-6 and step != 0:
+            raise ValueError(
+                f"{label}: corner numbers span {corner_span:g} but "
+                f"{count} lines x step {step} span {span}"
+            )
+        if (corner_span < 0) != (step < 0) and corner_span != 0:
+            step = -step
+        return step, count
 
-    # Distance along XL edge (p1→p2) and IL edge (p2→p3)
+    iline_step, n_il = _resolve(il1 - il0, iline_step, n_inlines, "inline")
+    xline_step, n_xl = _resolve(xl1 - xl0, xline_step, n_crosslines, "crossline")
+
+    # Distance along XL edge (p1→p2) and IL edge (p2→p3): the physical edge
+    # length spans (count-1) bins regardless of the line-number step.
     xl_len = float(np_hypot(x1 - x0, y1 - y0))
     il_len = float(np_hypot(x2 - x1, y2 - y1))
-    xl_spacing = xl_len / n_xl_steps if n_xl_steps else 1.0
-    il_spacing = il_len / n_il_steps if n_il_steps else 1.0
+    xl_spacing = xl_len / (n_xl - 1) if n_xl > 1 else 1.0
+    il_spacing = il_len / (n_il - 1) if n_il > 1 else 1.0
 
     # Azimuth of inline axis from north (+Y), clockwise (BinGridGeometry convention).
     # IL direction: p2→p3. For classic IL=+Y/XL=+X, az=0.
@@ -110,8 +141,8 @@ def survey_from_corners(
         iline_step=iline_step,
         xline_start=int(round(xl0)),
         xline_step=xline_step,
-        n_inlines=n_il_steps + 1,
-        n_crosslines=n_xl_steps + 1,
+        n_inlines=n_il,
+        n_crosslines=n_xl,
         n_samples=int(n_samples),
         dt_ms=float(dt_ms),
         t0_ms=float(t0_ms),

@@ -160,21 +160,41 @@ class SeismicLoader:
     def read_trace(self, iline: int, xline: int) -> np.ndarray:
         """Read a single trace at the given (inline, crossline) position.
 
+        Uses direct trace indexing on the inline-sorted layout — one trace of
+        I/O instead of gathering the whole inline gather (the old path cost
+        O(n_xl * n_t) per call, which fenced fence extraction to ~1ms per
+        column on large surveys).
+
         Returns:
             ``(n_samples,)`` float32 trace.
         """
         try:
             f = self._open()
             meta = self._meta or self.inspect()
-            # Use segyio's trace sorting to index efficiently
-            inline_data = np.asarray(f.iline[iline], dtype=np.float32)
-            xl_idx = (xline - meta.xline_start) // meta.xline_step
-            if xl_idx < 0 or xl_idx >= inline_data.shape[0]:
+            il_idx = (int(iline) - meta.iline_start) // meta.iline_step
+            xl_idx = (int(xline) - meta.xline_start) // meta.xline_step
+            if not (0 <= il_idx < meta.n_inlines):
+                raise ValueError(
+                    f"Inline {iline} out of range "
+                    f"(available: {meta.iline_start}-{meta.iline_start + (meta.n_inlines - 1) * meta.iline_step})."
+                )
+            if not (0 <= xl_idx < meta.n_crosslines):
                 raise ValueError(
                     f"Crossline {xline} out of range "
                     f"(available: {meta.xline_start}-{meta.xline_start + (meta.n_crosslines - 1) * meta.xline_step})."
                 )
-            return inline_data[xl_idx, :]
+            # Respect the file's actual trace sorting for direct indexing.
+            try:
+                sorting = int(f.sorting)
+            except Exception:
+                sorting = 2  # segyio TraceSortingFormat.INLINE_SORTING
+            if sorting == 1:  # CROSSLINE_SORTING
+                trace_index = xl_idx * meta.n_inlines + il_idx
+            else:
+                trace_index = il_idx * meta.n_crosslines + xl_idx
+            return np.ascontiguousarray(
+                f.trace[trace_index], dtype=np.float32
+            )
         except (KeyError, ValueError) as e:
             raise ValueError(
                 f"Failed to read trace at ({iline}, {xline}) from {self._path}: {e}"

@@ -49,7 +49,9 @@ def survey_corners_from_segy(
                 "loader_n_inlines": m.n_inlines,
                 "loader_n_crosslines": m.n_crosslines,
                 "loader_iline_start": m.iline_start,
+                "loader_iline_step": getattr(m, "iline_step", 1),
                 "loader_xline_start": m.xline_start,
+                "loader_xline_step": getattr(m, "xline_step", 1),
                 "n_samples": m.n_samples,
                 "dt_ms": m.dt_ms,
                 "t0_ms": m.t0_ms,
@@ -169,23 +171,63 @@ def _corners_from_trace_scan(f, n_samples: int, dt_ms: float, t0_ms: float, load
     last_xl = int(xl1)
     x_at_p2, y_at_p2 = x0, y0
     x_at_p3, y_at_p3 = x1, y1
-    for i in range(0, min(n, 5000), max(1, n // 2000)):
-        h = f.header[i]
-        il = int(h[TF.FieldRecord] or 0)
-        xl = int(h[TF.CDP] or 0)
-        sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
-        if il == first_il and xl >= last_xl:
-            last_xl = xl
-            x_at_p2, y_at_p2 = sx, sy
+    # When loader counts are known, traces are iline-major sorted: the first
+    # inline occupies traces [0, n_xl) and the last inline the final block.
+    # Scanning those blocks exactly beats the old strided sample, which could
+    # step over the last crossline and collapse P2 onto P1 (zero-length XL
+    # edge → zero bin spacing).
+    n_xl = loader_meta.get("loader_n_crosslines")
+    first_block = range(0, min(n, int(n_xl))) if n_xl else None
+    last_block = (
+        range(max(0, n - int(n_xl)), n) if n_xl else None
+    )
+    if first_block is not None:
+        for i in first_block:
+            h = f.header[i]
+            xl = int(h[TF.CDP] or 0)
+            sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
+            if xl >= last_xl:
+                last_xl = xl
+                x_at_p2, y_at_p2 = sx, sy
+        # The last crossline of the first inline is p2; p3 shares it.
+        for i in first_block:
+            h = f.header[i]
+            if int(h[TF.CDP] or 0) == last_xl:
+                x_at_p2, y_at_p2 = (
+                    float(h[TF.SourceX] or 0),
+                    float(h[TF.SourceY] or 0),
+                )
+                break
+    else:
+        for i in range(0, min(n, 5000), max(1, n // 2000)):
+            h = f.header[i]
+            il = int(h[TF.FieldRecord] or 0)
+            xl = int(h[TF.CDP] or 0)
+            sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
+            if il == first_il and xl >= last_xl:
+                last_xl = xl
+                x_at_p2, y_at_p2 = sx, sy
     last_il = int(il1)
-    for i in range(max(0, n - 5000), n, max(1, n // 2000)):
-        h = f.header[i]
-        il = int(h[TF.FieldRecord] or 0)
-        xl = int(h[TF.CDP] or 0)
-        sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
-        if xl == last_xl and il >= last_il:
-            last_il = il
-            x_at_p3, y_at_p3 = sx, sy
+    if last_block is not None:
+        for i in reversed(list(last_block)):
+            h = f.header[i]
+            il = int(h[TF.FieldRecord] or 0)
+            if il >= last_il:
+                last_il = il
+                x_at_p3, y_at_p3 = (
+                    float(h[TF.SourceX] or 0),
+                    float(h[TF.SourceY] or 0),
+                )
+                break
+    else:
+        for i in range(max(0, n - 5000), n, max(1, n // 2000)):
+            h = f.header[i]
+            il = int(h[TF.FieldRecord] or 0)
+            xl = int(h[TF.CDP] or 0)
+            sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
+            if xl == last_xl and il >= last_il:
+                last_il = il
+                x_at_p3, y_at_p3 = sx, sy
     p1 = (float(first_il), float(xl0), x0, y0)
     p2 = (float(first_il), float(last_xl), x_at_p2, y_at_p2)
     p3 = (float(last_il), float(last_xl), x_at_p3, y_at_p3)
