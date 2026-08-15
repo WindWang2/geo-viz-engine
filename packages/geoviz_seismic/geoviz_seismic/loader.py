@@ -30,6 +30,14 @@ class SeismicLoader:
         self._meta: SeismicVolumeMeta | None = None
         self._downsampled: np.ndarray | None = None
         self._downsample_factor: tuple[int, int, int] | None = None
+        # "standard_189_193" (real INLINE_3D/CROSSLINE_3D geometry),
+        # "detected_headers" (fast/slow header-pair fallback), or "pseudo".
+        self._geometry_source = "pseudo"
+
+    @property
+    def geometry_source(self) -> str:
+        """How ilines/xlines were established (see _open)."""
+        return self._geometry_source
 
     def inspect(self) -> SeismicVolumeMeta:
         """Read SEGY headers and return volume metadata.
@@ -71,6 +79,7 @@ class SeismicLoader:
             xline_step=int(xlines[1] - xlines[0]) if xlines.size > 1 else 1,
             dt_ms=dt_ms,
             t0_ms=float(samples[0]),
+            geometry_source=self._geometry_source,
         )
         return self._meta
 
@@ -278,6 +287,7 @@ class SeismicLoader:
             self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=False)
             # Quick sanity check: if ilines/xlines are valid, we're done
             if len(self._f.ilines) > 1 and len(self._f.xlines) > 1:
+                self._geometry_source = "standard_189_193"
                 return self._f
             self._f.close()
             self._f = None
@@ -340,6 +350,7 @@ class SeismicLoader:
                 self._path, "r", strict=False, ignore_geometry=False,
                 iline=int(found_il), xline=int(found_xl),
             )
+            self._geometry_source = "detected_headers"
             return self._f
         else:
             # Last resort: assume square grid and open unstructured

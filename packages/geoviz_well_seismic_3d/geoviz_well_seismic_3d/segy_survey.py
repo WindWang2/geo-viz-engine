@@ -52,6 +52,9 @@ def survey_corners_from_segy(
                 "loader_iline_step": getattr(m, "iline_step", 1),
                 "loader_xline_start": m.xline_start,
                 "loader_xline_step": getattr(m, "xline_step", 1),
+                "loader_geometry_source": getattr(
+                    m, "geometry_source", getattr(loader, "geometry_source", "unknown")
+                ),
                 "n_samples": m.n_samples,
                 "dt_ms": m.dt_ms,
                 "t0_ms": m.t0_ms,
@@ -73,8 +76,19 @@ def survey_corners_from_segy(
         t0_ms = float(f.samples[0]) if n_samples else 0.0
 
         classic = _parse_text_header_classic(text)
-        if classic is not None:
-            p1, p2, p3 = _classic_corners_to_loader_axes(*classic)
+        if classic is not None and _corners_match_loader_counts(
+            classic, loader_meta
+        ):
+            # The loader-axes swap is only valid when the loader assigned its
+            # "inline" axis from a fast/slow header pair (detected/pseudo).
+            # With real INLINE_3D/CROSSLINE_3D geometry the loader inline IS
+            # the text inline — swapping would transpose the survey (square
+            # grids) or fail the span validation (non-square).
+            source = loader_meta.get("loader_geometry_source", "unknown")
+            if source != "standard_189_193":
+                p1, p2, p3 = _classic_corners_to_loader_axes(*classic)
+            else:
+                p1, p2, p3 = classic
             meta = {
                 "n_samples": loader_meta.get("n_samples", n_samples),
                 "dt_ms": loader_meta.get("dt_ms", dt_ms),
@@ -84,8 +98,30 @@ def survey_corners_from_segy(
             }
             return p1, p2, p3, meta
 
-        # Fallback: FieldRecord≈loader-related, CDP≈loader-related (same as loader)
+        # Loader counts disagree with the text header (stale header values):
+        # scan actual trace headers — the data itself is authoritative over a
+        # text header that claims different line ranges.
         return _corners_from_trace_scan(f, n_samples, dt_ms, t0_ms, loader_meta)
+
+
+def _corners_match_loader_counts(classic, loader_meta: dict) -> bool:
+    """Text-header corner spans must agree with the loader's line counts.
+
+    Without loader counts there is nothing to cross-check (legacy path).
+    """
+    n_il = loader_meta.get("loader_n_inlines")
+    n_xl = loader_meta.get("loader_n_crosslines")
+    if n_il is None or n_xl is None:
+        return True
+    il_step = abs(int(loader_meta.get("loader_iline_step") or 1)) or 1
+    xl_step = abs(int(loader_meta.get("loader_xline_step") or 1)) or 1
+    il0, xl0 = float(classic[0][0]), float(classic[0][1])
+    il1, xl1 = float(classic[2][0]), float(classic[2][1])
+    span_il = abs(il1 - il0)
+    span_xl = abs(xl1 - xl0)
+    ok_il = abs(span_il - (int(n_il) - 1) * il_step) <= 1e-6
+    ok_xl = abs(span_xl - (int(n_xl) - 1) * xl_step) <= 1e-6
+    return ok_il and ok_xl
 
 
 def _classic_corners_to_loader_axes(
@@ -112,9 +148,17 @@ def _classic_corners_to_loader_axes(
     return lp1, lp2, lp3
 
 
-def align_horizon_corners_to_loader_axes(p1, p2, p3) -> tuple:
-    """Remap horizon P1–P3 (classic text IL/XL) to loader axis assignment."""
-    return _classic_corners_to_loader_axes(p1, p2, p3)
+def align_horizon_corners_to_loader_axes(p1, p2, p3, *, swap=None) -> tuple:
+    """Remap horizon P1–P3 (classic text IL/XL) to loader axis assignment.
+
+    *swap* follows the SEGY loader geometry: ``True`` (or None, legacy
+    default) for the detected fast/slow header fallback, ``False`` when the
+    loader read real INLINE_3D/CROSSLINE_3D geometry (text IL already IS the
+    loader inline — swapping would transpose the horizon).
+    """
+    if swap is None or swap:
+        return _classic_corners_to_loader_axes(p1, p2, p3)
+    return p1, p2, p3
 
 
 def _parse_text_header_classic(text: str) -> tuple | None:
@@ -144,26 +188,36 @@ def _parse_text_header_classic(text: str) -> tuple | None:
 
 
 def _corners_from_trace_scan(f, n_samples: int, dt_ms: float, t0_ms: float, loader_meta: dict):
-    """Fallback when text header is missing: scan FieldRecord/CDP + SourceX/Y."""
+    """Fallback when text header is missing: scan line headers + SourceX/Y.
+
+    The header pair scanned matches how the loader established geometry:
+    real INLINE_3D/CROSSLINE_3D for standard files, FieldRecord/CDP for the
+    detected fast/slow fallback. Block scans follow the file's trace sorting.
+    """
     import segyio
 
     TF = segyio.TraceField
     n = f.tracecount
     if n <= 0:
         raise ValueError("SEGY has no traces")
+    source = loader_meta.get("loader_geometry_source", "unknown")
+    if source == "standard_189_193":
+        il_field, xl_field = TF.INLINE_3D, TF.CROSSLINE_3D
+    else:
+        il_field, xl_field = TF.FieldRecord, TF.CDP
     h0 = f.header[0]
     h1 = f.header[n - 1]
-    # Prefer loader starts when available (already FieldRecord/CDP order)
+    # Prefer loader starts when available (same axis order the loader uses)
     if loader_meta.get("loader_iline_start") is not None:
         il0 = float(loader_meta["loader_iline_start"])
         xl0 = float(loader_meta["loader_xline_start"])
     else:
-        il0 = float(h0[TF.FieldRecord] or 0)
-        xl0 = float(h0[TF.CDP] or 0)
+        il0 = float(h0[il_field] or 0)
+        xl0 = float(h0[xl_field] or 0)
     x0 = float(h0[TF.SourceX] or 0)
     y0 = float(h0[TF.SourceY] or 0)
-    il1 = float(h1[TF.FieldRecord] or il0)
-    xl1 = float(h1[TF.CDP] or xl0)
+    il1 = float(h1[il_field] or il0)
+    xl1 = float(h1[xl_field] or xl0)
     x1 = float(h1[TF.SourceX] or x0)
     y1 = float(h1[TF.SourceY] or y0)
 
@@ -171,60 +225,60 @@ def _corners_from_trace_scan(f, n_samples: int, dt_ms: float, t0_ms: float, load
     last_xl = int(xl1)
     x_at_p2, y_at_p2 = x0, y0
     x_at_p3, y_at_p3 = x1, y1
-    # When loader counts are known, traces are iline-major sorted: the first
-    # inline occupies traces [0, n_xl) and the last inline the final block.
-    # Scanning those blocks exactly beats the old strided sample, which could
-    # step over the last crossline and collapse P2 onto P1 (zero-length XL
-    # edge → zero bin spacing).
+    # With loader counts known, scan the exact trace blocks of the first and
+    # last line. Blocks follow the file's sorting: inline-major keeps one
+    # inline contiguous (n_xl traces); crossline-major keeps one crossline
+    # contiguous (n_il traces) and the first inline is a strided walk.
     n_xl = loader_meta.get("loader_n_crosslines")
-    first_block = range(0, min(n, int(n_xl))) if n_xl else None
-    last_block = (
-        range(max(0, n - int(n_xl)), n) if n_xl else None
-    )
+    n_il = loader_meta.get("loader_n_inlines")
+    try:
+        sorting = int(f.sorting)
+    except Exception:
+        sorting = 2  # segyio TraceSortingFormat.INLINE_SORTING
+    crossline_sorted = sorting == 1
+
+    def _header_at(i):
+        h = f.header[i]
+        return (
+            int(h[il_field] or 0),
+            int(h[xl_field] or 0),
+            float(h[TF.SourceX] or 0),
+            float(h[TF.SourceY] or 0),
+        )
+
+    if n_xl and not crossline_sorted:
+        first_block = range(0, min(n, int(n_xl)))
+        last_block = range(max(0, n - int(n_xl)), n)
+    elif n_il and crossline_sorted:
+        first_block = range(0, n, int(n_il))
+        last_block = range(n_il - 1, n, int(n_il))
+    else:
+        first_block = None
+        last_block = None
+
     if first_block is not None:
         for i in first_block:
-            h = f.header[i]
-            xl = int(h[TF.CDP] or 0)
-            sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
-            if xl >= last_xl:
+            il, xl, sx, sy = _header_at(i)
+            if il == first_il and xl >= last_xl:
                 last_xl = xl
                 x_at_p2, y_at_p2 = sx, sy
-        # The last crossline of the first inline is p2; p3 shares it.
-        for i in first_block:
-            h = f.header[i]
-            if int(h[TF.CDP] or 0) == last_xl:
-                x_at_p2, y_at_p2 = (
-                    float(h[TF.SourceX] or 0),
-                    float(h[TF.SourceY] or 0),
-                )
-                break
     else:
         for i in range(0, min(n, 5000), max(1, n // 2000)):
-            h = f.header[i]
-            il = int(h[TF.FieldRecord] or 0)
-            xl = int(h[TF.CDP] or 0)
-            sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
+            il, xl, sx, sy = _header_at(i)
             if il == first_il and xl >= last_xl:
                 last_xl = xl
                 x_at_p2, y_at_p2 = sx, sy
     last_il = int(il1)
     if last_block is not None:
         for i in reversed(list(last_block)):
-            h = f.header[i]
-            il = int(h[TF.FieldRecord] or 0)
-            if il >= last_il:
+            il, xl, sx, sy = _header_at(i)
+            if xl == last_xl and il >= last_il:
                 last_il = il
-                x_at_p3, y_at_p3 = (
-                    float(h[TF.SourceX] or 0),
-                    float(h[TF.SourceY] or 0),
-                )
+                x_at_p3, y_at_p3 = sx, sy
                 break
     else:
         for i in range(max(0, n - 5000), n, max(1, n // 2000)):
-            h = f.header[i]
-            il = int(h[TF.FieldRecord] or 0)
-            xl = int(h[TF.CDP] or 0)
-            sx, sy = float(h[TF.SourceX] or 0), float(h[TF.SourceY] or 0)
+            il, xl, sx, sy = _header_at(i)
             if xl == last_xl and il >= last_il:
                 last_il = il
                 x_at_p3, y_at_p3 = sx, sy

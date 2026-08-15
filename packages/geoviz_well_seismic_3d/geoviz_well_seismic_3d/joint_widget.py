@@ -324,8 +324,25 @@ class WellSeismicJointWidget(QWidget):
         self._update_gr_legend()
 
     def set_fence_curtains(self, extractions: list) -> None:
-        """Public: draw fence curtains from FenceExtraction list (or active only)."""
+        """Public: draw fence curtains from FenceExtraction list (or active only).
+
+        Rebuilding the meshes is expensive (~25ms for a 128-column fence) and
+        depends only on (fence geometry, extraction, domain) — the scene's
+        extract cache already returns the SAME FenceExtraction object for
+        unchanged state, so identity-keyed skipping keeps colour/well-width
+        refreshes from re-triangulating the curtains every tick.
+        """
+        key = tuple(
+            (ext.fence_id, id(ext), tuple(ext.amplitude.shape))
+            for ext in extractions
+        )
+        if key == getattr(self, "_last_curtain_key", None):
+            return
         self._clear_items(self._curtain_items)
+        self._last_curtain_key = key
+        # Hold references so id() of the cached extractions cannot be reused
+        # by a new array while it is part of the key.
+        self._last_curtains_ref = list(extractions)
         if self._renderer is None or self._gl is None or self._scene is None:
             return
         view = self._view()
@@ -567,6 +584,10 @@ class WellSeismicJointWidget(QWidget):
                             np.asarray(data, dtype=np.float32), **load_kw
                         )
                         self._last_volume_key = volume_key
+                        # Prevent id() recycling: keep the uploaded array
+                        # alive so a cache-evicted re-read cannot alias the
+                        # same id and falsely match the key.
+                        self._last_volume_ref = data
                         self.sync_orthogonal_slices()
                     except Exception as exc:
                         logger.warning("load_volume failed: %s", exc)

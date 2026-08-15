@@ -729,10 +729,22 @@ class WellSeismicScene:
         if state.inline_index is None and state.crossline_index is None:
             return
         new_shape = new_access.shape
+        # Prefer the new access's EXPLICIT strides; inference is only a
+        # fallback for volume objects that do not carry them.
+        new_strides = getattr(new_access, "strides", None)
         try:
-            new_reg = VolumeRegistration.from_survey_and_shape(
-                self._survey, new_shape
-            )
+            if new_strides is not None:
+                new_reg = VolumeRegistration(
+                    survey=self._survey,
+                    n_inline=int(new_shape[0]),
+                    n_crossline=int(new_shape[1]),
+                    n_sample=int(new_shape[2]),
+                    strides=tuple(int(s) for s in new_strides),
+                )
+            else:
+                new_reg = VolumeRegistration.from_survey_and_shape(
+                    self._survey, new_shape
+                )
         except ValueError:
             return
         il_num, xl_num = old_reg.volume_idx_to_il_xl(

@@ -83,6 +83,9 @@ class SeismicVolumeMeta(BaseModel):
     xline_step: int
     dt_ms: float
     t0_ms: float = 0.0
+    # How ilines/xlines were established: "standard_189_193" (real geometry
+    # headers), "detected_headers" (fast/slow pair fallback), "pseudo".
+    geometry_source: str = "unknown"
     bin_grid: BinGridGeometry | None = None
 
     def xy_to_il_xl(self, x: float, y: float) -> tuple[float, float]:
