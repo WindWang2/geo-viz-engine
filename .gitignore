@@ -20,6 +20,7 @@ src-tauri/target/
 src-tauri/binaries/geoviz-backend
 src-tauri/binaries/geoviz-backend-*
 *.spec
+*.so
 
 # Env
 .env.local
