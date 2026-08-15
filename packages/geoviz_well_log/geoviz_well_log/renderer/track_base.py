@@ -1,10 +1,30 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QRectF, Qt, QSizeF, Signal, QPointF
 from PySide6.QtGui import QPainter, QFont, QColor, QPen
 from PySide6.QtWidgets import QWidget
 
 from .label_layout import compute_header_label_policy, fit_label_text
+
+
+def nice_depth_interval(span: float, rect_height: float, min_px: float = 20.0) -> float:
+    """Smallest 1/2/5 × 10^k step whose on-screen spacing is at least *min_px* pixels.
+
+    Keeps working for sub-unit spans (0.1/0.2/0.5) and for spans beyond 5000,
+    unlike a fixed integer candidate list which degenerates in both regimes.
+    """
+    if span <= 0 or rect_height <= 0:
+        return 1.0
+    raw = (span / rect_height) * min_px
+    exp = math.floor(math.log10(raw)) if raw > 0 else 0
+    base = 10.0**exp
+    for n in (1, 2, 5):
+        candidate = n * base
+        if candidate >= raw:
+            return candidate
+    return 10.0 * base
 
 # Azurite Design System constants
 ECHARTS_BORDER = "#94a3b8"
@@ -119,12 +139,7 @@ class BaseTrack(QWidget):
 
     def _compute_grid_interval(self, rect_height: float, span: float) -> float:
         """Pick interval so that grid lines are >=20px apart."""
-        candidates = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
-        for c in candidates:
-            px_per_tick = rect_height / (span / c)
-            if px_per_tick >= 20:
-                return c
-        return candidates[-1]
+        return nice_depth_interval(span, rect_height, min_px=20.0)
 
     def paint_content(self, painter: QPainter, rect: QRectF):
         """Render track content. Must be implemented by subclasses."""

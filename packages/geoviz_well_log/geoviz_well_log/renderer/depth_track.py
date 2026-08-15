@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QRectF, Qt, QPointF
 from PySide6.QtGui import QPainter, QPen, QColor
 from PySide6.QtWidgets import QWidget
 
-from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT
+from .track_base import BaseTrack, ECHARTS_BORDER, ECHARTS_TEXT, nice_depth_interval
 
 
 class DepthTrack(BaseTrack):
@@ -21,16 +23,7 @@ class DepthTrack(BaseTrack):
         return self._tick_interval
 
     def _compute_tick_interval(self, rect_height: float) -> float:
-        span = self.depth_span
-        if span <= 0:
-            return 10.0
-        candidates = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
-        for c in candidates:
-            num_ticks = span / c
-            pixels_per_tick = rect_height / num_ticks
-            if pixels_per_tick >= 20:
-                return float(c)
-        return float(candidates[-1])
+        return nice_depth_interval(self.depth_span, rect_height, min_px=20.0)
 
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()
@@ -57,13 +50,16 @@ class DepthTrack(BaseTrack):
         start = (self.depth_top // interval) * interval
         if start < self.depth_top:
             start += interval
+        decimals = max(0, -math.floor(math.log10(interval) + 1e-9)) if interval > 0 else 0
         depth = start
         while depth <= self.depth_bottom:
             y = self._depth_to_y(depth, rect)
             if rect.top() <= y <= rect.bottom():
                 # Centered label
                 text_rect = QRectF(rect.left(), y - 8, rect.width(), 16)
-                painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, f"{depth:.0f}")
+                painter.drawText(
+                    text_rect, Qt.AlignmentFlag.AlignCenter, f"{depth:.{decimals}f}"
+                )
             depth += interval
 
         # Right edge border only
