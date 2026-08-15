@@ -55,6 +55,9 @@ def survey_corners_from_segy(
                 "loader_geometry_source": getattr(
                     m, "geometry_source", getattr(loader, "geometry_source", "unknown")
                 ),
+                "loader_geometry_fields": getattr(
+                    m, "geometry_fields", getattr(loader, "geometry_fields", None)
+                ),
                 "n_samples": m.n_samples,
                 "dt_ms": m.dt_ms,
                 "t0_ms": m.t0_ms,
@@ -119,9 +122,24 @@ def _corners_match_loader_counts(classic, loader_meta: dict) -> bool:
     il1, xl1 = float(classic[2][0]), float(classic[2][1])
     span_il = abs(il1 - il0)
     span_xl = abs(xl1 - xl0)
-    ok_il = abs(span_il - (int(n_il) - 1) * il_step) <= 1e-6
-    ok_xl = abs(span_xl - (int(n_xl) - 1) * xl_step) <= 1e-6
-    return ok_il and ok_xl
+    source = loader_meta.get("loader_geometry_source", "unknown")
+    if source == "standard_189_193":
+        # Loader inline IS the text inline: compare in text-axis space.
+        checks = (
+            (span_il, int(n_il), il_step),
+            (span_xl, int(n_xl), xl_step),
+        )
+    else:
+        # Detected geometry assigned the loader inline to the FAST header —
+        # for classic IL=+Y/XL=+X files that is the text crossline. Compare
+        # each text axis against the swapped loader axis counts.
+        checks = (
+            (span_xl, int(n_il), il_step),
+            (span_il, int(n_xl), xl_step),
+        )
+    return all(
+        abs(span - (count - 1) * step) <= 1e-6 for span, count, step in checks
+    )
 
 
 def _classic_corners_to_loader_axes(
@@ -200,11 +218,20 @@ def _corners_from_trace_scan(f, n_samples: int, dt_ms: float, t0_ms: float, load
     n = f.tracecount
     if n <= 0:
         raise ValueError("SEGY has no traces")
-    source = loader_meta.get("loader_geometry_source", "unknown")
-    if source == "standard_189_193":
-        il_field, xl_field = TF.INLINE_3D, TF.CROSSLINE_3D
+    fields = loader_meta.get("loader_geometry_fields")
+    if fields and len(fields) == 2:
+        # Read the SAME header pair the loader established geometry with;
+        # guessing (FieldRecord/CDP) inverts the axes on detected files.
+        try:
+            il_field, xl_field = TF(int(fields[0])), TF(int(fields[1]))
+        except ValueError:
+            il_field, xl_field = TF.FieldRecord, TF.CDP
     else:
-        il_field, xl_field = TF.FieldRecord, TF.CDP
+        source = loader_meta.get("loader_geometry_source", "unknown")
+        if source == "standard_189_193":
+            il_field, xl_field = TF.INLINE_3D, TF.CROSSLINE_3D
+        else:
+            il_field, xl_field = TF.FieldRecord, TF.CDP
     h0 = f.header[0]
     h1 = f.header[n - 1]
     # Prefer loader starts when available (same axis order the loader uses)
@@ -231,11 +258,33 @@ def _corners_from_trace_scan(f, n_samples: int, dt_ms: float, t0_ms: float, load
     # contiguous (n_il traces) and the first inline is a strided walk.
     n_xl = loader_meta.get("loader_n_crosslines")
     n_il = loader_meta.get("loader_n_inlines")
+    # f.sorting is None on the ignore_geometry handle used here; infer the
+    # layout from header runs instead. One loader-inline contiguous means
+    # inline-major; the run belongs to whichever field is constant.
+    def _run_length(field) -> int:
+        first = None
+        run = 0
+        for i in range(min(n, max(int(n_xl or 1), int(n_il or 1)) + 1)):
+            value = int(f.header[i][field] or 0)
+            if first is None:
+                first = value
+            if value == first:
+                run += 1
+            else:
+                break
+        return run
+
     try:
-        sorting = int(f.sorting)
+        crossline_sorted = False
+        if n_xl and n_il:
+            il_run = _run_length(il_field)
+            xl_run = _run_length(xl_field)
+            if il_run == int(n_xl) and int(n_xl) > 1:
+                crossline_sorted = False
+            elif xl_run == int(n_il) and int(n_il) > 1:
+                crossline_sorted = True
     except Exception:
-        sorting = 2  # segyio TraceSortingFormat.INLINE_SORTING
-    crossline_sorted = sorting == 1
+        crossline_sorted = False
 
     def _header_at(i):
         h = f.header[i]

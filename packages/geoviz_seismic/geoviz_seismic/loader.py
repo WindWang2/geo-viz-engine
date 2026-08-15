@@ -33,11 +33,19 @@ class SeismicLoader:
         # "standard_189_193" (real INLINE_3D/CROSSLINE_3D geometry),
         # "detected_headers" (fast/slow header-pair fallback), or "pseudo".
         self._geometry_source = "pseudo"
+        # (iline_byte, xline_byte) actually used for geometry, when known —
+        # consumers scanning headers must read the SAME pair the loader did.
+        self._geometry_fields = None
 
     @property
     def geometry_source(self) -> str:
         """How ilines/xlines were established (see _open)."""
         return self._geometry_source
+
+    @property
+    def geometry_fields(self) -> tuple[int, int] | None:
+        """(iline, xline) trace-header byte positions used for geometry."""
+        return self._geometry_fields
 
     def inspect(self) -> SeismicVolumeMeta:
         """Read SEGY headers and return volume metadata.
@@ -80,6 +88,9 @@ class SeismicLoader:
             dt_ms=dt_ms,
             t0_ms=float(samples[0]),
             geometry_source=self._geometry_source,
+            geometry_fields=list(self._geometry_fields)
+            if self._geometry_fields
+            else None,
         )
         return self._meta
 
@@ -288,6 +299,10 @@ class SeismicLoader:
             # Quick sanity check: if ilines/xlines are valid, we're done
             if len(self._f.ilines) > 1 and len(self._f.xlines) > 1:
                 self._geometry_source = "standard_189_193"
+                self._geometry_fields = (
+                    int(segyio.TraceField.INLINE_3D),
+                    int(segyio.TraceField.CROSSLINE_3D),
+                )
                 return self._f
             self._f.close()
             self._f = None
@@ -351,6 +366,7 @@ class SeismicLoader:
                 iline=int(found_il), xline=int(found_xl),
             )
             self._geometry_source = "detected_headers"
+            self._geometry_fields = (int(found_il), int(found_xl))
             return self._f
         else:
             # Last resort: assume square grid and open unstructured
