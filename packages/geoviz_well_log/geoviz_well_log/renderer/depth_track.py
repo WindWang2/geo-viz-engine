@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QRectF, Qt, QPointF
 from PySide6.QtGui import QPainter, QPen, QColor
 from PySide6.QtWidgets import QWidget
@@ -21,16 +23,10 @@ class DepthTrack(BaseTrack):
         return self._tick_interval
 
     def _compute_tick_interval(self, rect_height: float) -> float:
-        span = self.depth_span
-        if span <= 0:
-            return 10.0
-        candidates = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
-        for c in candidates:
-            num_ticks = span / c
-            pixels_per_tick = rect_height / num_ticks
-            if pixels_per_tick >= 20:
-                return float(c)
-        return float(candidates[-1])
+        # Delegate to the shared mantissa/exponent nice-number walk on
+        # BaseTrack: the previous integer-only table [1..5000] left spans
+        # below 1 depth unit with no representable interval (WL-13).
+        return self._compute_grid_interval(rect_height, self.depth_span)
 
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()
@@ -54,6 +50,11 @@ class DepthTrack(BaseTrack):
         painter.setFont(font)
         painter.setPen(QColor(ECHARTS_TEXT))
 
+        # Sub-unit intervals need fractional labels: with the old fixed
+        # "{depth:.0f}" every tick inside a <1-unit window collapsed onto the
+        # same integer text (WL-13).
+        decimals = max(0, -math.floor(math.log10(interval))) if interval > 0 else 0
+
         start = (self.depth_top // interval) * interval
         if start < self.depth_top:
             start += interval
@@ -63,7 +64,7 @@ class DepthTrack(BaseTrack):
             if rect.top() <= y <= rect.bottom():
                 # Centered label
                 text_rect = QRectF(rect.left(), y - 8, rect.width(), 16)
-                painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, f"{depth:.0f}")
+                painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, f"{depth:.{decimals}f}")
             depth += interval
 
         # Right edge border only

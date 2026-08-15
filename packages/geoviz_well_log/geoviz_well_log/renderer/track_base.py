@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QRectF, Qt, QSizeF, Signal, QPointF
 from PySide6.QtGui import QPainter, QFont, QColor, QPen
 from PySide6.QtWidgets import QWidget
@@ -117,14 +119,30 @@ class BaseTrack(QWidget):
                 painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
             depth += interval
 
+    _GRID_TARGET_PX = 20.0
+    _NICE_MANTISSAS = (1.0, 2.0, 5.0)
+
     def _compute_grid_interval(self, rect_height: float, span: float) -> float:
-        """Pick interval so that grid lines are >=20px apart."""
-        candidates = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
-        for c in candidates:
-            px_per_tick = rect_height / (span / c)
-            if px_per_tick >= 20:
-                return c
-        return candidates[-1]
+        """Pick a nice interval (1/2/5 mantissa × power of ten) so grid lines
+        are >= ~20px apart.
+
+        Sub-unit and >5000-unit spans are covered by the mantissa/exponent
+        walk; the previous integer-only candidate table [1..5000] rendered
+        zero grid lines when the visible span dropped below 1 depth unit.
+        Mirrors DepthRuler._compute_nice_intervals.
+        """
+        if span <= 0 or rect_height <= 0:
+            return 1.0
+        raw = (span / rect_height) * self._GRID_TARGET_PX
+        if raw <= 0:
+            return 1.0
+        exp = math.floor(math.log10(raw))
+        base = 10.0 ** exp
+        for n in self._NICE_MANTISSAS:
+            candidate = n * base
+            if candidate >= raw:
+                return candidate
+        return self._NICE_MANTISSAS[-1] * base
 
     def paint_content(self, painter: QPainter, rect: QRectF):
         """Render track content. Must be implemented by subclasses."""
