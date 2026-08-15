@@ -23,6 +23,11 @@ class CrossWellWidget(QWidget):
 
     canvas_depth_changed = Signal()
 
+    #: Height of the well-name label wrapped above each canvas (px).
+    NAME_LABEL_HEIGHT = 28
+    #: Fallback track header height used by all Y transforms (px).
+    DEFAULT_HEADER_HEIGHT = 56
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._canvases: list[WellLogCanvas] = []
@@ -66,7 +71,26 @@ class CrossWellWidget(QWidget):
     def _on_coalesced_depth_changed(self):
         """Perform the actual update after coalescing."""
         self.canvas_depth_changed.emit()
+        self._sync_depth_ruler()
         self._overlay.update()
+
+    def _sync_depth_ruler(self):
+        """Keep the shared depth ruler on the synchronized viewport.
+
+        Reads the depth range and header height of the first canvas with
+        tracks (all canvases share one synchronized range) and applies the
+        well-name-label + track-header insets so ruler ticks align with the
+        canvas content.
+        """
+        for canvas in self._canvases:
+            if not canvas.tracks:
+                continue
+            track = canvas.tracks[0]
+            header_h = max((t.header_height for t in canvas.tracks),
+                           default=self.DEFAULT_HEADER_HEIGHT)
+            self._depth_ruler.set_depth_range(track.depth_top, track.depth_bottom)
+            self._depth_ruler.set_geometry_insets(self.NAME_LABEL_HEIGHT, header_h)
+            return
 
     @property
     def canvas_count(self) -> int:
@@ -89,7 +113,7 @@ class CrossWellWidget(QWidget):
             "background: #f7fafc; border-bottom: 1px solid #e2e8f0;"
             "padding: 4px 8px;"
         )
-        name_label.setFixedHeight(28)
+        name_label.setFixedHeight(self.NAME_LABEL_HEIGHT)
         vbox.addWidget(name_label)
         vbox.addWidget(canvas, 1)
         self._wrappers.append(wrapper)
@@ -107,7 +131,7 @@ class CrossWellWidget(QWidget):
         if canvas.tracks:
             zh = ZoomPanHandler(canvas, self)
             zh.set_full_range(canvas.tracks[0].depth_top, canvas.tracks[0].depth_bottom)
-            self._depth_ruler.set_depth_range(canvas.tracks[0].depth_top, canvas.tracks[0].depth_bottom)
+            self._sync_depth_ruler()
         
         # Wire reactive signal connections to update overlays on zoom/pan depth scaling
         # using a coalescing timer (16ms throttle) to prevent rapid redraws
@@ -376,7 +400,8 @@ class CrossWellWidget(QWidget):
         """Convert a Y pixel coordinate to a depth value."""
         if not canvas.tracks:
             return None
-        header_h = max((t.header_height for t in canvas.tracks), default=56)
+        header_h = max((t.header_height for t in canvas.tracks),
+                       default=CrossWellWidget.DEFAULT_HEADER_HEIGHT)
         content_h = canvas.height() - header_h
         if content_h <= 0:
             return None

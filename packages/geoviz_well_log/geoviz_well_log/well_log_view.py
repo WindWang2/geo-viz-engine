@@ -80,6 +80,7 @@ class WellLogView(QScrollArea):
             self._zoom_handler.set_full_range(self._full_top, self._full_bottom)
         self._depth_ruler.set_depth_range(self._full_top, self._full_bottom)
         self._sync_depth_ruler_geometry()
+        self._sync_depth_ruler_insets()
         self._update_canvas_size()
         self._sync_scrollbar_range()
         self._sync_scrollbar_from_depth()
@@ -92,8 +93,18 @@ class WellLogView(QScrollArea):
 
     def _on_canvas_depth_range_changed(self, top: float, bottom: float):
         self._depth_ruler.set_depth_range(top, bottom)
+        self._sync_depth_ruler_insets()
         self._sync_scrollbar_range()
         self._sync_scrollbar_from_depth()
+
+    def _sync_depth_ruler_insets(self):
+        """Exclude the track header band from the ruler's depth mapping so its
+        ticks align with the canvas content (the canvas sits at y=0 here, so
+        there is no well-name label inset)."""
+        if not self._canvas.tracks:
+            return
+        header_h = max((t.header_height for t in self._canvas.tracks), default=56)
+        self._depth_ruler.set_geometry_insets(0.0, header_h)
 
     def _sync_depth_ruler_geometry(self):
         self._depth_ruler.setFixedHeight(self.viewport().height())
