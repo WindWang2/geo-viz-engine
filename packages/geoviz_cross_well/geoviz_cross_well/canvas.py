@@ -240,6 +240,10 @@ class CrossWellCanvas(QWidget):
 
         self._overlay.set_models(self._tops_model, self._picks_model, self._widget)
         self._overlay.set_seismic_tie(self._seismic_tie)
+
+        # Export tops/picks (screen-visible interpretation) into composite
+        # exports — the workbench exports through CrossWellWidget.
+        self._widget.set_interpretation_painter(self._paint_interpretation_composite)
         
         # Repaint PickingOverlay when any underlying well canvas zooms or pans
         self._widget.canvas_depth_changed.connect(self._overlay.update)
@@ -286,6 +290,17 @@ class CrossWellCanvas(QWidget):
 
     def set_tops_visible(self, visible: bool):
         self._overlay.set_tops_visible(visible)
+
+    def _paint_interpretation_composite(self, painter: QPainter):
+        """Paint tops + picks into the composite export painter.
+
+        Invoked by CrossWellWidget._paint_composite in a painter whose world
+        transform maps widget coordinates to composite coordinates, so the
+        exact same drawing code as the on-screen PickingOverlay produces
+        screen-aligned output (labels, depths and x offsets all included).
+        """
+        self._overlay._paint_tops(painter)
+        self._overlay._paint_ties(painter)
 
     @property
     def pick_mode(self) -> bool:
@@ -456,7 +471,17 @@ class CrossWellCanvas(QWidget):
                 return canvas, i
         return None, -1
 
-    def _pick_at(self, pos) -> HorizonPick | None:
+    def _pick_at(self, pos, tolerance_px: float = 10.0) -> HorizonPick | None:
+        """Return the pick nearest to ``pos`` within ``tolerance_px`` screen pixels.
+
+        The tolerance is expressed in screen pixels and converted to depth
+        units through the canvas's current depth scale, so hit-testing stays
+        constant on screen regardless of zoom level (a fixed depth-unit
+        tolerance made every click hit at <10 m spans and made picks
+        un-clickable at ~2 km spans). When several picks fall inside the
+        tolerance the closest one wins.
+        """
+        best: tuple[float, HorizonPick] | None = None
         for i, canvas in enumerate(self._widget._canvases):
             if i >= len(self._widget._well_names):
                 break
@@ -469,29 +494,22 @@ class CrossWellCanvas(QWidget):
             depth = CrossWellWidget._y_to_depth(canvas, local_pos.y())
             if depth is None:
                 continue
-            tolerance = self._pick_tolerance(canvas)
+
+            header_h = max((t.header_height for t in canvas.tracks), default=56)
+            content_h = canvas.height() - header_h
+            span = canvas.tracks[0].depth_span
+            if content_h <= 0 or span <= 0:
+                continue
+            depth_tol = tolerance_px * span / content_h
+
             for pick in self._picks_model.picks_for_well(well):
                 pick_depth = pick.depth_for_well(well)
-                if pick_depth is not None and abs(pick_depth - depth) < tolerance:
-                    return pick
-        return None
-
-    def _pick_tolerance(self, canvas: WellLogCanvas) -> float:
-        """Depth hit-test tolerance for picks, scaled to the visible zoom.
-
-        Roughly 8 px worth of the currently visible depth span, so clicking
-        stays forgiving when zoomed out and precise when zoomed in. Falls
-        back to the legacy 5.0 depth units when the canvas layout or depth
-        span is not available yet.
-        """
-        if not canvas.tracks:
-            return 5.0
-        header_h = max((t.header_height for t in canvas.tracks), default=56)
-        content_h = canvas.height() - header_h
-        span = canvas.tracks[0].depth_span
-        if content_h <= 0 or span <= 0:
-            return 5.0
-        return span / content_h * 8.0
+                if pick_depth is None:
+                    continue
+                delta = abs(pick_depth - depth)
+                if delta <= depth_tol and (best is None or delta < best[0]):
+                    best = (delta, pick)
+        return best[1] if best is not None else None
 
     def _extract_curve(self, canvas: WellLogCanvas, preferred: tuple[str, ...] = ("GR", "SP", "RT")) -> tuple[np.ndarray, np.ndarray] | None:
         """Return (depths, values) from the first CurveTrack matching `preferred` curve names, else first available curve."""

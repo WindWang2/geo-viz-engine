@@ -49,6 +49,12 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     # well ordering for section layout. Pure numpy, already in the package.
     "plan_section": ("geoviz_cross_well", "plan_section"),
     "WellTieCanvas": ("geoviz_well_tie.canvas", "WellTieCanvas"),
+    # Unit-aware sonic normalization for well-tie TWT integration (WL-9 /
+    # #406): resolve µs/m vs µs/ft from curve.unit before any numeric
+    # heuristic, warning when the heuristic is used.
+    "normalize_sonic_units": ("geoviz_well_tie.sonic_units", "normalize_sonic_units"),
+    "canonical_sonic_unit": ("geoviz_well_tie.sonic_units", "canonical_sonic_unit"),
+    "US_FT_TO_US_M": ("geoviz_well_tie.sonic_units", "US_FT_TO_US_M"),
     "PlotWidget": ("geoviz_plots", "PlotWidget"),
     "SurfaceWidget": ("geoviz_plots", "SurfaceWidget"),
     "PreviewRowIssue": ("geoviz.previews.dat", "PreviewRowIssue"),

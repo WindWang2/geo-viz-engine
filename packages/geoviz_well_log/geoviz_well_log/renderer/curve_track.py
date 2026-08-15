@@ -147,10 +147,13 @@ class CurveTrack(BaseTrack):
                     rect: QRectF) -> float:
         lo, hi = display_range
         if self._log_scale:
-            if value <= 0:
-                value = lo
+            # Apply the same floor as the render path (_cached_path uses
+            # np.clip(values, max(lo, 1e-10), None)) BEFORE taking log10, so
+            # non-positive display ranges (e.g. lo <= 0) can never feed log10
+            # with a non-positive value (math domain error inside paintEvent).
             lo = max(lo, 1e-10)
             hi = max(hi, 1e-10)
+            value = max(value, lo)
             if lo == hi:
                 t = 0.5
             else:

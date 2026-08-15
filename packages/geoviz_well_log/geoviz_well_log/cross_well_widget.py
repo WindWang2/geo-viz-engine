@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Callable
+
 from PySide6.QtCore import Qt, QRectF, QSizeF, QSize, QPointF, Signal, QEvent, QTimer
 from PySide6.QtGui import QPainter, QColor, QPen, QPolygonF, QImage, QPageSize, QMouseEvent
 from PySide6.QtSvg import QSvgGenerator
@@ -22,6 +24,11 @@ class CrossWellWidget(QWidget):
     """Multi-well cross-section view using QPainter-rendered WellLogCanvas widgets."""
 
     canvas_depth_changed = Signal()
+
+    #: Height of the well-name label wrapped above each canvas (px).
+    NAME_LABEL_HEIGHT = 28
+    #: Fallback track header height used by all Y transforms (px).
+    DEFAULT_HEADER_HEIGHT = 56
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,6 +65,11 @@ class CrossWellWidget(QWidget):
         self._coalesce_timer.setInterval(16)
         self._coalesce_timer.timeout.connect(self._on_coalesced_depth_changed)
 
+        # Optional callback painting interpretation overlays (tops/picks)
+        # into composite exports; registered by geoviz_cross_well's
+        # CrossWellCanvas, which owns the tops/picks models.
+        self._interpretation_painter: Callable[[QPainter], None] | None = None
+
     def _schedule_depth_changed(self):
         """Schedule a coalesced update for depth changes."""
         if not self._coalesce_timer.isActive():
@@ -66,7 +78,26 @@ class CrossWellWidget(QWidget):
     def _on_coalesced_depth_changed(self):
         """Perform the actual update after coalescing."""
         self.canvas_depth_changed.emit()
+        self._sync_depth_ruler()
         self._overlay.update()
+
+    def _sync_depth_ruler(self):
+        """Keep the shared depth ruler on the synchronized viewport.
+
+        Reads the depth range and header height of the first canvas with
+        tracks (all canvases share one synchronized range) and applies the
+        well-name-label + track-header insets so ruler ticks align with the
+        canvas content.
+        """
+        for canvas in self._canvases:
+            if not canvas.tracks:
+                continue
+            track = canvas.tracks[0]
+            header_h = max((t.header_height for t in canvas.tracks),
+                           default=self.DEFAULT_HEADER_HEIGHT)
+            self._depth_ruler.set_depth_range(track.depth_top, track.depth_bottom)
+            self._depth_ruler.set_geometry_insets(self.NAME_LABEL_HEIGHT, header_h)
+            return
 
     @property
     def canvas_count(self) -> int:
@@ -89,7 +120,7 @@ class CrossWellWidget(QWidget):
             "background: #f7fafc; border-bottom: 1px solid #e2e8f0;"
             "padding: 4px 8px;"
         )
-        name_label.setFixedHeight(28)
+        name_label.setFixedHeight(self.NAME_LABEL_HEIGHT)
         vbox.addWidget(name_label)
         vbox.addWidget(canvas, 1)
         self._wrappers.append(wrapper)
@@ -107,7 +138,7 @@ class CrossWellWidget(QWidget):
         if canvas.tracks:
             zh = ZoomPanHandler(canvas, self)
             zh.set_full_range(canvas.tracks[0].depth_top, canvas.tracks[0].depth_bottom)
-            self._depth_ruler.set_depth_range(canvas.tracks[0].depth_top, canvas.tracks[0].depth_bottom)
+            self._sync_depth_ruler()
         
         # Wire reactive signal connections to update overlays on zoom/pan depth scaling
         # using a coalescing timer (16ms throttle) to prevent rapid redraws
@@ -227,6 +258,11 @@ class CrossWellWidget(QWidget):
 
     def eventFilter(self, watched, event) -> bool:
         """Intercept child canvas clicks when manual linking is active."""
+        # Guard against PySide6 re-creating the wrapper of a C++ object that
+        # outlived its Python instance (deletion-time event delivery), which
+        # would otherwise raise AttributeError here.
+        if not hasattr(self, "_manual_link_active") or not hasattr(self, "_canvases"):
+            return super().eventFilter(watched, event)
         if self._manual_link_active and watched in self._canvases:
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 pos = watched.mapTo(self, event.position().toPoint())
@@ -376,7 +412,8 @@ class CrossWellWidget(QWidget):
         """Convert a Y pixel coordinate to a depth value."""
         if not canvas.tracks:
             return None
-        header_h = max((t.header_height for t in canvas.tracks), default=56)
+        header_h = max((t.header_height for t in canvas.tracks),
+                       default=CrossWellWidget.DEFAULT_HEADER_HEIGHT)
         content_h = canvas.height() - header_h
         if content_h <= 0:
             return None
@@ -473,27 +510,51 @@ class CrossWellWidget(QWidget):
         painter.end()
         img.save(path)
 
+    def set_interpretation_painter(self, painter_fn: Callable[[QPainter], None] | None):
+        """Register a callback painting interpretation overlays (tops/picks)
+        into composite exports.
+
+        ``painter_fn(painter)`` is invoked after the correlation polygons in
+        a painter whose world transform maps widget coordinates to composite
+        coordinates (each canvas is drawn at ``translate(x_off, 0)``, i.e. the
+        well-name label and container margin are subtracted). Registered by
+        ``geoviz_cross_well.CrossWellCanvas`` so its tops/picks models appear
+        in exported sections.
+        """
+        self._interpretation_painter = painter_fn
+
     def _paint_composite(self, painter: QPainter, total_w: int, total_h: int):
-        """Paint all canvases at computed x-offsets, then overlay correlation polygons."""
+        """Paint all canvases at computed x-offsets, then correlation polygons
+        and any interpretation overlays (tops/picks)."""
         spacing = self._well_spacing
         x_off = 0
-        canvas_x_offsets: dict[int, float] = {}
-        canvas_right_edges: dict[int, float] = {}
 
         for canvas in self._canvases:
             painter.save()
             painter.translate(x_off, 0)
             canvas.paint_all(painter)
             painter.restore()
-            canvas_x_offsets[id(canvas)] = x_off
-            canvas_right_edges[id(canvas)] = x_off + canvas.width()
             x_off += canvas.width() + spacing
 
-        # Paint correlation polygons
         links = self._overlay.links
-        if links:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        if not links and self._interpretation_painter is None:
+            return
 
+        # Correlation polygons and interpretation overlays are computed in
+        # widget coordinates: the overlay helpers map through the canvases'
+        # positions inside this widget, which include the 28 px well-name
+        # label above each canvas and the container's left margin. The export
+        # draws each canvas at translate(x_off, 0) with no label, so shift
+        # from widget space into composite space here. Using the same
+        # transforms as the on-screen overlay keeps exported geometry exactly
+        # aligned with what the user sees (previously the 28 px label offset
+        # was left in, shifting every link polygon down by 28 px).
+        margins = self._container_layout.contentsMargins()
+        painter.save()
+        painter.translate(-margins.left(), -self.NAME_LABEL_HEIGHT)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        if links:
             name_to_canvas: dict[str, WellLogCanvas] = {}
             for i, c in enumerate(self._canvases):
                 if i < len(self._well_names):
@@ -520,8 +581,8 @@ class CrossWellWidget(QWidget):
                 ty1 = self._overlay.depth_to_y(target, tgt_top)
                 ty2 = self._overlay.depth_to_y(target, tgt_bot)
 
-                src_right = canvas_right_edges[id(source)]
-                tgt_left = canvas_x_offsets[id(target)]
+                src_right = self._overlay._canvas_right(source)
+                tgt_left = self._overlay._canvas_left(target)
 
                 polygon = QPolygonF([
                     QPointF(src_right, sy1),
@@ -535,3 +596,8 @@ class CrossWellWidget(QWidget):
                 painter.setPen(QPen(color.darker(120), 1))
                 painter.setBrush(color)
                 painter.drawPolygon(polygon)
+
+        if self._interpretation_painter is not None:
+            self._interpretation_painter(painter)
+
+        painter.restore()

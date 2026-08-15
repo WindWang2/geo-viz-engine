@@ -144,10 +144,18 @@ class WellLogCanvas(QWidget):
         if not self.tracks:
             return
 
-        # Filter to visible tracks only
+        # Filter to visible tracks only; full-canvas overlay tracks (e.g.
+        # MarkerTrack) are painted last over everything and contribute
+        # nothing to the layout.
         visible_tracks = [(i, t) for i, t in enumerate(self.tracks)
                           if getattr(t, '_visible', True)]
         if not visible_tracks:
+            return
+        normal_tracks = [(i, t) for i, t in visible_tracks
+                         if not getattr(t, '_overlay_track', False)]
+        overlay_tracks = [t for _, t in visible_tracks
+                          if getattr(t, '_overlay_track', False)]
+        if not normal_tracks:
             return
 
         w = self.width()
@@ -159,14 +167,14 @@ class WellLogCanvas(QWidget):
         # Compute scaled x offsets and widths for visible tracks
         scaled: list[tuple[float, float]] = []
         x_off = 0.0
-        for _, track in visible_tracks:
+        for _, track in normal_tracks:
             sw = track.width * scale
             scaled.append((x_off, sw))
             x_off += sw
 
         # Collect groups: group_name -> [(x_offset, width), ...]
         groups: dict[str, list[tuple[float, float]]] = {}
-        for (_, track), s in zip(visible_tracks, scaled):
+        for (_, track), s in zip(normal_tracks, scaled):
             gn = track.group_name
             if gn:
                 groups.setdefault(gn, []).append(s)
@@ -193,10 +201,14 @@ class WellLogCanvas(QWidget):
             painter.drawText(group_rect, Qt.AlignmentFlag.AlignCenter, group_name)
 
         # Render individual tracks with uniform header height
-        max_header = max((t.header_height for _, t in visible_tracks), default=0)
-        for (_, track), (x_off, sw) in zip(visible_tracks, scaled):
+        max_header = max((t.header_height for _, t in normal_tracks), default=0)
+        for (_, track), (x_off, sw) in zip(normal_tracks, scaled):
             full_rect = QRectF(x_off, 0, sw, h)
             track.export_render(painter, full_rect, canvas_header_height=max_header)
+
+        # Full-canvas overlay tracks (markers) painted on top.
+        for track in overlay_tracks:
+            track.paint_content(painter, QRectF(0, 0, w, h))
 
     def resizeEvent(self, event):
         self._cache_dirty = True
@@ -238,7 +250,9 @@ class WellLogCanvas(QWidget):
 
     def _handle_x_positions(self) -> list[tuple[float, int, int]]:
         """Return list of (x_center, left_track_idx, right_track_idx) for resize handles."""
-        visible = [(i, t) for i, t in enumerate(self.tracks) if getattr(t, '_visible', True)]
+        visible = [(i, t) for i, t in enumerate(self.tracks)
+                   if getattr(t, '_visible', True)
+                   and not getattr(t, '_overlay_track', False)]
         if len(visible) < 2:
             return []
         w = self.width()
