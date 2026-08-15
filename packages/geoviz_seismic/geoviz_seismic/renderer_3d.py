@@ -171,6 +171,39 @@ class GLImageLutItem(gl.GLImageItem):
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
         self._lut_needs_upload = False
 
+    def clean(self) -> None:
+        """Release the GPU textures and shader owned by this item.
+
+        Idempotent; safe without a current GL context (handles are dropped so
+        stale ids cannot be reused). Called by the renderer when planes are
+        cleared so volume switch / page close loops do not accumulate VRAM.
+        """
+        program = self._lut_shader_program
+        self._lut_shader_program = None
+        lut_tex, self._lut_tex = self._lut_tex, None
+        index_tex, self.texture = self.texture, None
+        ctx = None
+        try:
+            ctx = QtGui.QOpenGLContext.currentContext()
+        except Exception:
+            ctx = None
+        if ctx is None:
+            return
+        for tex in (lut_tex, index_tex):
+            if tex is not None:
+                try:
+                    GL.glDeleteTextures(1, [int(tex)])
+                except Exception:
+                    pass
+        if program is not None:
+            try:
+                if hasattr(program, "removeAllShaders"):
+                    program.removeAllShaders()
+                if hasattr(program, "deleteLater"):
+                    program.deleteLater()
+            except Exception:
+                pass
+
     @staticmethod
     def prepare_r8_upload(index_2d: np.ndarray) -> tuple[np.ndarray, int, int]:
         """Pack a 2-D index image for ``glTexImage2D`` like pyqtgraph GLImageItem.
@@ -1577,6 +1610,24 @@ class Renderer3D(QWidget):
 
     def _clear_visuals(self):
         self._clear_time_plane_items()
+        # Release GPU resources before detaching items so load/switch/clear
+        # cycles do not leak textures and shader programs (long-session VRAM).
+        for v in (self._volume_visual, self._overlay_volume_visual):
+            if v is not None:
+                clean = getattr(v, "clean", None)
+                if callable(clean):
+                    try:
+                        clean()
+                    except Exception:
+                        pass
+        for v in (self._img_il, self._img_xl, self._img_arb):
+            if v is not None:
+                clean = getattr(v, "clean", None)
+                if callable(clean):
+                    try:
+                        clean()
+                    except Exception:
+                        pass
         for v in (self._volume_visual, self._overlay_volume_visual, self._img_il, self._img_xl,
                   self._img_arb, self._horizon_visual,
                   self._picks_visual, self._bbox_visual, self._cursor_sphere):
@@ -2130,6 +2181,12 @@ class Renderer3D(QWidget):
         for image, line in getattr(
             self, "_time_plane_items", {}
         ).values():
+            clean = getattr(image, "clean", None)
+            if callable(clean):
+                try:
+                    clean()
+                except Exception:
+                    pass
             for item in (image, line):
                 try:
                     self._view.removeItem(item)
@@ -2802,18 +2859,54 @@ class Renderer3D(QWidget):
         time_opacity: float,
         time_enabled: bool = True,
     ) -> None:
-        """Public host seam for one IL, one XL and many Time planes."""
+        """Public host seam for one IL, one XL and many Time planes.
+
+        Differential: only the axes whose index changed are re-extracted and
+        re-uploaded; unchanged planes keep their textures. Time planes are
+        rebuilt only when the slice set/visibility/opacity actually moved
+        (set_time_slices already syncs them in place).
+        """
         if not self._loaded:
             return
+        dirty: set[str] = set()
+        if int(il) != int(self._il_pos):
+            dirty.add("inline")
+        if int(xl) != int(self._xl_pos):
+            dirty.add("crossline")
+        # Record pre-state so set_time_slices' own rebuild can be skipped when
+        # nothing about the horizontal stack changed.
+        prev_times = (
+            list(self._time_slice_positions),
+            dict(self._time_slice_visibility),
+            self._active_time_pos,
+            self._time_slice_opacity,
+            self._time_slices_enabled,
+        )
         self.set_position_external("inline", int(il))
         self.set_position_external("crossline", int(xl))
-        self.set_time_slices(
-            time_slices,
-            active=int(active_time),
-            opacity=float(time_opacity),
-            enabled=bool(time_enabled),
+        new_times = (
+            [int(s) for s, _v in time_slices],
+            {int(s): bool(v) for s, v in time_slices},
+            int(active_time),
+            float(time_opacity),
+            bool(time_enabled),
         )
-        self._update_slice_planes_for({"inline", "crossline"})
+        times_changed = (
+            sorted(new_times[0]) != sorted(prev_times[0])
+            or new_times[1] != prev_times[1]
+            or new_times[2] != prev_times[2]
+            or new_times[3] != prev_times[3]
+            or new_times[4] != prev_times[4]
+        )
+        if times_changed:
+            self.set_time_slices(
+                time_slices,
+                active=int(active_time),
+                opacity=float(time_opacity),
+                enabled=bool(time_enabled),
+            )
+        if dirty:
+            self._update_slice_planes_for(dirty)
         self._view.update()
 
     def apply_slice_positions(

@@ -29,6 +29,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Workbench seismic scale keys → Renderer3D LUT names (kept consistent with
+# color_scales.SEISMIC_COLOR_SCALES used by the 2D fence profile).
+_RENDER_CMAP = {
+    "blue-white-red": "seismic",
+    "red-white-blue": "seismic_r",
+    "gray": "gray",
+}
+
 
 @dataclass(frozen=True)
 class WellOverlaySpec:
@@ -58,6 +66,10 @@ class WellSeismicJointWidget(QWidget):
         self._well_items: list = []
         self._curtain_items: list = []
         self._probe_item = None
+        # Volume identity last uploaded to the renderer (skip redundant
+        # whole-volume GPU re-uploads on colour/fence/domain refreshes).
+        self._last_volume_key = None
+        self._cmap_applied = False
         self._gr_legend: QLabel | None = None
         self._status = QLabel("井震联合场景未加载")
         self._status.setStyleSheet("color: #64748b; padding: 4px 8px;")
@@ -516,36 +528,67 @@ class WellSeismicJointWidget(QWidget):
             return
 
         vol = scene.volume_access
-        if self._renderer is not None and vol is not None:
-            data = getattr(vol, "data", None)
-            if data is not None:
-                try:
-                    self._set_default_render_mode()
-                    # Progressive LOD upgrades must not reset the camera.
-                    already = bool(getattr(self._renderer, "_loaded", False))
-                    load_kw = {}
+        data = getattr(vol, "data", None) if vol is not None else None
+        if self._renderer is not None:
+            if vol is None or data is None:
+                # Volume detached (project switch / empty state): drop the
+                # stale GL brick and planes instead of leaving the previous
+                # dataset on screen while the scene says "not loaded".
+                if getattr(self._renderer, "_loaded", False):
                     try:
-                        # Keyword supported on Stage-7 renderer; ignore if older.
-                        import inspect
-
-                        if "preserve_camera" in inspect.signature(
-                            self._renderer.load_volume
-                        ).parameters:
-                            load_kw["preserve_camera"] = already
+                        self._renderer.clear()
                     except Exception:
-                        pass
-                    self._renderer.load_volume(
-                        np.asarray(data, dtype=np.float32), **load_kw
-                    )
-                    self.sync_orthogonal_slices()
-                except Exception as exc:
-                    logger.warning("load_volume failed: %s", exc)
+                        logger.debug("renderer clear failed", exc_info=True)
+                self._last_volume_key = None
             else:
-                # Source-backed access without dense display yet: scene still
-                # has shape/slices for wells/fences; GL waits for L0 brick.
-                logger.debug(
-                    "volume access has no dense display data yet; defer GL load"
+                volume_key = (
+                    getattr(vol, "source_id", None),
+                    getattr(vol, "lod_level", None),
+                    id(data),
+                    tuple(int(x) for x in data.shape),
                 )
+                if volume_key != getattr(self, "_last_volume_key", None):
+                    try:
+                        self._set_default_render_mode()
+                        # Progressive LOD upgrades must not reset the camera.
+                        already = bool(getattr(self._renderer, "_loaded", False))
+                        load_kw = {}
+                        try:
+                            # Keyword supported on Stage-7 renderer; ignore if older.
+                            import inspect
+
+                            if "preserve_camera" in inspect.signature(
+                                self._renderer.load_volume
+                            ).parameters:
+                                load_kw["preserve_camera"] = already
+                        except Exception:
+                            pass
+                        self._renderer.load_volume(
+                            np.asarray(data, dtype=np.float32), **load_kw
+                        )
+                        self._last_volume_key = volume_key
+                        self.sync_orthogonal_slices()
+                    except Exception as exc:
+                        logger.warning("load_volume failed: %s", exc)
+                else:
+                    # Same brick: only re-apply slice positions (cheap,
+                    # differential) — domain/fence/colour changes must not
+                    # re-upload the whole volume texture.
+                    self.sync_orthogonal_slices()
+            # Wire the scene's seismic colour scale into the 3D renderer so
+            # the 2D profile and the 3D planes share one LUT source.
+            cmap = _RENDER_CMAP.get(
+                scene.display_settings.seismic_color_scale, "seismic"
+            )
+            try:
+                if (
+                    getattr(self._renderer, "_cmap_name", None) != cmap
+                    or not getattr(self, "_cmap_applied", False)
+                ):
+                    self._renderer.set_colormap(cmap)
+                    self._cmap_applied = True
+            except Exception:
+                logger.debug("set_colormap failed", exc_info=True)
 
         self.set_well_trajectories(
             scene.well_trajectories(visible_only=True)
@@ -628,21 +671,31 @@ class WellSeismicJointWidget(QWidget):
         n_v = min(32, nt)
         t_idx = np.linspace(0, nt - 1, n_v)
         z_vals = np.interp(t_idx, np.arange(nt), ext.sample_axis)
-        # resample path to match along samples of extract
+        # Place curtain columns at the SAME arc-length stations the amplitude
+        # strip was extracted at (extract_fence_strip samples by arc length);
+        # a vertex-fraction parameterization misplaces columns whenever the
+        # fence polyline has uneven segment lengths.
         n_a = ext.amplitude.shape[0]
-        # use extract arc points
+        seg = np.diff(verts_xy, axis=0)
+        seg_len = np.linalg.norm(seg, axis=1)
+        cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+        total = float(cum[-1]) or 1.0
+        targets = np.clip(
+            np.asarray(ext.arc_length_m, dtype=np.float64), 0.0, total
+        )
+        j_idx = np.clip(
+            np.searchsorted(cum, targets, side="right") - 1, 0, n - 2
+        )
+        local = (targets - cum[j_idx]) / np.where(
+            seg_len[j_idx] > 1e-12, seg_len[j_idx], 1.0
+        )
+        xy_rows = verts_xy[j_idx] + local[:, None] * (
+            verts_xy[j_idx + 1] - verts_xy[j_idx]
+        )
         verts = []
         faces = []
         for i in range(n_a):
-            # position along polyline by arc fraction
-            frac = i / max(n_a - 1, 1)
-            # approximate XY by linear along original verts
-            # better: use same parameterization as extract — place via fence verts
-            idx_f = frac * (n - 1)
-            j = int(idx_f)
-            j = min(j, n - 2)
-            local = idx_f - j
-            xy = verts_xy[j] * (1 - local) + verts_xy[j + 1] * local
+            xy = xy_rows[i]
             for k, z in enumerate(z_vals):
                 rx, ry, rz = self._scene.world_to_render_xyz(float(xy[0]), float(xy[1]), float(z))
                 verts.append([rx, ry, rz])
