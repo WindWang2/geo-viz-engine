@@ -15,6 +15,11 @@ from .synthetic import (
 )
 from .calibration import WellTieCalibration, resample_to_seismic_grid, shift_depths
 from .auto_tie import auto_tie_with_quality, correlate_synthetic_to_trace
+from .sonic_units import (
+    US_FT_TO_US_M,
+    canonical_sonic_unit,
+    normalize_sonic_units,
+)
 
 __version__ = "0.1.0"
 
@@ -30,4 +35,7 @@ __all__ = [
     "shift_depths",
     "auto_tie_with_quality",
     "correlate_synthetic_to_trace",
+    "US_FT_TO_US_M",
+    "canonical_sonic_unit",
+    "normalize_sonic_units",
 ]
