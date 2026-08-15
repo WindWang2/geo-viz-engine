@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import math
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import QWidget
+
+from .track_base import nice_depth_interval
 
 
 class DepthRuler(QWidget):
     """Depth ruler widget showing depth labels and cursor depth indicator."""
 
-    _NICE_NUMBERS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
     _TARGET_PIXEL_SPACING = 60
 
     def __init__(self, parent=None):
@@ -38,17 +38,7 @@ class DepthRuler(QWidget):
 
     def _compute_nice_intervals(self, top: float, bottom: float, height: int) -> float:
         """Compute a nice label interval for the given depth range and pixel height."""
-        span = bottom - top
-        if span <= 0 or height <= 0:
-            return 1.0
-        raw = (span / height) * self._TARGET_PIXEL_SPACING
-        exp = math.floor(math.log10(raw)) if raw > 0 else 0
-        base = 10 ** exp
-        for n in self._NICE_NUMBERS:
-            candidate = n * base
-            if candidate >= raw:
-                return candidate
-        return self._NICE_NUMBERS[-1] * base
+        return nice_depth_interval(bottom - top, height, min_px=self._TARGET_PIXEL_SPACING)
 
     def paintEvent(self, event):
         if self._depth_bottom <= self._depth_top:
