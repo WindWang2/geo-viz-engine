@@ -11,6 +11,7 @@ from .pattern_engine import PatternEngine
 from .interaction import ZoomPanHandler
 from .overlay import CrosshairOverlay
 from .depth_ruler import DepthRuler
+from .marker_track import MarkerTrack
 
 from geoviz_well_log.tracks.image_track import ImageTrack, CorePhotoSegment
 
@@ -19,5 +20,5 @@ __all__ = [
     "IntervalTrack", "LithologyTrack", "FaciesTrack", "SystemsTractTrack",
     "ImageTrack", "CorePhotoSegment",
     "WellLogCanvas", "LayoutCoordinator", "PatternEngine",
-    "ZoomPanHandler", "CrosshairOverlay", "DepthRuler",
+    "ZoomPanHandler", "CrosshairOverlay", "DepthRuler", "MarkerTrack",
 ]

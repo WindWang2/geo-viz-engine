@@ -8,6 +8,7 @@ from .renderer import (
     FaciesTrack,
     IntervalTrack,
     LithologyTrack,
+    MarkerTrack,
     SystemsTractTrack,
 )
 from .tracks.image_track import ImageTrack, CorePhotoSegment
@@ -159,6 +160,14 @@ def build_qpainter_tracks(data: WellLogData, merge_groups: list[tuple[list[str],
             log = c.name in _LOG_SCALE_CURVES
             ct = CurveTrack(curves=[styled], label=c.name, width=140, log_scale=log)
             tracks.append(ct)
+
+    # 9. Formation-top markers overlay — consumed from duck-typed
+    #    ``data.markers`` (workbench WellLogDataWithMarkers). The track is a
+    #    zero-width full-canvas overlay, so it never changes the layout and no
+    #    track is produced when there are no markers.
+    markers = getattr(data, "markers", None) or []
+    if markers:
+        tracks.append(MarkerTrack(markers=markers))
 
     # Set depth range on all tracks
     for t in tracks:
