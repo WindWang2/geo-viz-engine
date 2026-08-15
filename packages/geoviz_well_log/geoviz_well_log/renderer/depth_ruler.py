@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import QWidget
