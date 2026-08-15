@@ -15,16 +15,21 @@ def project_well_trajectory(
     domain: VerticalDomain,
     td: TimeDepthTable | None,
     n_samples: int = _DEFAULT_SAMPLES,
+    depth_transform=None,
 ) -> WellTrajectory3D:
     """Build a head→bottom polyline in scene XYZ for the given vertical domain.
 
-    In **Time** domain, Z is TWT (ms) from the TD table. Without TD, only the
-    wellhead point is returned with a warning (no fabricated time path).
+    In **Time** domain, Z is TWT (ms) from the TD table. In **Depth** domain,
+    Z is the TD table's TWT pushed through the scene's depth transform. In
+    either domain, wells without a TD table return only the wellhead point
+    with a warning — MD is a along-path parameter and is never substituted
+    for a seismic vertical coordinate.
     """
     if domain is VerticalDomain.TIME:
         return _project_time(well, td=td, n_samples=n_samples)
-    # Depth path reserved for ticket #63; still return geometric MD path.
-    return _project_depth(well, n_samples=n_samples)
+    return _project_depth(
+        well, td=td, n_samples=n_samples, depth_transform=depth_transform
+    )
 
 
 def _linspace_path(well: WellHead, n_samples: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -57,10 +62,28 @@ def _project_time(
     return WellTrajectory3D(name=well.name, points=pts, has_td=True, warning=None)
 
 
-def _project_depth(well: WellHead, *, n_samples: int) -> WellTrajectory3D:
+def _project_depth(
+    well: WellHead,
+    *,
+    td: TimeDepthTable | None,
+    n_samples: int,
+    depth_transform=None,
+) -> WellTrajectory3D:
+    if td is None or depth_transform is None or not depth_transform.available:
+        pts = np.array([[well.x, well.y, 0.0]], dtype=np.float64)
+        return WellTrajectory3D(
+            name=well.name,
+            points=pts,
+            has_td=False,
+            warning=(
+                f"Well {well.name}: missing time-depth table or transform; "
+                "showing wellhead only in Depth domain"
+            ),
+        )
     xs, ys, md = _linspace_path(well, n_samples)
-    # Z = MD as depth proxy (TVDSS refinement lands with DepthTransform ticket).
-    pts = np.column_stack([xs, ys, md])
+    twt = np.asarray(td.md_to_time_ms(md), dtype=np.float64)
+    z = np.asarray(depth_transform.time_ms_to_depth_m(twt), dtype=np.float64)
+    pts = np.column_stack([xs, ys, z])
     return WellTrajectory3D(name=well.name, points=pts, has_td=True, warning=None)
 
 

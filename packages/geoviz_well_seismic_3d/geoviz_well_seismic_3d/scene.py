@@ -108,9 +108,22 @@ class WellSeismicScene:
         n_samples: int,
         dt_ms: float,
         t0_ms: float = 0.0,
+        iline_step: int | None = None,
+        xline_step: int | None = None,
+        n_inlines: int | None = None,
+        n_crosslines: int | None = None,
     ) -> SurveySpec:
         survey = survey_from_corners(
-            p1, p2, p3, n_samples=n_samples, dt_ms=dt_ms, t0_ms=t0_ms
+            p1,
+            p2,
+            p3,
+            n_samples=n_samples,
+            dt_ms=dt_ms,
+            t0_ms=t0_ms,
+            iline_step=iline_step,
+            xline_step=xline_step,
+            n_inlines=n_inlines,
+            n_crosslines=n_crosslines,
         )
         self.set_survey(survey)
         return survey
@@ -475,18 +488,28 @@ class WellSeismicScene:
     def depth_transform(self) -> DepthTransformState:
         return self._depth_transform
 
+    @property
+    def depth_available(self) -> bool:
+        """True only when an authoritative (or explicitly opted-in) T-D transform exists."""
+        return bool(self._depth_transform.available)
+
     def set_depth_transform(self, state: DepthTransformState) -> None:
         self._depth_transform = state
 
     def set_vertical_domain(self, domain: VerticalDomain) -> None:
+        """Switch the scene-wide vertical domain (shared by 3D and 2D consumers).
+
+        Fail-closed: Depth is refused when no time-depth transform is
+        available — uniform scaling must never masquerade as depth.
+        """
         if domain is self._domain:
             return
-        self._domain = domain
-        if domain is VerticalDomain.DEPTH:
-            self._depth_transform = select_depth_transform(
-                has_external_volume=False,
-                v0_m_s=self._depth_transform.constant.v0_m_s,
+        if domain is VerticalDomain.DEPTH and not self._depth_transform.available:
+            raise ValueError(
+                "Depth domain unavailable: no time-depth transform "
+                "(velocity model / checkshot / depth cube) is set"
             )
+        self._domain = domain
         self._invalidate_traj()
         self._extract_cache.clear()
 
@@ -566,18 +589,12 @@ class WellSeismicScene:
                 td = self._td_tables.get(
                     str(well_id), self._td_tables.get(well.name)
                 )
-                traj = project_well_trajectory(well, domain=self._domain, td=td)
-                if self._domain is VerticalDomain.DEPTH and traj.has_td is False:
-                    # Depth path uses MD; reproject with domain DEPTH
-                    traj = project_well_trajectory(
-                        well, domain=VerticalDomain.DEPTH, td=td
-                    )
-                elif self._domain is VerticalDomain.DEPTH and td is not None:
-                    # Prefer converting TWT path to depth via V0 if we had time
-                    pass
-                if self._domain is VerticalDomain.DEPTH and td is not None:
-                    # Rebuild Z from MD via constant (MD as depth) already done
-                    pass
+                traj = project_well_trajectory(
+                    well,
+                    domain=self._domain,
+                    td=td,
+                    depth_transform=self._depth_transform,
+                )
                 self._traj_cache[well_id] = traj
         if visible_only:
             return {
@@ -633,9 +650,9 @@ class WellSeismicScene:
             td = self._td_tables.get(
                 str(presentation.id), self._td_tables.get(well.name)
             )
-            if curve is None or (
-                self._domain is VerticalDomain.TIME and td is None
-            ):
+            if curve is None or td is None:
+                # No GR curve, or no TD table to place it in the seismic
+                # vertical domain (Time or Depth both need the MD→TWT leg).
                 points = base_trajectories[presentation.id].points
                 values = np.full(len(points), np.nan, dtype=np.float64)
             else:
@@ -657,7 +674,14 @@ class WellSeismicScene:
                 if self._domain is VerticalDomain.TIME:
                     z = np.asarray(td.md_to_time_ms(md), dtype=np.float64)
                 else:
-                    z = md
+                    # Depth from MD goes through the TD table and the scene's
+                    # (real) time-depth transform — MD itself is never used as
+                    # scene depth for a deviated/measured-depth well.
+                    twt = np.asarray(td.md_to_time_ms(md), dtype=np.float64)
+                    z = np.asarray(
+                        self._depth_transform.time_ms_to_depth_m(twt),
+                        dtype=np.float64,
+                    )
                 points = np.column_stack([x, y, z])
             tracks[presentation.id] = WellGrTrajectory(
                 id=presentation.id,
@@ -679,10 +703,51 @@ class WellSeismicScene:
     # ------------------------------------------------------------------
 
     def set_volume_access(self, access: VolumeAccess | None) -> None:
+        self._rescale_slice_indices(self._volume, access)
         self._volume = access
         self._extract_cache.clear()
         self._rebuild_registration()
         self._reconcile_orthogonal_slice_state()
+
+    def _rescale_slice_indices(
+        self, old_access: VolumeAccess | None, new_access: VolumeAccess | None
+    ) -> None:
+        """Keep IL/XL slice indices physically stationary across LOD changes.
+
+        Indices live in loaded-volume space, so a preview refinement (L0→L1)
+        changes their meaning. Convert through the OLD registration into
+        survey iline/xline numbers, then back through the NEW registration —
+        without this the displayed plane jumps to a different physical line
+        whenever the preview shape changes.
+        """
+        if old_access is None or new_access is None:
+            return
+        old_reg = self._registration
+        if old_reg is None:
+            return
+        state = self._orthogonal_slice_state
+        if state.inline_index is None and state.crossline_index is None:
+            return
+        new_shape = new_access.shape
+        try:
+            new_reg = VolumeRegistration.from_survey_and_shape(
+                self._survey, new_shape
+            )
+        except ValueError:
+            return
+        il_num, xl_num = old_reg.volume_idx_to_il_xl(
+            float(state.inline_index or 0), float(state.crossline_index or 0)
+        )
+        vi, vx = new_reg.il_xl_to_volume_idx(il_num, xl_num)
+        il = int(max(0, min(new_shape[0] - 1, round(vi))))
+        xl = int(max(0, min(new_shape[1] - 1, round(vx))))
+        self._orthogonal_slice_state = OrthogonalSliceState(
+            inline_index=il,
+            crossline_index=xl,
+            time_slices=state.time_slices,
+            active_time_ms=state.active_time_ms,
+            time_opacity=state.time_opacity,
+        )
 
     @property
     def volume_access(self) -> VolumeAccess | None:
@@ -697,6 +762,24 @@ class WellSeismicScene:
         if self._survey is None or self._volume is None:
             self._registration = None
             return
+        # Source-backed previews expose the exact per-axis downsample stride;
+        # registration maps through it instead of guessing from shape ratios.
+        strides = getattr(self._volume, "strides", None)
+        if strides is not None:
+            strides = tuple(int(s) for s in strides)
+            try:
+                self._registration = VolumeRegistration(
+                    survey=self._survey,
+                    n_inline=int(self._volume.shape[0]),
+                    n_crossline=int(self._volume.shape[1]),
+                    n_sample=int(self._volume.shape[2]),
+                    strides=strides,
+                )
+                return
+            except ValueError:
+                # Stride/shape mismatch: fall through to inference, which will
+                # also raise if the shape is impossible for the survey.
+                pass
         self._registration = VolumeRegistration.from_survey_and_shape(
             self._survey, self._volume.shape
         )
@@ -763,6 +846,17 @@ class WellSeismicScene:
         self.remove_fence(fid)
         return True
 
+    def clear_fences(self) -> None:
+        """Drop all fences (e.g. when rebinding a different survey/project).
+
+        Stale fence vertices are meaningless against a new survey and would
+        otherwise silently clamp into invalid extraction strips.
+        """
+        self._fences = []
+        self._active_fence_id = None
+        self._extract_cache.clear()
+        self._probe = None
+
     def set_fence_visible(self, fence_id: str, visible: bool) -> None:
         for f in self._fences:
             if f.id == fence_id:
@@ -807,7 +901,10 @@ class WellSeismicScene:
 
         domain:
             If set, sample axis uses this domain instead of scene ``vertical_domain``.
-            Workbench 2D profile forces Time while 3D may stay on Depth (#122).
+            Kept as an extraction-time override for callers that manage their
+            own domain; the workbench UI passes ``None`` so 2D and 3D share
+            the single scene domain (the old #122 "2D stays Time" split is
+            gone — both views must agree).
         """
         fence = self.active_fence()
         if fence is None or self._volume is None or self._survey is None:
@@ -817,14 +914,20 @@ class WellSeismicScene:
         if cache_key in self._extract_cache:
             return self._extract_cache[cache_key]
         survey = self._survey
-        nt = getattr(self._volume, "shape", (0, 0, 0))[2]
-        if use_domain is VerticalDomain.TIME:
-            saxis = survey.t0_ms + np.arange(nt) * survey.dt_ms
-        else:
-            saxis = self._depth_transform.constant.time_ms_to_depth_m(
-                survey.t0_ms + np.arange(nt) * survey.dt_ms
-            )
         if self._registration is None:
+            self._rebuild_registration()
+        registration = self._registration
+        nt = getattr(self._volume, "shape", (0, 0, 0))[2]
+        # Preview sample i represents native sample i*stride_t, so the axis
+        # must span the FULL survey time range with spacing dt*stride_t —
+        # arange(nt)*dt alone would compress the axis by the stride factor.
+        stride_t = registration.strides[2] if registration is not None else 1
+        times_native = survey.t0_ms + np.arange(nt) * (survey.dt_ms * stride_t)
+        if use_domain is VerticalDomain.TIME:
+            saxis = times_native
+        else:
+            saxis = self._depth_transform.time_ms_to_depth_m(times_native)
+        if registration is None:
             self._rebuild_registration()
         ext = extract_fence_strip(
             self._volume,
@@ -868,7 +971,21 @@ class WellSeismicScene:
             curve_z = None
             if cmd is not None:
                 if use_domain is VerticalDomain.DEPTH:
-                    curve_z = np.asarray(cmd, dtype=np.float64)
+                    # Curve depth = TD(MD→TWT) then the active transform —
+                    # never raw MD (which is a well-path parameter, not a
+                    # seismic vertical coordinate).
+                    td = self._td_tables.get(
+                        str(presentation.id),
+                        self._td_tables.get(well.name),
+                    )
+                    if td is not None and self._depth_transform.available:
+                        twt = np.asarray(
+                            td.md_to_time_ms(cmd), dtype=np.float64
+                        )
+                        curve_z = np.asarray(
+                            self._depth_transform.time_ms_to_depth_m(twt),
+                            dtype=np.float64,
+                        )
                 else:
                     td = self._td_tables.get(
                         str(presentation.id),
@@ -886,9 +1003,12 @@ class WellSeismicScene:
                     s_m=s,
                     distance_m=dist,
                     tops=list(
-                        self._tops_by_well.get(
-                            presentation.id,
-                            self._tops_by_well.get(well.name, []),
+                        self._tops_in_domain(
+                            self._tops_by_well.get(
+                                presentation.id,
+                                self._tops_by_well.get(well.name, []),
+                            ),
+                            use_domain,
                         )
                     ),
                     curve_name=curve_name,
@@ -899,6 +1019,19 @@ class WellSeismicScene:
             )
         hits.sort(key=lambda h: h.s_m)
         return hits
+
+    def _tops_in_domain(
+        self,
+        tops: list[tuple[str, float]],
+        domain: VerticalDomain,
+    ) -> list[tuple[str, float]]:
+        """Tops are stored as TWT ms; convert to the requested display domain."""
+        if domain is not VerticalDomain.DEPTH or not self._depth_transform.available:
+            return tops
+        return [
+            (name, float(self._depth_transform.time_ms_to_depth_m(z)))
+            for name, z in tops
+        ]
 
     def _pick_curve(
         self, well_id: JointWellId | str, *, fallback_name: str
@@ -943,8 +1076,9 @@ class WellSeismicScene:
             p = self._probe
             z = p.z
             if p.domain == "depth":
-                # Convert depth m → time ms via inverse V0 for sample axis
-                z = float(self._depth_transform.constant.depth_m_to_time_ms(z))
+                # Convert depth m → time ms via the active transform for the
+                # sample axis; unavailable transforms raise (fail-closed).
+                z = float(self._depth_transform.depth_m_to_time_ms(z))
             return self._registration.world_xyz_to_volume(
                 p.x, p.y, z, domain="time"
             )
@@ -954,13 +1088,15 @@ class WellSeismicScene:
         """Map world XY + domain Z to volume/render index space."""
         if self._registration is not None:
             if self._domain is VerticalDomain.DEPTH:
-                z = float(self._depth_transform.constant.depth_m_to_time_ms(z))
+                z = float(self._depth_transform.depth_m_to_time_ms(z))
             vi, vx = self._registration.xy_to_volume_idx(x, y)
             vt = self._registration.time_ms_to_sample_idx(z)
             return float(vi), float(vx), float(vt)
         if self._survey is None:
             return x, y, z
         s = self._survey
+        if self._domain is VerticalDomain.DEPTH:
+            z = float(self._depth_transform.depth_m_to_time_ms(z))
         il, xl = s.xy_to_il_xl(x, y)
         il_idx = (il - s.iline_start) / (s.iline_step or 1)
         xl_idx = (xl - s.xline_start) / (s.xline_step or 1)
