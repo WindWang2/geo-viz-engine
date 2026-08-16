@@ -50,3 +50,66 @@ def test_tie_evaluator():
     r, lag, residual = evaluate_tie_quality(s1, s2)
     assert pytest.approx(r, abs=1e-2) == 1.0
     assert lag == 0
+
+
+def _reference_ormsby(t: np.ndarray, f1: float, f2: float, f3: float, f4: float) -> np.ndarray:
+    """Independent standard-Ormsby reference (Ryan 1994), peak-normalized."""
+    def sinc_sq(f):
+        return np.sinc(f * t) ** 2
+
+    high = (f4**2 * sinc_sq(f4) - f3**2 * sinc_sq(f3)) / (f4 - f3)
+    low = (f2**2 * sinc_sq(f2) - f1**2 * sinc_sq(f1)) / (f2 - f1)
+    w = np.pi * (high - low)
+    peak = np.max(np.abs(w))
+    return w / peak if peak > 0 else w
+
+
+def test_ormsby_wavelet_matches_standard_formula():
+    """wavelet.ormsby_wavelet must match the standard Ormsby shape (#540)."""
+    from geoviz_well_tie.wavelet import ormsby_wavelet
+
+    f1, f2, f3, f4 = 5.0, 10.0, 40.0, 50.0
+    dt = 0.002
+    n = 201
+    t = (np.arange(n, dtype=np.float64) * dt) - (n // 2) * dt
+    expected = _reference_ormsby(t, f1, f2, f3, f4)
+
+    got = ormsby_wavelet(n, dt, f1, f2, f3, f4)
+    np.testing.assert_allclose(got, expected, atol=1e-4)
+    # The old implementation's f4/f2 contribution ratio at t=0 was ~26 vs
+    # the true 12.5 — the shape, not just the scale, must agree.
+    assert np.abs(np.max(np.abs(got)) - 1.0) < 1e-6
+
+
+def test_generate_ormsby_wavelet_matches_standard_formula():
+    """wavelet_engine.generate_ormsby_wavelet must not divide by the product
+    of both bandwidths (#540)."""
+    f1, f2, f3, f4 = 5.0, 10.0, 40.0, 50.0
+    dt = 0.002
+    length = 0.1
+    n = int(length / dt)
+    if n % 2 == 0:
+        n += 1
+    t = np.linspace(-length / 2, length / 2, n)
+    expected = _reference_ormsby(t, f1, f2, f3, f4)
+
+    t_got, got = generate_ormsby_wavelet(f1, f2, f3, f4, dt=dt, length=length)
+    np.testing.assert_allclose(t_got, t)
+    np.testing.assert_allclose(got, expected, atol=1e-4)
+
+
+def test_ormsby_band_weights_ratio_at_zero():
+    """At t=0 the two band groups contribute pi*(f4+f3) - pi*(f2+f1); the
+    ratio of the high to low group is (f4+f3)/(f2+f1) = 6.0 for the defaults —
+    the old product-denominator code made it 2x weaker (#540)."""
+    f1, f2, f3, f4 = 5.0, 10.0, 40.0, 50.0
+    dt = 0.002
+    n = 201
+    t = (np.arange(n, dtype=np.float64) * dt) - (n // 2) * dt
+
+    def sinc_sq(f):
+        return np.sinc(f * t) ** 2
+
+    high = (f4**2 * sinc_sq(f4) - f3**2 * sinc_sq(f3)) / (f4 - f3)
+    low = (f2**2 * sinc_sq(f2) - f1**2 * sinc_sq(f1)) / (f2 - f1)
+    assert high[0] / low[0] == pytest.approx((f4 + f3) / (f2 + f1), rel=1e-6)
