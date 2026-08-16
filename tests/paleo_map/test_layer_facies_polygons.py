@@ -326,3 +326,62 @@ def test_locked_micro_facies_boundary_marked_red(qtbot):
 
 
 
+
+
+def test_vector_pattern_fill_pre_render_not_per_tile_playback(monkeypatch):
+    """#505 lock: the tiled vector fill must paint via one cached pre-rendered
+    QPixmap tile per (pattern, tile, dpr) — never replay the QPicture per
+    visible tile cell (the old double loop cost 38k-150k play() calls per
+    zoom tick at ordinary viewports)."""
+    import time
+
+    lake_feature = {
+        "type": "Feature",
+        "properties": {"name": "湖盆", "facies": "湖泊"},
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+                [105.0, 15.0], [125.0, 15.0], [125.0, 35.0], [105.0, 35.0], [105.0, 15.0]
+            ]],
+        },
+    }
+    engine = PatternEngine()
+    resolver = FaciesStyleResolver(engine)
+    assert resolver.get_vector_pattern("湖泊") is not None
+
+    import geoviz_paleo_map.layers.facies_polygons as fp_mod
+
+    real_cache = fp_mod.QPixmapCache
+
+    class CountingCache:
+        renders = 0
+
+        @staticmethod
+        def find(key, pm):
+            return real_cache.find(key, pm)
+
+        @staticmethod
+        def insert(key, pm):
+            CountingCache.renders += 1
+            return real_cache.insert(key, pm)
+
+    monkeypatch.setattr(fp_mod, "QPixmapCache", CountingCache)
+
+    layer = FaciesPolygonsLayer([lake_feature], resolver)
+    t0 = time.perf_counter()
+    for w, h in ((800, 600), (2400, 1600)):
+        img = QImage(w, h, QImage.Format.Format_RGB32)
+        img.fill(0xFFFFFFFF)
+        vp = PaleoMapViewport(115.0, 25.0, zoom=4.0, width=w, height=h)
+        p = QPainter(img)
+        layer.paint(p, vp)
+        p.end()
+    dt = time.perf_counter() - t0
+
+    # 9x the pixel area must not multiply the render count: exactly one
+    # pre-render per distinct (pattern, tile, dpr) key, served from
+    # QPixmapCache afterwards — never a replay per visible tile cell.
+    assert CountingCache.renders <= 1, CountingCache.renders
+    # Generous CI bound: both full paints together stay well under a
+    # second (the per-tile loop measured 0.2-1 s per zoom tick alone).
+    assert dt < 2.0, f"pattern fill paint took {dt:.2f}s for two frames"
