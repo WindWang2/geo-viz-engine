@@ -106,6 +106,12 @@ class PaleoMapCanvas(QWidget):
         self._edit_overlay = EditOverlayLayer()
         self._undo_mgr = UndoManager()
         self._edit_engine = EditEngine(self._edit_overlay, self._undo_mgr)
+        # Wire the (currently empty) facies layer so polygon hit-testing is
+        # live from the start; load_features and level switches re-wire every
+        # replacement instance (#504: without this the engine could never hit
+        # -test a polygon, so selection and every polygon edit command were
+        # dead in the shipped widget).
+        self._edit_engine.set_facies_layer(self._facies_layer)
 
         self._scheduler = PaintScheduler(self)
         self._layer_caches: list[LayerPixmapCache] = []
@@ -222,6 +228,7 @@ class PaleoMapCanvas(QWidget):
         # Build topology model for editing
         self._topology_model = TopologyBuilder.from_features(features)
         self._edit_engine.set_model(self._topology_model)
+        self._edit_engine.set_facies_layer(self._facies_layer)
         self._update_locked_panel()
         self._rebuild_layer_caches()
 
@@ -512,6 +519,7 @@ class PaleoMapCanvas(QWidget):
 
         # Preserve the existing filled-contour overlay across level switches.
         self._facies_layer = poly
+        self._edit_engine.set_facies_layer(poly)
         self._labels_layer = labels
         self._wells_layer = WellsScatterLayer(self._wells_data)
         self._title_layer = TitleLayer(title)

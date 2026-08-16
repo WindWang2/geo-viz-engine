@@ -61,18 +61,58 @@ def test_placement_freehand_drag(qtbot):
     assert len(free[0].to_record()["geometry"]["points"]) >= 3
 
 
-def test_placement_polygon_double_click_closes(qtbot):
+def test_placement_polygon_click_per_vertex_closes(qtbot):
+    """#547: the window's eventFilter forwards every left press to
+    begin_click, so polygon vertices must accumulate across presses. The
+    old reset-on-press meant a click-placed polygon could never reach the
+    three-point minimum (this test previously drove begin_click once and fed
+    vertices via add_point — a protocol the real window never produces)."""
     win = CartographyLayoutWindow()
     qtbot.addWidget(win)
     win.set_tool_mode("polygon")
     ctrl = win._placement
     ctrl.begin_click(QPointF(0.0, 0.0))
-    ctrl.add_point(QPointF(40.0, 0.0))
-    ctrl.add_point(QPointF(20.0, 30.0))
+    ctrl.begin_click(QPointF(40.0, 0.0))
+    ctrl.begin_click(QPointF(20.0, 30.0))
     ctrl.finish_polygon()
     free = [it for it in win._scene.items() if hasattr(it, "kind")]
     assert len(free) == 1
     assert free[0].kind == "polygon"
+    assert len(free[0].to_record()["geometry"]["points"]) == 3
+
+
+def test_placement_polygon_double_click_press_does_not_duplicate(qtbot):
+    """The press that lands at the same spot as the last vertex (closing
+    double-click) must not add a duplicate vertex."""
+    win = CartographyLayoutWindow()
+    qtbot.addWidget(win)
+    win.set_tool_mode("polygon")
+    ctrl = win._placement
+    ctrl.begin_click(QPointF(0.0, 0.0))
+    ctrl.begin_click(QPointF(40.0, 0.0))
+    ctrl.begin_click(QPointF(20.0, 30.0))
+    ctrl.begin_click(QPointF(20.0, 30.0))  # double-click's press
+    ctrl.finish_polygon()
+    free = [it for it in win._scene.items() if hasattr(it, "kind")]
+    assert len(free) == 1
+    assert len(free[0].to_record()["geometry"]["points"]) == 3
+
+
+def test_placement_polygon_move_does_not_add_vertices(qtbot):
+    """Drag moves between presses must not spray duplicate polygon vertices
+    (only freehand accumulates on move)."""
+    win = CartographyLayoutWindow()
+    qtbot.addWidget(win)
+    win.set_tool_mode("polygon")
+    ctrl = win._placement
+    ctrl.begin_click(QPointF(0.0, 0.0))
+    ctrl.add_point(QPointF(10.0, 5.0))
+    ctrl.add_point(QPointF(25.0, 9.0))
+    ctrl.begin_click(QPointF(40.0, 0.0))
+    ctrl.begin_click(QPointF(20.0, 30.0))
+    ctrl.finish_polygon()
+    free = [it for it in win._scene.items() if hasattr(it, "kind")]
+    assert len(free) == 1
     assert len(free[0].to_record()["geometry"]["points"]) == 3
 
 

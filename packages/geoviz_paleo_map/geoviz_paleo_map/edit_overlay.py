@@ -127,8 +127,8 @@ class EditOverlayLayer(PaleoLayer):
                 v = self._model.get_vertex(vid)
                 if v is None:
                     continue
-                sx, sy = viewport.world_to_screen(v.x, v.y)
-                dist = ((sx - mx) ** 2 + (sy - my) ** 2) ** 0.5
+                sp = viewport.world_to_screen(v.x, v.y)
+                dist = ((sp.x() - mx) ** 2 + (sp.y() - my) ** 2) ** 0.5
                 if dist < self.HANDLE_HOVER_RADIUS + 4:
                     self._hovered_vertex_id = vid
                     return
@@ -142,10 +142,12 @@ class EditOverlayLayer(PaleoLayer):
                 v2 = self._model.get_vertex(ids[i + 1])
                 if v1 is None or v2 is None:
                     continue
+                s1 = viewport.world_to_screen(v1.x, v1.y)
+                s2 = viewport.world_to_screen(v2.x, v2.y)
                 dist = self._point_to_segment_dist(
                     mx, my,
-                    *viewport.world_to_screen(v1.x, v1.y),
-                    *viewport.world_to_screen(v2.x, v2.y),
+                    s1.x(), s1.y(),
+                    s2.x(), s2.y(),
                 )
                 if dist < best_dist:
                     best_dist = dist
@@ -171,8 +173,8 @@ class EditOverlayLayer(PaleoLayer):
                 v = self._model.get_vertex(vid)
                 if v is None:
                     continue
-                sx, sy = viewport.world_to_screen(v.x, v.y)
-                dist = ((sx - mx) ** 2 + (sy - my) ** 2) ** 0.5
+                sp = viewport.world_to_screen(v.x, v.y)
+                dist = ((sp.x() - mx) ** 2 + (sp.y() - my) ** 2) ** 0.5
                 if dist < self.HANDLE_HOVER_RADIUS + 4:
                     return vid
         return None
@@ -195,10 +197,12 @@ class EditOverlayLayer(PaleoLayer):
                 v2 = self._model.get_vertex(ids[i + 1])
                 if v1 is None or v2 is None:
                     continue
+                s1 = viewport.world_to_screen(v1.x, v1.y)
+                s2 = viewport.world_to_screen(v2.x, v2.y)
                 dist = self._point_to_segment_dist(
                     mx, my,
-                    *viewport.world_to_screen(v1.x, v1.y),
-                    *viewport.world_to_screen(v2.x, v2.y),
+                    s1.x(), s1.y(),
+                    s2.x(), s2.y(),
                 )
                 if dist < best_dist:
                     best_dist = dist

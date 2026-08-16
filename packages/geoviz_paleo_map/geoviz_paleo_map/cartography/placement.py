@@ -62,6 +62,17 @@ class PlacementController:
     def begin_click(self, scene_pos: QPointF) -> None:
         if self._mode == "select":
             return
+        if self._mode == "polygon" and self._active:
+            # Click-to-add-vertices interaction: each press appends; only the
+            # first press initializes the list. The unconditional reset below
+            # used to wipe the accumulated vertices on every click, so a
+            # click-placed polygon could never reach three points (#547).
+            # Skip a press at (nearly) the same position as the last vertex —
+            # the press that precedes a closing double-click lands there.
+            p = self._clamp(scene_pos)
+            if not self._points or (p - self._points[-1]).manhattanLength() > 1e-6:
+                self._points.append(p)
+            return
         self._active = True
         self._points = [self._clamp(scene_pos)]
         if self._mode in CLICK_BOX_KINDS:
@@ -81,7 +92,11 @@ class PlacementController:
     def add_point(self, scene_pos: QPointF) -> None:
         if not self._active:
             return
-        if self._mode in ("freehand", "polygon"):
+        if self._mode == "freehand":
+            # Freehand accumulates the drag path. Polygon vertices come from
+            # begin_click presses only: moves between clicks are not even
+            # delivered without mouse tracking, and a press-drag would
+            # otherwise spray duplicate vertices along the path.
             self._points.append(self._clamp(scene_pos))
 
     def end_click(self, scene_pos: QPointF) -> None:
