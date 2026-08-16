@@ -55,11 +55,22 @@ class BaseLayerPixmapCache:
         self._vp_height: int = 0
         self._dpr: float = 1.0
         self._dirty: bool = True
+        self._last_visible: bool = True
 
     def mark_dirty(self) -> None:
         self._dirty = True
 
     def paint(self, painter: QPainter, viewport) -> None:
+        # Honor the layer's visibility on EVERY paint, not just rerenders:
+        # a pan blit of a stale pixmap would otherwise keep a just-hidden
+        # layer on screen, and screen/export would disagree (#546).
+        visible = bool(getattr(self._layer, "visible", True))
+        if visible != self._last_visible:
+            self._dirty = True
+        self._last_visible = visible
+        if not visible:
+            self._pixmap = None
+            return
         dpr = painter.device().devicePixelRatioF() if painter.device() else 1.0
         if dpr <= 0:
             dpr = 1.0
