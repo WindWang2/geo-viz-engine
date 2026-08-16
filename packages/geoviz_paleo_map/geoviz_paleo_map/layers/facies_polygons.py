@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap, QPixmapCache
 
@@ -201,19 +202,63 @@ class FaciesPolygonsLayer(PaleoLayer):
         self._topology_model = model
 
     def rebuild_dirty_paths(self, feature_ids: set[str]) -> None:
-        """Rebuild QPainterPaths for features whose topology has changed."""
+        """Rebuild QPainterPaths for features whose topology has changed.
+
+        Also refreshes the raw ring arrays the screen-path LOD builder reads
+        (get_or_build ignores ``item.path`` whenever ``item.polygons`` is not
+        None) and the hierarchy level-quadtree border items, so the rendered
+        geometry follows the edited topology instead of the pre-edit snapshot
+        (#544). Style keys (facies name / boundary kind) are refreshed from
+        the model so attribute edits re-render too (#549).
+        """
         if self._topology_model is None:
             return
         for fid in feature_ids:
             new_path = self._topology_model.build_path(fid)
             if new_path is None:
                 continue
+            # LOD path builder consumes the raw rings, not the QPainterPath;
+            # capture them from the freshly built path in the same world space.
+            new_polygons = []
+            for ring in new_path.toFillPolygons():
+                pts = np.array(
+                    [(pt.x(), pt.y()) for pt in ring], dtype=np.float64
+                )
+                if len(pts) >= 2:
+                    new_polygons.append(pts)
+            ref = self._topology_model.get_feature(fid)
+            facies = (
+                (ref.properties.get("facies") or ref.properties.get("name") or "")
+                if ref is not None
+                else ""
+            )
+            boundary_kind = (
+                ref.properties.get("boundary_type")
+                if ref is not None
+                else None
+            )
             for item in self._items:
                 if item.feature_id == fid:
                     item.path = new_path
+                    item.polygons = new_polygons
+                    item.facies_name = facies
+                    item.boundary_kind = boundary_kind
                     br = new_path.boundingRect()
                     item.bbox = (br.left(), br.top(), br.right(), br.bottom())
                     self._screen_cache.mark_dirty(item.cache_key)
+            # Hierarchy border items hold separate copies: rebuild those too.
+            for tree in (self._level_quadtrees or {}).values():
+                if tree is None:
+                    continue
+                for item in self._walk_items(tree):
+                    if item.feature_id == fid:
+                        item.path = new_path
+                        item.polygons = new_polygons
+                        br = new_path.boundingRect()
+                        item.bbox = (
+                            br.left(), br.top(), br.right(), br.bottom(),
+                        )
+                        self._screen_cache.mark_dirty(item.cache_key)
         if feature_ids and self._items:
             min_x = min(item.bbox[0] for item in self._items)
             min_y = min(item.bbox[1] for item in self._items)
@@ -222,6 +267,13 @@ class FaciesPolygonsLayer(PaleoLayer):
             self._quadtree_root = QuadtreeNode((min_x, min_y, max_x, max_y))
             for item in self._items:
                 self._quadtree_root.insert(item)
+
+    @staticmethod
+    def _walk_items(node: QuadtreeNode):
+        """Yield every _Item in a quadtree (used to refresh border items)."""
+        yield from node.items
+        for child in node.children or ():
+            yield from FaciesPolygonsLayer._walk_items(child)
 
     @staticmethod
     def _build_item(poly: list[list[list[float]]],
