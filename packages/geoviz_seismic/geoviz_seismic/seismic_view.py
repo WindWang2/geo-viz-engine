@@ -689,6 +689,16 @@ class SeismicView(QWidget):
         from . import attribute_pipeline as _ap
         self._attr_combo = QComboBox()
         self._attr_combo.addItems(_ap.labels())
+        # The combo drives 2-D slice computation only — disable entries that
+        # are undefined for 2-D input (e.g. Gaussian/max curvature) so users
+        # cannot pick a guaranteed all-zero result.
+        combo_model = self._attr_combo.model()
+        for i, spec in enumerate(_ap.ATTRIBUTES):
+            if not spec.supports_2d:
+                item = combo_model.item(i)
+                if item is not None:
+                    item.setEnabled(False)
+                    item.setToolTip(f"{spec.label}: 仅支持 3D 体数据，2D 切片不可用")
         self._attr_combo.currentIndexChanged.connect(self._on_attr_changed)
 
         self._rgb_r_combo = QComboBox()

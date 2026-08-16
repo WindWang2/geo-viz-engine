@@ -73,13 +73,44 @@ class TestApplyCurvatureAttributes:
         assert np.all(out >= 0.0)
         assert np.all(out <= 2 * np.pi + 1e-6)
 
-    @pytest.mark.parametrize("idx", [11, 12, 13])
+    @pytest.mark.parametrize("idx", [11])
     def test_curvature_idx_no_nan(self, idx):
         data = _sample_slice()
         out = ap.apply(idx, data)
         assert out.shape == data.shape
         assert not np.any(np.isnan(out))
         assert not np.any(np.isinf(out))
+
+
+class TestUnsupported2DRejected:
+    """Gaussian/max curvature degenerate to all-zero maps on 2-D slices
+    (inline slope is identically zero) — apply() must reject them with a
+    clear error instead of silently returning zeros."""
+
+    @pytest.mark.parametrize("label", ["高斯曲率", "最大曲率"])
+    def test_2d_raises_value_error(self, label):
+        idx = ap.labels().index(label)
+        data = _sample_slice()
+        with pytest.raises(ValueError, match="2-D"):
+            ap.apply(idx, data)
+
+    @pytest.mark.parametrize("label", ["高斯曲率", "最大曲率"])
+    def test_spec_marked_unsupported(self, label):
+        idx = ap.labels().index(label)
+        assert ap.ATTRIBUTES[idx].supports_2d is False
+
+    def test_mean_curvature_still_supports_2d(self):
+        idx = ap.labels().index("平均曲率")
+        data = _sample_slice()
+        out = ap.apply(idx, data)
+        assert out.shape == data.shape
+
+    def test_3d_input_still_allowed(self):
+        idx = ap.labels().index("高斯曲率")
+        rng = np.random.default_rng(0)
+        vol = rng.standard_normal((8, 10, 20)).astype(np.float32)
+        out = ap.apply(idx, vol)
+        assert out.shape == vol.shape
 
 
 class TestCoherenceC3:
@@ -111,5 +142,9 @@ class TestApplyAllIndicesCovered:
     @pytest.mark.parametrize("idx", list(range(len(ap.ATTRIBUTES))))
     def test_dispatch_runs(self, idx):
         data = _sample_slice()
+        if not ap.ATTRIBUTES[idx].supports_2d:
+            with pytest.raises(ValueError):
+                ap.apply(idx, data, sample_interval_s=0.002)
+            return
         out = ap.apply(idx, data, sample_interval_s=0.002)
         assert out.shape == data.shape

@@ -121,6 +121,71 @@ class TestCurvatureSynthetic:
         np.testing.assert_allclose(interior, 0.0, atol=0.05)
 
 
+class TestCurvature2DSmoothingAxisOrder:
+    """2-D slices are (n_xl, n_t) — the smoothing window must be applied in
+    that axis order.  Regression: ``uniform_filter`` was called with
+    ``size=(size_t, size_xl)``, swapping the crossline/time windows."""
+
+    def test_asymmetric_window_matches_reference(self):
+        from scipy.ndimage import uniform_filter
+
+        rng = np.random.default_rng(0)
+        data = rng.standard_normal((40, 60)).astype(np.float32)
+        win_xl, win_t = 1, 4  # asymmetric — swapped order gives a different map
+        out = compute_curvature(data, kind="mean", win_xl=win_xl, win_t=win_t)
+
+        # Reference: replicate the 2-D pipeline with the correct axis order.
+        # slope_il is identically zero on 2-D input, so mean = d2_xl / 2.
+        grad_xl = np.gradient(data, axis=0)
+        grad_t = np.gradient(data, axis=1)
+        gt_safe = np.where(np.abs(grad_t) < 1e-10, 1e-10, grad_t)
+        slope_xl = (grad_xl / gt_safe).astype(np.float32)
+        slope_xl = uniform_filter(
+            slope_xl, size=(2 * win_xl + 1, 2 * win_t + 1), mode="reflect"
+        )
+        d2_xl = np.gradient(np.gradient(slope_xl, axis=0), axis=0)
+        ref = (d2_xl / 2.0).astype(np.float32)
+
+        np.testing.assert_allclose(out, ref, rtol=1e-4, atol=1e-4)
+
+    def test_axis_order_is_observable(self):
+        """Guard against a vacuous reference: the swapped-window variant
+        (the original bug) must produce a visibly different map."""
+        from scipy.ndimage import uniform_filter
+
+        rng = np.random.default_rng(0)
+        data = rng.standard_normal((40, 60)).astype(np.float32)
+        win_xl, win_t = 1, 4
+        out = compute_curvature(data, kind="mean", win_xl=win_xl, win_t=win_t)
+
+        grad_xl = np.gradient(data, axis=0)
+        grad_t = np.gradient(data, axis=1)
+        gt_safe = np.where(np.abs(grad_t) < 1e-10, 1e-10, grad_t)
+        slope_xl = (grad_xl / gt_safe).astype(np.float32)
+        buggy = uniform_filter(
+            slope_xl, size=(2 * win_t + 1, 2 * win_xl + 1), mode="reflect"
+        )
+        ref_buggy = (np.gradient(np.gradient(buggy, axis=0), axis=0) / 2.0).astype(np.float32)
+        assert not np.allclose(out, ref_buggy, rtol=1e-3, atol=1e-3)
+
+    def test_window_follows_crossline_axis(self):
+        """A ridge running along the time axis: smoothing across crosslines
+        (win_xl large) must blur it, smoothing along time (win_t large)
+        must not."""
+        t = np.linspace(0, 4 * np.pi, 80, dtype=np.float32)
+        xl = np.linspace(0, 2 * np.pi, 60, dtype=np.float32)
+        # Amplitude varies only across crosslines (axis 0); linear ramp in
+        # time keeps grad_t constant so slope_xl is a clean 1-D profile.
+        data = (np.sin(xl)[:, None] + 0.5 * t[None, :]).astype(np.float32)
+
+        cur_xl = compute_curvature(data, kind="mean", win_xl=5, win_t=1)
+        cur_t = compute_curvature(data, kind="mean", win_xl=1, win_t=5)
+        interior = np.s_[10:-10, 10:-10]
+        # Heavy crossline smoothing suppresses the ridge curvature much more
+        # than heavy time smoothing (the signal is constant along time).
+        assert np.abs(cur_xl[interior]).mean() < np.abs(cur_t[interior]).mean()
+
+
 class TestCurvatureEdgeHandling:
     """Edge behavior."""
 
