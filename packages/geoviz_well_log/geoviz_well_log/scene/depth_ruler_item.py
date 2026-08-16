@@ -5,6 +5,8 @@ from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import QGraphicsObject, QStyleOptionGraphicsItem, QWidget
 
+from geoviz_well_log.renderer.track_base import nice_depth_interval
+
 
 class DepthRulerItem(QGraphicsObject):
     """Shared depth ruler rendered as a QGraphicsObject.
@@ -13,7 +15,6 @@ class DepthRulerItem(QGraphicsObject):
     Positioned at the left side of the scene.
     """
 
-    _NICE_NUMBERS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
     _TARGET_PIXEL_SPACING = 60
     _WIDTH = 50
 
@@ -50,17 +51,14 @@ class DepthRulerItem(QGraphicsObject):
         return ratio * self._height
 
     def _compute_nice_intervals(self, top: float, bottom: float, height: float) -> float:
-        span = bottom - top
-        if span <= 0 or height <= 0:
-            return 1.0
-        raw = (span / height) * self._TARGET_PIXEL_SPACING
-        exp = math.floor(math.log10(raw)) if raw > 0 else 0
-        base = 10 ** exp
-        for n in self._NICE_NUMBERS:
-            candidate = n * base
-            if candidate >= raw:
-                return candidate
-        return self._NICE_NUMBERS[-1] * base
+        """Shared nice-step policy (see renderer.track_base.nice_depth_interval).
+
+        Delegates so the scene/export ruler and the on-screen tracks can never
+        diverge at decade boundaries: when no {1,2,5}×10^k candidate reaches
+        the raw target, the step must advance to the NEXT decade (10×base),
+        not saturate at 5×10^k and undershoot the pixel spacing.
+        """
+        return nice_depth_interval(bottom - top, height, min_px=self._TARGET_PIXEL_SPACING)
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None):
         if self._depth_bottom <= self._depth_top:
