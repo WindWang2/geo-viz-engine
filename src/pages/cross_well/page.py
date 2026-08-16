@@ -229,7 +229,10 @@ class _DTWPropagateWorker(QObject):
                                 tgt_values, tgt_depths,
                                 ref_depth=ref_depth,
                             )
-                            results.append((target_well, result.suggested_depth, formation))
+                            # Infeasible alignments (band/NaN) must not
+                            # fabricate ghost picks (#539).
+                            if result.feasible:
+                                results.append((target_well, result.suggested_depth, formation))
                     self.progress.emit(completed, f"DTW 传播中... ({completed}/{total})")
             self.finished.emit(results)
         except Exception as e:

@@ -572,6 +572,13 @@ class CrossWellCanvas(QWidget):
                 band_radius=band_radius,
                 ref_depth=ref_depth,
             )
+            # An infeasible alignment (curve length difference beyond the
+            # Sakoe-Chiba band, or non-finite samples) must not fabricate a
+            # ghost pick (#539).
+            if not result.feasible:
+                if progress_callback is not None:
+                    progress_callback(step, total)
+                continue
             pick_id = self._picks_model.add_pick(
                 formation, name, result.suggested_depth, source="dtw",
             )
