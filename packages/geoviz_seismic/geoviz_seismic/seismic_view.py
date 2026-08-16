@@ -14,7 +14,7 @@ from .renderer_3d import Renderer3D
 from .profile_widget import ProfileWidget
 from .loader import SeismicLoader
 from .horizon import HorizonParser
-from .cache import SeismicCache
+from .cache import RamSliceCache, SeismicCache
 from .colorbar_widget import ColorbarWidget
 from .workers import (
     DEFAULT_MAX_PREVIEW_VOXELS,
@@ -63,6 +63,7 @@ class SeismicView(QWidget):
         self._segy_generation = 0
         self._segy_worker: SegyLoadWorker | None = None
         self._segy_workers: set[SegyLoadWorker] = set()
+        self._synth_worker: SyntheticWorker | None = None
 
         # Attribute computation runs off the GUI thread (C3 / curvature /
         # RGB fusion take seconds on large slices).  Results are cached per
@@ -71,7 +72,12 @@ class SeismicView(QWidget):
         self._attr_worker: AttrComputeWorker | None = None
         self._attr_generation = 0
         self._pending_attr: dict[str, int] = {}  # slice_type -> latest submission gen
-        self._attr_cache: dict[tuple, np.ndarray] = {}
+        # Bounded LRU (same 512 MB / 50-slice budget as the SEGY slice cache):
+        # an unbounded dict grows without limit while sweeping slider
+        # positions x attributes within one volume generation.  Keys still
+        # carry ``segy_generation`` so entries from an older volume can never
+        # be served for the current one.
+        self._attr_cache = RamSliceCache(max_bytes=512 * 1024 * 1024, max_slices=50)
 
         # Horizon picking state
         self._picked_points: list[tuple[float, float, float]] = []  # (il, xl, t)
@@ -397,6 +403,10 @@ class SeismicView(QWidget):
     def load_segy_async(self, path: str):
         """Load a SEGY file in a background thread."""
         self.cancel_pending_segy_load()
+        # A pending auto-load synthetic worker must not win the race: its
+        # result would call load_demo(), whose cancel_pending_segy_load()
+        # would wipe this SEGY load.
+        self._invalidate_synth_worker()
         generation = self._segy_generation
         self._segy_path = path
         self._profile_il.set_overlay_text("加载 SEGY...")
@@ -434,8 +444,32 @@ class SeismicView(QWidget):
     # Async callbacks
     # ------------------------------------------------------------------
 
+    def _invalidate_synth_worker(self) -> None:
+        """Detach any pending synthetic worker so its result is discarded.
+
+        ``requestInterruption`` alone is not enough (SyntheticWorker.run does
+        not poll it), so disconnect the slot as well; the sender check in
+        ``_on_synthetic_ready`` catches results already queued for delivery.
+        """
+        worker = self._synth_worker
+        self._synth_worker = None
+        if worker is None:
+            return
+        try:
+            worker.done.disconnect(self._on_synthetic_ready)
+        except (RuntimeError, TypeError):
+            pass
+        if worker.isRunning():
+            worker.requestInterruption()
+
     @Slot(object)
     def _on_synthetic_ready(self, data: np.ndarray):
+        # Drop results from a superseded synthetic worker (e.g. a SEGY load
+        # was started while auto-load data was still being generated); loading
+        # the demo volume here would cancel that in-flight SEGY load.
+        if self.sender() is not self._synth_worker:
+            return
+        self._synth_worker = None
         self.load_demo(data)
         self._profile_il.set_overlay_text(None)
 
@@ -886,13 +920,19 @@ class SeismicView(QWidget):
         self._slice_data["arbitrary"] = data.copy()
         
         m = self._meta
+        # Arbitrary-slice rows come from the (possibly downsampled) preview
+        # volume: each row spans df[2] * dt_ms and starts at t0_ms, matching
+        # _build_slice_info's vertical axis convention.
+        df = self._ds_factor or (1, 1, 1)
+        dt_row = (m.dt_ms * int(df[2])) if m else 1.0
+        t0 = m.t0_ms if m else 0.0
         info = SliceInfo(
             slice_type="arbitrary",
             position=0,
             axis_h_label="Distance",
             axis_v_label="Time (ms)" if m else "Sample",
             axis_h_values=np.arange(data.shape[1]).tolist(),
-            axis_v_values=(np.arange(data.shape[0]) * (m.dt_ms if m else 1.0)).tolist()
+            axis_v_values=(np.arange(data.shape[0]) * dt_row + t0).tolist()
         )
         
         self._profile_arb.update_profile(data, slice_info=info)
@@ -1385,7 +1425,7 @@ class SeismicView(QWidget):
             self._segy_generation, result.slice_type, result.position,
             result.attr_idx, result.rgb_channels,
         )
-        self._attr_cache[key] = result.display
+        self._attr_cache.put(key, result.display)
         pw = self._profile_for(result.slice_type)
         info = self._build_slice_info(
             result.slice_type, result.position, result.display.shape
@@ -1868,7 +1908,12 @@ class SeismicView(QWidget):
 
         il_data = self._slice_data.get("inline")
         if il_data is not None and getattr(il_data, "ndim", 0) == 2:
+            # _slice_data holds a FULL-resolution (n_t, n_xl) inline slice
+            # while _xl_pos is a preview-voxel index: scale it back to the
+            # full crossline grid before indexing.
+            df = self._ds_factor or (1, 1, 1)
             xl = int(getattr(self._renderer_3d, "_xl_pos", il_data.shape[1] // 2))
+            xl = xl * max(int(df[1]), 1)
             xl = max(0, min(xl, il_data.shape[1] - 1))
             return np.asarray(il_data[:, xl], dtype=np.float64)
         return None
