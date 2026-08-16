@@ -62,18 +62,43 @@ class TestGridInterval:
         track = DepthTrack()
         assert track._compute_grid_interval(100.0, 20000.0) == pytest.approx(5000.0)
         # raw = 2e5/50*20 = 8e4: no {1,2,5}x10^4 candidate >= 8e4, so the
-        # decade saturates at 5x10^4 (the same semantics as DepthRuler; the
-        # old fixed table capped at 5000 and rendered a grid 10x too dense).
-        assert track._compute_grid_interval(50.0, 2e5) == pytest.approx(5e4)
+        # step advances to the NEXT decade (1e5) — the smallest nice step
+        # whose spacing still meets the 20px floor (5e4 would render 12.5px).
+        # (The old fixed table capped at 5000 and rendered a grid 10x too
+        # dense; the pre-unify walk saturated the decade at 5x10^4.)
+        assert track._compute_grid_interval(50.0, 2e5) == pytest.approx(1e5)
 
     def test_interval_keeps_pixels_per_tick_floor(self, qapp):
-        # {1,2,5} mantissas can undershoot the 20px target by at most 2x
-        # (raw just above 5x10^n saturates the decade), matching DepthRuler.
+        # nice_depth_interval always returns a step >= raw, so tick spacing
+        # meets the 20px floor exactly; keep the >=10px assertion as the
+        # hard regression floor against any future re-tightening.
         track = DepthTrack()
         for span in (0.3, 0.46, 2.7, 137.0, 5000.0, 123456.0):
             interval = track._compute_grid_interval(400.0, span)
             px_per_tick = 400.0 / (span / interval)
             assert px_per_tick >= 10.0, f"span={span} interval={interval}"
+
+    def test_scene_ruler_matches_track_interval_policy(self, qapp):
+        """Scene/export ruler delegates to the shared nice-step policy.
+
+        The scene item used to carry its own decade table that only ever
+        coincided with the renderer policy; this lock-step test pins both
+        to concrete expected steps so the two sites can never diverge again
+        (e.g. by reintroducing a decade-saturating walk on either side).
+        """
+        from geoviz_well_log.scene.depth_ruler_item import DepthRulerItem
+
+        item = DepthRulerItem(height=400)
+        # (top, bottom, height, expected scene interval at 60px target)
+        expected_scene = [
+            (0.0, 0.46, 400.0, 0.1),     # raw = 0.069 -> 0.1
+            (1000.0, 21000.0, 100.0, 20000.0),  # raw = 1.2e4 -> 2x10^4
+            (0.0, 2e5, 50.0, 5e5),       # raw = 2.4e5 -> 5x10^5
+            (0.0, 123456.0, 400.0, 20000.0),  # raw = 18518.4 -> 2x10^4
+        ]
+        for top, bottom, height, want in expected_scene:
+            got = item._compute_nice_intervals(top, bottom, height)
+            assert got == pytest.approx(want), (top, bottom, height, got, want)
 
     def test_depth_track_paints_labels_offscreen(self, qapp):
         """Full offscreen paint of a <1-unit window must draw SOMETHING and
