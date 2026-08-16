@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from types import SimpleNamespace
 
+import numpy as np
+
 from geoviz_seismic import workers
 
 
@@ -270,3 +272,62 @@ def test_attr_combo_disables_attributes_without_2d_support(qtbot):
             assert item.isEnabled(), spec.label
         else:
             assert not item.isEnabled(), spec.label
+
+
+def test_crossplot_dialog_computes_off_gui_thread(qtbot, monkeypatch):
+    """#508 lock: the crossplot dialog's two Hilbert-transform attributes
+    must not run synchronously in __init__ (50-150 ms GUI freeze per open
+    on full-resolution slices)."""
+    import threading
+
+    from geoviz_seismic.dialogs.crossplot import CrossplotDialog
+
+    from geoviz_seismic import attributes as attr_mod
+
+    calls: list[str] = []
+    real_env = attr_mod.compute_envelope
+
+    def spy_envelope(data, axis=0):
+        calls.append(threading.current_thread().name)
+        return real_env(data, axis=axis)
+
+    monkeypatch.setattr(attr_mod, "compute_envelope", spy_envelope)
+
+    rng = np.random.default_rng(3)
+    raw = rng.uniform(-1, 1, size=(64, 48))
+    dlg = CrossplotDialog(raw, 0.002)
+    qtbot.addWidget(dlg)
+    # Nothing computed synchronously during construction.
+    assert calls == []
+
+    def computed():
+        return calls and dlg.findChild(CrossplotDialog.__mro__[0]) is not None
+
+    def canvas_shown():
+        from geoviz_seismic.dialogs.crossplot import CrossplotCanvas
+
+        return dlg.findChild(CrossplotCanvas) is not None
+
+    qtbot.waitUntil(lambda: bool(calls), timeout=10_000)
+    qtbot.waitUntil(canvas_shown, timeout=10_000)
+    assert calls[0] != threading.current_thread().name
+    dlg.close()
+
+
+def test_crossplot_dialog_failure_shows_placeholder(qtbot, monkeypatch):
+    from geoviz_seismic.dialogs.crossplot import CrossplotDialog
+    from geoviz_seismic import attributes as attr_mod
+
+    def boom(data, axis=0):
+        raise RuntimeError("hilbert exploded")
+
+    monkeypatch.setattr(attr_mod, "compute_envelope", boom)
+    rng = np.random.default_rng(3)
+    dlg = CrossplotDialog(rng.uniform(-1, 1, size=(16, 8)), 0.002)
+    qtbot.addWidget(dlg)
+
+    def failed():
+        return "失败" in dlg._placeholder.text()
+
+    qtbot.waitUntil(failed, timeout=10_000)
+    dlg.close()
