@@ -47,6 +47,11 @@ class DepthTrack(BaseTrack):
         painter.setFont(font)
         painter.setPen(QColor(ECHARTS_TEXT))
 
+        # Sub-unit intervals need fractional labels: with the old fixed
+        # "{depth:.0f}" every tick inside a <1-unit window collapsed onto the
+        # same integer text (WL-13).
+        decimals = max(0, -math.floor(math.log10(interval))) if interval > 0 else 0
+
         start = (self.depth_top // interval) * interval
         if start < self.depth_top:
             start += interval

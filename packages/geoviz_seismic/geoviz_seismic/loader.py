@@ -35,6 +35,22 @@ class SeismicLoader:
         self._meta: SeismicVolumeMeta | None = None
         self._downsampled: np.ndarray | None = None
         self._downsample_factor: tuple[int, int, int] | None = None
+        # "standard_189_193" (real INLINE_3D/CROSSLINE_3D geometry),
+        # "detected_headers" (fast/slow header-pair fallback), or "pseudo".
+        self._geometry_source = "pseudo"
+        # (iline_byte, xline_byte) actually used for geometry, when known —
+        # consumers scanning headers must read the SAME pair the loader did.
+        self._geometry_fields = None
+
+    @property
+    def geometry_source(self) -> str:
+        """How ilines/xlines were established (see _open)."""
+        return self._geometry_source
+
+    @property
+    def geometry_fields(self) -> tuple[int, int] | None:
+        """(iline, xline) trace-header byte positions used for geometry."""
+        return self._geometry_fields
 
     def inspect(self) -> SeismicVolumeMeta:
         """Read SEGY headers and return volume metadata.
@@ -76,6 +92,10 @@ class SeismicLoader:
             xline_step=int(xlines[1] - xlines[0]) if xlines.size > 1 else 1,
             dt_ms=dt_ms,
             t0_ms=float(samples[0]),
+            geometry_source=self._geometry_source,
+            geometry_fields=list(self._geometry_fields)
+            if self._geometry_fields
+            else None,
         )
         return self._meta
 
@@ -180,18 +200,25 @@ class SeismicLoader:
     def read_trace(self, iline: int, xline: int) -> np.ndarray:
         """Read a single trace at the given (inline, crossline) position.
 
+        Uses direct trace indexing on the inline-sorted layout — one trace of
+        I/O instead of gathering the whole inline gather (the old path cost
+        O(n_xl * n_t) per call, which fenced fence extraction to ~1ms per
+        column on large surveys).
+
         Returns:
             ``(n_samples,)`` float32 trace.
         """
         try:
             f = self._open()
             meta = self._meta or self.inspect()
-            il_idx = (iline - meta.iline_start) // meta.iline_step
-            xl_idx = (xline - meta.xline_start) // meta.xline_step
-            if (
-                il_idx < 0 or il_idx >= meta.n_inlines
-                or xl_idx < 0 or xl_idx >= meta.n_crosslines
-            ):
+            il_idx = (int(iline) - meta.iline_start) // meta.iline_step
+            xl_idx = (int(xline) - meta.xline_start) // meta.xline_step
+            if not (0 <= il_idx < meta.n_inlines):
+                raise ValueError(
+                    f"Inline {iline} out of range "
+                    f"(available: {meta.iline_start}-{meta.iline_start + (meta.n_inlines - 1) * meta.iline_step})."
+                )
+            if not (0 <= xl_idx < meta.n_crosslines):
                 raise ValueError(
                     f"({iline}, {xline}) out of range "
                     f"(inlines: {meta.iline_start}-{meta.iline_start + (meta.n_inlines - 1) * meta.iline_step}, "
@@ -308,6 +335,11 @@ class SeismicLoader:
             self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=False)
             # Quick sanity check: if ilines/xlines are valid, we're done
             if len(self._f.ilines) > 1 and len(self._f.xlines) > 1:
+                self._geometry_source = "standard_189_193"
+                self._geometry_fields = (
+                    int(segyio.TraceField.INLINE_3D),
+                    int(segyio.TraceField.CROSSLINE_3D),
+                )
                 return self._f
             self._f.close()
             self._f = None
@@ -382,6 +414,8 @@ class SeismicLoader:
                 self._path, "r", strict=False, ignore_geometry=False,
                 iline=int(found_il), xline=int(found_xl),
             )
+            self._geometry_source = "detected_headers"
+            self._geometry_fields = (int(found_il), int(found_xl))
             return self._f
         else:
             # Last resort: assume square grid and open unstructured

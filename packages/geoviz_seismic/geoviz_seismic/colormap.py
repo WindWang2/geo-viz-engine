@@ -93,6 +93,10 @@ def _build_seismic(n: int) -> np.ndarray:
     return rgba
 
 
+def _build_seismic_r(n: int) -> np.ndarray:
+    """Reversed seismic (red-negative / blue-positive) for red-white-blue."""
+    return _build_seismic(n)[::-1].copy()
+
 def _build_gray(n: int) -> np.ndarray:
     vals = np.linspace(0, 255, n, dtype=np.uint8)
     rgba = np.zeros((n, 4), dtype=np.uint8)
@@ -177,6 +181,7 @@ class ColormapManager:
 
     _COLORMAPS = {
         "seismic": _build_seismic,
+        "seismic_r": _build_seismic_r,
         "gray": _build_gray,
         "jet": _build_jet,
         "hsv": _build_hsv,

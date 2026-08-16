@@ -39,7 +39,8 @@ class FenceProfile2D(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._scene: WellSeismicScene | None = None
-        # None = follow scene domain; Time = force Time extract (workbench #122)
+        # None = follow the scene domain (2D/3D unified); an explicit
+        # domain is only for callers that manage their own extraction.
         self._extract_domain: VerticalDomain | None = None
         self._label = QLabel("无活动剖面")
         self._label.setMinimumHeight(140)
