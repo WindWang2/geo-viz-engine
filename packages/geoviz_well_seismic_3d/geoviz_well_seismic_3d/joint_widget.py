@@ -29,6 +29,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Workbench seismic scale keys → Renderer3D LUT names (kept consistent with
+# color_scales.SEISMIC_COLOR_SCALES used by the 2D fence profile).
+_RENDER_CMAP = {
+    "blue-white-red": "seismic",
+    "red-white-blue": "seismic_r",
+    "gray": "gray",
+}
+
 
 @dataclass(frozen=True)
 class WellOverlaySpec:
@@ -58,6 +66,10 @@ class WellSeismicJointWidget(QWidget):
         self._well_items: list = []
         self._curtain_items: list = []
         self._probe_item = None
+        # Volume identity last uploaded to the renderer (skip redundant
+        # whole-volume GPU re-uploads on colour/fence/domain refreshes).
+        self._last_volume_key = None
+        self._cmap_applied = False
         self._gr_legend: QLabel | None = None
         self._status = QLabel("井震联合场景未加载")
         self._status.setStyleSheet("color: #64748b; padding: 4px 8px;")
@@ -312,8 +324,25 @@ class WellSeismicJointWidget(QWidget):
         self._update_gr_legend()
 
     def set_fence_curtains(self, extractions: list) -> None:
-        """Public: draw fence curtains from FenceExtraction list (or active only)."""
+        """Public: draw fence curtains from FenceExtraction list (or active only).
+
+        Rebuilding the meshes is expensive (~25ms for a 128-column fence) and
+        depends only on (fence geometry, extraction, domain) — the scene's
+        extract cache already returns the SAME FenceExtraction object for
+        unchanged state, so identity-keyed skipping keeps colour/well-width
+        refreshes from re-triangulating the curtains every tick.
+        """
+        key = tuple(
+            (ext.fence_id, id(ext), tuple(ext.amplitude.shape))
+            for ext in extractions
+        )
+        if key == getattr(self, "_last_curtain_key", None):
+            return
         self._clear_items(self._curtain_items)
+        self._last_curtain_key = key
+        # Hold references so id() of the cached extractions cannot be reused
+        # by a new array while it is part of the key.
+        self._last_curtains_ref = list(extractions)
         if self._renderer is None or self._gl is None or self._scene is None:
             return
         view = self._view()
@@ -516,36 +545,71 @@ class WellSeismicJointWidget(QWidget):
             return
 
         vol = scene.volume_access
-        if self._renderer is not None and vol is not None:
-            data = getattr(vol, "data", None)
-            if data is not None:
-                try:
-                    self._set_default_render_mode()
-                    # Progressive LOD upgrades must not reset the camera.
-                    already = bool(getattr(self._renderer, "_loaded", False))
-                    load_kw = {}
+        data = getattr(vol, "data", None) if vol is not None else None
+        if self._renderer is not None:
+            if vol is None or data is None:
+                # Volume detached (project switch / empty state): drop the
+                # stale GL brick and planes instead of leaving the previous
+                # dataset on screen while the scene says "not loaded".
+                if getattr(self._renderer, "_loaded", False):
                     try:
-                        # Keyword supported on Stage-7 renderer; ignore if older.
-                        import inspect
-
-                        if "preserve_camera" in inspect.signature(
-                            self._renderer.load_volume
-                        ).parameters:
-                            load_kw["preserve_camera"] = already
+                        self._renderer.clear()
                     except Exception:
-                        pass
-                    self._renderer.load_volume(
-                        np.asarray(data, dtype=np.float32), **load_kw
-                    )
-                    self.sync_orthogonal_slices()
-                except Exception as exc:
-                    logger.warning("load_volume failed: %s", exc)
+                        logger.debug("renderer clear failed", exc_info=True)
+                self._last_volume_key = None
             else:
-                # Source-backed access without dense display yet: scene still
-                # has shape/slices for wells/fences; GL waits for L0 brick.
-                logger.debug(
-                    "volume access has no dense display data yet; defer GL load"
+                volume_key = (
+                    getattr(vol, "source_id", None),
+                    getattr(vol, "lod_level", None),
+                    id(data),
+                    tuple(int(x) for x in data.shape),
                 )
+                if volume_key != getattr(self, "_last_volume_key", None):
+                    try:
+                        self._set_default_render_mode()
+                        # Progressive LOD upgrades must not reset the camera.
+                        already = bool(getattr(self._renderer, "_loaded", False))
+                        load_kw = {}
+                        try:
+                            # Keyword supported on Stage-7 renderer; ignore if older.
+                            import inspect
+
+                            if "preserve_camera" in inspect.signature(
+                                self._renderer.load_volume
+                            ).parameters:
+                                load_kw["preserve_camera"] = already
+                        except Exception:
+                            pass
+                        self._renderer.load_volume(
+                            np.asarray(data, dtype=np.float32), **load_kw
+                        )
+                        self._last_volume_key = volume_key
+                        # Prevent id() recycling: keep the uploaded array
+                        # alive so a cache-evicted re-read cannot alias the
+                        # same id and falsely match the key.
+                        self._last_volume_ref = data
+                        self.sync_orthogonal_slices()
+                    except Exception as exc:
+                        logger.warning("load_volume failed: %s", exc)
+                else:
+                    # Same brick: only re-apply slice positions (cheap,
+                    # differential) — domain/fence/colour changes must not
+                    # re-upload the whole volume texture.
+                    self.sync_orthogonal_slices()
+            # Wire the scene's seismic colour scale into the 3D renderer so
+            # the 2D profile and the 3D planes share one LUT source.
+            cmap = _RENDER_CMAP.get(
+                scene.display_settings.seismic_color_scale, "seismic"
+            )
+            try:
+                if (
+                    getattr(self._renderer, "_cmap_name", None) != cmap
+                    or not getattr(self, "_cmap_applied", False)
+                ):
+                    self._renderer.set_colormap(cmap)
+                    self._cmap_applied = True
+            except Exception:
+                logger.debug("set_colormap failed", exc_info=True)
 
         self.set_well_trajectories(
             scene.well_trajectories(visible_only=True)

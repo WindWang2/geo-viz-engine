@@ -137,6 +137,9 @@ class BaseTrack(QWidget):
                 painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
             depth += interval
 
+    _GRID_TARGET_PX = 20.0
+    _NICE_MANTISSAS = (1.0, 2.0, 5.0)
+
     def _compute_grid_interval(self, rect_height: float, span: float) -> float:
         """Pick interval so that grid lines are >=20px apart."""
         return nice_depth_interval(span, rect_height, min_px=20.0)

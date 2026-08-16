@@ -67,3 +67,8 @@ htmlcov/
 .context/
 .gemini/
 .cache/
+
+# Native extension builds land at the repo root via build_ext --inplace;
+# never track them — a committed binary shadows freshly built modules for
+# anyone with this checkout on sys.path (workbench packaging #435).
+/*.so

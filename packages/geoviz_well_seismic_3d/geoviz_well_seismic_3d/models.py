@@ -98,6 +98,20 @@ class TimeDepthTable:
             raise ValueError("time_ms and md_m must have the same length")
         if self.time_ms.size < 2:
             raise ValueError("TimeDepthTable requires at least two samples")
+        if not (np.all(np.isfinite(self.time_ms)) and np.all(np.isfinite(self.md_m))):
+            raise ValueError(
+                f"TimeDepthTable[{self.well_name}]: non-finite time/MD samples"
+            )
+        # np.interp requires strictly increasing xp; both directions are used,
+        # so both axes must be monotonic (physical T-D data always is).
+        if np.any(np.diff(self.md_m) <= 0):
+            raise ValueError(
+                f"TimeDepthTable[{self.well_name}]: md_m must be strictly increasing"
+            )
+        if np.any(np.diff(self.time_ms) <= 0):
+            raise ValueError(
+                f"TimeDepthTable[{self.well_name}]: time_ms must be strictly increasing"
+            )
 
     def md_to_time_ms(self, md: float | np.ndarray) -> float | np.ndarray:
         """Interpolate MD → TWT (ms). Extrapolates with edge values."""

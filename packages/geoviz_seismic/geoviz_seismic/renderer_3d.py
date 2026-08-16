@@ -85,6 +85,54 @@ def prepare_horizon_texture_upload(horizon_grid: np.ndarray):
     return buffer, width, height
 
 
+# ---------------------------------------------------------------------------
+# Deferred GL resource deletion
+#
+# QOpenGLWidget only has a current context inside paint/initializeGL; cleanup
+# triggered from GUI-thread slots (volume switch, page close) runs WITHOUT
+# one, so glDeleteTextures there is a silent no-op. Collect orphaned handles
+# here and flush them at the top of the next paint, where the context IS
+# current — otherwise load/switch/clear cycles leak VRAM indefinitely.
+# ---------------------------------------------------------------------------
+
+_PENDING_GL_TEXTURE_DELETES: list[int] = []
+_PENDING_GL_PROGRAM_DELETES: list = []
+
+
+def queue_gl_texture_delete(tex) -> None:
+    """Queue one GL texture name for deletion at the next paint flush."""
+    try:
+        if tex is not None:
+            _PENDING_GL_TEXTURE_DELETES.append(int(tex))
+    except (TypeError, ValueError):
+        pass
+
+
+def queue_gl_program_delete(program) -> None:
+    if program is not None:
+        _PENDING_GL_PROGRAM_DELETES.append(program)
+
+
+def flush_pending_gl_deletes() -> None:
+    """Delete queued GL objects; requires a current GL context."""
+    if _PENDING_GL_TEXTURE_DELETES:
+        names = list(_PENDING_GL_TEXTURE_DELETES)
+        _PENDING_GL_TEXTURE_DELETES.clear()
+        try:
+            GL.glDeleteTextures(len(names), names)
+        except Exception:
+            logger.debug("pending texture delete failed", exc_info=True)
+    while _PENDING_GL_PROGRAM_DELETES:
+        program = _PENDING_GL_PROGRAM_DELETES.pop()
+        try:
+            if hasattr(program, "removeAllShaders"):
+                program.removeAllShaders()
+            if hasattr(program, "deleteLater"):
+                program.deleteLater()
+        except Exception:
+            logger.debug("pending program delete failed", exc_info=True)
+
+
 class GLImageLutItem(gl.GLImageItem):
     """A 2D textured quad that looks up colour through a 1-D LUT in-shader.
 
@@ -204,6 +252,44 @@ class GLImageLutItem(gl.GLImageItem):
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, 256, 1, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, lut)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
         self._lut_needs_upload = False
+
+    def clean(self) -> None:
+        """Release the GPU textures and shader owned by this item.
+
+        Idempotent; safe without a current GL context (handles are dropped so
+        stale ids cannot be reused). Called by the renderer when planes are
+        cleared so volume switch / page close loops do not accumulate VRAM.
+        """
+        program = self._lut_shader_program
+        self._lut_shader_program = None
+        lut_tex, self._lut_tex = self._lut_tex, None
+        index_tex, self.texture = self.texture, None
+        ctx = None
+        try:
+            ctx = QtGui.QOpenGLContext.currentContext()
+        except Exception:
+            ctx = None
+        if ctx is None:
+            # No context outside paint: defer so the next paint actually
+            # frees the textures (dropping the ids would leak VRAM).
+            queue_gl_texture_delete(lut_tex)
+            queue_gl_texture_delete(index_tex)
+            queue_gl_program_delete(program)
+            return
+        for tex in (lut_tex, index_tex):
+            if tex is not None:
+                try:
+                    GL.glDeleteTextures(1, [int(tex)])
+                except Exception:
+                    pass
+        if program is not None:
+            try:
+                if hasattr(program, "removeAllShaders"):
+                    program.removeAllShaders()
+                if hasattr(program, "deleteLater"):
+                    program.deleteLater()
+            except Exception:
+                pass
 
     @staticmethod
     def prepare_r8_upload(index_2d: np.ndarray) -> tuple[np.ndarray, int, int]:
@@ -1189,6 +1275,18 @@ class Renderer3D(QWidget):
     def _init_pyqtgraph(self, layout: QVBoxLayout):
         # Create central 3D widget
         self._view = gl.GLViewWidget()
+        # Free GL resources queued by slot-context cleanups at the top of
+        # every paint, when the widget's context is actually current.
+        _orig_paintGL = self._view.paintGL
+
+        def _paintGL_with_flush(*args, **kwargs):
+            try:
+                flush_pending_gl_deletes()
+            except Exception:
+                pass
+            return _orig_paintGL(*args, **kwargs)
+
+        self._view.paintGL = _paintGL_with_flush
         self._view.setBackgroundColor("#1e1e2e")
         
         # Set intuitive default camera positioning
@@ -1262,6 +1360,21 @@ class Renderer3D(QWidget):
     def set_render_mode(self, mode: str):
         """Set the 3D display mode: 'planes' or 'volume'"""
         self._mode = mode
+        if (
+            mode == "volume"
+            and self._volume_visual is not None
+            and self._volume_data_cpu is not None
+            and getattr(self._volume_visual, "_normal_data", None) is None
+        ):
+            # Normals were skipped in planes mode; build them now that the
+            # volume item actually becomes visible.
+            try:
+                normals = compute_normal_map(self._volume_data_cpu[::2, ::2, ::2])
+                self._volume_visual._normal_data = normals
+                self._volume_visual._normal_needs_upload = True
+                self._volume_visual.update()
+            except Exception:
+                logger.debug("lazy normal map failed", exc_info=True)
         if self._volume_visual is not None:
             if mode == "volume":
                 self._volume_visual.show()
@@ -2882,13 +2995,16 @@ class Renderer3D(QWidget):
         if entry is None:
             return
         slider, attr = entry
+        previous = int(getattr(self, attr, position))
         slider.blockSignals(True)
         slider.setValue(position)
         slider._val_label.setText(str(position))
         slider.blockSignals(False)
         setattr(self, attr, position)
-        # 3D slice planes rebuilt in the debounced handler, not here.
-        self.slice_changed.emit(slice_type, position)
+        if int(position) != previous:
+            # 3D slice planes rebuilt in the debounced handler, not here.
+            # Only signal real moves so no-op syncs don't spam listeners.
+            self.slice_changed.emit(slice_type, position)
 
     def set_slice_controls_visible(self, visible: bool) -> None:
         """Show/hide the renderer's legacy three-slider control strip."""
@@ -2926,20 +3042,80 @@ class Renderer3D(QWidget):
         selected = int(active) if active is not None else positions[0]
         if selected not in positions:
             selected = positions[0]
+        opacity_clamped = max(0.0, min(1.0, float(opacity)))
+        structure_changed = (
+            positions != self._time_slice_positions
+            or {p: bool(v) for p, v in unique.items() if p in positions}
+            != dict(self._time_slice_visibility)
+        )
+        active_changed = selected != self._active_time_pos
+        opacity_changed = opacity_clamped != self._time_slice_opacity
+        enabled_changed = bool(enabled) != getattr(
+            self, "_time_slices_enabled", True
+        )
         self._time_slice_positions = positions
         self._time_slice_visibility = {
             position: unique[position] for position in positions
         }
         self._active_time_pos = selected
         self._t_pos = selected
-        self._time_slice_opacity = max(
-            0.0, min(1.0, float(opacity))
-        )
+        self._time_slice_opacity = opacity_clamped
         self._time_slices_enabled = bool(enabled)
-        if getattr(self, "_loaded", False):
+        try:
+            slider = self._t_slider
+            slider.blockSignals(True)
+            slider.setValue(int(selected))
+            slider._val_label.setText(str(int(selected)))
+            slider.blockSignals(False)
+        except Exception:
+            pass
+        if not getattr(self, "_loaded", False):
+            return
+        if structure_changed or not self._time_plane_items:
             self._sync_time_slice_planes()
+        else:
+            # Active/opacity/enabled-only changes are O(1): the planes'
+            # textures and geometry do not move.
+            if opacity_changed or enabled_changed:
+                self._apply_time_slice_opacity()
+            if active_changed:
+                self._update_time_slice_borders()
+        try:
+            self._view.update()
+        except Exception:
+            pass
+
+    def _apply_time_slice_opacity(self) -> None:
+        """Push the shared opacity/enabled state onto existing planes."""
+        for position, (image, _line) in getattr(
+            self, "_time_plane_items", {}
+        ).items():
+            set_op = getattr(image, "setOpacity", None)
+            if callable(set_op):
+                try:
+                    set_op(self._time_slice_opacity)
+                except Exception:
+                    pass
             try:
-                self._view.update()
+                visible = bool(
+                    getattr(self, "_time_slices_enabled", True)
+                    and self._time_slice_visibility.get(position, True)
+                )
+                image.setVisible(visible)
+            except Exception:
+                pass
+
+    def _update_time_slice_borders(self) -> None:
+        """Re-colour the plane borders for the new active time slice."""
+        for position, (_image, line) in getattr(
+            self, "_time_plane_items", {}
+        ).items():
+            try:
+                is_active = position == self._active_time_pos
+                line.setColor(
+                    (1.0, 0.85, 0.2, 1.0) if is_active else (0.9, 0.9, 0.9, 0.6)
+                )
+                line.setWidth(2.5 if is_active else 1.0)
             except Exception:
                 pass
 
@@ -3060,18 +3236,54 @@ class Renderer3D(QWidget):
         time_opacity: float,
         time_enabled: bool = True,
     ) -> None:
-        """Public host seam for one IL, one XL and many Time planes."""
+        """Public host seam for one IL, one XL and many Time planes.
+
+        Differential: only the axes whose index changed are re-extracted and
+        re-uploaded; unchanged planes keep their textures. Time planes are
+        rebuilt only when the slice set/visibility/opacity actually moved
+        (set_time_slices already syncs them in place).
+        """
         if not self._loaded:
             return
+        dirty: set[str] = set()
+        if int(il) != int(self._il_pos):
+            dirty.add("inline")
+        if int(xl) != int(self._xl_pos):
+            dirty.add("crossline")
+        # Record pre-state so set_time_slices' own rebuild can be skipped when
+        # nothing about the horizontal stack changed.
+        prev_times = (
+            list(self._time_slice_positions),
+            dict(self._time_slice_visibility),
+            self._active_time_pos,
+            self._time_slice_opacity,
+            self._time_slices_enabled,
+        )
         self.set_position_external("inline", int(il))
         self.set_position_external("crossline", int(xl))
-        self.set_time_slices(
-            time_slices,
-            active=int(active_time),
-            opacity=float(time_opacity),
-            enabled=bool(time_enabled),
+        new_times = (
+            [int(s) for s, _v in time_slices],
+            {int(s): bool(v) for s, v in time_slices},
+            int(active_time),
+            float(time_opacity),
+            bool(time_enabled),
         )
-        self._update_slice_planes_for({"inline", "crossline"})
+        times_changed = (
+            sorted(new_times[0]) != sorted(prev_times[0])
+            or new_times[1] != prev_times[1]
+            or new_times[2] != prev_times[2]
+            or new_times[3] != prev_times[3]
+            or new_times[4] != prev_times[4]
+        )
+        if times_changed:
+            self.set_time_slices(
+                time_slices,
+                active=int(active_time),
+                opacity=float(time_opacity),
+                enabled=bool(time_enabled),
+            )
+        if dirty:
+            self._update_slice_planes_for(dirty)
         self._view.update()
 
     def apply_slice_positions(
