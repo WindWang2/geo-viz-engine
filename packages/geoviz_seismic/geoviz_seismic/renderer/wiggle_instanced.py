@@ -237,5 +237,12 @@ class WiggleTraceRenderer:
         self.clip_limit = float(clip)
 
     def destroy(self, mock_gl: bool = False) -> None:
-        """Clean up renderer resources."""
+        """Clean up renderer resources (main texture + colormap LUT texture)."""
         self.texture.destroy(mock_gl=mock_gl)
+        if self.lut_texture_id is not None:
+            if not mock_gl and HAS_OPENGL and GL is not None:
+                try:
+                    GL.glDeleteTextures([self.lut_texture_id])
+                except Exception:
+                    pass
+            self.lut_texture_id = None

@@ -404,6 +404,42 @@ class GLImageLutItem(gl.GLImageItem):
         GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
 
+    def clean(self):
+        """Release every GL resource owned by this item.
+
+        Deletes the R8 index texture, the LUT texture, the per-instance LUT
+        shader program and the position VBO. Requires a current GL context —
+        callers that run outside ``paintGL`` must make the owning view's
+        context current first (see ``Renderer3D._clean_gl_items``).
+        Idempotent: safe to call twice.
+        """
+        ctx = QtGui.QOpenGLContext.currentContext()
+        if ctx is None:
+            return
+        tex_ids = [t for t in (self.texture, self._lut_tex) if t is not None]
+        if tex_ids:
+            try:
+                GL.glDeleteTextures(tex_ids)
+            except Exception:
+                pass
+        self.texture = None
+        self._lut_tex = None
+        if self._lut_shader_program is not None:
+            try:
+                GL.glDeleteProgram(self._lut_shader_program)
+            except Exception:
+                pass
+            self._lut_shader_program = None
+        vbo = getattr(self, "m_vbo_position", None)
+        if vbo is not None and vbo.isCreated():
+            try:
+                vbo.destroy()
+            except Exception:
+                pass
+        # If the item is ever repainted after clean(), re-upload from scratch.
+        self._needUpdate = True
+        self._lut_needs_upload = self._cmap_name is not None
+
 
 class DualGLVolumeItem(gl.GLVolumeItem):
     """Custom OpenGL volume item that displays two superimposed volumes
@@ -1016,33 +1052,50 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         GL.glActiveTexture(GL.GL_TEXTURE0)
 
     def clean(self):
-        """Cleanup OpenGL textures."""
+        """Release every GL resource owned by this item.
+
+        Deletes the main 3D volume texture (the single largest VRAM block),
+        the colormap/horizon/normal textures, the custom shader program and
+        the position VBO. Requires a current GL context — callers that run
+        outside ``paintGL`` must make the owning view's context current first
+        (see ``Renderer3D._clean_gl_items``). Idempotent: safe to call twice.
+        """
         ctx = QtGui.QOpenGLContext.currentContext()
-        if ctx is not None:
-            if self._primary_cmap_tex is not None:
-                try:
-                    GL.glDeleteTextures([self._primary_cmap_tex])
-                except Exception:
-                    pass
-                self._primary_cmap_tex = None
-            if self._overlay_cmap_tex is not None:
-                try:
-                    GL.glDeleteTextures([self._overlay_cmap_tex])
-                except Exception:
-                    pass
-                self._overlay_cmap_tex = None
-            if self._sculpt_horizon_tex is not None:
-                try:
-                    GL.glDeleteTextures([self._sculpt_horizon_tex])
-                except Exception:
-                    pass
-                self._sculpt_horizon_tex = None
-            if self._normal_tex is not None:
-                try:
-                    GL.glDeleteTextures([self._normal_tex])
-                except Exception:
-                    pass
-                self._normal_tex = None
+        if ctx is None:
+            return
+        tex_ids = [
+            t for t in (
+                self.texture,
+                self._primary_cmap_tex,
+                self._overlay_cmap_tex,
+                self._sculpt_horizon_tex,
+                self._normal_tex,
+            ) if t is not None
+        ]
+        if tex_ids:
+            try:
+                GL.glDeleteTextures(tex_ids)
+            except Exception:
+                pass
+        self.texture = None
+        self._primary_cmap_tex = None
+        self._overlay_cmap_tex = None
+        self._sculpt_horizon_tex = None
+        self._normal_tex = None
+        if self._customShaderProgram is not None:
+            try:
+                GL.glDeleteProgram(self._customShaderProgram)
+            except Exception:
+                pass
+            self._customShaderProgram = None
+        vbo = getattr(self, "m_vbo_position", None)
+        if vbo is not None and vbo.isCreated():
+            try:
+                vbo.destroy()
+            except Exception:
+                pass
+        # If the item is ever repainted after clean(), re-upload from scratch.
+        self._needUpload = True
 
 
 class Renderer3D(QWidget):
@@ -1522,18 +1575,48 @@ class Renderer3D(QWidget):
         elif self._loaded and self._volume_visual is not None:
             self._rebuild_volume_visual()
 
+    def _clean_gl_items(self, items) -> None:
+        """Best-effort GL resource release for scene items being discarded.
+
+        Calls ``clean()`` on each item that implements it. Texture/VBO/program
+        deletion needs a current GL context, but teardown paths (``load_volume``,
+        slider rebuilds) run outside ``paintGL`` — so make the view's context
+        current when one exists. Items never painted hold no GPU resources, so
+        a missing context degrades to a safe no-op inside ``clean()``.
+        """
+        targets = [item for item in items if item is not None and hasattr(item, "clean")]
+        if not targets:
+            return
+        view = getattr(self, "_view", None)
+        made_current = False
+        if QtGui.QOpenGLContext.currentContext() is None and view is not None:
+            try:
+                if view.context() is not None:
+                    view.makeCurrent()
+                    made_current = True
+            except Exception:
+                made_current = False
+        try:
+            for item in targets:
+                try:
+                    item.clean()
+                except Exception:
+                    pass
+        finally:
+            if made_current:
+                try:
+                    view.doneCurrent()
+                except Exception:
+                    pass
+
     def _rebuild_volume_visual(self):
         """Rebuild the GLVolumeItem with current opacity settings using our shared texture custom shader optimization."""
         if self._volume_visual is not None:
+            self._clean_gl_items([self._volume_visual])
             try:
                 self._view.removeItem(self._volume_visual)
             except Exception:
                 pass
-            if hasattr(self._volume_visual, 'clean'):
-                try:
-                    self._volume_visual.clean()
-                except Exception:
-                    pass
             self._volume_visual = None
 
         if self._volume_data_cpu is None:
@@ -1688,6 +1771,12 @@ class Renderer3D(QWidget):
     def clear(self):
         """Reset state and clean visual graph."""
         self._clear_visuals()
+        # Full reset also drops the stratal surface state (unlike the
+        # load_volume path, which keeps matching surfaces across a reload).
+        self._stratal_surfaces = []
+        self._stratal_visibility = []
+        self._stratal_labels = []
+        self._stratal_active = None
         self._loaded = False
         self._volume_data_cpu = None
         self._slice_range_cache = None
@@ -1698,14 +1787,21 @@ class Renderer3D(QWidget):
 
     def _clear_visuals(self):
         self._clear_time_plane_items()
-        for v in (self._volume_visual, self._overlay_volume_visual, self._img_il, self._img_xl,
-                  self._img_arb, self._horizon_visual,
-                  self._picks_visual, self._bbox_visual, self._cursor_sphere):
-            if v is not None:
-                try:
-                    self._view.removeItem(v)
-                except Exception:
-                    pass
+        # Release the stratal GL planes, but keep the surface *state* here:
+        # surfaces may have been registered before the volume was loaded (see
+        # ``set_stratal_slices``), and ``_sync_stratal_planes`` drops grids
+        # whose shape no longer matches the new volume.
+        self._clear_stratal_plane_items()
+        main_items = [v for v in (self._volume_visual, self._overlay_volume_visual, self._img_il,
+                                  self._img_xl, self._img_arb, self._horizon_visual,
+                                  self._picks_visual, self._bbox_visual, self._cursor_sphere)
+                      if v is not None]
+        self._clean_gl_items(main_items)
+        for v in main_items:
+            try:
+                self._view.removeItem(v)
+            except Exception:
+                pass
         for v in self._horizons.values():
             try:
                 self._view.removeItem(v)
@@ -2201,6 +2297,7 @@ class Renderer3D(QWidget):
             if position in positions:
                 continue
             image, line = self._time_plane_items.pop(position)
+            self._clean_gl_items([image])
             for item in (image, line):
                 try:
                     self._view.removeItem(item)
@@ -2271,9 +2368,9 @@ class Renderer3D(QWidget):
         ]
 
     def _clear_time_plane_items(self) -> None:
-        for image, line in getattr(
-            self, "_time_plane_items", {}
-        ).values():
+        pairs = list(getattr(self, "_time_plane_items", {}).values())
+        self._clean_gl_items([image for image, _line in pairs])
+        for image, line in pairs:
             for item in (image, line):
                 try:
                     self._view.removeItem(item)
@@ -2310,11 +2407,24 @@ class Renderer3D(QWidget):
         ni, nx, nt = self._volume_data_cpu.shape
         si, sx, st = self._volume_spacing
 
+        # Surfaces are (nI, nX) sample-index grids tied to the volume shape.
+        # After loading a different-sized volume, stale grids from the old
+        # volume would make extract_stratal_slice raise ValueError — drop the
+        # whole stratal state instead of crashing the load path.
+        if any(np.shape(s) != (ni, nx) for s in self._stratal_surfaces):
+            logger.info(
+                "Dropping %d stratal surface(s): shape does not match the "
+                "loaded volume (%d, %d).", len(self._stratal_surfaces), ni, nx,
+            )
+            self.clear_stratal_slices()
+            return
+
         n_surf = len(self._stratal_surfaces)
         # Prune items beyond the current surface count.
         for idx in list(self._stratal_plane_items):
             if idx >= n_surf:
                 image, line = self._stratal_plane_items.pop(idx)
+                self._clean_gl_items([image])
                 for item in (image, line):
                     try:
                         self._view.removeItem(item)
@@ -2379,7 +2489,9 @@ class Renderer3D(QWidget):
             line.setVisible(visible)
 
     def _clear_stratal_plane_items(self) -> None:
-        for image, line in getattr(self, "_stratal_plane_items", {}).values():
+        pairs = list(getattr(self, "_stratal_plane_items", {}).values())
+        self._clean_gl_items([image for image, _line in pairs])
+        for image, line in pairs:
             for item in (image, line):
                 try:
                     self._view.removeItem(item)
@@ -2405,10 +2517,11 @@ class Renderer3D(QWidget):
             # Original full-rebuild body (unchanged):
             self._clear_time_plane_items()
             self._clear_stratal_plane_items()
-            items_to_clean = (
+            items_to_clean = [
                 getattr(self, "_img_il", None), getattr(self, "_img_xl", None), getattr(self, "_img_arb", None),
                 getattr(self, "_line_il", None), getattr(self, "_line_xl", None), getattr(self, "_line_arb", None)
-            )
+            ]
+            self._clean_gl_items(items_to_clean)
             for v in items_to_clean:
                 if v is not None:
                     try:
