@@ -32,6 +32,11 @@ class AttributeSpec:
             ``sample_interval`` kwarg.
         rgb_channel: True when this attribute can drive an RGB channel
             (used to build the channel combos).
+        supports_2d: False when the attribute is undefined for 2-D slices
+            (e.g. Gaussian/max curvature need a non-degenerate inline
+            slope, which is identically zero on 2-D input).  ``apply``
+            rejects such combinations and UI consumers should disable
+            the corresponding combo entries.
     """
 
     label: str
@@ -39,6 +44,7 @@ class AttributeSpec:
     compute: Callable | None = None
     needs_sample_interval: bool = False
     rgb_channel: bool = False
+    supports_2d: bool = True
 
 
 def _curvature_dip_il(data: np.ndarray) -> np.ndarray:
@@ -81,8 +87,8 @@ ATTRIBUTES: Sequence[AttributeSpec] = (
     AttributeSpec("Dip_XL", "curvature", _curvature_dip_xl),
     AttributeSpec("方位角", "curvature", _curvature_azimuth),
     AttributeSpec("平均曲率", "curvature", _curvature_mean),
-    AttributeSpec("高斯曲率", "curvature", _curvature_gaussian),
-    AttributeSpec("最大曲率", "curvature", _curvature_max),
+    AttributeSpec("高斯曲率", "curvature", _curvature_gaussian, supports_2d=False),
+    AttributeSpec("最大曲率", "curvature", _curvature_max, supports_2d=False),
     AttributeSpec("相干性(C3)", "curvature", _attr.compute_coherence_c3),
 )
 
@@ -110,8 +116,20 @@ def apply(idx: int, data: np.ndarray, sample_interval_s: float = 1.0) -> np.ndar
     Returns the displayed field. For ``"raw"`` returns ``data`` unchanged.
     For ``"rgb"`` returns ``data`` unchanged (caller must invoke
     ``_apply_rgb_fusion`` separately).
+
+    Raises:
+        ValueError: If ``data`` is 2-D and the attribute does not support
+            2-D input (``AttributeSpec.supports_2d`` is False) — e.g.
+            Gaussian/max/min curvature degenerate to an all-zero map on
+            2-D slices because the inline slope is identically zero.
     """
     spec = ATTRIBUTES[idx]
+    if data.ndim == 2 and not spec.supports_2d:
+        raise ValueError(
+            f"Attribute {spec.label!r} does not support 2-D slices "
+            "(inline slope is identically zero, so the result would be an "
+            "all-zero map); compute it on a 3-D volume instead."
+        )
     if spec.kind in ("raw", "rgb"):
         return data
     if spec.kind == "curvature":

@@ -297,7 +297,9 @@ def _compute_attr_display(request: AttrComputeRequest) -> np.ndarray:
         small = data[::stride, ::stride]
         out_small = _ap.apply(request.attr_idx, small, sample_interval_s=si)
         upscaled = np.repeat(np.repeat(out_small, stride, axis=0), stride, axis=1)
-        data = upscaled[: request.data.shape[0], : request.data.shape[1]]
+        # ``upscaled`` already holds coherence values — return directly so the
+        # shared tail below does not run C3 a second time on them.
+        return upscaled[: request.data.shape[0], : request.data.shape[1]]
     return _ap.apply(request.attr_idx, data, sample_interval_s=si)
 
 

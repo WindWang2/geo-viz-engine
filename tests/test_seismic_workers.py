@@ -178,3 +178,95 @@ def test_seismic_view_rapid_load_accepts_only_latest_generation(qtbot, monkeypat
     assert stale_worker.interrupted is True
     stale_worker.done.emit(result(stale_worker))
     assert [item.path for item in accepted] == ["new.sgy"]
+
+
+def _c3_request(data, c3_idx):
+    return workers.AttrComputeRequest(
+        generation=1,
+        segy_generation=1,
+        slice_type="inline",
+        position=0,
+        attr_idx=c3_idx,
+        data=data,
+        sample_interval_s=0.002,
+    )
+
+
+def test_c3_downsampled_display_computes_c3_exactly_once(monkeypatch):
+    """Large 2-D C3 requests must return the upsampled coherence directly.
+
+    Regression: the downsampled branch assigned the upsampled coherence map
+    to ``data`` and then fell through to the shared ``_ap.apply`` tail,
+    running C3 a second time on coherence values (wrong result, and the
+    downsampling optimisation was defeated).
+    """
+    import numpy as np
+    from geoviz_seismic import attribute_pipeline as ap
+
+    c3_idx = ap.labels().index("相干性(C3)")
+    rng = np.random.default_rng(0)
+    data = rng.standard_normal((640, 32)).astype(np.float32)
+
+    calls = []
+    real_apply = ap.apply
+
+    def spy_apply(idx, arr, sample_interval_s=1.0):
+        calls.append(arr.shape)
+        return real_apply(idx, arr, sample_interval_s=sample_interval_s)
+
+    monkeypatch.setattr(ap, "apply", spy_apply)
+    out = workers._compute_attr_display(_c3_request(data, c3_idx))
+
+    # C3 ran exactly once, on the strided (half-resolution) input.
+    assert calls == [data[::2, ::2].shape]
+    assert out.shape == data.shape
+
+    # Reference: a single C3 on the strided data, block-upsampled, cropped.
+    small = real_apply(c3_idx, data[::2, ::2])
+    ref = np.repeat(np.repeat(small, 2, axis=0), 2, axis=1)[
+        : data.shape[0], : data.shape[1]
+    ]
+    np.testing.assert_allclose(out, ref, atol=1e-6)
+
+
+def test_c3_small_slice_skips_downsample(monkeypatch):
+    """Slices under the pixel threshold compute C3 directly, once."""
+    import numpy as np
+    from geoviz_seismic import attribute_pipeline as ap
+
+    c3_idx = ap.labels().index("相干性(C3)")
+    rng = np.random.default_rng(0)
+    data = rng.standard_normal((64, 48)).astype(np.float32)
+
+    calls = []
+    real_apply = ap.apply
+
+    def spy_apply(idx, arr, sample_interval_s=1.0):
+        calls.append(arr.shape)
+        return real_apply(idx, arr, sample_interval_s=sample_interval_s)
+
+    monkeypatch.setattr(ap, "apply", spy_apply)
+    out = workers._compute_attr_display(_c3_request(data, c3_idx))
+
+    assert calls == [data.shape]
+    np.testing.assert_allclose(out, real_apply(c3_idx, data), atol=1e-6)
+
+
+def test_attr_combo_disables_attributes_without_2d_support(qtbot):
+    """Combo entries for attributes undefined on 2-D slices (Gaussian/max
+    curvature) must be disabled so users cannot select a guaranteed
+    all-zero result."""
+    from geoviz_seismic import attribute_pipeline as ap
+    from geoviz_seismic import seismic_view as view_module
+
+    view = view_module.SeismicView(auto_load=False)
+    qtbot.addWidget(view)
+
+    model = view._attr_combo.model()
+    assert model.rowCount() == len(ap.ATTRIBUTES)
+    for i, spec in enumerate(ap.ATTRIBUTES):
+        item = model.item(i)
+        if spec.supports_2d:
+            assert item.isEnabled(), spec.label
+        else:
+            assert not item.isEnabled(), spec.label

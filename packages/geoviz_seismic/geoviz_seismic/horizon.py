@@ -141,7 +141,10 @@ class HorizonParser:
         if len(target_ys) > 0:
             result[target_ys, target_xs] = interp(np.column_stack([target_ys, target_xs]))
         if max_dist > 0:
-            dist = distance_transform_edt(mask)
+            # EDT measures distance from *zero* pixels, so (like fill_nearest)
+            # transform the invalid-pixel mask — dist is then the distance of
+            # each gap pixel to the nearest valid sample.
+            dist = distance_transform_edt(~mask)
             result[(~mask) & (dist > max_dist)] = np.nan
         return result
 

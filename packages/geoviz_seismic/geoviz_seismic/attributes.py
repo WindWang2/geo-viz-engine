@@ -504,11 +504,13 @@ def compute_curvature(
     if data_x.ndim == 2:
         size_xl = 2 * win_xl + 1
         size_t = 2 * win_t + 1
-        slope_il = uniform_filter(slope_il, size=(size_t, size_xl), mode="reflect")
-        slope_xl = uniform_filter(slope_xl, size=(size_t, size_xl), mode="reflect")
-        # 3. Second derivatives
+        # 2-D slices are (n_xl, n_t) — window sizes must follow axis order.
+        slope_il = uniform_filter(slope_il, size=(size_xl, size_t), mode="reflect")
+        slope_xl = uniform_filter(slope_xl, size=(size_xl, size_t), mode="reflect")
+        # 3. Second derivatives — 2-D slices are (n_xl, n_t), so the
+        # crossline derivative runs along axis 0 (axis 1 in the 3-D path).
         d2_il = xp.gradient(xp.gradient(slope_il, axis=0), axis=0)
-        d2_xl = xp.gradient(xp.gradient(slope_xl, axis=1), axis=1)
+        d2_xl = xp.gradient(xp.gradient(slope_xl, axis=0), axis=0)
         d2_il_xl = xp.gradient(xp.gradient(slope_il, axis=1), axis=0)
     else:
         size_il = 2 * win_il + 1
