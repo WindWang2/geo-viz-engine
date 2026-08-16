@@ -1,6 +1,7 @@
 import numpy as np
 from PySide6.QtGui import QPainter, QPen, QColor
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
+from PySide6.QtCore import QObject, Qt, Signal, Slot
+from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
 
 
 class CrossplotCanvas(QWidget):
@@ -48,24 +49,83 @@ class CrossplotCanvas(QWidget):
 
 
 class CrossplotDialog(QDialog):
-    """Attribute crossplot dialog — frequency vs envelope."""
+    """Attribute crossplot dialog — frequency vs envelope.
+
+    The two Hilbert-transform attributes (envelope + instantaneous
+    frequency) cost ~50-150 ms per full-resolution slice and used to run
+    synchronously in __init__, freezing the GUI thread for every dialog
+    open (#508). They now compute in a worker thread; the dialog shows a
+    placeholder and swaps in the canvas when the result arrives.
+    """
 
     def __init__(self, raw_data, sample_interval_s: float, parent=None):
         super().__init__(parent)
-        from .. import attributes as _attr
-
         self.setWindowTitle("属性交叉图 — 频率 vs 包络")
         self.resize(500, 500)
 
-        env = _attr.compute_envelope(raw_data, axis=0)
-        freq = _attr.compute_instantaneous_frequency(
-            raw_data, axis=0, sample_interval=sample_interval_s
-        )
+        self._layout = QVBoxLayout(self)
+        self._placeholder = QLabel("正在计算属性（包络 / 瞬时频率）…")
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._layout.addWidget(self._placeholder)
 
-        # Subsample for performance
-        step = max(1, env.size // 5000)
-        x = freq.flatten()[::step]
-        y = env.flatten()[::step]
+        from PySide6.QtCore import QThread
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(CrossplotCanvas(x, y))
+        self._thread = QThread()
+        self._worker = _CrossplotComputeWorker(raw_data, sample_interval_s)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.finished.connect(self._on_computed)
+        self._worker.failed.connect(self._on_failed)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.failed.connect(self._thread.quit)
+        self._thread.finished.connect(self._thread.deleteLater)
+        self._thread.start()
+
+    def _on_computed(self, x, y) -> None:
+        self._layout.removeWidget(self._placeholder)
+        self._placeholder.deleteLater()
+        self._layout.addWidget(CrossplotCanvas(x, y))
+
+    def _on_failed(self, message: str) -> None:
+        self._placeholder.setText(f"属性计算失败: {message}")
+
+    def closeEvent(self, event) -> None:
+        # finished->deleteLater may already have destroyed the wrapper.
+        thread = getattr(self, "_thread", None)
+        if thread is not None:
+            try:
+                if thread.isRunning():
+                    thread.quit()
+                    thread.wait(2000)
+            except RuntimeError:
+                pass
+        super().closeEvent(event)
+
+
+class _CrossplotComputeWorker(QObject):
+    """Envelope + instantaneous frequency off the GUI thread (#508)."""
+
+    finished = Signal(object, object)  # x, y (subsampled)
+    failed = Signal(str)
+
+    def __init__(self, raw_data, sample_interval_s: float):
+        super().__init__()
+        self._raw = raw_data
+        self._dt = sample_interval_s
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            from .. import attributes as _attr
+
+            env = _attr.compute_envelope(self._raw, axis=0)
+            freq = _attr.compute_instantaneous_frequency(
+                self._raw, axis=0, sample_interval=self._dt
+            )
+            # Subsample for performance
+            step = max(1, env.size // 5000)
+            self.finished.emit(
+                freq.flatten()[::step], env.flatten()[::step]
+            )
+        except Exception as exc:  # surface to the dialog placeholder
+            self.failed.emit(str(exc))
