@@ -364,6 +364,9 @@ class EditAttributesCmd(EditCommand):
         ref.properties.clear()
         ref.properties.update(self.new_props)
         model.mark_dirty()
+        # Attribute edits change neither geometry nor edges; flag the feature
+        # so the canvas rebuild path refreshes its rendered style (#549).
+        model.mark_feature_dirty(self.feature_id)
 
     def undo(self, model: TopologyModel) -> None:
         ref = model.get_feature(self.feature_id)
@@ -372,6 +375,7 @@ class EditAttributesCmd(EditCommand):
         ref.properties.clear()
         ref.properties.update(self._snapshot)
         model.mark_dirty()
+        model.mark_feature_dirty(self.feature_id)
 
 
 class CompositeCommand(EditCommand):

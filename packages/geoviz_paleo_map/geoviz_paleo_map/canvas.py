@@ -914,6 +914,10 @@ class PaleoMapCanvas(QWidget):
         from geoviz_paleo_map.edit_commands import EditAttributesCmd
         cmd = EditAttributesCmd(feature_id, old_props, new_props)
         self._undo_mgr.execute(cmd, self._topology_model)
+        # The attribute edit marks the feature dirty directly (no geometry
+        # change): rebuild affected layer items so the new style renders, then
+        # repaint (#549). The other edit handlers all funnel through this.
+        self._rebuild_topology_paths()
         self._scheduler.schedule()
 
     def _hierarchy_hit_test(self, pos: QPointF) -> str | None:
