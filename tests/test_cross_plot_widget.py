@@ -37,3 +37,41 @@ def test_lasso_selection(cross_plot_widget, qtbot):
     assert len(selected_count) == 1
     assert selected_count[0] == 2
     assert len(cross_plot_widget.clusters) == 1
+
+
+def test_lasso_selection_rotated_polygon_selects_correct_points(cross_plot_widget, qtbot):
+    """#506: a non-axis-aligned lasso must select the points it visually
+    encloses (descending edges mis-evaluated before the sign fix)."""
+    x = np.array([2.0, 3.6, 3.5, 2.9])
+    y = np.array([2.0, 1.5, 0.4, 2.0])
+    cross_plot_widget.set_scatter_data(x, y, x_label="GR", y_label="NPHI")
+
+    emitted = []
+    cross_plot_widget.points_selected.connect(
+        lambda indices, bounds: emitted.append(list(indices))
+    )
+    diamond = [QPointF(2.0, 0.0), QPointF(4.0, 2.0), QPointF(2.0, 4.0), QPointF(0.0, 2.0)]
+    cross_plot_widget.apply_lasso_polygon(diamond)
+
+    assert emitted == [[0, 3]]  # (2,2) and (2.9,2) inside; slanted-edge points outside
+    assert len(cross_plot_widget.clusters) == 1
+
+
+def test_lasso_selection_collinear_points_still_emits(cross_plot_widget, qtbot):
+    """#557: lassoing points on a line (the normal crossplot trend case)
+    must still create the cluster and emit points_selected — no QhullError
+    out of the event handler."""
+    x = np.array([1.0, 2.0, 3.0, 4.0])
+    y = np.array([1.0, 2.0, 3.0, 4.0])
+    cross_plot_widget.set_scatter_data(x, y, x_label="GR", y_label="NPHI")
+
+    emitted = []
+    cross_plot_widget.points_selected.connect(
+        lambda indices, bounds: emitted.append(list(indices))
+    )
+    lasso = [QPointF(0.0, 0.0), QPointF(5.0, 5.0), QPointF(5.0, 4.0), QPointF(0.0, -1.0)]
+    cross_plot_widget.apply_lasso_polygon(lasso)
+
+    assert len(emitted) == 1
+    assert len(emitted[0]) == 4
+    assert len(cross_plot_widget.clusters) == 1
