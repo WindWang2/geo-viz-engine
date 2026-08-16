@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -85,14 +87,21 @@ class ProjectManager:
     def _expand_path(self, path_str: str | None) -> str | None:
         """Convert a relative path back to an absolute path based on the project directory.
 
-        Rejects paths that escape the project directory (path traversal hardening).
+        Stored relative paths are resolved against the project directory and
+        rejected if they escape it (path traversal hardening). Stored
+        ABSOLUTE paths pass through resolved: save_project deliberately
+        keeps out-of-project data references absolute, and nuling them on
+        load silently dropped every well/seismic/horizon that lived outside
+        the project folder (#509).
         """
         if not path_str:
             return None
         try:
             path = Path(path_str)
             proj_dir = self.project_path.parent.resolve()
-            resolved = path.resolve() if path.is_absolute() else (proj_dir / path).resolve()
+            if path.is_absolute():
+                return path.resolve().as_posix()
+            resolved = (proj_dir / path).resolve()
             if not resolved.is_relative_to(proj_dir):
                 return None
             return resolved.as_posix()
@@ -126,9 +135,29 @@ class ProjectManager:
         # Ensure parent directory exists
         self.project_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write to disk
-        with open(self.project_path, "w", encoding="utf-8") as f:
-            json.dump(data_dict, f, indent=4, ensure_ascii=False)
+        # Atomic save (#574): the previous in-place 'w' open truncated the
+        # only copy of the project file before streaming the JSON, so a
+        # crash / power loss / full disk mid-dump destroyed it. Write the
+        # full payload to a temp sibling (fsynced), keep the previous
+        # version as .bak, then os.replace atomically onto the final path.
+        tmp_path = self.project_path.with_name(self.project_path.name + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data_dict, f, indent=4, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            if self.project_path.exists():
+                try:
+                    shutil.copy2(self.project_path, self._backup_path())
+                except OSError:
+                    pass  # best-effort history; the atomic replace below is the guarantee
+            os.replace(tmp_path, self.project_path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+    def _backup_path(self) -> Path:
+        return self.project_path.with_suffix(self.project_path.suffix + ".bak")
 
     def load_project(self) -> ProjectSchema:
         """Load project data from the .gvz JSON file, expanding relative paths to absolute."""
