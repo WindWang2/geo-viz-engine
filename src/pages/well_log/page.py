@@ -338,6 +338,10 @@ class WellLogPage(QWidget):
         self._current_well: str | None = None
         self._current_xls_path = None
         self._current_data = None
+        # LAS import outcome introspection (#510/#573): non-modal callers
+        # (tests) read these instead of a blocking QMessageBox.
+        self._last_import_error: str | None = None
+        self._last_import_summary: str = ""
         self._load_thread = None
         self._load_worker = None
         self._pred_thread = None
@@ -511,16 +515,72 @@ class WellLogPage(QWidget):
             self, "导入 LAS 测井文件", "", "LAS Files (*.las);;All Files (*)"
         )
         if filepath:
-            self.import_las_file(filepath)
+            # Interactive import: always report the outcome (#510/#573).
+            self.import_las_file(filepath, show_dialog=True)
 
-    def import_las_file(self, filepath: str, show_dialog: bool = False):
-        """Parse LAS file and display curves."""
+    def import_las_file(self, filepath: str, show_dialog: bool = False) -> bool:
+        """Parse a LAS file and display its curves (#510/#573).
+
+        The parsed result used to be discarded — no tracks were built, the
+        canvas/labels never updated, and with the default show_dialog=False
+        not even a message appeared, making the toolbar's 导入 LAS action a
+        silent no-op. The parse now feeds the same display path as a
+        registry well load; both success and failure always report.
+        """
+        from pathlib import Path as _Path
+
         from geoviz_well_log.las_parser import parse_las_file
-        parsed = parse_las_file(filepath)
-        if parsed and len(parsed.depth) > 0 and show_dialog:
+        from geoviz_well_log.models import CurveData, WellLogData
+
+        parse_error = ""
+        parsed = None
+        try:
+            parsed = parse_las_file(filepath)
+        except Exception as exc:
+            parse_error = str(exc)
+        if parsed is None or len(parsed.depth) == 0 or not parsed.curves:
+            detail = f": {parse_error}" if parse_error else ": 无可显示的曲线数据"
+            self._last_import_error = f"LAS 导入失败（{filepath}）{detail}"
+            self._last_import_summary = ""
+            if show_dialog:
+                QMessageBox.warning(self, "LAS 导入失败", self._last_import_error)
+            return False
+
+        curves = []
+        for name, values in parsed.curves.items():
+            if len(values) != len(parsed.depth):
+                continue
+            curves.append(CurveData(
+                name=name,
+                unit=parsed.units.get(name, ""),
+                depth=[float(d) for d in parsed.depth],
+                values=[float(v) for v in values],
+            ))
+        if not curves:
+            self._last_import_error = f"LAS 导入失败（{filepath}）: 曲线与深度采样数不一致"
+            self._last_import_summary = ""
+            if show_dialog:
+                QMessageBox.warning(self, "LAS 导入失败", self._last_import_error)
+            return False
+
+        data = WellLogData(
+            well_name=parsed.well_name or _Path(filepath).stem,
+            top_depth=float(min(parsed.depth)),
+            bottom_depth=float(max(parsed.depth)),
+            curves=curves,
+        )
+        self._last_import_error = None
+        self._last_import_summary = (
+            f"成功导入井 [{data.well_name}]，包含 {len(curves)} 条曲线"
+        )
+        # Same display path as a registry well load: builds tracks, swaps
+        # the canvas, syncs the combo/labels and the track list.
+        self._on_well_loaded(data)
+        if show_dialog:
             QMessageBox.information(
-                self, "LAS 导入成功", f"成功导入井 [{parsed.well_name}]，包含 {len(parsed.curves)} 条曲线！"
+                self, "LAS 导入成功", self._last_import_summary + "！"
             )
+        return True
 
 
     def _on_merge_curves(self):
