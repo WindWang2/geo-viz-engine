@@ -40,6 +40,51 @@ def compute_normal_map(data: np.ndarray) -> np.ndarray:
     return ((N + 1.0) * 127.5).astype(np.uint8)
 
 
+def prepare_normal_texture_upload(normal_data: np.ndarray):
+    """Prepare a hillshading normal map for ``glTexImage3D`` upload.
+
+    Applies the same axis convention as the main volume texture in
+    ``pyqtgraph.opengl.GLVolumeItem._uploadData``: the data is transposed with
+    ``(2, 1, 0, 3)`` while the texture is *declared* with the original
+    ``shape[:3]`` as (width, height, depth). Because the C-order buffer varies
+    fastest along the (transposed) last spatial axis, GL texel ``(i, j, k)``
+    ends up addressing ``normal_data[i, j, k]`` — i.e. shader texcoord
+    components x/y/z map to data axes 0/1/2, exactly like the volume texture.
+
+    Returns ``(buffer, width, height, depth)`` with a C-contiguous uint8
+    buffer.
+    """
+    if normal_data.ndim != 4 or normal_data.shape[3] != 3:
+        raise ValueError(
+            f"normal_data must have shape (ni, nx, nt, 3), got {normal_data.shape}"
+        )
+    width, height, depth = normal_data.shape[:3]
+    buffer = np.ascontiguousarray(normal_data.transpose((2, 1, 0, 3)))
+    return buffer, width, height, depth
+
+
+def prepare_horizon_texture_upload(horizon_grid: np.ndarray):
+    """Prepare a sculpting horizon grid for ``glTexImage2D`` upload.
+
+    Horizon grids follow the ``(nI, nX)`` contract (see ``stratal.py``), where
+    axis 0 is the volume inline axis. The volume texture contract maps shader
+    ``v_texcoord.x`` to data axis 0, so the grid must be transposed before
+    upload: with a C-order buffer GL's s axis addresses the fastest-varying
+    (column) axis, and transposing makes that axis the inline axis. Without
+    the transpose the sculpting mask is mirrored across the grid diagonal —
+    invisible for square grids, wrong for ``nI != nX``.
+
+    Returns ``(buffer, width, height)`` with a C-contiguous float32 buffer.
+    """
+    if horizon_grid.ndim != 2:
+        raise ValueError(
+            f"horizon_grid must have shape (nI, nX), got {horizon_grid.shape}"
+        )
+    width, height = horizon_grid.shape
+    buffer = np.ascontiguousarray(horizon_grid.T, dtype=np.float32)
+    return buffer, width, height
+
+
 class GLImageLutItem(gl.GLImageItem):
     """A 2D textured quad that looks up colour through a 1-D LUT in-shader.
 
@@ -479,9 +524,9 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
         
-        h, w = self._sculpt_horizon_data.shape
-        # We upload a single channel float32 texture
-        data = np.ascontiguousarray(self._sculpt_horizon_data)
+        # Transpose so GL texel (i, j) addresses horizon_grid[i, j], matching
+        # v_texcoord.x -> inline axis 0 (see prepare_horizon_texture_upload).
+        data, w, h = prepare_horizon_texture_upload(self._sculpt_horizon_data)
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_R32F, w, h, 0, GL.GL_RED, GL.GL_FLOAT, data)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
         self._sculpt_needs_upload = False
@@ -500,8 +545,11 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         GL.glTexParameteri(GL.GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
         GL.glTexParameteri(GL.GL_TEXTURE_3D, GL.GL_TEXTURE_WRAP_R, GL.GL_CLAMP_TO_EDGE)
         
-        h, w, d = self._normal_data.shape[:3]
-        GL.glTexImage3D(GL.GL_TEXTURE_3D, 0, GL.GL_RGB8, w, h, d, 0, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, self._normal_data)
+        # Same transpose convention as the main volume texture
+        # (GLVolumeItem._uploadData): shader texcoord x/y/z map to data axes
+        # 0/1/2 (see prepare_normal_texture_upload).
+        data, w, h, d = prepare_normal_texture_upload(self._normal_data)
+        GL.glTexImage3D(GL.GL_TEXTURE_3D, 0, GL.GL_RGB8, w, h, d, 0, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, data)
         GL.glBindTexture(GL.GL_TEXTURE_3D, 0)
         self._normal_needs_upload = False
 
