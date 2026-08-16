@@ -87,3 +87,60 @@ def test_idw_with_fault_barrier():
     assert grid_z[5, 2] < 20.0
     # Right side (x > 5) should only be influenced by right points (z ~ 100)
     assert grid_z[5, 8] > 80.0
+
+
+def test_vectorized_barrier_matches_scalar_reference_on_large_inputs():
+    """#507 lock: inputs above _FAULT_REFERENCE_LIMIT must take the
+    broadcast path and still match the scalar segments_intersect reference
+    exactly (crossings, endpoint touches, collinear overlap)."""
+    from geoviz_plots.interpolation.idw import (
+        _FAULT_REFERENCE_LIMIT,
+        _apply_fault_barriers,
+    )
+
+    r = np.random.default_rng(99)
+    C, S, F = 128, 64, 9  # 73728 > 65536 -> vectorized path
+    assert C * S * F > _FAULT_REFERENCE_LIMIT
+    nx = r.uniform(-5, 5, C)
+    ny = r.uniform(-5, 5, C)
+    sx = r.uniform(-5, 5, S)
+    sy = r.uniform(-5, 5, S)
+    segs = [tuple(map(tuple, r.uniform(-5, 5, (2, 2)))) for _ in range(F)]
+
+    w = np.ones((C, S))
+    _apply_fault_barriers(w, nx, ny, sx, sy, segs)
+
+    mismatch = 0
+    for i in range(C):
+        for j in range(S):
+            ref = any(
+                segments_intersect((nx[i], ny[i]), (sx[j], sy[j]), s[0], s[1])
+                for s in segs
+            )
+            if bool(w[i, j] == 0.0) != ref:
+                mismatch += 1
+    assert mismatch == 0
+
+
+def test_barrier_interpolation_audit_scale_completes_fast():
+    """#507 lock: the audit's trigger scale (50x50 grid, 100 wells, 20 fault
+    segments — minutes with the old triple Python loop) must stay in the
+    sub-second range on the vectorized path."""
+    import time
+
+    r = np.random.default_rng(7)
+    x = r.uniform(0, 100, 100)
+    y = r.uniform(0, 100, 100)
+    z = r.uniform(0, 50, 100)
+    gx = np.linspace(0, 100, 50)
+    gy = np.linspace(0, 100, 50)
+    faults = [[tuple(p) for p in r.uniform(0, 100, (2, 2))] for _ in range(20)]
+
+    t0 = time.perf_counter()
+    res = interpolate_idw(x, y, z, gx, gy, fault_polylines=faults)
+    dt = time.perf_counter() - t0
+
+    assert res.shape == (50, 50)
+    # Generous CI margin (audit measured the old loop at 30-60 s; the
+    # vectorized path measures ~0.3 s locally).
+    assert dt < 10.0, f"barrier IDW regressed to {dt:.1f}s at audit scale"
