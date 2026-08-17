@@ -12,6 +12,22 @@ from scipy.ndimage import distance_transform_edt
 _NUM_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
 
 
+def horizon_quad_faces(nI: int, nX: int) -> np.ndarray:
+    """Triangle faces for an nI×nX regular grid, two tris per quad.
+
+    Winding matches the historical nested-append path: (p0, p1, p2) and
+    (p1, p3, p2) with p0=i*nX+j, p1=p0+1, p2=p0+nX, p3=p2+1.
+    """
+    if nI < 2 or nX < 2:
+        return np.empty((0, 3), dtype=np.int64)
+    i_idx, j_idx = np.mgrid[0:nI - 1, 0:nX - 1]
+    p0 = i_idx * nX + j_idx
+    p1 = p0 + 1
+    p2 = p0 + nX
+    p3 = p2 + 1
+    return np.stack([p0, p1, p2, p1, p3, p2], axis=-1).reshape(-1, 3)
+
+
 class HorizonAxes(TypedDict):
     """Axes definition expected by :meth:`HorizonParser.parse`.
 

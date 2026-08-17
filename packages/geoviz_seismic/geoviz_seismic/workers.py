@@ -139,6 +139,31 @@ class SyntheticWorker(QThread):
         self.done.emit(data)
 
 
+class HorizonLoadWorker(QThread):
+    """Parse a horizon file and nearest-fill gaps off the GUI thread (#695)."""
+
+    done = Signal(object)  # (name, filled_grid, color)
+    error = Signal(str)
+
+    def __init__(self, path: str, axes: dict, name: str, color: tuple, parent=None):
+        super().__init__(parent)
+        self._path = path
+        self._axes = axes
+        self._name = name
+        self._color = color
+
+    def run(self):
+        try:
+            from .horizon import HorizonParser
+
+            parser = HorizonParser(self._path, unit="ms")
+            grid = parser.parse(self._axes)
+            filled = parser.fill_nearest(grid)
+            self.done.emit((self._name, filled, self._color))
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 class SegyLoadWorker(QThread):
     """Background thread for SEGY file loading."""
 

@@ -19,6 +19,7 @@ from .gpu_ops import (
     is_gpu_available, to_gpu, slice_volume_gpu,
     sample_polyline_slice
 )
+from .horizon import horizon_quad_faces
 from .stratal import extract_stratal_slice
 
 logger = logging.getLogger(__name__)
@@ -1620,17 +1621,7 @@ class Renderer3D(QWidget):
         xx, yy = np.meshgrid(x, y)
 
         verts = np.dstack([xx, yy, z])
-
-        # Vectorized face construction (#57): each (i, j) quad corner maps to
-        # p0=i*nX+j, p1=p0+1, p2=p0+nX, p3=p2+1, split into two triangles
-        # (p0, p1, p2) and (p1, p3, p2) — same winding/order as the old
-        # double loop, generated in one pass from a grid of corner indices.
-        i_idx, j_idx = np.mgrid[0:nI - 1, 0:nX - 1]
-        p0 = i_idx * nX + j_idx
-        p1 = p0 + 1
-        p2 = p0 + nX
-        p3 = p2 + 1
-        faces = np.stack([p0, p1, p2, p1, p3, p2], axis=-1).reshape(-1, 3)
+        faces = horizon_quad_faces(nI, nX)
         verts_flat = verts.reshape(-1, 3)
 
         mesh = gl.GLMeshItem(
