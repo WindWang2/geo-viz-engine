@@ -17,16 +17,31 @@ import numpy as np
 class TestChartEngineDeadImport:
     """render_well_log_data() should not crash on import."""
 
-    def test_render_well_log_data_does_not_crash_on_import(self, qtbot):
+    def test_render_well_log_data_does_not_crash_on_import(self):
         """Calling render_well_log_data must not raise ImportError from missing utils."""
         from geoviz_well_log.chart_engine import ChartEngine
-        engine = ChartEngine()
-        qtbot.addWidget(engine)
-        # The method exists but should not crash with ImportError
-        # We just verify the method is callable without the import error
-        import inspect
-        src = inspect.getsource(engine.render_well_log_data)
-        assert "from .utils import" not in src, "Dead import of nonexistent utils.py should be removed"
+        from geoviz_well_log.models import CurveData, WellLogData
+
+        data = WellLogData(
+            well_name="T",
+            top_depth=0.0,
+            bottom_depth=10.0,
+            curves=[CurveData(name="GR", depth=[0.0, 10.0], values=[1.0, 2.0])],
+        )
+
+        class _Sink:
+            def __init__(self):
+                self.payload = None
+
+            def render_data(self, well_data_json: str):
+                self.payload = well_data_json
+
+        sink = _Sink()
+        ChartEngine.render_well_log_data(sink, data)
+        assert sink.payload
+        import json
+        parsed = json.loads(sink.payload)
+        assert parsed
 
 
 # --- 26-A2: ConnectionOverlay._well_names ---
@@ -62,22 +77,57 @@ class TestConnectionOverlayInit:
 class TestShadingStateNotReset:
     """Uploading a horizon texture must NOT reset shading state."""
 
+    def _bare_item(self):
+        from geoviz_seismic.renderer_3d import DualGLVolumeItem
+        item = DualGLVolumeItem.__new__(DualGLVolumeItem)
+        item._shading_enabled = False
+        item._shading_light_dir = (1.0, 1.0, 1.0)
+        item._shading_needs_upload = False
+        item._sculpt_horizon_data = None
+        item._sculpt_horizon_tex = None
+        item._sculpt_needs_upload = False
+        item.smooth = False
+        item.update = lambda *a, **k: None
+        return item
+
     def test_upload_horizon_does_not_reset_shading(self):
         """_uploadHorizonTexture must preserve _shading_enabled state."""
-        import inspect
+        from unittest.mock import MagicMock, patch
+
         from geoviz_seismic.renderer_3d import DualGLVolumeItem
-        src = inspect.getsource(DualGLVolumeItem._uploadHorizonTexture)
-        # The shading state reset lines should NOT be present
-        assert "_shading_enabled = False" not in src, \
-            "Shading state should not be reset inside _uploadHorizonTexture"
+
+        item = self._bare_item()
+        DualGLVolumeItem.setShading(item, True, (0.0, 1.0, 0.0))
+        assert item._shading_enabled is True
+        item._sculpt_horizon_data = np.ones((2, 2), dtype=np.float32)
+        item._sculpt_horizon_tex = 7
+        item._sculpt_needs_upload = True
+        with (
+            patch("geoviz_seismic.renderer_3d.QtGui.QOpenGLContext") as ctx_cls,
+            patch("geoviz_seismic.renderer_3d.GL"),
+        ):
+            ctx_cls.currentContext.return_value = MagicMock()
+            DualGLVolumeItem._uploadHorizonTexture(item)
+        assert item._shading_enabled is True
+        assert item._shading_light_dir == (0.0, 1.0, 0.0)
+        assert item._sculpt_needs_upload is False
 
     def test_no_duplicate_setShading(self):
-        """setShading should be defined exactly once."""
-        import inspect
+        """setShading should be defined exactly once and toggle public state."""
         from geoviz_seismic.renderer_3d import DualGLVolumeItem
-        src = inspect.getsource(DualGLVolumeItem)
-        count = src.count("def setShading(")
-        assert count == 1, f"setShading defined {count} times, expected 1"
+
+        defs = [
+            cls for cls in DualGLVolumeItem.__mro__
+            if "setShading" in getattr(cls, "__dict__", {})
+        ]
+        assert len(defs) == 1, f"setShading defined on {defs}"
+
+        item = self._bare_item()
+        DualGLVolumeItem.setShading(item, True, (0.2, 0.3, 0.4))
+        assert item._shading_enabled is True
+        assert item._shading_light_dir == (0.2, 0.3, 0.4)
+        DualGLVolumeItem.setShading(item, False)
+        assert item._shading_enabled is False
 
 
 # --- 26-A4: loader.py UnboundLocalError ---
@@ -85,40 +135,55 @@ class TestShadingStateNotReset:
 class TestLoaderExceptionHandling:
     """Exception handlers must not reference unbound local variables."""
 
+    def _failing_loader(self):
+        from types import SimpleNamespace
+
+        from geoviz_seismic.loader import SeismicLoader
+        from geoviz_seismic.models import SeismicVolumeMeta
+
+        loader = SeismicLoader("missing.sgy")
+        loader._f = SimpleNamespace(
+            ilines=[10, 11, 12], xlines=[20, 21], close=lambda: None
+        )
+        loader._meta = SeismicVolumeMeta(
+            filename="missing.sgy",
+            n_inlines=3,
+            n_crosslines=2,
+            n_samples=8,
+            sample_interval=4.0,
+            iline_start=10,
+            iline_step=1,
+            xline_start=20,
+            xline_step=1,
+            dt_ms=4.0,
+        )
+
+        def _boom():
+            raise KeyError("forced")
+
+        loader._open = _boom
+        return loader
+
     def test_read_inline_error_uses_self_f_not_local(self):
         """read_inline exception handler must not reference unbound `f`."""
-        import inspect
-        from geoviz_seismic.loader import SeismicLoader
-        src = inspect.getsource(SeismicLoader.read_inline)
-        # After the fix, the error message should use self._f or be restructured
-        # The old code had f.ilines[0] which would be UnboundLocalError
-        assert "f.ilines" not in src or "self._f" in src, \
-            "Exception handler should not reference unbound local `f`"
+        loader = self._failing_loader()
+        with pytest.raises(ValueError, match=r"available: 10-12") as info:
+            loader.read_inline(999)
+        assert not isinstance(info.value.__cause__, UnboundLocalError)
 
     def test_read_crossline_error_uses_self_f_not_local(self):
         """read_crossline exception handler must not reference unbound `f`."""
-        import inspect
-        from geoviz_seismic.loader import SeismicLoader
-        src = inspect.getsource(SeismicLoader.read_crossline)
-        assert "f.xlines" not in src or "self._f" in src, \
-            "Exception handler should not reference unbound local `f`"
+        loader = self._failing_loader()
+        with pytest.raises(ValueError, match=r"available: 20-21") as info:
+            loader.read_crossline(999)
+        assert not isinstance(info.value.__cause__, UnboundLocalError)
 
     def test_read_timeslice_error_uses_meta_not_f(self):
         """read_timeslice exception handler must not reference unbound `f`."""
-        import inspect
-        from geoviz_seismic.loader import SeismicLoader
-        src = inspect.getsource(SeismicLoader.read_timeslice)
-        # read_timeslice uses meta, not f - just verify no f.something reference
-        lines = src.split("\n")
-        in_except = False
-        for line in lines:
-            if "except" in line:
-                in_except = True
-            if in_except and "f." in line and "f" in line.split("f.")[0][-1:]:
-                # Check if it's a standalone f.xxx reference (not self._f, not f-string)
-                import re
-                if re.search(r'(?<![_"\'])f\.(ilines|xlines)', line):
-                    pytest.fail(f"Exception handler references unbound `f`: {line.strip()}")
+        loader = self._failing_loader()
+        with pytest.raises(ValueError, match=r"available: 0-7") as info:
+            loader.read_timeslice(99)
+        assert not isinstance(info.value.__cause__, UnboundLocalError)
 
 
 # --- 26-A5: WellTiePanel auto-tie button wiring ---

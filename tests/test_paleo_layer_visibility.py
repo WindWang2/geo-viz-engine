@@ -45,11 +45,25 @@ def test_region_labels_checks_visible():
 
 
 def test_layer_toggle_handler_does_not_crash(qtbot):
-    """_on_layer_toggled should not raise AttributeError accessing map_view.layers."""
+    """Toggling wells/labels must flip the matching canvas layer.visible flags."""
     from src.pages.paleo_map.page import PaleoMapPage
     page = PaleoMapPage()
     qtbot.addWidget(page)
     assert hasattr(page.map_view, "layers"), "map_view must expose layers"
+
+    wells = [layer for layer in page.map_view.layers if "Well" in type(layer).__name__]
+    labels = [layer for layer in page.map_view.layers if "Label" in type(layer).__name__]
+    assert wells, "PaleoMapCanvas must expose a wells layer"
+    assert labels, "PaleoMapCanvas must expose a labels layer"
+
     page.toggle_wells.setChecked(False)
+    assert all(layer.visible is False for layer in wells)
+    assert all(layer.visible is True for layer in labels)
+
     page.toggle_labels.setChecked(False)
-    page._on_layer_toggled()
+    assert all(layer.visible is False for layer in labels)
+
+    page.toggle_wells.setChecked(True)
+    page.toggle_labels.setChecked(True)
+    assert all(layer.visible is True for layer in wells)
+    assert all(layer.visible is True for layer in labels)

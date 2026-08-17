@@ -60,28 +60,59 @@ def test_map_page_has_chips(qtbot):
 
 
 def test_map_page_layer_checkboxes_wired(qtbot):
-    """chk_wells and chk_grids toggling must not crash."""
+    """chk_wells / chk_grids must flip WellsLayer / GraticuleLayer.visible."""
+    from geoviz_map.layers.graticule import GraticuleLayer
+    from geoviz_map.layers.wells import WellsLayer
     from src.pages.map.page import MapPage
     from src.data.cache import DataCache
     cache = DataCache()
     page = MapPage(cache)
     qtbot.addWidget(page)
+
+    wells = [layer for layer in page.map_canvas.layers if isinstance(layer, WellsLayer)]
+    grids = [layer for layer in page.map_canvas.layers if isinstance(layer, GraticuleLayer)]
+    assert wells, "MapPage canvas must expose a WellsLayer"
+    assert grids, "MapPage canvas must expose a GraticuleLayer"
+
     page.chk_wells.setChecked(False)
     page.chk_grids.setChecked(False)
+    assert all(layer.visible is False for layer in wells)
+    assert all(layer.visible is False for layer in grids)
+
     page.chk_wells.setChecked(True)
     page.chk_grids.setChecked(True)
+    assert all(layer.visible is True for layer in wells)
+    assert all(layer.visible is True for layer in grids)
 
 
 def test_map_page_chip_filter_does_not_crash(qtbot):
-    """Clicking filter chips must not crash."""
+    """Filter chips are exclusive and drive the well-list filter."""
     from src.pages.map.page import MapPage
     from src.data.cache import DataCache
     cache = DataCache()
     page = MapPage(cache)
     qtbot.addWidget(page)
+
     page.chip_all.setChecked(True)
     page.chip_interpreted.setChecked(True)
+    assert page.chip_interpreted.isChecked()
+    assert not page.chip_all.isChecked()
+    assert not page.chip_gas.isChecked()
+
     page.chip_gas.setChecked(True)
+    assert page.chip_gas.isChecked()
+    assert not page.chip_all.isChecked()
+    assert not page.chip_interpreted.isChecked()
+
+    if page.well_list.count() == 0:
+        return
+    for i in range(page.well_list.count()):
+        item = page.well_list.item(i)
+        name = item.data(Qt.UserRole)
+        marker = next((w for w in page.wells if w.name == name), None)
+        if marker is None:
+            continue
+        assert item.isHidden() is marker.has_data
 
 
 def test_map_page_chip_filters_differ_by_has_data(qtbot):

@@ -1,7 +1,6 @@
 import pytest
-from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtGui import QPainter, QPixmap
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QImage, QPainter
 
 from geoviz_well_log.renderer.depth_ruler import DepthRuler
 
@@ -30,15 +29,37 @@ def test_depth_ruler_nice_intervals(app):
     assert intervals == 10
 
 
-def test_depth_ruler_paint_no_crash(app):
+def test_depth_ruler_paint_no_crash(app, monkeypatch):
     ruler = DepthRuler()
     ruler.set_depth_range(0, 1000)
     ruler.set_cursor_depth(500.0)
     ruler.resize(50, 600)
-    pm = QPixmap(50, 600)
-    painter = QPainter(pm)
-    ruler.paintEvent(None)  # paint directly
-    painter.end()
+
+    drawn: list[str] = []
+    orig = QPainter.drawText
+
+    def _capture(self, *args, **kwargs):
+        for arg in args:
+            if isinstance(arg, str):
+                drawn.append(arg)
+        return orig(self, *args, **kwargs)
+
+    monkeypatch.setattr(QPainter, "drawText", _capture)
+
+    img = QImage(50, 600, QImage.Format.Format_ARGB32)
+    img.fill(0xFFFFFFFF)
+    ruler.render(img)
+
+    joined = " ".join(drawn)
+    assert any(label in joined for label in ("0", "500", "1000"))
+    assert any("500" in text for text in drawn)
+    from PySide6.QtGui import QColor
+    bg = QColor("#f8fafc")
+    assert any(
+        img.pixelColor(x, y) != bg and img.pixelColor(x, y).alpha() > 0
+        for y in range(0, img.height(), 8)
+        for x in range(0, img.width(), 4)
+    )
 
 
 def test_depth_ruler_cursor_indicator(app):

@@ -5,7 +5,8 @@
 - Bonus: Curve legend shows min/max values
 """
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRectF
+from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 from geoviz_well_log.renderer.canvas import WellLogCanvas
@@ -103,34 +104,45 @@ class TestVerticalScrollbar:
         w = QPainterWidget()
         w.resize(600, 800)
         track = _make_curve_track()
+        track.set_depth_range(1000.0, 2000.0)
         w.set_tracks([track])
         w.show()
 
-        # Record initial depth range
-        initial_top = track.depth_top
-        initial_bottom = track.depth_bottom
+        # Zoom so the thumb no longer fills the track, then drive the bar.
+        w.set_depth_range(1200.0, 1400.0)
+        assert track.depth_top == pytest.approx(1200.0)
+        assert track.depth_bottom == pytest.approx(1400.0)
 
-        # Move scrollbar to top (minimum value)
-        w._scrollbar_syncing = False
-        w.verticalScrollBar().setValue(0)
+        sb = w.verticalScrollBar()
+        sb.setValue(sb.maximum())
+        assert track.depth_top == pytest.approx(1800.0)
+        assert track.depth_bottom == pytest.approx(2000.0)
 
-        # Depth range should have shifted
-        new_top = track.depth_top
-        # At scrollbar=0, center should be at full_top
-        assert new_top <= initial_top
+        sb.setValue(0)
+        assert track.depth_top == pytest.approx(1000.0)
+        assert track.depth_bottom == pytest.approx(1200.0)
 
     def test_scrollbar_range_configured(self, app):
-        """Scrollbar thumb size should represent visible_depth / total_depth."""
+        """Scrollbar max/pageStep must track visible vs full depth span."""
         w = QPainterWidget()
         w.resize(600, 800)
         track = _make_curve_track()
+        track.set_depth_range(1000.0, 2000.0)
         w.set_tracks([track])
 
         sb = w.verticalScrollBar()
-        # When visible span == full span, thumb fills entire track (max=0)
-        assert sb.pageStep() > 0
         full_span = track.depth_bottom - track.depth_top
-        assert full_span > 0
+        assert full_span == pytest.approx(1000.0)
+        # Full view: thumb fills the track (max=0) but pageStep stays positive.
+        assert sb.maximum() == 0
+        assert sb.pageStep() > 0
+
+        w.set_depth_range(1200.0, 1400.0)
+        visible_span = track.depth_bottom - track.depth_top
+        assert visible_span == pytest.approx(200.0)
+        assert sb.maximum() == 100000
+        assert sb.pageStep() == int((visible_span / full_span) * 100000)
+        assert 0 < sb.pageStep() < sb.maximum()
 
     def test_scrollbar_thumb_shrinks_on_zoom(self, app):
         """Zooming in should shrink the scrollbar thumb proportionally."""
@@ -182,13 +194,38 @@ class TestLastTrackVisible:
 class TestCurveLegendMinMax:
     """Curve legend should show min/max values."""
 
-    def test_paint_header_includes_range(self, app):
+    def test_paint_header_includes_range(self, app, monkeypatch):
         """CurveTrack header should render min/max range text."""
         track = _make_curve_track("GR", 100)
-        # Check that the curve has valid min/max
-        curve = track._curves[0]
-        vmin = min(curve.values)
-        vmax = max(curve.values)
-        assert vmin < vmax
-        # The paint_header method should format this as "GR  vmin~vmax API"
-        # We verify the data is available; actual rendering is visual
+        curve = track.curves[0]
+        range_str = track._range_str_for(curve)
+        assert "~" in range_str
+
+        drawn: list[str] = []
+        orig = QPainter.drawText
+
+        def _capture(self, *args, **kwargs):
+            for arg in args:
+                if isinstance(arg, str):
+                    drawn.append(arg)
+            return orig(self, *args, **kwargs)
+
+        monkeypatch.setattr(QPainter, "drawText", _capture)
+
+        img = QImage(160, 80, QImage.Format.Format_ARGB32)
+        img.fill(0xFFFFFFFF)
+        painter = QPainter(img)
+        track.paint_header(painter, QRectF(0, 0, 160, 80))
+        painter.end()
+
+        joined = " ".join(drawn)
+        assert "GR" in joined
+        assert "~" in joined
+        assert any(range_str in text or "~" in text for text in drawn)
+        from PySide6.QtGui import QColor
+        white = QColor("#ffffff")
+        assert any(
+            img.pixelColor(x, y) != white
+            for y in range(0, img.height(), 4)
+            for x in range(0, img.width(), 4)
+        )
