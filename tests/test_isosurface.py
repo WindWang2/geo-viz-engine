@@ -39,7 +39,8 @@ def test_set_and_clear_isosurface(qtbot):
     assert r._isosurface_item in r._view.items
     r.clear_isosurface()
     assert r._isosurface_item is None
-    assert all(type(it).__name__ != "GLMeshItem" or it not in r._view.items for it in [])
+    leftover = [it for it in r._view.items if type(it).__name__ == "GLMeshItem"]
+    assert leftover == []
 
 
 def test_set_isosurface_replaces_previous(qtbot):

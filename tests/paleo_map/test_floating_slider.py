@@ -23,7 +23,10 @@ def test_slider_params_and_conversions(qtbot):
     # Check minimum and maximum denominators are calculated
     assert slider._scale_min > 0
     assert slider._scale_max > slider._scale_min
-    assert slider._log2_smin == pytest.approx(slider._log2_smin)
+    import math
+
+    assert slider._log2_smin == pytest.approx(math.log2(slider._scale_min))
+    assert slider._log2_smax == pytest.approx(math.log2(slider._scale_max))
 
     # Check zoom to fraction and back
     zoom = 5.0

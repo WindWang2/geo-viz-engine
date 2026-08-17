@@ -138,7 +138,7 @@ def test_renderer_3d_set_annotations(qtbot):
     widget.load_volume(data)
 
     widget.set_annotations([(5, 5, 5, "test_label")])
-    assert len(widget._annotation_items) >= 0  # may be 0 if GLTextItem fails
+    assert len(widget._annotation_items) == 1
 
 
 def test_renderer_3d_clear_annotations(qtbot):

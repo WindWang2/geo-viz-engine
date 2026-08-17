@@ -92,7 +92,8 @@ def test_figure_panel_paints_snapshot_without_crash(qtbot):
     scene.addItem(item)
     scene.render(p, QRectF(0, 0, 200, 150), QRectF(0, 0, 200, 150))
     p.end()
-    # Painting a snapshot-mode panel with a pixmap must not crash; the
-    # rendered area under the panel rect is non-white (pixmap red).
+    # Snapshot paint must actually transfer the blue pixmap, not leave the
+    # white fill. Alpha-only is tautological on Format_ARGB32 (#712).
     c = img.pixelColor(30, 30)
-    assert c.alpha() > 0
+    assert (c.red(), c.green(), c.blue()) != (255, 255, 255)
+    assert c.blue() > c.red() and c.blue() > c.green()

@@ -18,12 +18,21 @@ def test_get_color_fuzzy_returns_color_for_known_facies():
 
 def test_get_color_fuzzy_substring_match_longest_first():
     """'浅灰色粉砂岩' must match '粉砂岩' before '砂岩' (longer key wins)."""
+    from geoviz_well_log.pattern_map import FACIES_COLORS
+
     _ensure_app()
     engine = PatternEngine()
+    assert PatternEngine._SORTED_COLOR_KEYS == sorted(
+        FACIES_COLORS.keys(), key=len, reverse=True
+    )
     c_specific = engine.get_color_fuzzy("浅灰色粉砂岩")
     c_generic = engine.get_color_fuzzy("浅灰色砂岩")
-    # Both resolve to a color; specific match should not be the generic one's
+    c_silt = engine.get_color_fuzzy("粉砂岩")
+    c_sand = engine.get_color_fuzzy("砂岩")
     assert c_specific is not None and c_generic is not None
+    assert c_specific == c_silt
+    assert c_generic == c_sand
+    assert c_specific != c_generic
 
 
 def test_get_color_fuzzy_unknown_returns_none():
