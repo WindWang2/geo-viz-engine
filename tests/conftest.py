@@ -10,36 +10,62 @@ def _qt_offscreen():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
+# Exact module stems that need GL, QtWebEngine, or golden PNG compare.
+# Substring matching used to drag in hardware-free files (e.g.
+# test_seismic_3d_sculpting via "test_seismic_3d", shader-source tests
+# via "test_renderer_3d"). Fast CI is `pytest -m "not slow"`.
+_SLOW_MODULES = frozenset({
+    "test_seismic_view",
+    "test_seismic_view_async",
+    "test_seismic_view_guards",
+    "test_renderer_3d",
+    "test_renderer_3d_stratal",
+    "test_chart_engine",
+    "test_seismic_interaction",
+    "test_seismic_fidelity",
+    "test_map_visual_parity",
+    "test_paleo_map_visual_parity",
+    "test_hillshading_ui",
+    "test_sculpting_ui",
+})
+
+# Hardware-free tests that live in an otherwise-slow module. Shader
+# source / LUT-lookup checks are the primary CI gate for the slice-plane
+# LUT path and must run in the fast job.
+_FAST_IN_SLOW_MODULES = frozenset({
+    "test_dual_gl_volume_item_uses_pyopengl_compiler_and_clean_gles3_source",
+    "test_dual_gl_volume_item_legacy_shaders_use_legacy_texture_functions",
+    "test_gl_image_lut_item_shader_has_lut_lookup_and_compiles",
+    "test_gl_image_lut_item_legacy_shader_uses_texture2d",
+    "test_normalize_to_index_parity_with_apply_colormap",
+    "test_renderer_3d_signals",
+})
+
+
+def _item_module_stem(item) -> str:
+    path = getattr(item, "path", None)
+    if path is not None:
+        return path.stem
+    return item.fspath.purebasename
+
+
+def _item_original_name(item) -> str:
+    name = getattr(item, "originalname", None)
+    if name:
+        return name
+    return item.name.split("[", 1)[0]
+
+
+def is_slow_test(module_stem: str, original_name: str) -> bool:
+    """Return True when a collected test belongs in the advisory slow job."""
+    if module_stem not in _SLOW_MODULES:
+        return False
+    return original_name not in _FAST_IN_SLOW_MODULES
+
+
 def pytest_collection_modifyitems(config, items):
-    slow_modules = (
-        "test_seismic_view",
-        "test_renderer_3d",
-        "test_seismic_3d",
-        "test_well_tie_canvas",
-        "test_chart_engine",
-        "test_seismic_interaction",
-        "test_advanced_viz",
-        "test_well_tie_panel",
-        "test_visual_parity",
-        "test_well_log_ui",
-        "test_well_log_fidelity",
-        "test_map_visual",
-        "test_paleo_map_visual",
-        "test_plots_ui",
-        "test_seismic_fidelity",
-        "test_qpainter_widget",
-        "test_hillshading_ui",
-        "test_sculpting_ui",
-        "test_surface_widget_interaction",
-        "test_3d_contour_sync",
-        "test_cross_plot_widget",
-        "test_well_tie_export",
-        "test_data_page_buttons",
-        "test_data_fidelity",
-        "test_data_kpi_detail",
-    )
     for item in items:
-        if any(m in item.nodeid for m in slow_modules):
+        if is_slow_test(_item_module_stem(item), _item_original_name(item)):
             item.add_marker(pytest.mark.slow)
 
 

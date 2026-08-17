@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 import time
@@ -8,7 +9,7 @@ import time
 import numpy as np
 import segyio
 
-from .models import SeismicVolumeMeta
+from .models import BinGridGeometry, SeismicVolumeMeta
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,107 @@ def detect_iline_xline_fields(f) -> tuple[int, int] | None:
     return None
 
 
+def _header_int(header, field) -> int:
+    try:
+        return int(header[field])
+    except Exception:
+        return 0
+
+
+def _apply_coord_scalar(x: float, y: float, header) -> tuple[float, float]:
+    """SEGY SourceGroupScalar: >0 multiply, <0 divide, 0 means metres."""
+    scalar = _header_int(header, segyio.TraceField.SourceGroupScalar)
+    if scalar > 0:
+        return x * scalar, y * scalar
+    if scalar < 0:
+        return x / float(-scalar), y / float(-scalar)
+    return x, y
+
+
+def _corner_xy(headers: list) -> list[tuple[float, float]] | None:
+    """World (x, y) for 3 corner traces: prefer CDP_X/Y, else SourceX/Y."""
+    cdp = [
+        (
+            float(_header_int(h, segyio.TraceField.CDP_X)),
+            float(_header_int(h, segyio.TraceField.CDP_Y)),
+        )
+        for h in headers
+    ]
+    if any(x or y for x, y in cdp):
+        pairs = cdp
+    else:
+        src = [
+            (
+                float(_header_int(h, segyio.TraceField.SourceX)),
+                float(_header_int(h, segyio.TraceField.SourceY)),
+            )
+            for h in headers
+        ]
+        if not any(x or y for x, y in src):
+            return None
+        pairs = src
+    return [_apply_coord_scalar(x, y, h) for (x, y), h in zip(pairs, headers)]
+
+
+def _grid_trace_index(il_idx: int, xl_idx: int, n_il: int, n_xl: int, sorting) -> int:
+    if sorting == segyio.TraceSortingFormat.CROSSLINE_SORTING:
+        return int(xl_idx) * int(n_il) + int(il_idx)
+    return int(il_idx) * int(n_xl) + int(xl_idx)
+
+
+def _infer_bin_grid(f, ilines, xlines) -> BinGridGeometry | None:
+    """Build BinGridGeometry from three corner CDP (or Source) coordinates.
+
+    Reads only the origin, +1-inline, and +1-crossline traces — no full
+    header scan. Returns None when coordinates are missing or degenerate.
+    """
+    try:
+        n_il = int(len(ilines))
+        n_xl = int(len(xlines))
+        if n_il < 2 or n_xl < 2:
+            return None
+        n_traces = int(f.tracecount)
+        if n_traces < n_il * n_xl:
+            return None
+        sorting = getattr(f, "sorting", None)
+        corners = []
+        for il_idx, xl_idx in ((0, 0), (1, 0), (0, 1)):
+            idx = _grid_trace_index(il_idx, xl_idx, n_il, n_xl, sorting)
+            if idx < 0 or idx >= n_traces:
+                return None
+            corners.append(f.header[idx])
+        xy = _corner_xy(corners)
+        if xy is None:
+            return None
+        (x0, y0), (x_il, y_il), (x_xl, y_xl) = xy
+        il_dx, il_dy = x_il - x0, y_il - y0
+        xl_dx, xl_dy = x_xl - x0, y_xl - y0
+        il_spacing = math.hypot(il_dx, il_dy)
+        xl_spacing = math.hypot(xl_dx, xl_dy)
+        if il_spacing <= 0.0 or xl_spacing <= 0.0:
+            return None
+        # Clockwise from north (+Y), matching BinGridGeometry.
+        az = math.degrees(math.atan2(il_dx, il_dy)) if (il_dx or il_dy) else 0.0
+        az_rad = math.radians(az)
+        sin_a, cos_a = math.sin(az_rad), math.cos(az_rad)
+        pred_il = (-sin_a, cos_a)
+        pred_xl = (cos_a, sin_a)
+        if pred_il[0] * il_dx + pred_il[1] * il_dy < 0:
+            il_spacing = -il_spacing
+        if pred_xl[0] * xl_dx + pred_xl[1] * xl_dy < 0:
+            xl_spacing = -xl_spacing
+        return BinGridGeometry(
+            x_origin=x0,
+            y_origin=y0,
+            il_azimuth_deg=az,
+            il_spacing_m=il_spacing,
+            xl_spacing_m=xl_spacing,
+        )
+    except Exception:
+        logger.debug("bin_grid inference from CDP/Source headers failed", exc_info=True)
+        return None
+
+
 class SeismicLoader:
     """On-demand SEGY file reader built on segyio.
 
@@ -151,6 +253,20 @@ class SeismicLoader:
         else:
             dt_ms = 4.0
 
+        # Structured volumes may carry CDP_X/Y (or SourceX/Y). Infer a
+        # BinGridGeometry from three corner traces; leave None when the
+        # file has no usable coordinates so callers cannot silently use a
+        # fabricated default grid.
+        bin_grid = None
+        if (
+            f.ilines is not None
+            and f.xlines is not None
+            and ilines.size >= 2
+            and xlines.size >= 2
+            and self._geometry_source != "pseudo"
+        ):
+            bin_grid = _infer_bin_grid(f, ilines, xlines)
+
         self._meta = SeismicVolumeMeta(
             filename=self._path,
             n_inlines=int(ilines.size),
@@ -167,6 +283,7 @@ class SeismicLoader:
             geometry_fields=list(self._geometry_fields)
             if self._geometry_fields
             else None,
+            bin_grid=bin_grid,
         )
         return self._meta
 
