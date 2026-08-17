@@ -1973,6 +1973,16 @@ class SeismicView(QWidget):
             getattr(panel, "_shift_samples", None),
             getattr(panel, "_correlation_coeff", None),
         )
+        lbl = getattr(self, "_tie_quality_label", None)
+        if lbl is not None:
+            cc = getattr(panel, "_correlation_coeff", None)
+            shift = getattr(panel, "_shift_samples", None)
+            if cc is None:
+                lbl.setText("时间偏置: —\n相位旋转: —\n相关度: 未标定")
+            else:
+                lbl.setText(
+                    f"时间偏置: {shift} samples\n相位旋转: —\n相关度: {cc * 100.0:.1f}%"
+                )
 
     def _on_synthetic_changed(self, twt, values) -> None:
         """Draw synthetic seismogram overlay on IL/XL profile panels."""

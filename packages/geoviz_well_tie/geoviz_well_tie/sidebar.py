@@ -59,7 +59,7 @@ class WellTieSidebar(QWidget):
         self._auto_tie_btn.clicked.connect(lambda: self.auto_tie_clicked.emit())
         tie_layout.addWidget(self._auto_tie_btn)
 
-        self._score_label = QLabel("相关系数 R: 0.85\n时移量 Lag: 0 ms")
+        self._score_label = QLabel("相关系数 R: —\n时移量 Lag: —")
         self._score_label.setStyleSheet("font-size: 12px; color: #586878; font-weight: bold;")
         tie_layout.addWidget(self._score_label)
 
@@ -81,5 +81,10 @@ class WellTieSidebar(QWidget):
 
         self.wavelet_changed.emit(w)
 
-    def set_quality_metrics(self, r_score: float, lag_ms: float):
-        self._score_label.setText(f"相关系数 R: {r_score:.3f}\n时移量 Lag: {lag_ms:.1f} ms")
+    def wavelet_description(self) -> str:
+        return f"{self._type_combo.currentText()} ({self._freq_slider.value()}Hz)"
+
+    def set_quality_metrics(self, r_score: float | None, lag_ms: float | None):
+        r_text = "—" if r_score is None else f"{r_score:.3f}"
+        lag_text = "—" if lag_ms is None else f"{lag_ms:.1f} ms"
+        self._score_label.setText(f"相关系数 R: {r_text}\n时移量 Lag: {lag_text}")

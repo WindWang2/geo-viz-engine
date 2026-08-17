@@ -111,9 +111,9 @@ class MapPage(QWidget):
         chips_layout = QHBoxLayout()
         chips_layout.setSpacing(6)
         
-        self.chip_all = QPushButton("全部 46")
-        self.chip_interpreted = QPushButton("已解释 31")
-        self.chip_gas = QPushButton("含气 12")
+        self.chip_all = QPushButton("全部 0")
+        self.chip_interpreted = QPushButton("有数据 0")
+        self.chip_gas = QPushButton("无数据 0")
 
         chip_style = (
             "QPushButton { border-radius: 6px; background: #fafbfd; color: #586878; border: 1px solid #d3dbe6; font-size: 11px; padding: 4px 8px; }"
@@ -167,6 +167,7 @@ class MapPage(QWidget):
             item = QListWidgetItem(f"📍 {w.name}")
             item.setData(Qt.UserRole, w.name)
             self.well_list.addItem(item)
+        self._update_chip_labels()
 
         # Wire search filtering
         self.search_box.textChanged.connect(self._filter_wells)
@@ -277,7 +278,15 @@ class MapPage(QWidget):
             item = QListWidgetItem(f"📍 {w.name}")
             item.setData(Qt.UserRole, w.name)
             self.well_list.addItem(item)
-        self.chip_all.setText(f"全部 {len(self.wells)}")
+        self._update_chip_labels()
+        self._apply_chip_filter()
+
+    def _update_chip_labels(self):
+        n = len(self.wells)
+        n_data = sum(1 for w in self.wells if w.has_data)
+        self.chip_all.setText(f"全部 {n}")
+        self.chip_interpreted.setText(f"有数据 {n_data}")
+        self.chip_gas.setText(f"无数据 {n - n_data}")
 
     def _on_layer_toggled(self):
         """Toggle map layer visibility from checkboxes."""
@@ -309,7 +318,7 @@ class MapPage(QWidget):
     def _apply_chip_filter(self):
         """Filter the well list based on active chip."""
         show_data_only = self.chip_interpreted.isChecked()
-        show_gas_only = self.chip_gas.isChecked()
+        show_nodata_only = self.chip_gas.isChecked()
         for i in range(self.well_list.count()):
             item = self.well_list.item(i)
             well_name = item.data(Qt.UserRole)
@@ -319,8 +328,8 @@ class MapPage(QWidget):
                 continue
             if show_data_only:
                 item.setHidden(not marker.has_data)
-            elif show_gas_only:
-                item.setHidden(not marker.has_data)
+            elif show_nodata_only:
+                item.setHidden(marker.has_data)
             else:
                 item.setHidden(False)
 
@@ -342,7 +351,7 @@ class MapPage(QWidget):
 
         if well_marker:
             self.well_callout_title.setText(f"📍 {well_name}")
-            status_str = "含气" if well_marker.has_data else "未测试"
+            status_str = "有测井" if well_marker.has_data else "无测井"
             self.well_callout_desc.setText(
                 f"经度: {well_marker.lng:.4f}°\n"
                 f"纬度: {well_marker.lat:.4f}°\n"

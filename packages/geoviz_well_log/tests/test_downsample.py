@@ -61,6 +61,19 @@ def test_set_and_reset_provider():
     assert get_downsample_provider() is numpy_minmax_downsample
 
 
+def test_numpy_downsample_keeps_finite_extrema_when_bin_has_nan():
+    """#726: a single NaN must not blank the whole bin's finite min/max."""
+    # 20 bins of 5 samples; one NaN in the first bin next to the true extrema.
+    values = np.tile(np.array([1.0, np.nan, 3.0, -5.0, 2.0]), 20)
+    depths = np.arange(len(values), dtype=np.float64)
+    out_d, out_v = numpy_minmax_downsample(depths, values, 20)
+    finite = out_v[np.isfinite(out_v)]
+    assert finite.size > 0
+    assert finite.min() == -5.0
+    assert finite.max() == 3.0
+    assert np.isnan(out_v).any()
+
+
 def test_curve_track_delegates_to_provider():
     """CurveTrack._downsample must route through the module provider."""
     from PySide6.QtWidgets import QApplication

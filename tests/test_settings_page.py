@@ -108,3 +108,23 @@ def test_coordinate_format_propagates_to_paleo_map(app):
     # 触发应不抛异常
     get_preference_bus().coordinate_format_changed.emit("DMS")
     get_preference_bus().coordinate_format_changed.emit("DD")
+
+
+def test_purge_all_caches_includes_registered_well_adjacent(tmp_path, monkeypatch):
+    """#701: well-adjacent .cache dirs must be counted and purged."""
+    from src.utils import cache_metrics as cm
+
+    user_root = tmp_path / "user_cache"
+    well_cache = tmp_path / "wells" / ".cache"
+    well_cache.mkdir(parents=True)
+    stale = well_cache / "OutOfDir_deadbeef.json"
+    stale.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(cm, "_user_cache_root", lambda: user_root)
+    monkeypatch.setattr(cm, "get_data_dir", lambda: tmp_path / "appdata")
+
+    cm.register_well_cache_dir(well_cache)
+    assert cm.compute_total_cache_mb() > 0
+    released = cm.purge_all_caches()
+    assert released > 0
+    assert not stale.exists()

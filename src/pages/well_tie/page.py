@@ -61,6 +61,7 @@ class WellTiePage(QWidget):
         # Connect signals
         self._sidebar.wavelet_changed.connect(self._canvas.set_wavelet)
         self._sidebar.auto_tie_clicked.connect(self._on_auto_tie)
+        self._last_tie = None
 
     def _load_sample_data(self):
         n = 200
@@ -73,9 +74,35 @@ class WellTiePage(QWidget):
         self._canvas.set_tie_data(depths, twt, sonic, density, seismic)
 
     def _on_auto_tie(self):
-        self._sidebar.set_quality_metrics(0.925, 0.0)
+        from geoviz_well_tie.auto_tie import correlate_synthetic_to_trace
+
+        syn = self._canvas._synthetic
+        seis = self._canvas._seismic
+        if syn is None or seis is None:
+            self._sidebar.set_quality_metrics(None, None)
+            self._last_tie = None
+            return
+        shift, r_score = correlate_synthetic_to_trace(syn, seis)
+        twt = self._canvas._twt
+        if twt is not None and len(twt) > 1:
+            dt_ms = float(twt[1] - twt[0])
+        else:
+            dt_ms = 0.0
+        lag_ms = float(shift) * dt_ms
+        self._last_tie = {
+            "r_score": float(r_score),
+            "lag_ms": lag_ms,
+            "wavelet": self._sidebar.wavelet_description(),
+        }
+        self._sidebar.set_quality_metrics(r_score, lag_ms)
 
     def _on_export_report(self):
         path, _ = QFileDialog.getSaveFileName(self, "导出井震标定报告", "Well_Seismic_Tie_Report.pdf", "PDF Documents (*.pdf);;SVG Vector (*.svg)")
         if path:
-            export_well_tie_pdf(path)
+            metrics = self._last_tie or {}
+            export_well_tie_pdf(
+                path,
+                wavelet=metrics.get("wavelet"),
+                r_score=metrics.get("r_score"),
+                lag_ms=metrics.get("lag_ms"),
+            )

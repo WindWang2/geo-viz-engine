@@ -205,13 +205,27 @@ class SEGYHeaderInspectorDialog(_AzuriteDialog):
         try:
             import segyio
             with segyio.open(path, "r", strict=False) as f:
-                ebcdic = f.header[0]
-                self._text_header.setPlainText(str(ebcdic))
-                self._bin_header.setPlainText(
-                    f"Samples: {f.samples.size}\n"
-                    f"dt: {f.bin[segyio.BinField.Interval]} µs\n"
-                    f"Format: {f.bin[segyio.BinField.Format]}"
-                )
+                raw = f.text[0]
+                if isinstance(raw, bytes):
+                    raw = raw.decode("ascii", errors="replace")
+                else:
+                    raw = str(raw)
+                raw = raw.replace("\x00", "")
+                if "\n" not in raw and len(raw) >= 80:
+                    raw = "\n".join(raw[i:i + 80] for i in range(0, len(raw), 80))
+                self._text_header.setPlainText(raw.rstrip())
+                bin_lines = [
+                    f"Samples: {f.samples.size}",
+                    f"dt: {f.bin[segyio.BinField.Interval]} µs",
+                    f"Format: {f.bin[segyio.BinField.Format]}",
+                ]
+                try:
+                    extra = [f"{key}: {f.bin[key]}" for key in f.bin]
+                    if extra:
+                        bin_lines = extra
+                except Exception:
+                    pass
+                self._bin_header.setPlainText("\n".join(bin_lines))
         except Exception as e:
             self._text_header.setPlainText(f"加载失败: {e}")
 
