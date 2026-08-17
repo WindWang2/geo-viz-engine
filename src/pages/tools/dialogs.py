@@ -116,10 +116,31 @@ class _AzuriteDialog(QDialog):
 
         self._accept_btn = QPushButton("执行")
         self._accept_btn.setStyleSheet(AZURITE_PRIMARY_BTN)
-        self._accept_btn.clicked.connect(self.accept)
+        self._accept_btn.clicked.connect(self._on_accept_clicked)
         self._footer.addWidget(self._accept_btn)
 
         layout.addLayout(self._footer)
+
+    def _on_accept_clicked(self):
+        """Run the tool action; close only when it actually completed (#567).
+
+        The old direct ``connect(self.accept)`` closed every tool dialog
+        with zero computation — the four tool backends were unreachable
+        from the UI.
+        """
+        try:
+            if self._execute():
+                self.accept()
+        except Exception as exc:  # noqa: BLE001 - surface tool errors to the user
+            QMessageBox.warning(self, "执行失败", f"{type(exc).__name__}: {exc}")
+
+    def _execute(self) -> bool:
+        """Gather inputs, run the tool backend, present results.
+
+        Return True to close the dialog; return False (or raise) to keep
+        it open for correction.
+        """
+        return True
 
     def _add_body_widget(self, widget):
         self._body_layout.addWidget(widget)
@@ -234,6 +255,23 @@ class LASCurveResamplerDialog(_AzuriteDialog):
 
         self._accept_btn.setText("执行降采样")
 
+    def _execute(self) -> bool:
+        path = self._path_edit.text().strip()
+        if not path:
+            QMessageBox.warning(self, "缺少输入", "请先选择 LAS 文件。")
+            return False
+        depths, curves = self._do_resample(path, float(self._step_spin.value()))
+        preview = "\n".join(
+            f"  {mn}: {vals[0]:.4g} … {vals[-1]:.4g}" for mn, vals in list(curves.items())[:6]
+        )
+        more = f"\n  … 共 {len(curves)} 条曲线" if len(curves) > 6 else ""
+        QMessageBox.information(
+            self, "降采样完成",
+            f"采样深度 {depths[0]:.4g} ~ {depths[-1]:.4g} m，步长 {self._step_spin.value():g} m，"
+            f"共 {len(depths)} 个采样点。\n曲线预览:\n{preview}{more}",
+        )
+        return True
+
     def _browse_las(self):
         path, _ = QFileDialog.getOpenFileName(self, "选择 LAS 文件", "", "LAS Files (*.las)")
         if path:
@@ -292,6 +330,48 @@ class DeviationTVDDialog(_AzuriteDialog):
         self._add_body_widget(add_row_btn)
 
         self._accept_btn.setText("计算 TVD")
+
+    def _execute(self) -> bool:
+        rows: list[tuple[float, float, float]] = []
+        for r in range(self._table.rowCount()):
+            cells = []
+            for c in range(3):
+                item = self._table.item(r, c)
+                text = (item.text() if item is not None else "").strip()
+                if not text:
+                    continue
+                try:
+                    cells.append(float(text))
+                except ValueError:
+                    QMessageBox.warning(
+                        self, "无法解析的输入",
+                        f"第 {r + 1} 行第 {c + 1} 列不是数字: {text!r}",
+                    )
+                    return False
+            if not cells:
+                continue  # blank row
+            if len(cells) != 3:
+                QMessageBox.warning(
+                    self, "不完整的行", f"第 {r + 1} 行需要 MD / Incl / Azim 三个数字。"
+                )
+                return False
+            rows.append((cells[0], cells[1], cells[2]))  # type: ignore[arg-type]
+        if len(rows) < 2:
+            QMessageBox.warning(
+                self, "输入不足", "至少需要两行完整的测斜数据 (MD / Incl / Azim)。"
+            )
+            return False
+        rows.sort(key=lambda t: t[0])
+        result = self._compute_min_curvature(rows)
+        lines = "\n".join(
+            f"  MD {rows[i][0]:g} → TVD {tvd:.3f}  X {x:.3f}  Y {y:.3f}"
+            for i, (tvd, x, y) in enumerate(result)
+        )
+        QMessageBox.information(
+            self, "TVD 计算完成",
+            f"最小曲率法轨迹 ({len(result)} 站):\n{lines}",
+        )
+        return True
 
     def _compute_min_curvature(self, rows: list[tuple[float, float, float]]) -> list[tuple[float, float, float]]:
         """Minimum curvature method: (MD, Incl, Azim) → (TVD, X, Y)."""
@@ -355,6 +435,45 @@ class XMLCoordsConverterDialog(_AzuriteDialog):
 
         self._accept_btn.setText("批量转换")
 
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        coord_row = QHBoxLayout()
+        coord_row.addWidget(QLabel("坐标 (每行 x,y):"))
+        self._coords_edit = QPlainTextEdit()
+        self._coords_edit.setPlaceholderText("每行一个坐标对，例如:\n116.351,39.984\n116.372,40.001")
+        self._coords_edit.setMaximumHeight(120)
+        self._coords_edit.setStyleSheet(
+            "QPlainTextEdit { background: #fafbfd; border: 1px solid #e5eaf1; border-radius: 8px; padding: 6px 10px; font-size: 12px; }"
+        )
+        self._add_body_widget(self._coords_edit)
+
+    def _execute(self) -> bool:
+        coords: list[tuple[float, float]] = []
+        for ln, line in enumerate(self._coords_edit.toPlainText().splitlines(), 1):
+            text = line.strip()
+            if not text:
+                continue
+            parts = [p for p in text.replace("，", ",").split(",") if p.strip()]
+            if len(parts) != 2:
+                QMessageBox.warning(self, "无法解析的坐标", f"第 {ln} 行需要两个逗号分隔的数字: {text!r}")
+                return False
+            try:
+                coords.append((float(parts[0]), float(parts[1])))
+            except ValueError:
+                QMessageBox.warning(self, "无法解析的坐标", f"第 {ln} 行包含非数字: {text!r}")
+                return False
+        if not coords:
+            QMessageBox.warning(self, "缺少输入", "请输入至少一个坐标对 (每行 x,y)。")
+            return False
+        converted = self._do_convert(self._src_combo.currentText(), self._dst_combo.currentText(), coords)
+        lines = "\n".join(f"  {x:.6f}, {y:.6f}" for x, y in converted)
+        QMessageBox.information(
+            self, "转换完成",
+            f"{self._src_combo.currentText()} → {self._dst_combo.currentText()}，"
+            f"共 {len(converted)} 个坐标:\n{lines}",
+        )
+        return True
+
     def _do_convert(self, src_epsg: str, dst_epsg: str, coords: list[tuple[float, float]]) -> list[tuple[float, float]]:
         """Convert coordinates between CRS using pyproj."""
         try:
@@ -397,6 +516,50 @@ class TopsCompletionDialog(_AzuriteDialog):
         self._add_body_layout(method_row)
 
         self._accept_btn.setText("执行插值")
+
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        self._tops_edit = QPlainTextEdit()
+        self._tops_edit.setPlaceholderText(
+            "JSON: 井名 → {层位: 深度或 null}\n"
+            '{"W1": {"H1": 1000.0, "H2": 1200.0},\n "W2": {"H1": 1010.0, "H2": null}}'
+        )
+        self._tops_edit.setMaximumHeight(140)
+        self._tops_edit.setStyleSheet(
+            "QPlainTextEdit { background: #fafbfd; border: 1px solid #e5eaf1; border-radius: 8px; padding: 6px 10px; font-size: 12px; }"
+        )
+        self._add_body_widget(self._tops_edit)
+
+    def _execute(self) -> bool:
+        import json
+
+        text = self._tops_edit.toPlainText().strip()
+        if not text:
+            QMessageBox.warning(self, "缺少输入", "请输入分层数据 (JSON: 井名 → {层位: 深度或 null})。")
+            return False
+        try:
+            known_tops = json.loads(text)
+        except ValueError as exc:
+            QMessageBox.warning(self, "JSON 解析失败", f"输入不是合法 JSON:\n{exc}")
+            return False
+        if not isinstance(known_tops, dict) or not all(
+            isinstance(tops, dict) for tops in known_tops.values()
+        ):
+            QMessageBox.warning(self, "格式不符", "顶层必须是对象，且每个井名对应 {层位: 深度或 null}。")
+            return False
+        method = {"线性插值": "linear", "最近邻": "nearest", "RBF 径向基": "rbf"}[
+            self._method_combo.currentText()
+        ]
+        result = self._do_interpolate(known_tops, method=method)
+        filled = [
+            f"  {wn}.{fm} = {v}"
+            for wn, tops in result.items()
+            for fm, v in tops.items()
+            if known_tops.get(wn, {}).get(fm) is None and v is not None
+        ]
+        body = "\n".join(filled) if filled else "  （没有可推导的缺失层位）"
+        QMessageBox.information(self, "插值完成", f"推导出的缺失分层:\n{body}")
+        return True
 
     def _do_interpolate(self, known_tops: dict[str, dict[str, float | None]], method: str = "linear") -> dict[str, dict[str, float | None]]:
         """Fill missing formation tops using interpolation across wells."""

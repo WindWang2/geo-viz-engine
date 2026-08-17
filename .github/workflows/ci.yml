@@ -47,17 +47,29 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONFAULTHANDLER: "1"
-        # Exit-code handling: ONLY 134 (SIGABRT) is tolerated — it comes
-        # from PySide6/Qt's atexit EGL teardown on headless CI, AFTER pytest
-        # has printed its "N passed" summary, and is benign. Any other
-        # non-zero exit — notably 139 (SIGSEGV) — is a real crash and MUST
-        # fail the gate (#272). PYTHONFAULTHANDLER=1 ensures the Python
-        # stack is printed on a crash so the root cause is traceable.
+        # Exit-code handling (#575): rc=134 (SIGABRT) is tolerated ONLY when
+        # pytest demonstrably finished — the benign case is PySide6/Qt's
+        # atexit EGL teardown firing AFTER the "N passed" summary. A 134
+        # with no terminal summary means pytest aborted mid-suite: the run
+        # did not complete, so the gate must fail instead of passing while
+        # most tests silently never ran. Any other non-zero exit — notably
+        # 139 (SIGSEGV) — fails outright (#272). PYTHONFAULTHANDLER=1 keeps
+        # crash stacks traceable.
         run: |
           set +e
-          uv run pytest -m "not slow" -q --tb=short --maxfail=5 --timeout=60
-          rc=$?
-          if [ "$rc" -eq 0 ] || [ "$rc" -eq 134 ]; then exit 0; else exit "$rc"; fi
+          uv run pytest -m "not slow" -q --tb=short --maxfail=5 --timeout=60 2>&1 | tee /tmp/pytest_out.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -eq 0 ]; then exit 0; fi
+          if [ "$rc" -eq 134 ]; then
+            if grep -qE '^[0-9]+ (passed|failed|error|skipped)|no tests ran' /tmp/pytest_out.txt; then
+              echo "rc=134 AFTER pytest terminal summary — benign Qt atexit teardown"
+              exit 0
+            fi
+            echo "::error::rc=134 WITHOUT a pytest terminal summary — pytest aborted mid-suite"
+            exit 1
+          fi
+          exit "$rc"
 
   test-slow:
     runs-on: ubuntu-latest
