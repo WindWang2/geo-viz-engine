@@ -248,5 +248,7 @@ def test_per_well_track_toggle(app):
     widget.add_canvas(c1, "well1")
     # Hide the interval track (index 1 = IntervalTrack)
     widget.set_track_visible(c1, 1, False)
-    assert len(c1.tracks) < initial_track_count or \
-           any(not t.visible for t in c1.tracks if hasattr(t, 'visible'))
+    assert len(c1.tracks) == initial_track_count
+    assert c1.tracks[1].visible is False
+    widget.set_track_visible(c1, 1, True)
+    assert c1.tracks[1].visible is True

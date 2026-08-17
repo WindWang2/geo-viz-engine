@@ -1,5 +1,5 @@
 """Task 22a.3 — HeaderToolButton must have clicked connections (TDD)."""
-import pytest
+from unittest.mock import Mock, patch
 
 
 def test_header_tool_button_has_tool_key(qtbot):
@@ -20,16 +20,22 @@ def test_mainwindow_has_on_header_tool():
 
 
 def test_on_header_tool_handles_known_keys(qtbot):
-    """_on_header_tool should handle all PAGE_CONFIGS tool keys without error."""
+    """_on_header_tool must dispatch each PAGE_CONFIGS tool key to the page."""
     from src.app import MainWindow, PAGE_CONFIGS
     win = MainWindow()
     qtbot.addWidget(win)
+    page = win.stack.currentWidget()
+    assert page is not None
 
-    for page_idx, cfg in PAGE_CONFIGS.items():
+    for _page_idx, cfg in PAGE_CONFIGS.items():
         for t in cfg.get("tools", []):
             if t.startswith("seg:"):
                 continue
+            handler = Mock(name=f"_on_tool_{t}")
+            setattr(page, f"_on_tool_{t}", handler)
             win._on_header_tool(t)
+            handler.assert_called_once()
+            delattr(page, f"_on_tool_{t}")
 
 
 def test_update_header_connects_button_clicked(qtbot):
@@ -41,9 +47,13 @@ def test_update_header_connects_button_clicked(qtbot):
     win._switch_page(0)
 
     found_any = False
-    for i in range(win.header_tools_layout.count()):
-        w = win.header_tools_layout.itemAt(i).widget()
-        if w and isinstance(w, HeaderToolButton):
-            found_any = True
-            assert w.tool_key, "HeaderToolButton must have non-empty tool_key"
+    with patch.object(win, "_on_header_tool") as spy:
+        for i in range(win.header_tools_layout.count()):
+            w = win.header_tools_layout.itemAt(i).widget()
+            if w and isinstance(w, HeaderToolButton):
+                found_any = True
+                assert w.tool_key, "HeaderToolButton must have non-empty tool_key"
+                spy.reset_mock()
+                w.click()
+                spy.assert_called_once_with(w.tool_key)
     assert found_any, "Expected at least one HeaderToolButton for page 0"

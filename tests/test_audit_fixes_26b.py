@@ -1,9 +1,6 @@
 """Phase 26-B: HIGH priority audit fixes — TDD RED tests."""
 from __future__ import annotations
 
-import inspect
-import math
-
 import numpy as np
 import pytest
 
@@ -18,20 +15,25 @@ class TestDeterministicFormationColors:
         """_formation_color() must return the same color for the same name
         regardless of PYTHONHASHSEED."""
         from geoviz_cross_well.correlation_layer import _formation_color
-        # The function should use a deterministic hash, not Python's hash()
-        src = inspect.getsource(_formation_color)
-        assert "hash(" not in src, (
-            "_formation_color uses Python's hash() which is non-deterministic. "
-            "Use a stable hash (e.g. sum of ords or zlib.crc32)."
-        )
+        from geoviz_cross_well.tops_model import _FORMATION_PALETTE
+
+        name = "Permian"
+        expected = _FORMATION_PALETTE[
+            sum(ord(c) for c in name) % len(_FORMATION_PALETTE)
+        ]
+        assert _formation_color(name) == expected
+        assert _formation_color(name) == _formation_color(name)
 
     def test_tops_model_color_is_deterministic(self):
         """FormationTop.__post_init__ must not use hash() for color assignment."""
-        from geoviz_cross_well.tops_model import FormationTop
-        src = inspect.getsource(FormationTop.__post_init__)
-        assert "hash(" not in src, (
-            "FormationTop.__post_init__ uses Python's hash() which is non-deterministic."
-        )
+        from geoviz_cross_well.tops_model import FormationTop, _FORMATION_PALETTE
+
+        name = "Triassic"
+        expected = _FORMATION_PALETTE[
+            sum(ord(c) for c in name) % len(_FORMATION_PALETTE)
+        ]
+        top = FormationTop(well_name="W1", formation_name=name, depth_m=100.0)
+        assert top.color == expected
 
     def test_formation_color_consistency(self):
         """Same formation name always yields same color."""
@@ -46,6 +48,34 @@ class TestDeterministicFormationColors:
         t1 = FormationTop(well_name="W1", formation_name="Triassic", depth_m=100.0)
         t2 = FormationTop(well_name="W2", formation_name="Triassic", depth_m=200.0)
         assert t1.color == t2.color
+
+    def test_formation_color_stable_across_hash_seeds(self):
+        """PYTHONHASHSEED must not change formation colors across interpreters."""
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        pkg_paths = [str(root)] + [
+            str(path) for path in (root / "packages").iterdir() if path.is_dir()
+        ]
+        pythonpath = os.pathsep.join(pkg_paths + [os.environ.get("PYTHONPATH", "")])
+        snippet = (
+            "from geoviz_cross_well.correlation_layer import _formation_color;"
+            "print(_formation_color('Permian'))"
+        )
+        colors = []
+        for seed in ("0", "1"):
+            env = os.environ.copy()
+            env["PYTHONHASHSEED"] = seed
+            env["PYTHONPATH"] = pythonpath
+            out = subprocess.check_output(
+                [sys.executable, "-c", snippet], env=env, text=True
+            )
+            colors.append(out.strip())
+        assert colors[0] == colors[1]
+        assert colors[0].startswith("#")
 
 
 # ── 26-B5: IDW empty input returns zeros not NaN ───────────────────────────
@@ -117,22 +147,13 @@ class TestRegionLabelsVisibleLabels:
     def test_visible_labels_exists_before_paint(self):
         """__init__ must set self.visible_labels = [] so it's safe to read
         before the first paint call."""
-        src_file = inspect.getsourcefile(
-            __import__("geoviz_paleo_map.layers.region_labels", fromlist=["RegionLabelsLayer"])
-        )
-        with open(src_file) as f:
-            src = f.read()
-        # Check that __init__ sets visible_labels
-        init_start = src.index("def __init__")
-        # Find the end of __init__ (next def at same indentation)
-        after_init = src[init_start:]
-        # Look for visible_labels assignment in __init__
-        # __init__ ends when we hit the next method
-        next_method = after_init.index("\n    def ", 1)
-        init_body = after_init[:next_method]
-        assert "visible_labels" in init_body, (
-            "RegionLabelsLayer.__init__ must initialize self.visible_labels = []"
-        )
+        from geoviz_paleo_map.layers.region_labels import RegionLabelsLayer
+        from geoviz_paleo_map.style import FaciesStyleResolver
+        from geoviz_well_log.renderer.pattern_engine import PatternEngine
+
+        layer = RegionLabelsLayer([], FaciesStyleResolver(PatternEngine()))
+        assert hasattr(layer, "visible_labels")
+        assert layer.visible_labels == []
 
 
 # ── 26-B8: line_style not passed to CurveData ───────────────────────────────
@@ -141,37 +162,24 @@ class TestLineStyleNotPassed:
     """loaders.py computes line_style but never passes it to CurveData().
     All curves default to 'solid' regardless of type."""
 
-    def test_line_style_passed_to_curvedata(self):
-        src_file = inspect.getsourcefile(
-            __import__("src.data.loaders", fromlist=["load_excel_well_data"])
-        )
-        with open(src_file) as f:
-            src = f.read()
-        # Find the CurveData constructor call near the line_style assignment
-        # The pattern should be: line_style = "dashed" ... CurveData(..., line_style=...)
-        # But currently line_style is computed AFTER CurveData() and never passed
-        # Find all CurveData( calls
-        import re
-        curvedata_calls = [m.start() for m in re.finditer(r"CurveData\(", src)]
-        # At least one call should include line_style
-        found_line_style_in_curvedata = False
-        for pos in curvedata_calls:
-            # Get the call (up to next closing paren at same nesting)
-            depth = 0
-            end = pos
-            for i in range(pos, len(src)):
-                if src[i] == "(":
-                    depth += 1
-                elif src[i] == ")":
-                    depth -= 1
-                    if depth == 0:
-                        end = i
-                        break
-            call_text = src[pos:end + 1]
-            if "line_style" in call_text:
-                found_line_style_in_curvedata = True
-                break
-        assert found_line_style_in_curvedata, (
-            "CurveData() is called without line_style parameter. "
-            "The line_style variable is computed but never passed."
-        )
+    def test_line_style_passed_to_curvedata(self, tmp_path):
+        import pandas as pd
+
+        from geoviz_well_log.models import LineStyle
+        from src.data.loaders import load_well_log_converted
+
+        path = tmp_path / "curves.xlsx"
+        df = pd.DataFrame({
+            "深度": [100.0, 101.0],
+            "GR": [10.0, 20.0],
+            "AC": [70.0, 80.0],
+            "RXO": [1.0, 2.0],
+        })
+        with pd.ExcelWriter(path) as writer:
+            df.to_excel(writer, sheet_name="测井曲线", index=False)
+
+        data = load_well_log_converted(path)
+        by_name = {curve.name: curve for curve in data.curves}
+        assert by_name["GR"].line_style == LineStyle.SOLID
+        assert by_name["AC"].line_style == LineStyle.DASHED
+        assert by_name["RXO"].line_style == LineStyle.DASHED

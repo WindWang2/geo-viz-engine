@@ -29,6 +29,8 @@ def test_horizon_fill_rbf_single_value():
     parser = HorizonParser("/dev/null")
     result = parser.fill_rbf(sparse, neighbors=4, smoothing=0.0)
     assert result.shape == (4, 4)
+    assert not np.any(np.isnan(result))
+    np.testing.assert_allclose(result, 150.0)
 
 
 # --- ColormapManager: jet + hsv ---

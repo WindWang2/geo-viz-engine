@@ -18,16 +18,24 @@ def test_identical_curves_zero_cost():
 def test_shifted_curve_correct_offset():
     engine = DTWEngine()
     n = 100
-    ref_curve = np.random.randn(n).cumsum()
+    rng = np.random.default_rng(0)
+    ref_curve = rng.standard_normal(n).cumsum()
     ref_depths = np.linspace(0, 1000, n)
 
     # Target curve is shifted by 10 samples
     shift = 10
     target_curve = np.roll(ref_curve, shift)
     target_depths = np.linspace(0, 1000, n)
+    depth_per_sample = (ref_depths[-1] - ref_depths[0]) / (n - 1)
+    expected_offset = shift * depth_per_sample
+    ref_depth = float(ref_depths[n // 2])
 
     result = engine.correlate(ref_curve, ref_depths, target_curve, target_depths)
-    assert result.suggested_depth > 0
+    err = abs((result.suggested_depth - ref_depth) - expected_offset)
+    assert err < depth_per_sample * 3, (
+        f"suggested={result.suggested_depth} ref={ref_depth} "
+        f"expected_offset={expected_offset} err={err}"
+    )
     assert result.cost < 1.0
 
 
@@ -151,40 +159,94 @@ def test_progress_callback_receives_monotonic_updates():
     assert seen[-1][0] == n
 
 
+def _naive_dtw(ref, tgt, ref_depths, tgt_depths, band_radius, ref_depth=None):
+    """Scalar Sakoe-Chiba DTW matching DTWEngine.correlate semantics."""
+    n, m = len(ref), len(tgt)
+    dist = np.abs(ref[:, None] - tgt[None, :])
+    cost = np.full((n, m), np.inf)
+    cost[0, 0] = dist[0, 0]
+    for i in range(n):
+        for j in range(m):
+            if abs(j - i) > band_radius:
+                continue
+            if i == 0 and j == 0:
+                continue
+            prev = []
+            if i > 0:
+                prev.append(cost[i - 1, j])
+            if j > 0:
+                prev.append(cost[i, j - 1])
+            if i > 0 and j > 0:
+                prev.append(cost[i - 1, j - 1])
+            if prev:
+                cost[i, j] = dist[i, j] + min(prev)
+
+    i, j = n - 1, m - 1
+    path = [(i, j)]
+    total_dist = 0.0
+    while i > 0 or j > 0:
+        candidates = []
+        if i > 0 and j > 0:
+            candidates.append((cost[i - 1, j - 1], i - 1, j - 1))
+        if i > 0:
+            candidates.append((cost[i - 1, j], i - 1, j))
+        if j > 0:
+            candidates.append((cost[i, j - 1], i, j - 1))
+        if not candidates:
+            break
+        c_val, ni, nj = min(candidates, key=lambda item: item[0])
+        if c_val == np.inf:
+            break
+        total_dist += abs(ref[i] - tgt[j])
+        i, j = ni, nj
+        path.append((i, j))
+    total_dist += abs(ref[0] - tgt[0])
+    path.reverse()
+
+    if ref_depth is None:
+        ref_idx = n // 2
+    else:
+        ref_idx = int(np.argmin(np.abs(ref_depths - ref_depth)))
+    target_indices = [pj for pi, pj in path if pi == ref_idx]
+    if target_indices:
+        matched = int(np.median(target_indices))
+    else:
+        closest = int(np.argmin([abs(pi - ref_idx) for pi, _pj in path]))
+        matched = path[closest][1]
+    suggested = float(tgt_depths[matched])
+    normalized_cost = total_dist / len(path)
+    max_diff = np.max(np.abs(ref)) + np.max(np.abs(tgt))
+    norm_cost = min(normalized_cost / max(1e-6, max_diff), 1.0)
+    return suggested, norm_cost, path
+
+
 def test_vectorized_dtw_matches_reference_implementation():
     """Numerical equivalence: vectorized result must match a naive nested-loop
     reference within float tolerance on a small case."""
     engine = DTWEngine()
+
+    # Hand-computed identity pair: midpoint of [100, 200, 300] stays at 200.
+    ident = np.array([0.0, 1.0, 0.0])
+    ident_d = np.array([100.0, 200.0, 300.0])
+    ident_res = engine.correlate(ident, ident_d, ident.copy(), ident_d, band_radius=3)
+    ident_sug, ident_cost, _ = _naive_dtw(ident, ident, ident_d, ident_d, 3)
+    assert ident_res.suggested_depth == pytest.approx(200.0)
+    assert ident_res.suggested_depth == pytest.approx(ident_sug)
+    assert ident_res.cost == pytest.approx(ident_cost, abs=1e-12)
+
     rng = np.random.default_rng(13)
     n, m = 40, 35
     ref = rng.standard_normal(n).cumsum()
     tgt = rng.standard_normal(m).cumsum()
     ref_d = np.linspace(0, 400, n)
     tgt_d = np.linspace(0, 350, m)
+    band = max(n, m)
 
-    # Reference: naive O(nm) full-band DTW
-    from scipy.spatial.distance import cdist
-    dist = cdist(ref.reshape(-1, 1), tgt.reshape(-1, 1))
-    ref_cost = np.full((n, m), np.inf)
-    ref_cost[0, 0] = dist[0, 0]
-    for i in range(n):
-        for j in range(m):
-            if i == 0 and j == 0:
-                continue
-            prev = []
-            if i > 0:
-                prev.append(ref_cost[i - 1, j])
-            if j > 0:
-                prev.append(ref_cost[i, j - 1])
-            if i > 0 and j > 0:
-                prev.append(ref_cost[i - 1, j - 1])
-            ref_cost[i, j] = dist[i, j] + min(prev)
+    expected_depth, expected_cost, _path = _naive_dtw(ref, tgt, ref_d, tgt_d, band)
+    res = engine.correlate(ref, ref_d, tgt, tgt_d, band_radius=band)
+    assert res.suggested_depth == pytest.approx(expected_depth, abs=1e-9)
+    assert res.cost == pytest.approx(expected_cost, abs=1e-9)
 
-    # Force full band on vectorized impl to compare apples-to-apples
-    res = engine.correlate(ref, ref_d, tgt, tgt_d, band_radius=max(n, m))
-    # We can't read internal cost matrix; instead check the normalized
-    # cost is finite and confidence matches expectations
-    assert np.isfinite(res.cost)
-    # Repeating with band ≥ max(n,m) should yield identical suggested_depth
-    res2 = engine.correlate(ref, ref_d, tgt, tgt_d, band_radius=max(n, m) * 2)
-    assert abs(res.suggested_depth - res2.suggested_depth) < 1e-9
+    res2 = engine.correlate(ref, ref_d, tgt, tgt_d, band_radius=band * 2)
+    assert res2.suggested_depth == pytest.approx(res.suggested_depth, abs=1e-9)
+    assert res2.cost == pytest.approx(res.cost, abs=1e-9)
