@@ -169,3 +169,47 @@ def test_save_hierarchy_geojson_skips_unmapped_level(tmp_path):
     assert len(facies_data["features"]) == 1
     # sub_facies file should NOT exist
     assert not (tmp_path / "sub_facies.geojson").exists()
+
+
+def test_hierarchy_round_trip_keeps_extra_geojson_properties(tmp_path):
+    """#681: extra source properties must survive hierarchy load → save."""
+    from geoviz_paleo_map.hierarchy import FaciesHierarchy
+
+    src = tmp_path / "facies.geojson"
+    src.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {
+                            "id": "f1",
+                            "facies": "砂岩",
+                            "name": "砂体A",
+                            "level": "facies",
+                            "period": "P1",
+                            "boundary_type": "fault",
+                            "source_ref": "outcrop-map",
+                        },
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    hier = FaciesHierarchy.from_geojson_files([str(src)])
+    out = tmp_path / "saved.geojson"
+    model = TopologyBuilder.from_hierarchy(hier, source_files={"facies": str(out)})
+    save_hierarchy_geojson(model, {"facies": str(out)})
+
+    props = json.loads(out.read_text(encoding="utf-8"))["features"][0]["properties"]
+    assert props["boundary_type"] == "fault"
+    assert props["source_ref"] == "outcrop-map"
+    assert props["facies"] == "砂岩"
+    assert props["id"] == "f1"

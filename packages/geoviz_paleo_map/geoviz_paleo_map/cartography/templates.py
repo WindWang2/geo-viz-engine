@@ -38,8 +38,6 @@ def apply_template_preset(scene: PaperGraphicsScene, preset_name: str = "GB_EXPL
         # Academic journal style: Header title top left, legend top right
         tb = TitleBlockGraphicsItem(
             rect=QRectF(0, 0, min(120.0, p_w * 0.4), 24.0),
-            map_title="Geological Map of Exploration Region",
-            organization="Academic Journal Publication"
         )
         tb.setPos(printable.left() + 5.0, printable.top() + 5.0)
         scene.addItem(tb)

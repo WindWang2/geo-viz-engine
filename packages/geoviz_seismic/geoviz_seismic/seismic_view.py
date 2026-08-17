@@ -379,6 +379,7 @@ class SeismicView(QWidget):
             xline_step=1,
             dt_ms=4.0,
         )
+        self._sync_well_tie_sample_interval()
         spacing = self._compute_balanced_spacing(data.shape)
         self._renderer_3d.load_volume(data, spacing=spacing)
         self._sync_renderer_survey_mapping()
@@ -488,6 +489,7 @@ class SeismicView(QWidget):
         self._slice_worker.set_volume(result.path, self._segy_generation)
         self._meta = meta
         self._ds_factor = result.downsample_factor
+        self._sync_well_tie_sample_interval()
         
         # Clear existing polyline state
         self._profile_t.clear_polyline()
@@ -1893,25 +1895,43 @@ class SeismicView(QWidget):
         for pw in (self._profile_il, self._profile_xl, self._profile_t):
             pw._vd.enable_annotation_mode(checked)
 
+    def current_seismic_dt_ms(self) -> float:
+        """Sample interval of the trace ``current_seismic_trace`` would return."""
+        m = self._meta
+        native = 4.0
+        if m is not None:
+            native = float(m.dt_ms or m.sample_interval or 4.0)
+            if native <= 0.0:
+                native = 4.0
+        # Full-resolution loader traces keep native dt; the preview volume is
+        # decimated in time by ds_factor[2].
+        if self._loader is not None:
+            return native
+        vol = getattr(self._renderer_3d, "_volume_data_cpu", None)
+        if vol is not None and getattr(vol, "ndim", 0) == 3:
+            ft = max(int((self._ds_factor or (1, 1, 1))[2]), 1)
+            return native * ft
+        return native
+
+    def _sync_well_tie_sample_interval(self) -> None:
+        panel = self._well_tie_panel
+        if panel is None:
+            return
+        setter = getattr(panel, "set_sample_interval", None)
+        if callable(setter):
+            setter(self.current_seismic_dt_ms())
+
     def current_seismic_trace(self) -> np.ndarray | None:
         """Return the vertical seismic trace at the current IL/XL intersection.
 
         Preference order:
-        1. In-memory volume (demo / downsampled SEGY)
-        2. ``SeismicLoader.read_trace`` when a SEGY file is open
+        1. ``SeismicLoader.read_trace`` when a SEGY file is open (full resolution)
+        2. In-memory volume (demo / when no loader)
         3. Column from the cached inline slice
         """
-        vol = getattr(self._renderer_3d, "_volume_data_cpu", None)
-        if vol is not None and getattr(vol, "ndim", 0) == 3:
-            il = int(getattr(self._renderer_3d, "_il_pos", vol.shape[0] // 2))
-            xl = int(getattr(self._renderer_3d, "_xl_pos", vol.shape[1] // 2))
-            il = max(0, min(il, vol.shape[0] - 1))
-            xl = max(0, min(xl, vol.shape[1] - 1))
-            return np.asarray(vol[il, xl, :], dtype=np.float64)
-
         if self._loader is not None and self._meta is not None:
             m = self._meta
-            df = self._ds_factor
+            df = self._ds_factor or (1, 1, 1)
             il_idx = int(getattr(self._renderer_3d, "_il_pos", 0))
             xl_idx = int(getattr(self._renderer_3d, "_xl_pos", 0))
             iline = m.iline_start + il_idx * df[0] * m.iline_step
@@ -1920,6 +1940,14 @@ class SeismicView(QWidget):
                 return np.asarray(self._loader.read_trace(iline, xline), dtype=np.float64)
             except Exception as exc:
                 self._log.warning("current_seismic_trace read_trace failed: %s", exc)
+
+        vol = getattr(self._renderer_3d, "_volume_data_cpu", None)
+        if vol is not None and getattr(vol, "ndim", 0) == 3:
+            il = int(getattr(self._renderer_3d, "_il_pos", vol.shape[0] // 2))
+            xl = int(getattr(self._renderer_3d, "_xl_pos", vol.shape[1] // 2))
+            il = max(0, min(il, vol.shape[0] - 1))
+            xl = max(0, min(xl, vol.shape[1] - 1))
+            return np.asarray(vol[il, xl, :], dtype=np.float64)
 
         il_data = self._slice_data.get("inline")
         if il_data is not None and getattr(il_data, "ndim", 0) == 2:
@@ -2031,6 +2059,7 @@ class SeismicView(QWidget):
                 self._well_tie_panel.auto_tie_requested.connect(self._on_auto_tie_requested)
                 self._well_tie_panel.synthetic_changed.connect(self._on_synthetic_changed)
                 self._seed_demo_well_logs_if_needed(self._well_tie_panel)
+                self._sync_well_tie_sample_interval()
                 # Insert into the main layout alongside the splitter
                 h_layout = self.layout().itemAt(2)
                 if h_layout and isinstance(h_layout, QHBoxLayout):
@@ -2038,6 +2067,7 @@ class SeismicView(QWidget):
             else:
                 # Re-seed only if still empty (e.g. first open before volume load).
                 self._seed_demo_well_logs_if_needed(self._well_tie_panel)
+                self._sync_well_tie_sample_interval()
             self._well_tie_panel.show()
         else:
             if self._well_tie_panel is not None:

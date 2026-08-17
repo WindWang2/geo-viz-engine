@@ -305,3 +305,23 @@ def test_current_seismic_trace_fallback_scales_xl_index(qtbot, monkeypatch):
     view._renderer_3d._xl_pos = 10  # 10 * 3 = 30 -> clamped to 11
     trace = view.current_seismic_trace()
     assert np.all(trace == 11.0)
+
+
+def test_current_seismic_trace_prefers_full_res_loader_dt(qtbot, monkeypatch):
+    """#697: well-tie must use native dt/samples, not the preview volume."""
+    view = _make_view(qtbot, monkeypatch)
+    view._meta = _make_meta(dt_ms=2.0, sample_interval=2.0, n_samples=40)
+    view._ds_factor = (2, 2, 2)
+    view._renderer_3d._volume_data_cpu = np.ones((5, 6, 20), dtype=np.float32)
+    view._renderer_3d._il_pos = 1
+    view._renderer_3d._xl_pos = 2
+
+    class _FullLoader:
+        def read_trace(self, iline, xline):
+            return np.full(40, float(iline) + float(xline) * 0.01, dtype=np.float64)
+
+    view._loader = _FullLoader()
+    trace = view.current_seismic_trace()
+    assert trace is not None
+    assert len(trace) == 40
+    assert view.current_seismic_dt_ms() == 2.0

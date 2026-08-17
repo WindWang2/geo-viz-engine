@@ -95,3 +95,34 @@ def test_cartography_window_export(app, tmp_path, qtbot):
     assert (tmp_path / "test_out.svg").stat().st_size > 0
 
 
+def test_preset_legend_and_title_are_unconfigured(app):
+    """#678: presets must not ship fabricated facies, authors, or dates."""
+    from geoviz_paleo_map.cartography import PaperGraphicsScene, apply_template_preset
+    from geoviz_paleo_map.cartography.items import LegendGraphicsItem, TitleBlockGraphicsItem
+
+    scene = PaperGraphicsScene()
+    apply_template_preset(scene, "GB_EXPLORATION_SPEC")
+    legends = [i for i in scene.items() if isinstance(i, LegendGraphicsItem)]
+    titles = [i for i in scene.items() if isinstance(i, TitleBlockGraphicsItem)]
+    assert legends
+    assert legends[0].items == []
+    assert titles
+    assert titles[0].author == ""
+    assert titles[0].checker == ""
+    assert titles[0].approver == ""
+    assert titles[0].map_number == ""
+    assert "张伟" not in titles[0].author
+    assert "GEO-MAP-2026" not in titles[0].map_number
+
+
+def test_legend_grows_for_ten_entries(app):
+    """#678: a 10-entry legend must grow instead of silently dropping rows."""
+    from geoviz_paleo_map.cartography.items import LegendGraphicsItem
+
+    entries = [(f"相{i}", "#1f66d4") for i in range(10)]
+    leg = LegendGraphicsItem(rect=QRectF(0, 0, 100, 45), items=entries, columns=2)
+    rows = 5
+    assert leg.rect().height() >= 20 + rows * 14
+    assert leg.truncated_count() == 0
+
+

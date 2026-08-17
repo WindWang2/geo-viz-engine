@@ -3,12 +3,19 @@
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPen, QPainter
 from .base_item import LayoutGraphicsItem
 
 class LegendGraphicsItem(LayoutGraphicsItem):
     """Interactive multi-column legend graphics item."""
+
+    EMPTY_PLACEHOLDER = "（图例待配置）"
+    _TITLE_H = 20.0
+    _ROW_H = 14.0
+    _PAD = 6.0
 
     def __init__(
         self,
@@ -20,13 +27,9 @@ class LegendGraphicsItem(LayoutGraphicsItem):
     ):
         super().__init__(rect, parent)
         self.title = title
-        self.items = items or [
-            ("三角洲前缘", "#1f66d4"),
-            ("滨浅湖相", "#38a169"),
-            ("深湖相", "#3182ce"),
-            ("冲积扇", "#d69e2e"),
-        ]
+        self.items = list(items) if items else []
         self.columns = max(1, columns)
+        self._fit_height_to_items()
 
     def paint(self, painter: QPainter, option, widget=None):
         painter.save()
@@ -50,8 +53,18 @@ class LegendGraphicsItem(LayoutGraphicsItem):
         painter.setFont(font)
 
         col_w = (r.width() - 8) / self.columns
-        row_h = 14
-        start_y = r.top() + 20
+        row_h = self._ROW_H
+        start_y = r.top() + self._TITLE_H
+
+        if not self.items:
+            painter.drawText(
+                QRectF(r.left() + 4, start_y, r.width() - 8, row_h),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                self.EMPTY_PLACEHOLDER,
+            )
+            painter.restore()
+            super().paint(painter, option, widget)
+            return
 
         for idx, (label, color_str) in enumerate(self.items):
             col = idx % self.columns
@@ -75,3 +88,29 @@ class LegendGraphicsItem(LayoutGraphicsItem):
 
         painter.restore()
         super().paint(painter, option, widget)
+
+    def set_items(self, items: list[tuple[str, str]]) -> None:
+        self.items = list(items)
+        self._fit_height_to_items()
+        self.update()
+
+    def truncated_count(self) -> int:
+        """How many entries would not fit the current rect."""
+        if not self.items:
+            return 0
+        r = self.rect()
+        rows_fit = max(0, int((r.height() - self._TITLE_H - 2) // self._ROW_H))
+        return max(0, len(self.items) - rows_fit * self.columns)
+
+    def _content_height(self) -> float:
+        if not self.items:
+            return self._TITLE_H + self._ROW_H + self._PAD
+        rows = math.ceil(len(self.items) / self.columns)
+        return self._TITLE_H + rows * self._ROW_H + self._PAD
+
+    def _fit_height_to_items(self) -> None:
+        needed = self._content_height()
+        r = QRectF(self.rect())
+        if r.height() < needed:
+            r.setHeight(needed)
+            self.setRect(r)

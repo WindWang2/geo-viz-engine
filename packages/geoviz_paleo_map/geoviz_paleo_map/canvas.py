@@ -270,16 +270,7 @@ class PaleoMapCanvas(QWidget):
         all_seen: set[str] = set()
 
         for level in ["facies", "sub_facies", "micro_facies"]:
-            feats = [
-                {"type": "Feature", "properties": {
-                    "facies": ff.facies_name,
-                    "name": ff.display_name,
-                    "id": ff.id,
-                    "boundary_type": None,
-                    "level": ff.level,
-                }, "geometry": ff.geometry}
-                for ff in hierarchy.get_features_at_level(level)
-            ]
+            feats = [ff.to_geojson_feature() for ff in hierarchy.get_features_at_level(level)]
             if not feats:
                 continue
 
@@ -490,16 +481,7 @@ class PaleoMapCanvas(QWidget):
                 polygon_features.append(node.feature)
                 visible_ids.add(fid)
 
-        feats = [
-            {"type": "Feature", "properties": {
-                "facies": ff.facies_name,
-                "name": ff.display_name,
-                "id": ff.id,
-                "boundary_type": None,
-                "level": ff.level,
-            }, "geometry": ff.geometry}
-            for ff in polygon_features
-        ]
+        feats = [ff.to_geojson_feature() for ff in polygon_features]
 
         pens = {
             "facies": QPen(QColor("#1a202c"), 2.0),

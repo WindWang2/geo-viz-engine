@@ -2,7 +2,7 @@
 
 ![PySide6](https://img.shields.io/badge/PySide6-6.6+-41CD52?logo=qt)
 ![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python)
-![ECharts](https://img.shields.io/badge/ECharts-Well_Log-41CD52)
+![QPainter](https://img.shields.io/badge/QPainter-Well_Log-41CD52)
 ![pyqtgraph](https://img.shields.io/badge/pyqtgraph-OpenGL-5896FF)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -50,10 +50,9 @@ GeoViz Engine 是一款基于 **PySide6 + QPainter + pyqtgraph** 的单进程地
 │                                                         │
 │  packages/geoviz-well-log/                              │
 │  ┌─────────────────────────────────────────────────┐    │
-│  │  独立测井可视化引擎 (ECharts-based)              │    │
-│  │  ├── ChartEngine    渲染控件                     │    │
-│  │  ├── TrackManager   轨道排序/合并/拆分           │    │
-│  │  ├── PayloadBuilder 数据→JSON 变换               │    │
+│  │  独立测井可视化引擎 (QPainter)                    │    │
+│  │  ├── WellLogCanvas  QPainter 渲染画布            │    │
+│  │  ├── Track builders 轨道构建                     │    │
 │  │  ├── Export         SVG/PDF 矢量导出             │    │
 │  │  ├── SyncManager    多井同步                     │    │
 │  │  └── PatternMap     岩性/沉积相 SVG 图案         │    │
@@ -116,7 +115,7 @@ GeoViz Engine 是一款基于 **PySide6 + QPainter + pyqtgraph** 的单进程地
 | 层级 | 技术 | 用途 |
 |------|------|------|
 | UI 框架 | PySide6 6.6+ | 桌面窗口、多线程并发加载、状态流转 |
-| 测井/图表 | ECharts 5.x (SVG) / QPainter | ECharts负责复杂相柱状图，QPainter负责极速连井联动与十万点LTTB图表渲染 |
+| 测井/图表 | QPainter | 测井曲线、岩性/沉积相柱、连井联动与十万点 LTTB 图表；可选遗留 ECharts 路径仍保留在包内 |
 | 3D 渲染 | pyqtgraph 0.13+ / PyOpenGL | 地震体三维显示、GLSL双体叠加混合与着色器级colormap、切片提取 |
 | 空间制图 | QPainter | Web Mercator/Plate Carrée投影地图绘制、古地理多边形交互编辑 |
 | GPU 加速 | CuPy 13.x | 基于 CUDA 的地震体三维属性计算（相干、曲率）、高速大数组切片 |
@@ -132,9 +131,9 @@ GeoViz Engine 是一款基于 **PySide6 + QPainter + pyqtgraph** 的单进程地
 ### 井剖面 — 综合测井解释图
 
 - **独立渲染引擎**：底层 `geoviz-well-log` 包可脱离主应用独立使用，支持 `pip install` 后在任何 PySide6 项目中集成。
-- **高性能 ECharts 渲染**：测井曲线支持万级数据点流畅缩放，岩性/沉积相使用 SVG 花纹填充。
-- **轨道管理**：通过 `TrackManager` 实现拖拽排序、曲线合并/拆分、可见性控制。
-- **矢量导出**：SVG/PDF 导出与屏幕显示完全一致（ECharts SVG renderer → 矢量输出）。
+- **QPainter 原生渲染**：测井曲线支持万级数据点流畅缩放，岩性/沉积相使用 SVG 花纹填充。
+- **轨道管理**：通过轨道构建器与画布实现排序、曲线合并/拆分、可见性控制。
+- **矢量导出**：SVG/PDF 导出走 `QSvgGenerator` / `QPrinter`，与屏幕 QPainter 路径一致。
 - **AI 沉积相预测**：支持一键调用 AI 模型预测沉积相，结果直接渲染为轨道并持久化到 Excel。
 - 6 种岩性 SVG 花纹（砂岩、粉砂岩、泥岩、页岩、灰岩、白云岩）— GB/T 附录M
 - 10 种沉积相 SVG 纹理（潮坪、陆棚、砂坪等）— GB/T 附录O
@@ -158,8 +157,8 @@ GeoViz Engine 是一款基于 **PySide6 + QPainter + pyqtgraph** 的单进程地
 
 ### 地图总览
 
-- 57 口真实井位坐标（EPSG:4326/WGS84），MapLibre GL 暗色底图
-- 井位点击 → Qt WebChannel 信号 → 切换到井剖面页面
+- 57 口真实井位坐标（EPSG:4326/WGS84），QPainter + Web Mercator 暗色底图
+- 井位点击 → `MapCanvas.well_clicked` Qt 信号 → 切换到井剖面页面
 - 井剖面页也支持下拉框直接选井
 
 ### 地震 3D
@@ -342,10 +341,10 @@ geo-viz-engine/
 ├── packages/
 │   ├── geoviz_well_log/           # 独立测井可视化包 (pip installable)
 │   │   ├── geoviz_well_log/
-│   │   │   ├── chart_engine.py    # ChartEngine (QWebEngineView + ECharts)
-│   │   │   ├── payload_builder.py # 数据→ECharts JSON 变换
-│   │   │   ├── track_manager.py   # 轨道排序/可见性/合并/拆分
-│   │   │   ├── export.py          # SVG/PDF/PNG 矢量导出
+│   │   │   ├── renderer/          # QPainter tracks + WellLogCanvas
+│   │   │   ├── qpainter_builder.py
+│   │   │   ├── export_qpainter.py # SVG/PDF/PNG 矢量导出
+│   │   │   ├── chart_engine.py    # 可选遗留 ECharts 路径
 │   │   │   ├── pattern_map.py     # 岩性/沉积相 SVG 图案映射
 │   │   │   ├── models.py          # Pydantic 数据模型
 │   │   │   ├── sync_manager.py    # 多井深度同步
@@ -421,8 +420,7 @@ geo-viz-engine/
 │   ├── app.py                     # MainWindow + 侧栏导航
 │   ├── pages/                     # 页面 (每页独立文件夹)
 │   │   ├── map/                   # 地图总览
-│   │   │   ├── page.py            #   MapPage (MapLibre GL)
-│   │   │   └── renderer.py        #   QWebEngineView + MapLibre
+│   │   │   └── page.py            #   MapPage (QPainter geoviz-map)
 │   │   ├── paleo_map/             # 古地理图
 │   │   │   ├── page.py            #   PaleoMapPage (调用 geoviz-paleo-map)
 │   │   │   └── loader.py          #   CSV/Excel/GeoJSON 数据加载

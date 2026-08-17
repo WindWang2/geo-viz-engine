@@ -5,8 +5,8 @@ This module provides the UI orchestration for the single-well log visualization.
 ## Architecture
 
 The core rendering logic is delegated to the `geoviz-well-log` package:
-- `geoviz_well_log.ChartEngine`: The ECharts-based rendering engine.
-- `geoviz_well_log.TrackManager`: Manages the layout of curves and lithology tracks.
+- `geoviz_well_log.WellLogCanvas` / `build_qpainter_tracks`: QPainter well-log renderer.
+- `src.pages.well_log.qpainter_widget.QPainterWidget`: page-level canvas host.
 
 ## Features
 

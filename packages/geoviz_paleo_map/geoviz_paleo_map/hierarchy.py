@@ -22,6 +22,28 @@ class FaciesFeature:
     period: str
     parent_id: str | None
     geometry: dict      # raw GeoJSON geometry dict
+    properties: dict = field(default_factory=dict)
+
+    def to_properties(self) -> dict:
+        """Original GeoJSON properties with derived hierarchy keys winning."""
+        props = dict(self.properties)
+        props.update({
+            "facies": self.facies_name,
+            "name": self.display_name,
+            "id": self.id,
+            "level": self.level,
+            "period": self.period,
+        })
+        if self.parent_id:
+            props["parent_id"] = self.parent_id
+        return props
+
+    def to_geojson_feature(self) -> dict:
+        return {
+            "type": "Feature",
+            "properties": self.to_properties(),
+            "geometry": self.geometry,
+        }
 
 
 @dataclass
@@ -63,16 +85,7 @@ class FaciesHierarchy:
                 data = json.load(f)
             for feat in data.get("features", []):
                 props = feat.get("properties") or {}
-                ff = FaciesFeature(
-                    id=props.get("id", ""),
-                    facies_name=props.get("facies") or props.get("name") or "",
-                    display_name=props.get("name") or props.get("facies") or "",
-                    level=props.get("level", ""),
-                    period=props.get("period", ""),
-                    parent_id=props.get("parent_id"),
-                    geometry=feat.get("geometry") or {},
-                )
-                all_features.append(ff)
+                all_features.append(cls._feature_from_props(props, feat.get("geometry") or {}))
 
         return cls._build_tree(all_features)
 
@@ -82,17 +95,21 @@ class FaciesHierarchy:
         all_features: list[FaciesFeature] = []
         for feat in features:
             props = feat.get("properties") or {}
-            ff = FaciesFeature(
-                id=props.get("id", ""),
-                facies_name=props.get("facies") or props.get("name") or "",
-                display_name=props.get("name") or props.get("facies") or "",
-                level=props.get("level", ""),
-                period=props.get("period", ""),
-                parent_id=props.get("parent_id"),
-                geometry=feat.get("geometry") or {},
-            )
-            all_features.append(ff)
+            all_features.append(cls._feature_from_props(props, feat.get("geometry") or {}))
         return cls._build_tree(all_features)
+
+    @staticmethod
+    def _feature_from_props(props: dict, geometry: dict) -> FaciesFeature:
+        return FaciesFeature(
+            id=props.get("id", ""),
+            facies_name=props.get("facies") or props.get("name") or "",
+            display_name=props.get("name") or props.get("facies") or "",
+            level=props.get("level", ""),
+            period=props.get("period", ""),
+            parent_id=props.get("parent_id"),
+            geometry=geometry,
+            properties=dict(props),
+        )
 
     @classmethod
     def _build_tree(cls, features: list[FaciesFeature]) -> FaciesHierarchy:
