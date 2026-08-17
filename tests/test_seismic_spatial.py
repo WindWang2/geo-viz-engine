@@ -197,17 +197,17 @@ class TestLoaderSpatialHeaders:
     """Tests for reading spatial reference from SEGY headers."""
 
     def test_inspect_reads_spatial(self, small_segy_path):
-        """SeismicLoader.inspect() populates bin_grid from trace headers."""
+        """SEGY without CDP/Source coords must not invent a default bin_grid."""
         from geoviz_seismic.loader import SeismicLoader
 
         with SeismicLoader(small_segy_path) as loader:
             meta = loader.inspect()
-            # Standard test SEGY may not have coordinate headers,
-            # so bin_grid could be None — verify the field exists
-            assert hasattr(meta, "bin_grid")
+            assert meta.bin_grid is None
+            assert meta.xy_to_il_xl(0.0, 0.0) is None
+            assert meta.il_xl_to_xy(meta.iline_start, meta.xline_start) is None
 
     def test_inspect_with_coordinates(self, tmp_path):
-        """SEGY with CDP X/Y headers populates bin_grid."""
+        """SEGY with CDP X/Y headers populates bin_grid from those headers."""
         import segyio
 
         path = str(tmp_path / "spatial_test.sgy")
@@ -246,10 +246,18 @@ class TestLoaderSpatialHeaders:
         from geoviz_seismic.loader import SeismicLoader
         with SeismicLoader(path) as loader:
             meta = loader.inspect()
-            # If coordinates were read, bin_grid should be populated
-            if meta.bin_grid is not None:
-                assert meta.bin_grid.il_spacing_m > 0
-                assert meta.bin_grid.xl_spacing_m > 0
+            assert meta.bin_grid is not None
+            assert meta.bin_grid.x_origin == pytest.approx(0.0)
+            assert meta.bin_grid.y_origin == pytest.approx(0.0)
+            assert abs(meta.bin_grid.il_spacing_m) == pytest.approx(il_spacing)
+            assert abs(meta.bin_grid.xl_spacing_m) == pytest.approx(xl_spacing)
+            # Round-trip must recover the written CDP values, independent
+            # of how azimuth / spacing signs are encoded.
+            assert meta.il_xl_to_xy(100, 200) == pytest.approx((0.0, 0.0), abs=1e-6)
+            assert meta.il_xl_to_xy(101, 200) == pytest.approx((25.0, 0.0), abs=1e-6)
+            assert meta.il_xl_to_xy(100, 201) == pytest.approx((0.0, 25.0), abs=1e-6)
+            assert meta.xy_to_il_xl(25.0, 0.0) == pytest.approx((101.0, 200.0), abs=1e-6)
+            assert meta.xy_to_il_xl(0.0, 25.0) == pytest.approx((100.0, 201.0), abs=1e-6)
 
 
 # ---------------------------------------------------------------------------
