@@ -43,3 +43,14 @@ def test_gl_webengine_golden_modules_are_slow():
     assert is_slow_test("test_chart_engine", "test_chart_engine_creates_webengine")
     assert is_slow_test("test_map_visual_parity", "test_map_canvas_matches_golden")
     assert is_slow_test("test_paleo_map_visual_parity", "test_paleo_map_matches_golden")
+
+
+def test_chart_engine_js_queue_module_is_not_slow():
+    assert not is_slow_test(
+        "test_chart_engine_js_queue",
+        "test_render_data_queues_js_until_web_ready",
+    )
+    assert not is_slow_test(
+        "test_chart_engine_js_queue",
+        "test_export_svg_queues_until_web_ready",
+    )
