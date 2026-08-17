@@ -58,6 +58,24 @@ def test_template_presets(app):
     apply_template_preset(scene, "ACADEMIC_JOURNAL")
     assert len(scene.items()) >= 2
 
+
+def test_unknown_preset_does_not_clear_scene(app):
+    """#677: unknown preset names must not wipe a populated paper scene."""
+    from geoviz_paleo_map.cartography import PaperGraphicsScene, apply_template_preset
+    from geoviz_paleo_map.cartography.items import TitleBlockGraphicsItem
+
+    scene = PaperGraphicsScene()
+    item = TitleBlockGraphicsItem(map_title="keep-me")
+    scene.addItem(item)
+    before = list(scene.items())
+    assert before
+
+    with pytest.raises(ValueError, match="BOGUS"):
+        apply_template_preset(scene, "BOGUS")
+
+    assert scene.items() == before
+    assert item.scene() is scene
+
 def test_cartography_window_export(app, tmp_path, qtbot):
     from geoviz_paleo_map.cartography import CartographyLayoutWindow
     win = CartographyLayoutWindow()

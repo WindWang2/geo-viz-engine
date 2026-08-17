@@ -7,8 +7,12 @@ from PySide6.QtCore import QRectF
 from .scene import PaperGraphicsScene
 from .items import TitleBlockGraphicsItem, LegendGraphicsItem
 
+_KNOWN_PRESETS = frozenset({"GB_EXPLORATION_SPEC", "ACADEMIC_JOURNAL"})
+
 def apply_template_preset(scene: PaperGraphicsScene, preset_name: str = "GB_EXPLORATION_SPEC"):
     """Apply preset item layout to paper scene."""
+    if preset_name not in _KNOWN_PRESETS:
+        raise ValueError(f"Unknown cartography preset: {preset_name!r}")
     scene.clear()
 
     printable = scene.printable_rect()

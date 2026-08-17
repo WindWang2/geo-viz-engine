@@ -6,12 +6,14 @@ import numpy as np
 import pytest
 
 from geoviz_well_seismic_3d import (
+    FenceSection,
     InMemoryVolumeAccess,
     JointWellId,
     TimeDepthTable,
     VerticalDomain,
     WellHead,
     WellSeismicScene,
+    select_depth_transform,
     survey_from_corners,
 )
 
@@ -168,3 +170,43 @@ def test_volume_access_injectable_slice():
 def test_scene_default_vertical_domain_is_time():
     scene = WellSeismicScene()
     assert scene.vertical_domain is VerticalDomain.TIME
+
+
+def test_set_depth_transform_invalidates_traj_and_extract_caches():
+    """#672: swapping V0 must recompute cached Depth-domain geometry."""
+    scene = WellSeismicScene()
+    scene.set_survey_from_corners(P1, P2, P3, n_samples=20, dt_ms=2.0)
+    scene.set_volume_access(InMemoryVolumeAccess(np.zeros((2, 3, 20), dtype=np.float32)))
+    scene.set_depth_transform(select_depth_transform(constant_v0=True, v0_m_s=3000.0))
+    scene.set_vertical_domain(VerticalDomain.DEPTH)
+
+    td = TimeDepthTable(
+        well_name="A1",
+        time_ms=np.array([0.0, 1000.0], dtype=np.float64),
+        md_m=np.array([0.0, 2000.0], dtype=np.float64),
+    )
+    well = WellHead(
+        name="A1",
+        x=5288.67,
+        y=8219.94,
+        bottom_x=5288.67,
+        bottom_y=8219.94,
+        total_depth_m=2000.0,
+        kb_m=0.0,
+        id=JointWellId("source:a1"),
+    )
+    scene.set_wells([well], td_tables={"A1": td})
+    scene.add_fence(FenceSection(name="f", vertices_xy=np.array([[0.0, 0.0], [1000.0, 0.0]])))
+
+    traj_v0 = next(iter(scene.well_trajectories().values()))
+    ext_v0 = scene.extract_active_fence(n_along=8)
+    assert ext_v0 is not None
+    z_v0 = float(traj_v0.points[-1, 2])
+    assert z_v0 == pytest.approx(1500.0, rel=1e-6)  # 1000 ms * 3000 / 2 / 1000
+
+    scene.set_depth_transform(select_depth_transform(constant_v0=True, v0_m_s=2000.0))
+    traj_v1 = next(iter(scene.well_trajectories().values()))
+    ext_v1 = scene.extract_active_fence(n_along=8)
+    assert ext_v1 is not None
+    assert float(traj_v1.points[-1, 2]) == pytest.approx(z_v0 * (2000.0 / 3000.0), rel=1e-6)
+    np.testing.assert_allclose(ext_v1.sample_axis, ext_v0.sample_axis * (2000.0 / 3000.0))

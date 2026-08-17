@@ -75,3 +75,29 @@ def test_get_children_returns_facies_feature_objects():
     for child in children:
         assert isinstance(child, FaciesFeature)
         assert child.period == "C1"
+
+
+def test_dangling_parent_id_is_promoted_to_root():
+    """#680: a missing parent_id must not drop the feature from the tree."""
+    poly = {"type": "Polygon", "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]]}
+    features = [
+        FaciesFeature(
+            id="root", facies_name="三角洲", display_name="三角洲",
+            level="facies", period="C1", parent_id=None, geometry=poly,
+        ),
+        FaciesFeature(
+            id="orphan", facies_name="孤立亚相", display_name="孤立亚相",
+            level="sub_facies", period="C1", parent_id="missing", geometry=poly,
+        ),
+    ]
+    with pytest.warns(UserWarning, match="parent_id"):
+        hier = FaciesHierarchy._build_tree(features)
+    root_ids = [node.feature.id for node in hier.roots]
+    assert "root" in root_ids
+    assert "orphan" in root_ids
+    assert hier.get_node("orphan") is not None
+
+    from geoviz_paleo_map.topology import TopologyBuilder
+
+    model = TopologyBuilder.from_hierarchy(hier)
+    assert model.get_feature("orphan") is not None

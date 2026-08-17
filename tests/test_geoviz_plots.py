@@ -72,6 +72,41 @@ def test_series_data_bounds():
     empty_series = ScatterSeries()
     assert empty_series.get_bounds() == (0.0, 0.0, 0.0, 0.0)
 
+
+def test_series_get_bounds_ignores_inf():
+    """#683: Inf samples must not leak into autofit / tick calculation."""
+    import math
+
+    series = LineSeries([0.0, 1.0, 2.0], [1.0, float("inf"), 2.0], name="inf-y")
+    xmin, xmax, ymin, ymax = series.get_bounds()
+    assert (xmin, xmax, ymin, ymax) == (0.0, 2.0, 1.0, 2.0)
+    assert all(math.isfinite(v) for v in (xmin, xmax, ymin, ymax))
+
+    mixed = LineSeries(
+        [0.0, float("-inf"), 2.0],
+        [1.0, 5.0, float("nan")],
+        name="inf-x",
+    )
+    xmin, xmax, ymin, ymax = mixed.get_bounds()
+    assert (xmin, xmax, ymin, ymax) == (0.0, 0.0, 1.0, 1.0)
+
+
+def test_plot_autofit_and_paint_survive_inf_samples(qtbot):
+    """#683: autofit + paintEvent must stay finite when a series contains Inf."""
+    import math
+
+    from geoviz_plots.chart.plot_widget import PlotWidget
+
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.add_series(LineSeries([0.0, 1.0, 2.0], [1.0, float("inf"), 2.0]))
+    widget.autofit()
+    assert all(math.isfinite(v) for v in widget.view_bounds())
+    widget.resize(240, 180)
+    widget.show()
+    qtbot.waitExposed(widget)
+    widget.repaint()
+
 def test_lttb_downsampling_basic():
     """Verify that the LTTB algorithm downsamples a larger dataset to the target threshold."""
     # Generate 1000 points (a sine wave)

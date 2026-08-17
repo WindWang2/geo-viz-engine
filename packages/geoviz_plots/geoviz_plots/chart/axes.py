@@ -44,6 +44,9 @@ def calculate_ticks(vmin: float, vmax: float, max_ticks: int) -> tuple[list[floa
     """
     if max_ticks <= 1:
         return [vmin], 1.0
+
+    if not (math.isfinite(vmin) and math.isfinite(vmax)):
+        return [], 1.0
         
     if vmin > vmax:
         vmin, vmax = vmax, vmin

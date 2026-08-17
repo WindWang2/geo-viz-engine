@@ -105,11 +105,11 @@ class Series:
             self.color = QColor(color)
 
     def get_bounds(self) -> tuple[float, float, float, float]:
-        """Return (xmin, xmax, ymin, ymax) ignoring NaNs. Returns (0, 0, 0, 0) if empty."""
+        """Return (xmin, xmax, ymin, ymax) ignoring non-finite samples."""
         if len(self.x) == 0 or len(self.y) == 0:
             return 0.0, 0.0, 0.0, 0.0
             
-        mask = ~np.isnan(self.x) & ~np.isnan(self.y)
+        mask = np.isfinite(self.x) & np.isfinite(self.y)
         fx = self.x[mask]
         fy = self.y[mask]
         

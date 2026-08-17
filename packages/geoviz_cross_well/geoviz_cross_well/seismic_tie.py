@@ -44,9 +44,7 @@ class SeismicTie:
         self._tables: dict[str, CheckshotTable] = {}
 
     def load_csv(self, path: str, well_name: str | None = None) -> None:
-        depths = []
-        twts = []
-        detected_well: str | None = None
+        by_well: dict[str, tuple[list[float], list[float]]] = {}
         has_well_col = False
 
         with open(path, newline="", encoding="utf-8") as f:
@@ -54,37 +52,33 @@ class SeismicTie:
             for row in reader:
                 if not row or row[0].startswith("#"):
                     continue
-                if row[0].strip().lower() in ("depth_m", "depth", "md"):
-                    if len(row) >= 3 and row[2].strip().lower() in ("twt_ms", "twt"):
-                        has_well_col = len(row) >= 4 and "well" in row[-1].lower()
+                cells = [cell.strip() for cell in row]
+                header = [cell.lower() for cell in cells]
+                if header[0] in ("depth_m", "depth", "md"):
+                    has_well_col = any("well" in cell for cell in header)
                     continue
                 try:
-                    if len(row) >= 3 and has_well_col:
-                        d = float(row[0].strip())
-                        t = float(row[1].strip())
-                        w = row[2].strip()
-                    elif len(row) >= 2:
-                        d = float(row[0].strip())
-                        t = float(row[1].strip())
-                        w = well_name or "default"
-                    else:
+                    if len(cells) < 2:
                         continue
+                    d = float(cells[0])
+                    t = float(cells[1])
+                    if has_well_col and len(cells) >= 3 and cells[2]:
+                        w = cells[2]
+                    else:
+                        w = well_name or "default"
                 except (ValueError, IndexError):
                     continue
+                depths, twts = by_well.setdefault(w, ([], []))
                 depths.append(d)
                 twts.append(t)
-                detected_well = w
 
-        if not depths:
-            return
-
-        name = detected_well or well_name or "default"
-        order = np.argsort(depths)
-        self._tables[name] = CheckshotTable(
-            well_name=name,
-            depths_m=np.array(depths)[order],
-            twt_ms=np.array(twts)[order],
-        )
+        for name, (depths, twts) in by_well.items():
+            order = np.argsort(depths)
+            self._tables[name] = CheckshotTable(
+                well_name=name,
+                depths_m=np.array(depths)[order],
+                twt_ms=np.array(twts)[order],
+            )
 
     def depth_to_twt(self, well: str, depth: float) -> float | None:
         table = self._tables.get(well)

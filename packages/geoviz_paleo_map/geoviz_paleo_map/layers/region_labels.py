@@ -2,6 +2,7 @@
 with contrast-aware text color."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -105,6 +106,11 @@ class RegionLabelsLayer(PaleoLayer):
                 outer = poly[0] if poly else []
                 if len(outer) < 3:
                     continue
+                if not all(
+                    len(p) >= 2 and math.isfinite(p[0]) and math.isfinite(p[1])
+                    for p in outer
+                ):
+                    continue
                 xs = [p[0] for p in outer]
                 ys = [p[1] for p in outer]
                 min_x, max_x = min(xs), max(xs)
@@ -142,7 +148,6 @@ class RegionLabelsLayer(PaleoLayer):
 
         default_sizes = {"facies": 11, "sub_facies": 8, "micro_facies": 7}
         # Dynamic zoom scaling: base zoom=4 (scale=8), text grows with sqrt(scale)
-        import math
         zoom_factor = max(0.5, min(3.0, math.sqrt(viewport.scale / 8.0)))
 
         for item in self._items:
