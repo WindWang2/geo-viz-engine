@@ -75,3 +75,30 @@ def test_lasso_selection_collinear_points_still_emits(cross_plot_widget, qtbot):
     assert len(emitted) == 1
     assert len(emitted[0]) == 4
     assert len(cross_plot_widget.clusters) == 1
+
+
+def test_cross_plot_widget_nan_samples_do_not_poison_bounds(cross_plot_widget):
+    """A single NaN sample must not blank the whole plot (#553)."""
+    x = np.array([1.0, 2.0, np.nan, 4.0])
+    y = np.array([10.0, 20.0, 30.0, np.nan])
+
+    cross_plot_widget.set_scatter_data(x, y)
+
+    assert np.isfinite(cross_plot_widget.view_xmin)
+    assert np.isfinite(cross_plot_widget.view_xmax)
+    assert np.isfinite(cross_plot_widget.view_ymin)
+    assert np.isfinite(cross_plot_widget.view_ymax)
+    assert cross_plot_widget.view_xmin == 1.0
+    # (4.0, NaN) and (NaN, 30.0) are excluded by the joint finite mask.
+    assert cross_plot_widget.view_xmax == 2.0
+    assert cross_plot_widget.view_ymin == 10.0
+    assert cross_plot_widget.view_ymax == 20.0
+
+
+def test_cross_plot_widget_all_nan_keeps_default_bounds(cross_plot_widget):
+    x = np.array([np.nan, np.nan])
+    y = np.array([np.nan, np.nan])
+    cross_plot_widget.set_scatter_data(x, y)
+    assert np.isfinite(cross_plot_widget.view_xmin)
+    assert cross_plot_widget.view_xmin == 0.0
+    assert cross_plot_widget.view_xmax == 1.0

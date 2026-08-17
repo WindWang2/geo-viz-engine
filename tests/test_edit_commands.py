@@ -393,3 +393,16 @@ def test_edit_attributes_cmd_undo_feature_not_found():
     cmd = EditAttributesCmd("nonexistent", {}, {"key": "value"})
     # Don't execute, just undo — _snapshot is None
     cmd.undo(model)  # should not crash
+
+
+def test_edit_attributes_cmd_marks_feature_dirty():
+    """#549: an attribute edit must flag the feature so the canvas rebuild
+    path refreshes its rendered style (geometry/edges are unchanged)."""
+    model = _make_model_with_two_features()
+    model.clear_dirty()
+    cmd = EditAttributesCmd("A", {"facies": "砂岩"}, {"facies": "石灰岩"})
+    assert "A" not in model.get_dirty_ids()
+    cmd.execute(model)
+    assert "A" in model.get_dirty_ids()
+    cmd.undo(model)
+    assert "A" in model.get_dirty_ids()

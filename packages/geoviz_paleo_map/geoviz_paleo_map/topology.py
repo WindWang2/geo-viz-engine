@@ -135,6 +135,16 @@ class TopologyModel:
     def mark_dirty(self) -> None:
         self.is_dirty = True
 
+    def mark_feature_dirty(self, feature_id: str) -> None:
+        """Flag one feature for a display rebuild (attribute/style edits).
+
+        Attribute-only commands change neither geometry nor edges, so they
+        must poke the dirty set directly — the canvas refreshes affected
+        layer items/labels from it (#549).
+        """
+        self._dirty_ids.add(feature_id)
+        self._path_cache.pop(feature_id, None)
+
     def get_dirty_ids(self) -> set[str]:
         return set(self._dirty_ids)
 

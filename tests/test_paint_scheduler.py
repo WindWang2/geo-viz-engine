@@ -392,3 +392,42 @@ class TestScreenPathCache:
         # Should only have 2 zoom levels worth of entries
         zooms = set(k[0] for k in cache._cache)
         assert len(zooms) <= 2
+
+
+class TestLayerPixmapCacheVisibility:
+    def test_hidden_layer_not_blitted_and_reshow_rerenders(self, qtbot):
+        from geoviz_paleo_map.paint_scheduler import LayerPixmapCache
+        from geoviz_paleo_map.viewport import PaleoMapViewport
+
+        render_count = 0
+
+        class StubLayer:
+            visible = True
+
+            def paint(self, painter, viewport):
+                nonlocal render_count
+                render_count += 1
+
+        layer = StubLayer()
+        cache = LayerPixmapCache(layer)
+        widget = QWidget()
+        qtbot.addWidget(widget)
+        vp = PaleoMapViewport(
+            center_lng=115.0, center_lat=30.0, zoom=2.0, width=400, height=300
+        )
+
+        cache.paint(QPainter(widget), vp)
+        assert render_count == 1
+        assert cache._pixmap is not None
+
+        # Hiding the layer must clear the stale pixmap: a subsequent pan-blit
+        # would otherwise keep the layer on screen (#546).
+        layer.visible = False
+        cache.paint(QPainter(widget), vp)
+        assert render_count == 1
+        assert cache._pixmap is None
+
+        # Re-showing forces a fresh render (not a blit of nothing).
+        layer.visible = True
+        cache.paint(QPainter(widget), vp)
+        assert render_count == 2

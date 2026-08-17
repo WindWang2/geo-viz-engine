@@ -66,10 +66,15 @@ class CrossPlotWidget(QWidget):
         self.z_label = z_label
 
         if len(self.x_data) > 0:
-            self.view_xmin = float(np.min(self.x_data))
-            self.view_xmax = float(np.max(self.x_data))
-            self.view_ymin = float(np.min(self.y_data))
-            self.view_ymax = float(np.max(self.y_data))
+            # A single NaN sample must not poison the whole view bounds
+            # (np.min/np.max return NaN, mapping every point off-canvas) —
+            # mask non-finite samples like Series.get_bounds does (#553).
+            finite = np.isfinite(self.x_data) & np.isfinite(self.y_data)
+            if np.any(finite):
+                self.view_xmin = float(np.min(self.x_data[finite]))
+                self.view_xmax = float(np.max(self.x_data[finite]))
+                self.view_ymin = float(np.min(self.y_data[finite]))
+                self.view_ymax = float(np.max(self.y_data[finite]))
 
         self.clusters.clear()
         self.update()

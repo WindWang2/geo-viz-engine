@@ -133,6 +133,13 @@ def apply(idx: int, data: np.ndarray, sample_interval_s: float = 1.0) -> np.ndar
     if spec.kind in ("raw", "rgb"):
         return data
     if spec.kind == "curvature":
+        if data.ndim == 2:
+            # 2-D curvature-family functions assume (n_xl, n_t) with the
+            # crossline axis on axis 0 (see compute_dip/_compute_slope/
+            # compute_coherence_c3). The panels deliver (n_samples,
+            # n_traces) with TIME on axis 0, so feed the transpose and map
+            # the result back to the panel layout (#558).
+            return spec.compute(data.T).T
         return spec.compute(data)
     # trace
     kwargs: dict = {"axis": 0}

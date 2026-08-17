@@ -26,13 +26,19 @@ def generate_ormsby_wavelet(f1: float = 5.0, f2: float = 10.0, f3: float = 40.0,
     t = np.linspace(-length / 2, length / 2, n_samples)
     
     def _sinc_sq(f, t_arr):
-        return (np.sin(np.pi * f * t_arr) / (np.pi * f * np.where(t_arr == 0, 1e-12, t_arr))) ** 2
+        # Normalized sinc (np.sinc(x) = sin(pi x)/(pi x), sinc(0) = 1) —
+        # the old explicit division substituted 1e-12 at t == 0 and produced
+        # sinc^2(0) = 0 instead of 1, flattening the wavelet center (#540).
+        return np.sinc(f * t_arr) ** 2
 
-    # Ormsby formula
-    num = (np.pi * f4)**2 * _sinc_sq(f4, t) - (np.pi * f3)**2 * _sinc_sq(f3, t) - (np.pi * f2)**2 * _sinc_sq(f2, t) + (np.pi * f1)**2 * _sinc_sq(f1, t)
-    den = (f4 - f3) * (f2 - f1)
-    
-    w = num / max(1e-6, den)
+    # Standard Ormsby (Ryan 1994):
+    #   W(t) = pi [f4^2 sinc^2(f4 t) - f3^2 sinc^2(f3 t)] / (f4 - f3)
+    #        - pi [f2^2 sinc^2(f2 t) - f1^2 sinc^2(f1 t)] / (f2 - f1)
+    # Each band group is divided by ITS OWN bandwidth; a common denominator
+    # mis-weights the two groups (#540).
+    high = (f4**2 * _sinc_sq(f4, t) - f3**2 * _sinc_sq(f3, t)) / max(1e-6, f4 - f3)
+    low = (f2**2 * _sinc_sq(f2, t) - f1**2 * _sinc_sq(f1, t)) / max(1e-6, f2 - f1)
+    w = np.pi * (high - low)
     if np.max(np.abs(w)) > 0:
         w = w / np.max(np.abs(w))
         

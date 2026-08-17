@@ -52,15 +52,15 @@ def ormsby_wavelet(
     t = np.arange(n_samples, dtype=np.float64) * dt
     t = t - t[len(t) // 2]
 
-    def _term(fa, fb):
-        num = (np.pi * fb) ** 2 * np.sinc(fb * t) ** 2
-        den = (np.pi * fa) ** 2 * np.sinc(fa * t) ** 2
-        return num - den
+    # Standard Ormsby (Ryan 1994): each band group is divided by its own
+    # bandwidth.  The previous pairing (f1,f4) / (f2,f3) with cross factors
+    # (pi*f)^2 produced a shape with a 2x wrong band-weight ratio (#540).
+    def _sinc_sq(f):
+        return np.sinc(f * t) ** 2
 
-    w = (
-        _term(f1, f4) * (np.pi * f4) ** 2 / (np.pi * f4 - np.pi * f1)
-        - _term(f2, f3) * (np.pi * f3) ** 2 / (np.pi * f3 - np.pi * f2)
-    )
+    high = (f4**2 * _sinc_sq(f4) - f3**2 * _sinc_sq(f3)) / max(1e-6, f4 - f3)
+    low = (f2**2 * _sinc_sq(f2) - f1**2 * _sinc_sq(f1)) / max(1e-6, f2 - f1)
+    w = np.pi * (high - low)
     peak = np.max(np.abs(w))
     if peak > 0:
         w = w / peak

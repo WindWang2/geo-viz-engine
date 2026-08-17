@@ -10,6 +10,7 @@ class DTWResult:
     suggested_depth: float
     cost: float
     confidence: float
+    feasible: bool = True
 
 class DTWEngine:
     def correlate(
@@ -23,11 +24,24 @@ class DTWEngine:
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> DTWResult:
         if len(ref_curve) < 2 or len(target_curve) < 2:
-            return DTWResult(suggested_depth=0.0, cost=1.0, confidence=0.0)
+            return DTWResult(suggested_depth=0.0, cost=1.0, confidence=0.0, feasible=False)
 
         n, m = len(ref_curve), len(target_curve)
         if band_radius is None:
             band_radius = max(20, max(n, m) // 4)
+
+        # NaN/Inf samples poison every downstream statistic (max_diff becomes
+        # NaN and confidence becomes NaN). Report infeasible instead (#539).
+        if not np.all(np.isfinite(ref_curve)) or not np.all(np.isfinite(target_curve)):
+            return DTWResult(suggested_depth=0.0, cost=1.0, confidence=0.0, feasible=False)
+
+        # The Sakoe-Chiba band covers cells |j-i| <= band_radius, so the
+        # endpoint (n-1, m-1) is inside the band iff |m-n| <= band_radius.
+        # Backtracking from an uncomputed endpoint collapses to a single-cell
+        # path whose normalized cost is garbage and whose confidence is
+        # falsely high (#539).
+        if abs(m - n) > band_radius:
+            return DTWResult(suggested_depth=0.0, cost=1.0, confidence=0.0, feasible=False)
 
         # Compact cost matrix: row i, column j maps to cost_compact[i, j - (i - band_radius)]
         # width = 2 * band_radius + 1

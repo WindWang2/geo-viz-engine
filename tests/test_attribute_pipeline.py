@@ -148,3 +148,32 @@ class TestApplyAllIndicesCovered:
             return
         out = ap.apply(idx, data, sample_interval_s=0.002)
         assert out.shape == data.shape
+
+
+class TestApplyCurvature2DConvention:
+    """#558: panels deliver (n_samples, n_traces) with TIME on axis 0; the
+    curvature family must still compute with the crossline axis."""
+
+    def test_dip_xl_uses_crossline_axis(self):
+        # Amplitude varies ONLY along the crossline axis (axis 1 of the panel
+        # layout): true Dip_XL = arctan(grad_xl/grad_t) ~ +pi/2.  The buggy
+        # version computed arctan(grad_t/grad_xl) ~ 0.
+        n_t, n_xl = 24, 16
+        data = np.tile(np.arange(n_xl, dtype=np.float32), (n_t, 1))
+        out = ap.apply(9, data)  # Dip_XL
+        assert out.shape == data.shape
+        assert np.median(np.abs(out)) > np.pi / 4
+
+    def test_dip_il_is_zero_for_2d_slice(self):
+        n_t, n_xl = 24, 16
+        data = np.tile(np.arange(n_xl, dtype=np.float32), (n_t, 1))
+        out = ap.apply(8, data)  # Dip_IL
+        assert out.shape == data.shape
+        np.testing.assert_allclose(out, 0.0, atol=1e-6)
+
+    def test_curvature_2d_returns_panel_layout(self):
+        n_t, n_xl = 24, 16
+        data = np.tile(np.arange(n_xl, dtype=np.float32), (n_t, 1))
+        out = ap.apply(11, data)  # 平均曲率
+        assert out.shape == data.shape
+        assert np.all(np.isfinite(out))
