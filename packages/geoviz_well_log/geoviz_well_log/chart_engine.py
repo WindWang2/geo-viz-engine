@@ -2,7 +2,6 @@ import json
 import os
 import base64
 from PySide6.QtWidgets import QWidget, QVBoxLayout
-from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtCore import QObject, Slot, Signal
 
@@ -37,27 +36,32 @@ class Bridge(QObject):
         print(message)
 
 class ChartEngine(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, view=None):
         super().__init__(parent)
         self._well_name = ""
         self._flatten_offset = 0.0
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.view = QWebEngineView()
-        self.layout.addWidget(self.view)
-        
+
         # 配置 WebChannel
         self.channel = QWebChannel()
         self.bridge = Bridge()
         self.channel.registerObject("bridge", self.bridge)
-        self.view.page().setWebChannel(self.channel)
-        
+
         self._is_web_ready = False
         self._js_queue = []
         self._last_data_json = None
         self.bridge.ready.connect(self._on_web_ready)
+
+        if view is not None:
+            self.view = view
+            return
+
+        from PySide6.QtWebEngineWidgets import QWebEngineView
+        self.view = QWebEngineView()
+        self.layout.addWidget(self.view)
+        self.view.page().setWebChannel(self.channel)
 
         # Restrict context menu to prevent manual reloading resets
         from PySide6.QtCore import Qt
