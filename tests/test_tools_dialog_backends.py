@@ -14,17 +14,24 @@ def test_las_resampler_has_resample_method():
     )
 
 
-def test_las_resampler_accept_does_not_close_without_file(qtbot):
+def test_las_resampler_accept_does_not_close_without_file(qtbot, monkeypatch):
     """Accept without LAS file should warn, not close."""
+    from PySide6.QtWidgets import QDialog, QMessageBox
+
     from src.pages.tools.dialogs import LASCurveResamplerDialog
+
+    warned = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *args, **kwargs: warned.append(args)
+    )
     dlg = LASCurveResamplerDialog()
     qtbot.addWidget(dlg)
     dlg.show()
-    # Should not crash; accept should check for file existence
-    try:
-        dlg.accept()
-    except Exception:
-        pass  # Dialog may have been closed; that's fine for this test
+    assert dlg._execute() is False
+    dlg._on_accept_clicked()
+    assert warned
+    assert dlg.isVisible()
+    assert dlg.result() != QDialog.DialogCode.Accepted
 
 
 # ---------------------------------------------------------------------------
@@ -36,9 +43,10 @@ def test_tvd_dialog_has_compute_method():
     from src.pages.tools.dialogs import DeviationTVDDialog
     import inspect
     src = inspect.getsource(DeviationTVDDialog._compute_min_curvature)
-    assert "pass" not in src or "return" in src.lower(), (
-        "_compute_min_curvature must not be a bare pass"
-    )
+    lowered = src.lower()
+    assert "tvd" in lowered
+    assert "cos(" in lowered or "math.cos" in lowered
+    assert src.strip().splitlines()[-1].strip() != "pass"
 
 
 def test_min_curvature_computes_tvd():
