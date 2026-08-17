@@ -13,14 +13,14 @@ class TitleBlockGraphicsItem(LayoutGraphicsItem):
     def __init__(
         self,
         rect: QRectF = QRectF(0, 0, 120, 30),
-        map_title: str = "中国主要含油气盆地构造图",
-        map_number: str = "GEO-MAP-2026-001",
-        organization: str = "地质勘探研究院",
-        scale_str: str = "1 : 2,500,000",
-        author: str = "张伟",
-        checker: str = "李明",
-        approver: str = "王强",
-        date_str: str = "2026年07月",
+        map_title: str = "",
+        map_number: str = "",
+        organization: str = "",
+        scale_str: str = "",
+        author: str = "",
+        checker: str = "",
+        approver: str = "",
+        date_str: str = "",
         parent=None,
     ):
         super().__init__(rect, parent)

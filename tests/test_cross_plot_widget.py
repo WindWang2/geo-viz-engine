@@ -102,3 +102,47 @@ def test_cross_plot_widget_all_nan_keeps_default_bounds(cross_plot_widget):
     assert np.isfinite(cross_plot_widget.view_xmin)
     assert cross_plot_widget.view_xmin == 0.0
     assert cross_plot_widget.view_xmax == 1.0
+
+
+def test_z_coloring_uses_distinct_brushes(cross_plot_widget):
+    """#693: z values must map to more than one paint color."""
+    x = np.array([10.0, 20.0])
+    y = np.array([5.0, 15.0])
+    z = np.array([0.0, 100.0])
+    cross_plot_widget.set_scatter_data(
+        x, y, z, x_label="GR", y_label="NPHI", z_label="Depth (m)"
+    )
+    colors = cross_plot_widget._z_qcolors(z)
+    assert colors[0].rgb() != colors[1].rgb()
+
+
+def test_axis_and_z_labels_are_drawn(cross_plot_widget, qtbot):
+    """#693: reserved margins must actually render axis / z captions."""
+    from PySide6.QtGui import QColor
+
+    x = np.array([10.0, 20.0, 30.0])
+    y = np.array([5.0, 15.0, 25.0])
+    z = np.array([1.0, 2.0, 3.0])
+    cross_plot_widget.set_scatter_data(
+        x, y, z, x_label="GR_AXIS", y_label="NPHI_AXIS", z_label="DEPTH_Z"
+    )
+    qtbot.waitExposed(cross_plot_widget)
+    cross_plot_widget.repaint()
+    captions = cross_plot_widget._axis_captions()
+    assert captions["x"] == "GR_AXIS"
+    assert captions["y"] == "NPHI_AXIS"
+    assert captions["z"] == "DEPTH_Z"
+    img = cross_plot_widget.grab().toImage()
+    bg = QColor(25, 25, 25)
+    # Bottom / left / right margins should contain drawn chrome, not only bg.
+    def _margin_has_ink(x0, y0, x1, y1) -> bool:
+        for px in range(x0, x1, 2):
+            for py in range(y0, y1, 2):
+                if img.pixelColor(px, py) != bg:
+                    return True
+        return False
+
+    w, h = img.width(), img.height()
+    assert _margin_has_ink(0, 0, 60, h)
+    assert _margin_has_ink(0, h - 45, w, h)
+    assert _margin_has_ink(w - 70, 0, w, h)

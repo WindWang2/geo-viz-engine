@@ -289,13 +289,7 @@ class TopologyBuilder:
 
             if rings:
                 sf = (source_files or {}).get(ff.level)
-                props = {
-                    "facies": ff.facies_name,
-                    "name": ff.display_name,
-                    "id": ff.id,
-                    "level": ff.level,
-                    "period": ff.period,
-                }
+                props = ff.to_properties()
                 model.add_feature(
                     feature_id=ff.id,
                     rings=rings,

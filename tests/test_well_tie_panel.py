@@ -144,6 +144,14 @@ class TestWellTiePanelGenerateSynthetic:
         # Different frequency should produce different synthetic
         assert not np.allclose(synth1, synth2, atol=0.01)
 
+    def test_on_generate_uses_configured_sample_interval(self, panel_with_data):
+        """#697: Generate must honour survey dt, not a hardcoded 4 ms."""
+        panel_with_data.set_sample_interval(2.0)
+        panel_with_data._on_generate()
+        twt = panel_with_data._synthetic_twt
+        assert twt is not None and len(twt) > 1
+        assert twt[1] - twt[0] == pytest.approx(2.0)
+
 
 class TestWellTiePanelAutoTie:
 

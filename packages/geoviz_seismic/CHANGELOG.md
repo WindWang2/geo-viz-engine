@@ -24,23 +24,6 @@ All notable changes to this package will be documented in this file.
 - **Phase 7 — STFT spectral decomposition + RGB fusion + crossplot**: `compute_spectral_decomposition`, `fuse_rgb`, `CrossplotDialog`.
 - **Phase 6 — Seismic attributes**: `compute_envelope`, `compute_instantaneous_phase`, `compute_instantaneous_frequency`, `compute_rms_amplitude`, `compute_sweetness`, `compute_relative_impedance` + horizon-following slice extraction `extract_along_horizon`.
 
-## [0.1.0] - 2026-05-11
-
-### Added
-- `SeismicLoader`: SEGY file reader with inline/crossline/timeslice reads and downsampled volume extraction.
-- `Renderer3D`: PyVista Qt 3D volume renderer with interactive inline/crossline/time slice planes.
-- `ProfileVD`: Variable-density heatmap profile renderer.
-- `ProfileWiggle`: Wiggle-trace renderer with VisPy GPU acceleration and QPainter fallback.
-- `ProfileWidget`: Unified VD/Wiggle display-mode switcher.
-- `SeismicView`: Composite 3D+2D+toolbar widget (drop-in for any PySide6 app).
-- `SeismicCache`: LRU slice cache (default 50 entries, count-based eviction).
-- `ColormapManager`: seismic/gray/jet/hsv colormaps with LUT caching.
-- `HorizonParser`: Tab-separated horizon file parser with nearest/RBF interpolation.
-- `SeismicVolumeMeta`, `SliceInfo`, `HorizonData`: Pydantic data models.
-- Async synthetic data generation and SEGY loading via QThread workers.
-- `examples/demo.py` and `examples/load_segy.py` runnable examples.
-- `python -m geoviz_seismic` entry point for quick demo.
-
 ## [0.1.2] - 2026-05-11
 
 ### Changed
@@ -66,3 +49,20 @@ All notable changes to this package will be documented in this file.
 - HorizonAxes TypedDict for typed horizon parser axes parameter.
 - SeismicLoader context manager support (`__enter__`/`__exit__`).
 - Removed duplicate `is_loaded()` method (identical to `is_ready()`).
+
+## [0.1.0] - 2026-05-11
+
+### Added
+- `SeismicLoader`: SEGY file reader with inline/crossline/timeslice reads and downsampled volume extraction.
+- `Renderer3D`: PyVista Qt 3D volume renderer with interactive inline/crossline/time slice planes.
+- `ProfileVD`: Variable-density heatmap profile renderer.
+- `ProfileWiggle`: Wiggle-trace renderer with VisPy GPU acceleration and QPainter fallback.
+- `ProfileWidget`: Unified VD/Wiggle display-mode switcher.
+- `SeismicView`: Composite 3D+2D+toolbar widget (drop-in for any PySide6 app).
+- `SeismicCache`: LRU slice cache (default 50 entries, count-based eviction).
+- `ColormapManager`: seismic/gray/jet/hsv colormaps with LUT caching.
+- `HorizonParser`: Tab-separated horizon file parser with nearest/RBF interpolation.
+- `SeismicVolumeMeta`, `SliceInfo`, `HorizonData`: Pydantic data models.
+- Async synthetic data generation and SEGY loading via QThread workers.
+- `examples/demo.py` and `examples/load_segy.py` runnable examples.
+- `python -m geoviz_seismic` entry point for quick demo.

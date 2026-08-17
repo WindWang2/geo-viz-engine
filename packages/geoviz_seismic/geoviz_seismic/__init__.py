@@ -32,7 +32,7 @@ from .stratal import (
     validate_horizon_pair,
 )
 
-__version__ = "0.1.2"
+__version__ = "0.4.0"
 
 __all__ = [
     "ColormapManager",

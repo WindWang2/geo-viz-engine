@@ -58,6 +58,7 @@ class WellTiePanel(QWidget):
         self._tie_synthetic_calibration = None
         self._shift_samples = None
         self._correlation_coeff = None
+        self._dt_ms = 4.0
 
         self._build_ui()
 
@@ -183,6 +184,11 @@ class WellTiePanel(QWidget):
         self._sonic = np.asarray(sonic, dtype=np.float64)
         self._density = np.asarray(density, dtype=np.float64)
 
+    def set_sample_interval(self, dt_ms: float) -> None:
+        """Use the survey sample interval when generating the synthetic."""
+        dt = float(dt_ms)
+        self._dt_ms = dt if dt > 0.0 else 4.0
+
     def generate_synthetic(self, dt_ms: float = 4.0):
         """Generate synthetic seismogram from stored logs and wavelet params."""
         if self._calibration is None or self._sonic is None:
@@ -290,7 +296,7 @@ class WellTiePanel(QWidget):
         self.auto_tie_requested.emit()
 
     def _on_generate(self):
-        self.generate_synthetic(dt_ms=4.0)
+        self.generate_synthetic(dt_ms=self._dt_ms)
 
     def _on_export(self):
         if self._calibration is None:

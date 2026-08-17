@@ -1,8 +1,10 @@
 # geoviz-well-log
 
-基于 ECharts 的测井可视化渲染引擎，面向地质工程桌面应用（PySide6）。
+基于 **QPainter** 的测井可视化渲染引擎，面向地质工程桌面应用（PySide6）。
 
 支持测井曲线、岩性剖面、沉积相、地层系统、体系域等多种轨道类型，内置 SVG 矢量导出与多井同步滚动。
+
+`ChartEngine`（QWebEngineView + ECharts）仍保留为可选遗留路径，主渲染栈是 `WellLogCanvas`。
 
 ## 安装
 
@@ -10,36 +12,30 @@
 pip install -e .
 ```
 
-依赖：PySide6 ≥ 6.5, pydantic ≥ 2.0
+依赖：PySide6 ≥ 6.5, pydantic ≥ 2.0, numpy
 
 ## 30 秒上手
 
 ```python
-import sys, json
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
-from geoviz_well_log import ChartEngine
-from geoviz_well_log.export import export_dialog
+import sys
+import numpy as np
+from PySide6.QtWidgets import QApplication
+from geoviz_well_log import (
+    WellLogCanvas, WellLogData, CurveData, build_qpainter_tracks,
+)
 
 app = QApplication(sys.argv)
-
-engine = ChartEngine()
-engine.render_data(json.dumps({
-    "metadata": {"wellName": "Demo-1", "topDepth": 1000, "bottomDepth": 1200},
-    "tracks": [
-        {"type": "DepthTrack", "name": "深度\n(m)", "width": 6},
-        {
-            "type": "CurveTrack", "name": "GR", "width": 14,
-            "series": [{"name": "GR", "color": "#15803d", "lineStyle": "solid",
-                        "data": [[1000, 45], [1020, 67], [1040, 82], [1060, 55], [1080, 38], [1100, 61], [1120, 74], [1140, 50], [1160, 63], [1180, 70], [1200, 58]]}]
-        }
-    ]
-}))
-
-window = QWidget()
-layout = QVBoxLayout(window)
-layout.addWidget(engine)
-window.resize(400, 800)
-window.show()
+depth = np.linspace(1000, 1200, 50).tolist()
+data = WellLogData(
+    well_name="Demo-1",
+    top_depth=1000,
+    bottom_depth=1200,
+    curves=[CurveData(name="GR", depth=depth, values=[40 + i % 20 for i in range(len(depth))])],
+)
+canvas = WellLogCanvas()
+canvas.set_tracks(build_qpainter_tracks(data))
+canvas.resize(400, 800)
+canvas.show()
 app.exec()
 ```
 
@@ -120,9 +116,9 @@ app.exec()
 
 ## API 参考
 
-### ChartEngine
+### ChartEngine（遗留，可选）
 
-核心渲染控件，继承 `QWidget`，内嵌 QWebEngineView + ECharts。
+可选 ECharts 路径，继承 `QWidget`，内嵌 QWebEngineView。主应用与包默认 API 使用 `WellLogCanvas`。
 
 ```python
 from geoviz_well_log import ChartEngine

@@ -2,7 +2,7 @@
 
 > 完整 API 参考和示例见 `packages/geoviz_well_log/README.md`。
 
-`geoviz-well-log` 是一个为 PySide6 桌面应用设计的独立测井渲染引擎。它底层基于 ECharts (SVG 模式)，能够高效处理大规模测井数据并提供符合地质标准的专业制图能力。
+`geoviz-well-log` 是一个为 PySide6 桌面应用设计的独立测井渲染引擎。主路径是 QPainter（`WellLogCanvas` / `build_qpainter_tracks`）；包内仍保留可选的 ECharts `ChartEngine` 遗留实现。
 
 ## 1. 安装与配置
 
@@ -18,8 +18,9 @@ pip install -e ./packages/geoviz_well_log
 
 | 模块 | 职责 |
 |------|------|
-| `chart_engine.py` | `ChartEngine` — 核心渲染控件（QWebEngineView + ECharts） |
-| `payload_builder.py` | 数据变换函数 — `WellLogData` → ECharts JSON payload |
+| `renderer/` + `qpainter_builder.py` | `WellLogCanvas` — 主渲染路径（QPainter） |
+| `chart_engine.py` | `ChartEngine` — 可选遗留路径（QWebEngineView + ECharts） |
+| `payload_builder.py` | 数据变换函数 — `WellLogData` → 轨道 JSON（遗留 ECharts payload） |
 | `track_manager.py` | `TrackManager` — 轨道排序、可见性、合并/拆分管理 |
 | `export.py` | SVG/PDF/PNG 矢量导出 |
 | `pattern_map.py` | `PATTERN_MAP` — 岩性/沉积相 → SVG 图案 ID 映射 |
