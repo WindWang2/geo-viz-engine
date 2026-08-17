@@ -406,3 +406,110 @@ def test_edit_attributes_cmd_marks_feature_dirty():
     assert "A" in model.get_dirty_ids()
     cmd.undo(model)
     assert "A" in model.get_dirty_ids()
+
+
+# --- #551: shared-edge topology propagation -------------------------------
+
+
+def _shared_edge_ring(model: TopologyModel, feature_id: str):
+    """(ring ids, index j) such that ids[j] → ids[j+1] walks the x=5 border."""
+    ids = model.get_feature(feature_id).rings[0].vertex_ids
+    for j in range(len(ids) - 1):
+        a, b = model.get_vertex(ids[j]), model.get_vertex(ids[j + 1])
+        if (
+            a is not None and b is not None
+            and abs(a.x - 5.0) < 0.1 and abs(b.x - 5.0) < 0.1
+        ):
+            return ids, j
+    return ids, None
+
+
+def test_insert_vertex_propagates_to_shared_edge_neighbor():
+    """#551: inserting on a shared edge must split the edge in BOTH rings."""
+    model = _make_model_with_two_features()
+    ids_a, j = _shared_edge_ring(model, "A")
+    assert j is not None
+    edge = (ids_a[j], ids_a[j + 1])
+    insert_index = j + 1
+
+    cmd = InsertVertexCmd(5.0, 5.0, edge, "A", 0, insert_index)
+    cmd.execute(model)
+    new_vid = cmd._new_vertex_id
+    assert new_vid is not None
+
+    # BOTH features' rings now contain the new vertex on the shared border.
+    assert new_vid in model.get_feature("A").rings[0].vertex_ids
+    assert new_vid in model.get_feature("B").rings[0].vertex_ids
+    # The new sub-edges are registered as shared.
+    for sub in ((min(edge[0], new_vid), max(edge[0], new_vid)),
+                (min(edge[1], new_vid), max(edge[1], new_vid))):
+        assert model.get_features_for_edge(sub) == {"A", "B"}
+    # The pre-split edge is gone from the index.
+    assert model.get_features_for_edge(edge) == set()
+
+    # Undo removes it from both rings and the graph.
+    cmd.undo(model)
+    assert new_vid not in model.get_feature("A").rings[0].vertex_ids
+    assert new_vid not in model.get_feature("B").rings[0].vertex_ids
+    assert model.get_vertex(new_vid) is None
+    assert model.get_features_for_edge(edge) == {"A", "B"}
+
+
+def test_delete_shared_vertex_propagates_to_neighbor():
+    """#551: deleting a shared vertex removes it from every ring or nothing."""
+    model = _make_model_with_two_features()
+    # Insert on the shared edge first (propagating), then delete that vertex.
+    ids_a, j = _shared_edge_ring(model, "A")
+    edge = (ids_a[j], ids_a[j + 1])
+    ins = InsertVertexCmd(5.0, 5.0, edge, "A", 0, j + 1)
+    ins.execute(model)
+    shared_vid = ins._new_vertex_id
+
+    cmd = DeleteVertexCmd(shared_vid, 5.0, 5.0, "A", 0, j + 1)
+    cmd.execute(model)
+    # Removed from BOTH rings...
+    assert shared_vid not in model.get_feature("A").rings[0].vertex_ids
+    assert shared_vid not in model.get_feature("B").rings[0].vertex_ids
+    # ...and the original edge is shared again.
+    assert model.get_features_for_edge(edge) == {"A", "B"}
+
+    cmd.undo(model)
+    assert shared_vid in model.get_feature("A").rings[0].vertex_ids
+    assert shared_vid in model.get_feature("B").rings[0].vertex_ids
+    assert model.get_vertex(shared_vid) is not None
+
+
+def test_delete_shared_vertex_rejected_when_neighbor_would_degenerate():
+    """#551: a delete that would drop any ring below 3 logical vertices is a
+    full no-op, never a partial corruption."""
+    model = TopologyBuilder.from_features(
+        [
+            {
+                "type": "Feature",
+                "properties": {"id": "A", "facies": "砂岩", "level": "facies", "name": "A"},
+                "geometry": {"type": "Polygon",
+                             "coordinates": [[[0,0],[5,0],[5,10],[0,10],[0,0]]]},
+            },
+            {
+                "type": "Feature",
+                "properties": {"id": "T", "facies": "泥岩", "level": "facies", "name": "T"},
+                "geometry": {"type": "Polygon",
+                             "coordinates": [[[5,0],[6,0],[5,10],[5,0]]]},
+            },
+        ]
+    )
+    # T is a degenerate 3-vertex triangle sharing the whole x=5 border with A.
+    ids_a, j = _shared_edge_ring(model, "A")
+    # shared border endpoints: bottom (5,0) and top (5,10)
+    bottom = ids_a[j]
+    ref_t = model.get_feature("T")
+    assert bottom in ref_t.rings[0].vertex_ids
+
+    before_a = list(model.get_feature("A").rings[0].vertex_ids)
+    before_t = list(ref_t.rings[0].vertex_ids)
+    cmd = DeleteVertexCmd(bottom, 5.0, 0.0, "A", 0, 0)
+    cmd.execute(model)
+    # A can afford the delete but T cannot → nothing changed anywhere.
+    assert model.get_feature("A").rings[0].vertex_ids == before_a
+    assert ref_t.rings[0].vertex_ids == before_t
+    assert model.get_vertex(bottom) is not None

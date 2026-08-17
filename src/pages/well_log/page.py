@@ -736,11 +736,11 @@ class WellLogPage(QWidget):
 
                 self._current_xls_path = str(dst_path)
 
+                # Keep the shared catalog pointing at the converted file
+                # (#566): the old private _WELL_REGISTRY dict was removed
+                # when well_registry moved to the WellCatalog API.
                 import src.data.well_registry
-                entry = src.data.well_registry._WELL_REGISTRY.get(self._current_well)
-                if entry:
-                    loader_fn, _ = entry
-                    src.data.well_registry._WELL_REGISTRY[self._current_well] = (loader_fn, dst_path)
+                src.data.well_registry.update_well_file(self._current_well, dst_path)
 
                 print("[AI Prediction] Conversion successful. Switched to .xlsx mode.")
             except Exception as conv_err:

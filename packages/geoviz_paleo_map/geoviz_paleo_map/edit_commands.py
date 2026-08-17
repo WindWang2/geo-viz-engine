@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from geoviz_paleo_map.topology import TopologyModel, RingRef
+from geoviz_paleo_map.topology import TopologyModel, RingRef, TopologyVertex
 
 
 class EditCommand(ABC):
@@ -99,8 +99,29 @@ class MovePolygonCmd(EditCommand):
         return result
 
 
+def _rings_sharing_edge(model: TopologyModel,
+                        edge: tuple[int, int]) -> list[tuple[str, int, int]]:
+    """Every (feature_id, ring_index, insert_pos) whose ring walks *edge*.
+
+    The insert position sits between the two edge endpoints, so inserting a
+    vertex there splits the edge in that ring. Shared borders are modeled by
+    identical vertex ids in adjacent rings — an edge split must land in every
+    ring that walks the edge, or the polygons silently diverge (#551).
+    """
+    a, b = edge
+    sites: list[tuple[str, int, int]] = []
+    for fid, ref in model.all_features().items():
+        for ri, ring in enumerate(ref.rings):
+            ids = ring.vertex_ids
+            for i in range(len(ids) - 1):
+                if (ids[i] == a and ids[i + 1] == b) or (ids[i] == b and ids[i + 1] == a):
+                    sites.append((fid, ri, i + 1))
+    return sites
+
+
 class InsertVertexCmd(EditCommand):
-    """Insert a new vertex on an edge of a feature's ring."""
+    """Insert a new vertex on an edge, propagating the split to every ring
+    that shares the edge (shared-border topology, #551)."""
 
     def __init__(self, x: float, y: float,
                  edge: tuple[int, int],
@@ -112,6 +133,7 @@ class InsertVertexCmd(EditCommand):
         self.ring_index = ring_index
         self.insert_index = insert_index
         self._new_vertex_id: int | None = None
+        self._touched: list[tuple[str, int]] = []
 
     def execute(self, model: TopologyModel) -> None:
         ref = model.get_feature(self.feature_id)
@@ -119,66 +141,64 @@ class InsertVertexCmd(EditCommand):
             return
         ring = ref.rings[self.ring_index]
         ids = ring.vertex_ids
-        # Capture old edge before insertion
-        if self.insert_index > 0 and self.insert_index < len(ids):
-            old_v1 = ids[self.insert_index - 1]
-            old_v2 = ids[self.insert_index]
+        sites: list[tuple[str, int, int]] = []
+        if 0 < self.insert_index < len(ids):
+            old_v1, old_v2 = ids[self.insert_index - 1], ids[self.insert_index]
             old_edge = (min(old_v1, old_v2), max(old_v1, old_v2))
-            fids = model._edge_index.get(old_edge)
-            if fids:
-                fids.discard(self.feature_id)
-                if not fids:
-                    del model._edge_index[old_edge]
-        # Now insert vertex
+            sites = _rings_sharing_edge(model, old_edge)
         v = model.add_vertex(self.x, self.y)
         self._new_vertex_id = v.id
-        ring.vertex_ids.insert(self.insert_index, v.id)
-        # Register new edges
-        ids = ring.vertex_ids
-        if self.insert_index > 0:
-            e1 = (min(ids[self.insert_index - 1], v.id), max(ids[self.insert_index - 1], v.id))
-            model._edge_index.setdefault(e1, set()).add(self.feature_id)
-        if self.insert_index < len(ids) - 1:
-            e2 = (min(v.id, ids[self.insert_index + 1]), max(v.id, ids[self.insert_index + 1]))
-            model._edge_index.setdefault(e2, set()).add(self.feature_id)
+        self._touched = []
+        if sites:
+            # Insert into every ring sharing the edge. Sites are grouped per
+            # ring and applied right-to-left so earlier positions stay valid
+            # when a degenerate ring walks the same edge twice.
+            by_ring: dict[tuple[str, int], list[int]] = {}
+            for fid, ri, pos in sites:
+                by_ring.setdefault((fid, ri), []).append(pos)
+            for (fid, ri), positions in by_ring.items():
+                fref = model.get_feature(fid)
+                if fref is None or ri >= len(fref.rings):
+                    continue
+                for pos in sorted(set(positions), reverse=True):
+                    fref.rings[ri].vertex_ids.insert(pos, v.id)
+                model._mark_feature_dirty(fid)
+                self._touched.append((fid, ri))
+        else:
+            # Edge not registered as shared: plain per-ring insert.
+            ring.vertex_ids.insert(self.insert_index, v.id)
+            model._mark_feature_dirty(self.feature_id)
+            self._touched = [(self.feature_id, self.ring_index)]
+        model._rebuild_indexes()
         model.mark_dirty()
 
     def undo(self, model: TopologyModel) -> None:
         if self._new_vertex_id is None:
             return
-        ref = model.get_feature(self.feature_id)
-        if ref is None or self.ring_index >= len(ref.rings):
-            return
-        ring = ref.rings[self.ring_index]
-        idx = ring.vertex_ids.index(self._new_vertex_id) if self._new_vertex_id in ring.vertex_ids else -1
-        if idx < 0:
-            return
-        # Capture neighbors for edge restoration
-        prev_vid = ring.vertex_ids[idx - 1] if idx > 0 else None
-        next_vid = ring.vertex_ids[idx + 1] if idx < len(ring.vertex_ids) - 1 else None
-        # Remove new edges from index
-        for neighbor in [prev_vid, next_vid]:
-            if neighbor is not None:
-                edge = (min(self._new_vertex_id, neighbor), max(self._new_vertex_id, neighbor))
-                fids = model._edge_index.get(edge)
-                if fids:
-                    fids.discard(self.feature_id)
-                    if not fids:
-                        del model._edge_index[edge]
-        # Restore old edge
-        if prev_vid is not None and next_vid is not None:
-            old_edge = (min(prev_vid, next_vid), max(prev_vid, next_vid))
-            model._edge_index.setdefault(old_edge, set()).add(self.feature_id)
-        # Remove vertex from ring
-        ring.vertex_ids.remove(self._new_vertex_id)
-        # Remove vertex from model
+        for fid, ri in self._touched:
+            fref = model.get_feature(fid)
+            if fref is None or ri >= len(fref.rings):
+                continue
+            ring = fref.rings[ri]
+            while self._new_vertex_id in ring.vertex_ids:
+                ring.vertex_ids.remove(self._new_vertex_id)
+            model._mark_feature_dirty(fid)
         model._vertices.pop(self._new_vertex_id, None)
         model._vertex_to_features.pop(self._new_vertex_id, None)
+        self._touched = []
+        model._rebuild_indexes()
         model.mark_dirty()
 
 
 class DeleteVertexCmd(EditCommand):
-    """Delete a vertex from a feature's ring."""
+    """Delete a vertex from every ring that references it.
+
+    A shared vertex exists in the adjacent rings of multiple features;
+    removing it from only one ring leaves the neighbors routing through a
+    point the edited polygon no longer visits, opening gaps/overlaps along
+    the shared border (#551). The delete is rejected outright when any
+    affected ring would fall below its minimum logical vertex count.
+    """
 
     def __init__(self, vertex_id: int, x: float, y: float,
                  feature_id: str, ring_index: int, remove_index: int):
@@ -188,43 +208,62 @@ class DeleteVertexCmd(EditCommand):
         self.feature_id = feature_id
         self.ring_index = ring_index
         self.remove_index = remove_index
-        self._before_ids: list[int] | None = None
+        self._before: list[tuple[str, int, list[int]]] | None = None
 
     def execute(self, model: TopologyModel) -> None:
-        ref = model.get_feature(self.feature_id)
-        if ref is None or self.ring_index >= len(ref.rings):
+        vid = self.vertex_id
+        sites = [
+            (fid, ri)
+            for fid, ref in model.all_features().items()
+            for ri, ring in enumerate(ref.rings)
+            if vid in ring.vertex_ids
+        ]
+        if not sites:
             return
-        ring = ref.rings[self.ring_index]
-        ids = ring.vertex_ids
-        is_closed = len(ids) >= 2 and ids[0] == ids[-1]
-        logical_ids = list(ids[:-1] if is_closed else ids)
-        if len(logical_ids) <= 3 or self.vertex_id not in logical_ids:
-            return
-        requested_index = self.remove_index
-        if requested_index == len(ids) - 1 and is_closed:
-            requested_index = 0
-        if not (
-            0 <= requested_index < len(logical_ids)
-            and logical_ids[requested_index] == self.vertex_id
+        # Reject outright when any affected ring would fall below three
+        # logical vertices — deleting only from the rings that can afford it
+        # would corrupt the shared border the model exists to keep identical.
+        for fid, ri in sites:
+            ring = model.get_feature(fid).rings[ri]
+            ids = ring.vertex_ids
+            is_closed = len(ids) >= 2 and ids[0] == ids[-1]
+            logical = ids[:-1] if is_closed else ids
+            if vid in logical and len(logical) <= 3:
+                return
+        self._before = []
+        for fid, ri in sites:
+            ring = model.get_feature(fid).rings[ri]
+            self._before.append((fid, ri, list(ring.vertex_ids)))
+            ids = ring.vertex_ids
+            is_closed = len(ids) >= 2 and ids[0] == ids[-1]
+            logical = [x for x in (ids[:-1] if is_closed else ids) if x != vid]
+            ring.vertex_ids[:] = [*logical, logical[0]] if is_closed else logical
+            model._mark_feature_dirty(fid)
+        # Drop the vertex from the graph once no ring references it.
+        if not any(
+            vid in ring.vertex_ids
+            for ref in model.all_features().values()
+            for ring in ref.rings
         ):
-            requested_index = logical_ids.index(self.vertex_id)
-        self._before_ids = list(ids)
-        del logical_ids[requested_index]
-        ring.vertex_ids[:] = [*logical_ids, logical_ids[0]]
+            model._vertices.pop(vid, None)
+            model._vertex_to_features.pop(vid, None)
         model._rebuild_indexes()
-        model._mark_feature_dirty(self.feature_id)
         model.mark_dirty()
 
     def undo(self, model: TopologyModel) -> None:
-        ref = model.get_feature(self.feature_id)
-        if ref is None or self.ring_index >= len(ref.rings):
+        if not self._before:
             return
-        if self._before_ids is None:
-            return
-        ring = ref.rings[self.ring_index]
-        ring.vertex_ids[:] = self._before_ids
+        for fid, ri, before_ids in self._before:
+            ref = model.get_feature(fid)
+            if ref is None or ri >= len(ref.rings):
+                continue
+            ref.rings[ri].vertex_ids[:] = before_ids
+            model._mark_feature_dirty(fid)
+        if self.vertex_id not in model._vertices:
+            model._vertices[self.vertex_id] = TopologyVertex(
+                id=self.vertex_id, x=self.x, y=self.y
+            )
         model._rebuild_indexes()
-        model._mark_feature_dirty(self.feature_id)
         model.mark_dirty()
 
 

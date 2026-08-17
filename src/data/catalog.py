@@ -79,9 +79,12 @@ class WellCatalog:
             if stem not in registry:
                 registry[stem] = p
 
-        # register_well_file() 的显式登记在重建后保留（按存在性过滤）
+        # register_well_file() 的显式登记在重建后以覆盖语义保留：显式
+        # 注册表达用户意图（导入、xls→xlsx 原地转换 #566），不能被目录
+        # 扫描的启发式结果静默回滚；此前 setdefault 使转换在下一次
+        # get_well_file() 重建时失效。
         for name, p in self._registry.items():
-            registry.setdefault(name, p)
+            registry[name] = p
 
         self._registry = {k: v for k, v in registry.items() if v.exists()}
 
