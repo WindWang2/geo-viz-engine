@@ -9,8 +9,70 @@ from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtWidgets import QApplication, QWidget
 
-from geoviz_plots.chart.axes import calculate_ticks
+from geoviz_plots.chart.axes import calculate_ticks, format_tick
 from geoviz_plots.chart.series import LineSeries, ScatterSeries, lttb_downsample
+
+
+class _KDTreeMetadata:
+    """Lazy (name, local_idx, x, y) view over packed KD-tree arrays.
+
+    Series names are stored once with offset ranges so a 1e5-point scatter
+    does not allocate 1e5 Python tuples.
+    """
+
+    __slots__ = ("_names", "_offsets", "_indices", "_xy")
+
+    def __init__(self, names, offsets, indices, xy):
+        self._names = list(names)
+        self._offsets = np.asarray(offsets, dtype=np.int64)
+        self._indices = indices
+        self._xy = xy
+
+    def __len__(self):
+        return int(self._indices.shape[0])
+
+    def __bool__(self):
+        return len(self) > 0
+
+    def __eq__(self, other):
+        if other == [] or other is None:
+            return len(self) == 0
+        try:
+            return list(self) == list(other)
+        except TypeError:
+            return False
+
+    def _name_at(self, idx: int) -> str:
+        series_i = int(np.searchsorted(self._offsets, idx, side="right") - 1)
+        return self._names[series_i]
+
+    def __getitem__(self, idx):
+        return (
+            self._name_at(idx),
+            int(self._indices[idx]),
+            float(self._xy[idx, 0]),
+            float(self._xy[idx, 1]),
+        )
+
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self[i]
+
+    def clear(self):
+        self._names = []
+        self._offsets = np.zeros(1, dtype=np.int64)
+        self._indices = np.empty((0,), dtype=np.int64)
+        self._xy = np.empty((0, 2), dtype=np.float64)
+
+
+def _empty_tree_metadata():
+    return _KDTreeMetadata(
+        [],
+        np.zeros(1, dtype=np.int64),
+        np.empty((0,), dtype=np.int64),
+        np.empty((0, 2), dtype=np.float64),
+    )
+
 
 class PlotWidget(QWidget):
     """A premium, responsive, QPainter-based 2D plotting widget for lines and scatter series.
@@ -80,42 +142,69 @@ class PlotWidget(QWidget):
         self.highlighted_points = {}  # series_name -> set(index)
         
         self._kdtree = None
-        self._tree_metadata = [] # List of (series_name, local_index, x_val, y_val)
+        self._tree_xy = np.empty((0, 2), dtype=np.float64)
+        self._tree_names = []
+        self._tree_offsets = np.zeros(1, dtype=np.int64)
+        self._tree_indices = np.empty((0,), dtype=np.int64)
+        self._tree_metadata = _empty_tree_metadata()
+        self.downsample_threshold = 2000
+
+    def _reset_kdtree(self):
+        self._kdtree = None
+        self._tree_xy = np.empty((0, 2), dtype=np.float64)
+        self._tree_names = []
+        self._tree_offsets = np.zeros(1, dtype=np.int64)
+        self._tree_indices = np.empty((0,), dtype=np.int64)
+        self._tree_metadata = _empty_tree_metadata()
 
     def _rebuild_kdtree(self):
         """Build a spatial index of all points for fast snapping."""
-        import numpy as np
         try:
-            from scipy.spatial import KDTree
+            from scipy.spatial import cKDTree as KDTree
         except ImportError:
-            self._kdtree = None
+            self._reset_kdtree()
             return
 
-        points = []
-        metadata = []
-        
+        xs_parts = []
+        ys_parts = []
+        names = []
+        offsets = [0]
+        idx_parts = []
         for s in self.series_list:
             if not s.visible or len(s.x) == 0:
                 continue
-            
-            mask = ~np.isnan(s.x) & ~np.isnan(s.y)
-            sx = s.x[mask]
-            sy = s.y[mask]
-            indices = np.where(mask)[0]
-            
-            for i in range(len(sx)):
-                points.append([sx[i], sy[i]])
-                metadata.append((s.name, int(indices[i]), float(sx[i]), float(sy[i])))
-        
-        if points:
-            self._kdtree = KDTree(np.array(points))
-            self._tree_metadata = metadata
-        else:
-            self._kdtree = None
-            self._tree_metadata = []
-        
-        # Downsampling threshold
-        self.downsample_threshold = 2000
+            mask = np.isfinite(s.x) & np.isfinite(s.y)
+            if not np.any(mask):
+                continue
+            sx = np.asarray(s.x[mask], dtype=np.float64)
+            sy = np.asarray(s.y[mask], dtype=np.float64)
+            xs_parts.append(sx)
+            ys_parts.append(sy)
+            names.append(s.name)
+            offsets.append(offsets[-1] + int(sx.shape[0]))
+            idx_parts.append(np.flatnonzero(mask).astype(np.int64, copy=False))
+
+        if not xs_parts:
+            self._reset_kdtree()
+            return
+
+        points = np.column_stack((np.concatenate(xs_parts), np.concatenate(ys_parts)))
+        self._tree_xy = points
+        self._tree_names = names
+        self._tree_offsets = np.asarray(offsets, dtype=np.int64)
+        self._tree_indices = np.concatenate(idx_parts)
+        self._kdtree = KDTree(
+            points,
+            copy_data=False,
+            compact_nodes=False,
+            balanced_tree=False,
+        )
+        self._tree_metadata = _KDTreeMetadata(
+            self._tree_names,
+            self._tree_offsets,
+            self._tree_indices,
+            self._tree_xy,
+        )
 
     def add_series(self, series):
         """Add a data series (LineSeries or ScatterSeries) to the plot."""
@@ -588,43 +677,62 @@ class PlotWidget(QWidget):
         closest_dist = 15.0  # Activation radius in pixels
         closest_pt = None  # (series, index, x, y)
         
-        if self._kdtree is not None:
+        if self._kdtree is not None and len(self._tree_indices):
             # 1. Map mouse to data space
             mx_data, my_data = self.pixel_to_data(mouse_pos.x(), mouse_pos.y())
             
             # 2. Query nearest neighbors in data space
             # Since aspect ratio might be unequal, we find 10 neighbors and check screen dist
-            dists, indices = self._kdtree.query([mx_data, my_data], k=min(10, len(self._tree_metadata)))
+            _dists, indices = self._kdtree.query(
+                [mx_data, my_data], k=min(10, len(self._tree_indices))
+            )
             
             if isinstance(indices, (int, np.integer)):
                 indices = [indices]
                 
             for idx in indices:
-                if idx >= len(self._tree_metadata):
+                if idx >= len(self._tree_indices):
                     continue
-                s_name, local_idx, x_val, y_val = self._tree_metadata[idx]
+                series_i = int(
+                    np.searchsorted(self._tree_offsets, idx, side="right") - 1
+                )
+                s_name = self._tree_names[series_i]
+                local_idx = int(self._tree_indices[idx])
+                x_val = float(self._tree_xy[idx, 0])
+                y_val = float(self._tree_xy[idx, 1])
                 px, py = self.data_to_pixel(x_val, y_val)
                 dist = math.hypot(mouse_pos.x() - px, mouse_pos.y() - py)
                 if dist < closest_dist:
                     closest_dist = dist
                     closest_pt = (s_name, local_idx, x_val, y_val)
         else:
-            # Fallback to slow loop if tree not available
+            left, right, top, bottom = self.get_plot_rect(self.width(), self.height())
+            plot_w = max(right - left, 1.0)
+            plot_h = max(bottom - top, 1.0)
+            x_range = self.view_xmax - self.view_xmin or 1.0
+            y_range = self.view_ymax - self.view_ymin or 1.0
+            mx, my = float(mouse_pos.x()), float(mouse_pos.y())
             for s in self.series_list:
                 if not s.visible or len(s.x) == 0:
                     continue
-                    
                 mask = ~np.isnan(s.x) & ~np.isnan(s.y)
-                sx = s.x[mask]
-                sy = s.y[mask]
-                indices = np.where(mask)[0]
-                
-                for idx, x_val, y_val in zip(indices, sx, sy):
-                    px, py = self.data_to_pixel(x_val, y_val)
-                    dist = math.hypot(mouse_pos.x() - px, mouse_pos.y() - py)
-                    if dist < closest_dist:
-                        closest_dist = dist
-                        closest_pt = (s.name, idx, x_val, y_val)
+                if not np.any(mask):
+                    continue
+                sx = np.asarray(s.x[mask], dtype=np.float64)
+                sy = np.asarray(s.y[mask], dtype=np.float64)
+                indices = np.nonzero(mask)[0]
+                px = left + (sx - self.view_xmin) / x_range * plot_w
+                py = bottom - (sy - self.view_ymin) / y_range * plot_h
+                dist = np.hypot(mx - px, my - py)
+                j = int(np.argmin(dist))
+                if dist[j] < closest_dist:
+                    closest_dist = float(dist[j])
+                    closest_pt = (
+                        s.name,
+                        int(indices[j]),
+                        float(sx[j]),
+                        float(sy[j]),
+                    )
                     
         if closest_pt:
             s_name, idx, x_val, y_val = closest_pt
@@ -825,7 +933,7 @@ class PlotWidget(QWidget):
             
             # Hover Coordinate text label near the mouse
             dx, dy = self.pixel_to_data(self.hover_pos.x(), self.hover_pos.y())
-            lbl_txt = f"X: {dx:.2f}\nY: {dy:.2f}"
+            lbl_txt = f"X: {format_tick(dx, x_step)}\nY: {format_tick(dy, y_step)}"
             
             painter.setFont(QFont("Monospace", 8))
             painter.setPen(self.text_color)
@@ -888,7 +996,7 @@ class PlotWidget(QWidget):
                 painter.drawLine(px, bottom, px, bottom + 5)
                 
                 # Center label horizontally
-                label = f"{xt:.2f}"
+                label = format_tick(xt, x_step)
                 lbl_w = font_metrics.horizontalAdvance(label)
                 painter.setPen(self.text_color)
                 painter.drawText(px - lbl_w / 2, bottom + 20, label)
@@ -901,7 +1009,7 @@ class PlotWidget(QWidget):
                 painter.drawLine(left - 5, py, left, py)
                 
                 # Right align label on Y axis
-                label = f"{yt:.2f}"
+                label = format_tick(yt, y_step)
                 lbl_w = font_metrics.horizontalAdvance(label)
                 painter.setPen(self.text_color)
                 painter.drawText(left - lbl_w - 10, py + font_metrics.height() / 4, label)

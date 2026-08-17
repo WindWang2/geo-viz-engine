@@ -2,7 +2,7 @@
 
 __version__ = "0.1.0"
 
-from geoviz_plots.chart.axes import calculate_ticks, nice_number
+from geoviz_plots.chart.axes import calculate_ticks, format_tick, nice_number
 from geoviz_plots.chart.series import Series, LineSeries, ScatterSeries, lttb_downsample
 from geoviz_plots.chart.plot_widget import PlotWidget
 
@@ -94,6 +94,7 @@ from geoviz_plots.map_edit import (
 
 __all__ = [
     "calculate_ticks",
+    "format_tick",
     "nice_number",
     "Series",
     "LineSeries",

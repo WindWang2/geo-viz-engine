@@ -7,7 +7,7 @@ from PySide6.QtGui import QPainter, QPen, QColor, QFont, QFontMetrics, QBrush, Q
 from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtPrintSupport import QPrinter
 
-from geoviz_plots.chart.axes import calculate_ticks
+from geoviz_plots.chart.axes import calculate_ticks, format_tick
 from geoviz_plots.surface.marching_squares import extract_contour_lines, extract_filled_contours
 from geoviz_plots.surface.colormaps import COLORMAPS, sample_colormap
 
@@ -550,6 +550,9 @@ class SurfaceWidget(QWidget):
                 pass  # Fail-safe protection
             
         painter.restore()  # End clip rect
+
+        x_ticks, x_step = calculate_ticks(self.view_xmin, self.view_xmax, 6)
+        y_ticks, y_step = calculate_ticks(self.view_ymin, self.view_ymax, 6)
         
         # 5. Draw Interactive Coordinates Hover
         if self.hover_pos is not None:
@@ -561,7 +564,7 @@ class SurfaceWidget(QWidget):
             
             # Text coordinates bubble
             dx, dy = self.pixel_to_data(self.hover_pos.x(), self.hover_pos.y())
-            lbl_txt = f"X: {dx:.2f}\nY: {dy:.2f}"
+            lbl_txt = f"X: {format_tick(dx, x_step)}\nY: {format_tick(dy, y_step)}"
             
             painter.setFont(QFont("Monospace", 8))
             painter.setPen(self.text_color)
@@ -578,8 +581,6 @@ class SurfaceWidget(QWidget):
         painter.drawRect(left, top, plot_w, plot_h)
         
         font_metrics = QFontMetrics(painter.font())
-        x_ticks, x_step = calculate_ticks(self.view_xmin, self.view_xmax, 6)
-        y_ticks, y_step = calculate_ticks(self.view_ymin, self.view_ymax, 6)
         
         # X Ticks
         for xt in x_ticks:
@@ -587,7 +588,7 @@ class SurfaceWidget(QWidget):
                 px, _ = to_p(xt, self.view_ymin)
                 painter.drawLine(px, bottom, px, bottom + 5)
                 
-                label = f"{xt:.2f}"
+                label = format_tick(xt, x_step)
                 lbl_w = font_metrics.horizontalAdvance(label)
                 painter.setPen(self.text_color)
                 painter.drawText(px - lbl_w / 2, bottom + 20, label)
@@ -599,7 +600,7 @@ class SurfaceWidget(QWidget):
                 _, py = to_p(self.view_xmin, yt)
                 painter.drawLine(left - 5, py, left, py)
                 
-                label = f"{yt:.2f}"
+                label = format_tick(yt, y_step)
                 lbl_w = font_metrics.horizontalAdvance(label)
                 painter.setPen(self.text_color)
                 painter.drawText(left - lbl_w - 10, py + font_metrics.height() / 4, label)

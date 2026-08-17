@@ -272,12 +272,17 @@ class FenceProfile2D(QWidget):
         w, h = self._plot_width, self._pix.height()
         if w <= 1 or h <= 1:
             return
-        # map label coords to pixmap
+        # QLabel AlignCenter places the pixmap in the middle of the label.
+        # Map from label coordinates into pixmap space, then reject clicks
+        # that land in the side/top margins or on the legend rail.
         lw, lh = max(self._label.width(), 1), max(self._label.height(), 1)
-        px = x / lw * (self._pix.width() - 1)
+        pw, ph = self._pix.width(), self._pix.height()
+        px = x - (lw - pw) / 2.0
+        py = y - (lh - ph) / 2.0
+        if px < 0.0 or py < 0.0 or px >= pw or py >= ph:
+            return
         if px >= w:
             return
-        py = y / lh * (h - 1)
         s = px / max(w - 1, 1) * self._smax
         z = self._z0 + (py / max(h - 1, 1)) * (self._z1 - self._z0)
         self.probe_changed.emit(float(s), float(z))

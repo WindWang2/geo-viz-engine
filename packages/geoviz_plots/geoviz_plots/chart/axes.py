@@ -79,3 +79,18 @@ def calculate_ticks(vmin: float, vmax: float, max_ticks: int) -> tuple[list[floa
         current += step
         
     return ticks, step
+
+
+def format_tick(value: float, step: float) -> str:
+    """Format a tick or hover value with decimals matching ``step``.
+
+    ``calculate_ticks`` already chooses a step that distinguishes adjacent
+    ticks; labels must use that precision so a 0.001–0.004 window does not
+    collapse to identical ``0.00`` strings.
+    """
+    if not math.isfinite(value):
+        return str(value)
+    if not math.isfinite(step) or step <= 0.0:
+        step = abs(value) if value != 0.0 else 1.0
+    decimals = min(12, max(0, -math.floor(math.log10(step))))
+    return f"{value:.{decimals}f}"

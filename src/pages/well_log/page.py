@@ -817,17 +817,20 @@ class WellLogPage(QWidget):
         self._pred_worker.error.connect(self._on_prediction_error)
         self._pred_worker.finished.connect(self._pred_thread.quit)
         self._pred_worker.error.connect(self._pred_thread.quit)
+        self._pred_thread.finished.connect(self._on_pred_thread_finished)
 
         self._pred_thread.start()
 
     def _on_prediction_progress(self, val, msg):
         self._progress.update_progress(val, msg)
 
+    def _on_pred_thread_finished(self):
+        self._pred_thread = None
+        self._pred_worker = None
+
     def _on_prediction_finished(self, records):
         # 先取 worker 记录的输出文件路径，用于完成消息告知用户结果位置
         out_path = getattr(self._pred_worker, "output_path", None)
-        self._pred_thread = None
-        self._pred_worker = None
         self._progress.hide_progress()
         self._well_combo.setEnabled(True)
         self._apply_ai_prediction(records)
@@ -840,8 +843,6 @@ class WellLogPage(QWidget):
             QMessageBox.information(self, "AI 预测", "AI 预测完成！已成功渲染。")
 
     def _on_prediction_error(self, err_msg):
-        self._pred_thread = None
-        self._pred_worker = None
         self._progress.hide_progress()
         self._well_combo.setEnabled(True)
         QMessageBox.critical(self, "AI 预测错误", err_msg)

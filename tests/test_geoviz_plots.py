@@ -3,7 +3,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 
-from geoviz_plots.chart.axes import nice_number, calculate_ticks
+from geoviz_plots.chart.axes import nice_number, calculate_ticks, format_tick
 
 def test_nice_number_rounding():
     """Verify the nice_number function correctly rounds to friendly intervals (1, 2, 5, 10)."""
@@ -41,6 +41,16 @@ def test_calculate_ticks_sub_unity():
     for t in ticks:
         # Check all ticks are clean multiples of step
         assert (t / step) == pytest.approx(round(t / step))
+
+
+def test_format_tick_unique_for_milli_range():
+    """#554: labels must follow the tick step, not a hardcoded two decimals."""
+    ticks, step = calculate_ticks(0.001, 0.004, 6)
+    labels = [format_tick(t, step) for t in ticks]
+    assert "0.00" not in labels
+    assert len(set(labels)) == len(labels)
+    assert format_tick(0.001, 0.001) == "0.001"
+    assert format_tick(2.0, 1.0) == "2"
 
 import numpy as np
 from geoviz_plots.chart.series import LineSeries, ScatterSeries, lttb_downsample
@@ -469,6 +479,113 @@ def test_plot_widget_zoom_pan(qtbot):
     widget.zoom(1.5, 5.0, 5.0)
     # Range should shrink when zoom factor > 1.0 (zoom in)
     assert (widget.view_xmax - widget.view_xmin) < 10.0
+
+
+def test_plot_widget_tick_labels_unique_under_zoom(qtbot, monkeypatch):
+    """#554: render_plot must format ticks from the computed step."""
+    import geoviz_plots.chart.plot_widget as pw
+
+    formatter = getattr(pw, "format_tick", None)
+    assert formatter is not None, "plot_widget must format ticks via format_tick"
+    calls = []
+
+    def spy(value, step):
+        out = formatter(value, step)
+        calls.append(out)
+        return out
+
+    monkeypatch.setattr(pw, "format_tick", spy)
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 400)
+    widget.set_view_bounds((0.001, 0.004, 0.001, 0.004))
+    widget.grab()
+    assert calls
+    assert "0.00" not in calls
+    assert {"0.001", "0.002", "0.003", "0.004"}.issubset(set(calls))
+
+
+def test_rebuild_kdtree_large_series_is_fast(qtbot):
+    """#556: add_series must build the KD-tree without a per-point Python loop."""
+    import inspect
+    import time
+
+    src = inspect.getsource(PlotWidget._rebuild_kdtree)
+    assert "points.append" not in src
+    assert "np.column_stack" in src
+
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(400, 300)
+    rng = np.random.default_rng(0)
+    n = 100_000
+    series = ScatterSeries(rng.random(n), rng.random(n), name="pts")
+    t0 = time.perf_counter()
+    widget.add_series(series)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 0.05, f"add_series/KD-tree rebuild took {elapsed:.3f}s"
+    assert widget._kdtree is not None
+    assert len(widget._tree_metadata) == n
+    widget.autofit()
+    px, py = widget.data_to_pixel(float(series.x[0]), float(series.y[0]))
+    hit = widget.check_nearest_point(QPointF(px, py))
+    assert hit is not None
+    assert hit[0] == "pts"
+
+
+def test_cross_plot_paint_large_scatter_is_fast(qtbot):
+    """#552: painting 200k points must not walk drawEllipse per sample."""
+    import inspect
+    import time
+
+    from geoviz_plots.chart.cross_plot_widget import CrossPlotWidget
+
+    paint_src = inspect.getsource(CrossPlotWidget.paintEvent)
+    assert "for i in range(len(px))" not in paint_src
+    assert "_blit_scatter_points" in inspect.getsource(CrossPlotWidget)
+
+    widget = CrossPlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(600, 400)
+    rng = np.random.default_rng(0)
+    widget.set_scatter_data(rng.random(200_000), rng.random(200_000))
+    widget.show()
+    widget.repaint()
+    t0 = time.perf_counter()
+    widget.repaint()
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 0.1, f"CrossPlotWidget.paintEvent took {elapsed:.3f}s"
+
+
+def test_surface_widget_tick_labels_unique_under_zoom(qtbot, monkeypatch):
+    """#554: SurfaceWidget axis labels must also follow the tick step."""
+    import geoviz_plots.surface.surface_widget as sw
+
+    formatter = getattr(sw, "format_tick", None)
+    assert formatter is not None, "surface_widget must format ticks via format_tick"
+    calls = []
+
+    def spy(value, step):
+        out = formatter(value, step)
+        calls.append(out)
+        return out
+
+    monkeypatch.setattr(sw, "format_tick", spy)
+    widget = sw.SurfaceWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 400)
+    widget.set_grid_data(
+        np.array([0.001, 0.004]),
+        np.array([0.001, 0.004]),
+        np.array([[0.0, 1.0], [1.0, 2.0]]),
+        levels=[0.5, 1.5],
+    )
+    widget.view_xmin, widget.view_xmax = 0.001, 0.004
+    widget.view_ymin, widget.view_ymax = 0.001, 0.004
+    widget.grab()
+    assert calls
+    assert "0.00" not in calls
+    assert {"0.001", "0.002", "0.003", "0.004"}.issubset(set(calls))
 
 
 from geoviz_plots.interpolation.idw import interpolate_idw
