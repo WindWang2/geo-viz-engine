@@ -21,8 +21,16 @@ class IntervalTrack(BaseTrack):
                  header_height: int = 32, group_name: str = "", parent=None):
         super().__init__(label=label, width=width, header_height=header_height,
                          group_name=group_name, parent=parent)
-        self._intervals = intervals
         self._colors = colors or {}
+
+        self._intervals = intervals
+
+    @property
+    def intervals(self):
+        """Interval payload (#582): the section canvas discovers stratigraphy
+        tracks via a public ``intervals`` attribute; the private-only
+        ``_intervals`` made its horizon-link/facies-fill layer dead code."""
+        return self._intervals
 
     def _get_color(self, index: int, name: str) -> QColor:
         if name in self._colors:

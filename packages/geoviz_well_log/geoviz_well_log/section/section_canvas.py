@@ -23,6 +23,7 @@ class WellSectionCanvas(QWidget):
         self.setMouseTracking(True)
 
         self._wells: List[WellLogData] = []
+        self._formation_by_well: dict = {}
         self._well_tracks: List[List[BaseTrack]] = []
         self._inter_well_spacing: int = 180
         self._show_facies_fills: bool = True
@@ -56,18 +57,19 @@ class WellSectionCanvas(QWidget):
         self._transformer.global_min_depth = min(all_min, default=0.0)
         self._transformer.global_max_depth = max(all_max, default=1000.0)
 
-        # Update datum depths for available stratigraphy
-        datum_map = {}
+        # Per-well formation tops for datum flattening (#583): the old
+        # hasattr(w, "stratigraphy"/"formation_tops") probes matched no
+        # field of WellLogData and keyed entries by formation name while
+        # the transformer looks wells up by well id, so flattening never
+        # had any effect. Real payload: WellLogData.intervals.formation.
+        self._formation_by_well = {}
         for w in self._wells:
             w_id = getattr(w, "well_name", getattr(w, "well_id", str(w)))
-            if hasattr(w, "stratigraphy") and w.stratigraphy:
-                for strat in w.stratigraphy:
-                    datum_map[strat.name] = strat.top
-            elif hasattr(w, "formation_tops") and w.formation_tops:
-                for top_item in w.formation_tops:
-                    datum_map[getattr(top_item, "name", "")] = getattr(top_item, "top", 0.0)
-
-        self._transformer.datum_depths = datum_map
+            ivs = getattr(w, "intervals", None)
+            formation = getattr(ivs, "formation", None) if ivs is not None else None
+            if formation:
+                self._formation_by_well[w_id] = list(formation)
+        self._sync_datum_depths()
 
         self._cache_dirty = True
         self.update()
@@ -75,8 +77,34 @@ class WellSectionCanvas(QWidget):
     def set_datum_mode(self, mode: str, datum_name: str = "") -> None:
         self._transformer.mode = mode
         self._transformer.datum_name = datum_name
+        self._sync_datum_depths()
         self._cache_dirty = True
         self.update()
+
+    def available_datums(self) -> list[str]:
+        """Formation names usable as flattening datums (sorted, unique)."""
+        names: set[str] = set()
+        for tops in self._formation_by_well.values():
+            names.update(t.name for t in tops)
+        return sorted(names)
+
+    def _sync_datum_depths(self) -> None:
+        """Rebuild {well_id: depth} for the currently selected datum.
+
+        Wells that lack the selected formation are absent from the map, so
+        the transformer renders them in absolute mode (degraded, visible)
+        instead of silently flattening to a wrong depth.
+        """
+        name = self._transformer.datum_name
+        if not name:
+            self._transformer.datum_depths = {}
+            return
+        self._transformer.datum_depths = {
+            w_id: float(t.top)
+            for w_id, tops in self._formation_by_well.items()
+            for t in tops
+            if t.name == name
+        }
 
     def set_inter_well_spacing(self, spacing: int) -> None:
         self._inter_well_spacing = max(50, spacing)

@@ -41,9 +41,18 @@ def _parse_file(filepath: str) -> LASParseResult:
     for curve in header.curves:
         if curve.index == header.depth_index:
             continue
-        curves[curve.mnemonic] = values[curve.index]
-        units[curve.mnemonic] = curve.unit
-        descriptions[curve.mnemonic] = curve.description
+        name = curve.mnemonic
+        if name in curves:
+            # Duplicate mnemonics are legal LAS (repeated runs). Last-wins
+            # silently dropped the earlier column (#584); disambiguate with
+            # a visible suffix instead so every column survives.
+            suffix = 2
+            while f"{curve.mnemonic}_{suffix}" in curves:
+                suffix += 1
+            name = f"{curve.mnemonic}_{suffix}"
+        curves[name] = values[curve.index]
+        units[name] = curve.unit
+        descriptions[name] = curve.description
     return LASParseResult(
         well_name=header.well_name or "UNKNOWN",
         depth_name=depth_name,

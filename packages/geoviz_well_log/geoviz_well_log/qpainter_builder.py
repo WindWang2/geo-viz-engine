@@ -138,24 +138,28 @@ def build_qpainter_tracks(data: WellLogData, merge_groups: list[tuple[list[str],
             image_track.add_core_photo(photo)
         tracks.append(image_track)
 
-    # 8. Curve tracks — merge according to merge_groups
-    curve_map = {c.name: c for c in data.curves}
-    used: set[str] = set()
+    # 8. Curve tracks — merge according to merge_groups. Duplicate
+    # mnemonics must ALL render (#584): a name-keyed dict kept only the
+    # last column, and name-based `used` bookkeeping then hid every other
+    # duplicate from the ungrouped pass as well.
+    curve_map: dict[str, list] = {}
+    for c in data.curves:
+        curve_map.setdefault(c.name, []).append(c)
+    used: set[int] = set()  # id() of consumed curve objects
 
     for names, label in merge_groups:
-        available = [curve_map[n] for n in names if n in curve_map]
+        available = [c for n in names for c in curve_map.get(n, [])]
         if not available:
             continue
         styled = [_apply_curve_meta(c) for c in available]
-        for c in available:
-            used.add(c.name)
+        used.update(id(c) for c in available)
         log = any(c.name in _LOG_SCALE_CURVES for c in styled)
         ct = CurveTrack(curves=styled, label=label, width=140, log_scale=log)
         tracks.append(ct)
 
     # Remaining ungrouped curves (one per track)
     for c in data.curves:
-        if c.name not in used:
+        if id(c) not in used:
             styled = _apply_curve_meta(c)
             log = c.name in _LOG_SCALE_CURVES
             ct = CurveTrack(curves=[styled], label=c.name, width=140, log_scale=log)
