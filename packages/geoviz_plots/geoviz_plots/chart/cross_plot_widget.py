@@ -5,9 +5,16 @@ import numpy as np
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtWidgets import QWidget
-from PySide6.QtGui import QPainter, QPen, QColor, QFont, QBrush, QPolygonF
+from PySide6.QtGui import QImage, QPainter, QPen, QColor, QFont, QBrush, QPolygonF
 
 from geoviz_plots.chart.convex_hull import point_in_polygon_mask, compute_convex_hull
+
+# Per-point QPainter ellipses stay readable for small clouds; larger sets
+# are stamped into a QImage so paint stays O(N) numpy rather than N Python
+# drawEllipse calls.
+_SCATTER_ELLIPSE_LIMIT = 4000
+_SCATTER_RGBA = (90, 175, 255, 255)
+
 
 class CrossPlotWidget(QWidget):
     """Interactive 2D scatter cross-plot widget.
@@ -106,6 +113,22 @@ class CrossPlotWidget(QWidget):
 
         self.update()
 
+    @staticmethod
+    def _blit_scatter_points(painter: QPainter, px, py, width: int, height: int) -> None:
+        """Stamp in-view samples into one QImage (3×3 neighbourhood)."""
+        arr = np.zeros((height, width, 4), dtype=np.uint8)
+        ix = np.rint(px).astype(np.int32)
+        iy = np.rint(py).astype(np.int32)
+        color = np.asarray(_SCATTER_RGBA, dtype=np.uint8)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                xx = ix + dx
+                yy = iy + dy
+                ok = (xx >= 0) & (xx < width) & (yy >= 0) & (yy < height)
+                arr[yy[ok], xx[ok]] = color
+        image = QImage(arr.data, width, height, 4 * width, QImage.Format.Format_RGBA8888)
+        painter.drawImage(0, 0, image.copy())
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -129,11 +152,24 @@ class CrossPlotWidget(QWidget):
         px = plot_rect.left() + (self.x_data - self.view_xmin) / x_span * plot_rect.width()
         py = plot_rect.bottom() - (self.y_data - self.view_ymin) / y_span * plot_rect.height()
 
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(90, 175, 255)))
-        for i in range(len(px)):
-            if plot_rect.contains(px[i], py[i]):
-                painter.drawEllipse(QPointF(px[i], py[i]), 3.0, 3.0)
+        finite = np.isfinite(px) & np.isfinite(py)
+        px = px[finite]
+        py = py[finite]
+        inside = (
+            (px >= plot_rect.left())
+            & (px <= plot_rect.right())
+            & (py >= plot_rect.top())
+            & (py <= plot_rect.bottom())
+        )
+        px = px[inside]
+        py = py[inside]
+        if len(px) <= _SCATTER_ELLIPSE_LIMIT:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(90, 175, 255)))
+            for x_i, y_i in zip(px, py):
+                painter.drawEllipse(QPointF(float(x_i), float(y_i)), 3.0, 3.0)
+        else:
+            self._blit_scatter_points(painter, px, py, W, H)
 
         # Draw cluster convex hulls
         for c in self.clusters:

@@ -1098,22 +1098,41 @@ class WellSeismicScene:
 
     def world_to_render_xyz(self, x: float, y: float, z: float) -> tuple[float, float, float]:
         """Map world XY + domain Z to volume/render index space."""
+        mapped = self.world_to_render_xyz_array(
+            np.array([[x, y, z]], dtype=np.float64)
+        )
+        return float(mapped[0, 0]), float(mapped[0, 1]), float(mapped[0, 2])
+
+    def world_to_render_xyz_array(self, points: np.ndarray) -> np.ndarray:
+        """Vectorized world XY + domain Z → render index space, shape (N, 3)."""
+        pts = np.asarray(points, dtype=np.float64)
+        if pts.size == 0:
+            return np.zeros((0, 3), dtype=np.float32)
+        if pts.ndim == 1:
+            pts = pts.reshape(1, 3)
+        x = pts[:, 0]
+        y = pts[:, 1]
+        z = np.array(pts[:, 2], dtype=np.float64, copy=True)
         if self._registration is not None:
             if self._domain is VerticalDomain.DEPTH:
-                z = float(self._depth_transform.depth_m_to_time_ms(z))
+                z = np.asarray(
+                    self._depth_transform.depth_m_to_time_ms(z), dtype=np.float64
+                )
             vi, vx = self._registration.xy_to_volume_idx(x, y)
             vt = self._registration.time_ms_to_sample_idx(z)
-            return float(vi), float(vx), float(vt)
+            return np.column_stack((vi, vx, vt)).astype(np.float32)
         if self._survey is None:
-            return x, y, z
+            return pts.astype(np.float32)
         s = self._survey
         if self._domain is VerticalDomain.DEPTH:
-            z = float(self._depth_transform.depth_m_to_time_ms(z))
+            z = np.asarray(
+                self._depth_transform.depth_m_to_time_ms(z), dtype=np.float64
+            )
         il, xl = s.xy_to_il_xl(x, y)
         il_idx = (il - s.iline_start) / (s.iline_step or 1)
         xl_idx = (xl - s.xline_start) / (s.xline_step or 1)
         t_idx = (z - s.t0_ms) / s.dt_ms if s.dt_ms else z
-        return il_idx, xl_idx, t_idx
+        return np.column_stack((il_idx, xl_idx, t_idx)).astype(np.float32)
 
     def _require_volume(self) -> None:
         if self._volume is None:

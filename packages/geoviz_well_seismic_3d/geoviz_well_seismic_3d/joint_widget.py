@@ -70,6 +70,8 @@ class WellSeismicJointWidget(QWidget):
         # whole-volume GPU re-uploads on colour/fence/domain refreshes).
         self._last_volume_key = None
         self._cmap_applied = False
+        self._overlay_specs_token = None
+        self._overlay_specs_cached = None
         self._gr_legend: QLabel | None = None
         self._status = QLabel("井震联合场景未加载")
         self._status.setStyleSheet("color: #64748b; padding: 4px 8px;")
@@ -137,36 +139,56 @@ class WellSeismicJointWidget(QWidget):
             return {}
         value_range = scene.gr_value_range() or (0.0, 1.0)
         settings = scene.display_settings
+        tracks = scene.gr_well_trajectories(visible_only=True)
+        token = (
+            id(scene),
+            scene.vertical_domain,
+            value_range,
+            settings.gr_color_scale,
+            settings.well_width_px,
+            tuple(
+                (
+                    well_id,
+                    track.points.shape,
+                    track.gr_values.shape,
+                    float(track.points[0, 0]) if len(track.points) else 0.0,
+                    float(track.points[-1, 2]) if len(track.points) else 0.0,
+                    float(np.nansum(track.gr_values[:: max(1, len(track.gr_values) // 8)]))
+                    if len(track.gr_values)
+                    else 0.0,
+                )
+                for well_id, track in tracks.items()
+            ),
+        )
+        if (
+            self._overlay_specs_token == token
+            and self._overlay_specs_cached is not None
+        ):
+            return self._overlay_specs_cached
         specs: dict[JointWellId, WellOverlaySpec] = {}
-        for well_id, track in scene.gr_well_trajectories(
-            visible_only=True
-        ).items():
+        missing = np.asarray(MISSING_GR_RGBA, dtype=np.float32) / 255.0
+        for well_id, track in tracks.items():
             pos = self._traj_to_render(track.points)
             rgba = colorize_gr(
                 track.gr_values,
                 value_range=value_range,
                 color_scale=settings.gr_color_scale,
             ).astype(np.float32) / 255.0
-            segment_pos = np.empty(
-                (max(len(pos) - 1, 0) * 2, 3), dtype=np.float32
-            )
-            segment_colors = np.empty(
-                (len(segment_pos), 4), dtype=np.float32
-            )
-            for index in range(max(len(pos) - 1, 0)):
-                segment_pos[index * 2 : index * 2 + 2] = pos[
-                    index : index + 2
-                ]
-                values = track.gr_values[index : index + 2]
-                if np.all(np.isfinite(values)):
-                    segment_colors[index * 2 : index * 2 + 2] = rgba[
-                        index : index + 2
-                    ]
-                else:
-                    segment_colors[index * 2 : index * 2 + 2] = (
-                        np.asarray(MISSING_GR_RGBA, dtype=np.float32)
-                        / 255.0
-                    )
+            n_seg = max(len(pos) - 1, 0)
+            if n_seg == 0:
+                segment_pos = np.empty((0, 3), dtype=np.float32)
+                segment_colors = np.empty((0, 4), dtype=np.float32)
+            else:
+                segment_pos = np.empty((n_seg * 2, 3), dtype=np.float32)
+                segment_pos[0::2] = pos[:-1]
+                segment_pos[1::2] = pos[1:]
+                finite = np.isfinite(track.gr_values)
+                both = finite[:-1] & finite[1:]
+                col0 = np.where(both[:, None], rgba[:-1], missing)
+                col1 = np.where(both[:, None], rgba[1:], missing)
+                segment_colors = np.empty((n_seg * 2, 4), dtype=np.float32)
+                segment_colors[0::2] = col0
+                segment_colors[1::2] = col1
             head = (
                 tuple(float(value) for value in rgba[0])
                 if len(rgba)
@@ -184,6 +206,8 @@ class WellSeismicJointWidget(QWidget):
                 head_color=head,
                 width_px=settings.well_width_px,
             )
+        self._overlay_specs_token = token
+        self._overlay_specs_cached = specs
         return specs
 
     def take_profile_widget(self):
@@ -272,6 +296,8 @@ class WellSeismicJointWidget(QWidget):
 
     def set_scene(self, scene: WellSeismicScene) -> None:
         self._scene = scene
+        self._overlay_specs_token = None
+        self._overlay_specs_cached = None
         self._sync_from_scene()
 
     def _set_default_render_mode(self) -> None:
@@ -670,12 +696,9 @@ class WellSeismicJointWidget(QWidget):
 
     def _traj_to_render(self, points: np.ndarray) -> np.ndarray:
         scene = self._scene
-        out = np.zeros((len(points), 3), dtype=np.float32)
         if scene is None:
             return np.asarray(points, dtype=np.float32)
-        for i, (x, y, z) in enumerate(points):
-            out[i] = scene.world_to_render_xyz(float(x), float(y), float(z))
-        return out
+        return scene.world_to_render_xyz_array(points)
 
     def _curtain_mesh(self, vertices_xy: np.ndarray, ext):
         """Amplitude-coloured curtain strip along fence (#51).

@@ -14,6 +14,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+import numpy as np
+
 from .survey import SurveySpec
 
 
@@ -101,28 +103,40 @@ class VolumeRegistration:
     # ------------------------------------------------------------------
     # Survey coordinates → loaded volume indices
     # ------------------------------------------------------------------
-    def il_xl_to_volume_idx(self, iline: float, xline: float) -> tuple[float, float]:
+    def il_xl_to_volume_idx(
+        self, iline: float | np.ndarray, xline: float | np.ndarray
+    ) -> tuple[float, float] | tuple[np.ndarray, np.ndarray]:
         """Fractional volume indices (il_idx, xl_idx), exact on the stride lattice."""
         s = self.survey
         il_step = s.iline_step or 1
         xl_step = s.xline_step or 1
-        native_il = (float(iline) - s.iline_start) / il_step  # 0 .. n_inlines-1
-        native_xl = (float(xline) - s.xline_start) / xl_step
+        il_arr = np.asarray(iline, dtype=np.float64)
+        xl_arr = np.asarray(xline, dtype=np.float64)
+        native_il = (il_arr - s.iline_start) / il_step  # 0 .. n_inlines-1
+        native_xl = (xl_arr - s.xline_start) / xl_step
         vi = native_il / self.strides[0]
         vx = native_xl / self.strides[1]
+        if vi.ndim == 0:
+            return float(vi), float(vx)
         return vi, vx
 
-    def xy_to_volume_idx(self, x: float, y: float) -> tuple[float, float]:
-        il, xl = self.survey.xy_to_il_xl(float(x), float(y))
+    def xy_to_volume_idx(
+        self, x: float | np.ndarray, y: float | np.ndarray
+    ) -> tuple[float, float] | tuple[np.ndarray, np.ndarray]:
+        il, xl = self.survey.xy_to_il_xl(x, y)
         return self.il_xl_to_volume_idx(il, xl)
 
-    def time_ms_to_sample_idx(self, time_ms: float) -> float:
+    def time_ms_to_sample_idx(self, time_ms: float | np.ndarray) -> float | np.ndarray:
         s = self.survey
+        t = np.asarray(time_ms, dtype=np.float64)
         if s.dt_ms and s.dt_ms > 0:
-            native_t = (float(time_ms) - s.t0_ms) / s.dt_ms
+            native_t = (t - s.t0_ms) / s.dt_ms
         else:
-            native_t = float(time_ms)
-        return native_t / self.strides[2]
+            native_t = t
+        out = native_t / self.strides[2]
+        if out.ndim == 0:
+            return float(out)
+        return out
 
     def sample_idx_to_time_ms(self, sample_index: float) -> float:
         """Map a loaded/preview sample index back to represented TWT ms."""

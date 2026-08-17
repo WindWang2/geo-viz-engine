@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+
+import numpy as np
 
 from geoviz_seismic.models import BinGridGeometry
 
@@ -25,12 +28,23 @@ class SurveySpec:
     dt_ms: float
     t0_ms: float = 0.0
 
-    def xy_to_il_xl(self, x: float, y: float) -> tuple[float, float]:
-        il_frac, xl_frac = self.bin_grid.xy_to_il_xl(x, y)
-        return (
-            self.iline_start + il_frac * self.iline_step,
-            self.xline_start + xl_frac * self.xline_step,
-        )
+    def xy_to_il_xl(
+        self, x: float | np.ndarray, y: float | np.ndarray
+    ) -> tuple[float, float] | tuple[np.ndarray, np.ndarray]:
+        bg = self.bin_grid
+        x_arr = np.asarray(x, dtype=np.float64)
+        y_arr = np.asarray(y, dtype=np.float64)
+        dx = x_arr - bg.x_origin
+        dy = y_arr - bg.y_origin
+        az = math.radians(bg.il_azimuth_deg)
+        cos_a, sin_a = math.cos(az), math.sin(az)
+        il_frac = (-dx * sin_a + dy * cos_a) / bg.il_spacing_m
+        xl_frac = (dx * cos_a + dy * sin_a) / bg.xl_spacing_m
+        il = self.iline_start + il_frac * self.iline_step
+        xl = self.xline_start + xl_frac * self.xline_step
+        if x_arr.ndim == 0:
+            return float(il), float(xl)
+        return il, xl
 
     def il_xl_to_xy(self, iline: float, xline: float) -> tuple[float, float]:
         il_step = self.iline_step if self.iline_step != 0 else 1
