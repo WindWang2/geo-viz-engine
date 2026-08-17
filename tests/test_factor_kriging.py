@@ -284,7 +284,7 @@ def test_interpolate_factor_grid_kriging_backend():
     assert result["variance_min"] is not None and result["variance_max"] is not None
     assert result["variance_min"] <= result["variance_max"]
     assert "mvp_note" not in result  # real kriging carries no MVP caveat
-    assert result["r_squared"] is None or 0.0 <= result["r_squared"] <= 1.0
+    assert result["r_squared"] is None or math.isfinite(result["r_squared"])
     for key in ("grid_z", "grid_var"):
         assert all(isinstance(v, float) or v is None for row in result[key] for v in row)
     assert all(math.isfinite(v) for row in result["grid_z"] for v in row if v is not None)

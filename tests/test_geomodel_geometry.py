@@ -161,6 +161,14 @@ class TestTunnelMeshGenerator:
             ring = verts[i * 6 : (i + 1) * 6]
             assert np.allclose(np.linalg.norm(ring - trajectory[i], axis=1), 2.0)
 
+    def test_generate_tube_dedupes_consecutive_stations(self):
+        """#691: repeated survey rows must not produce NaN ring vertices."""
+        trajectory = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+        verts, faces = TunnelMeshGenerator.generate_tube(trajectory, radius=1.0, segments=4)
+        assert np.isfinite(verts).all()
+        assert np.isfinite(faces).all()
+        assert len(verts) == 2 * 4
+
     def test_rmf_frame_is_twist_free_on_a_curve(self):
         t = np.linspace(0, np.pi, 12)
         trajectory = np.column_stack([np.cos(t) * 20, np.sin(t) * 20, -t * 5])

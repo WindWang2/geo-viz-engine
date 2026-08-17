@@ -1,11 +1,18 @@
 """SciPy-based spatial interpolation algorithms and convex hull masking."""
+import logging
+
 import numpy as np
 from scipy.interpolate import griddata, Rbf
-from scipy.spatial import ConvexHull
+from scipy.spatial import ConvexHull, QhullError
 from matplotlib.path import Path
 
-def interpolate_scipy(x, y, z, grid_x, grid_y, method: str = "linear", 
-                      mask_convex_hull: bool = True) -> np.ndarray:
+logger = logging.getLogger(__name__)
+
+_SCIPY_METHODS = ("linear", "cubic", "nearest", "rbf")
+
+
+def interpolate_scipy(x, y, z, grid_x, grid_y, method: str = "linear",
+                      mask_convex_hull: bool = True, status: dict | None = None) -> np.ndarray:
     """Interpolate scattered points (x, y, z) onto grid (grid_x, grid_y) using SciPy methods.
     
     Filters out NaNs prior to computation.
@@ -16,6 +23,8 @@ def interpolate_scipy(x, y, z, grid_x, grid_y, method: str = "linear",
         method: "linear", "cubic", "nearest", or "rbf".
         mask_convex_hull: If True, masks out (sets to NaN) all grid points that lie
                           outside the convex hull of the input data points.
+        status: Optional dict filled when the requested method degrades (e.g.
+                ``{"fallback": "nearest", "requested_method": "linear"}``).
                           
     Returns:
         A 2D array of interpolated values with shape (len(grid_y), len(grid_x)).
@@ -33,6 +42,9 @@ def interpolate_scipy(x, y, z, grid_x, grid_y, method: str = "linear",
     if len(x) < 3:
         # SciPy methods require at least 3 points
         return np.full((len(grid_y), len(grid_x)), np.nan)
+
+    if method not in _SCIPY_METHODS:
+        raise ValueError(f"Unknown interpolation method: {method}")
         
     grid_x = np.asarray(grid_x, dtype=np.float64)
     grid_y = np.asarray(grid_y, dtype=np.float64)
@@ -40,17 +52,20 @@ def interpolate_scipy(x, y, z, grid_x, grid_y, method: str = "linear",
     
     # 1. Perform Interpolation
     try:
-        if method in ("linear", "cubic", "nearest"):
-            points = np.column_stack((x, y))
-            grid_z = griddata(points, z, (X, Y), method=method)
-        elif method == "rbf":
-            # Using Rbf (Radial Basis Function)
+        if method == "rbf":
             rbf_func = Rbf(x, y, z, function="multiquadric")
             grid_z = rbf_func(X, Y)
         else:
-            raise ValueError(f"Unknown interpolation method: {method}")
-    except Exception:
-        # Fallback to nearest if linear/cubic fails (e.g. collinear points)
+            points = np.column_stack((x, y))
+            grid_z = griddata(points, z, (X, Y), method=method)
+    except (QhullError, ValueError, np.linalg.LinAlgError) as exc:
+        logger.warning(
+            "interpolate_scipy method=%s failed (%s); falling back to nearest",
+            method, exc,
+        )
+        if status is not None:
+            status["fallback"] = "nearest"
+            status["requested_method"] = method
         try:
             points = np.column_stack((x, y))
             grid_z = griddata(points, z, (X, Y), method="nearest")
@@ -87,7 +102,7 @@ class InterpolationWorker(QThread):
     
     Excludes calculation workloads from the PySide main GUI thread to avoid UI freeze.
     """
-    finished = Signal(np.ndarray)
+    result_ready = Signal(np.ndarray)
     error = Signal(str)
     
     def __init__(self, x, y, z, grid_x, grid_y, method="linear", mask_convex_hull=True, power=2.0):
@@ -116,7 +131,7 @@ class InterpolationWorker(QThread):
                     method=self.method, 
                     mask_convex_hull=self.mask_convex_hull
                 )
-            self.finished.emit(grid_z)
+            self.result_ready.emit(grid_z)
         except Exception as e:
             self.error.emit(str(e))
 

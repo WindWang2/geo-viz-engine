@@ -133,6 +133,7 @@ def _run_grid(
     b_i: np.ndarray | None = None,
     cancellation_token=None,
     want_variance: bool = False,
+    interp_status: dict[str, Any] | None = None,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
@@ -163,7 +164,7 @@ def _run_grid(
     from geoviz import interpolate_scipy
 
     method = backend if backend in {"linear", "cubic", "nearest", "rbf"} else "linear"
-    result = interpolate_scipy(x, y, z, grid_x, grid_y, method=method)
+    result = interpolate_scipy(x, y, z, grid_x, grid_y, method=method, status=interp_status)
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
     return result
@@ -208,12 +209,12 @@ def _kriging_leave_one_out_r2(
 
 
 def _r_squared(observed: np.ndarray, preds: np.ndarray) -> float:
-    """Coefficient of determination clamped to [0, 1]."""
+    """Coefficient of determination (signed; not clamped to [0, 1])."""
     ss_res = float(np.sum((observed - preds) ** 2))
     ss_tot = float(np.sum((observed - np.mean(observed)) ** 2))
     if ss_tot <= 1e-12:
         return 1.0 if ss_res <= 1e-12 else 0.0
-    return max(0.0, min(1.0, 1.0 - ss_res / ss_tot))
+    return 1.0 - ss_res / ss_tot
 
 
 def _leave_one_out_r2(
@@ -306,6 +307,7 @@ def interpolate_factor_grid(
         raise ValueError("插值至少需要 2 个有效采样点")
     grid_x, grid_y = _grid_axes(x, y, grid_n)
     want_variance = backend == "kriging"
+    interp_status: dict[str, Any] = {}
     grid_out = _run_grid(
         x, y, z, grid_x, grid_y,
         backend=backend, power=power,
@@ -313,6 +315,7 @@ def interpolate_factor_grid(
         azimuth_deg=azimuth_deg, semi_major=semi_major, semi_minor=semi_minor,
         q=q, b_i=b_i, cancellation_token=cancellation_token,
         want_variance=want_variance,
+        interp_status=interp_status,
     )
     grid_z, grid_var = grid_out if want_variance else (grid_out, None)
     finite = grid_z[np.isfinite(grid_z)]
@@ -353,6 +356,9 @@ def interpolate_factor_grid(
     note = mvp_note_for(backend)
     if note:
         out["mvp_note"] = note
+    if interp_status.get("fallback"):
+        out["degraded"] = True
+        out["fallback"] = interp_status["fallback"]
     return out
 
 
