@@ -16,6 +16,10 @@ def _clean_tag(tag: str) -> str:
     return tag.split("}")[-1] if "}" in tag else tag
 
 
+def _col_in_row(idx: int, row) -> bool:
+    return 0 <= idx < len(row)
+
+
 def _unit_for_header(h_name: str) -> str:
     h_upper = h_name.upper()
     if h_upper in ("DEPT", "DEPTH", "深度", "TVD", "TVDSS"):
@@ -254,67 +258,78 @@ def load_xml_preview(
                 # 1. Lithology (岩性)
                 if "岩性" in w_name:
                     name_i = next((i for i, c in enumerate(w_h) if "岩性" in c), -1)
-                    for r in w_rows[1:]:
-                        if top_i < len(r) and bot_i < len(r) and name_i < len(r):
-                            try:
-                                t_val, b_val, n_val = float(r[top_i]), float(r[bot_i]), r[name_i].strip()
-                                if n_val and t_val < b_val:
-                                    lithology_list.append(
-                                        LithologyInterval(
-                                            top=t_val,
-                                            bottom=b_val,
-                                            lithology=n_val,
-                                            description=n_val,
+                    if top_i >= 0 and bot_i >= 0 and name_i >= 0:
+                        for r in w_rows[1:]:
+                            if _col_in_row(top_i, r) and _col_in_row(bot_i, r) and _col_in_row(name_i, r):
+                                try:
+                                    t_val, b_val, n_val = float(r[top_i]), float(r[bot_i]), r[name_i].strip()
+                                    if n_val and t_val < b_val:
+                                        lithology_list.append(
+                                            LithologyInterval(
+                                                top=t_val,
+                                                bottom=b_val,
+                                                lithology=n_val,
+                                                description=n_val,
+                                            )
                                         )
-                                    )
-                            except ValueError:
-                                pass
+                                except ValueError:
+                                    pass
 
                 # 2. Stratigraphy & Facies (地层单位、砂层组、沉积相)
                 if any(k in w_name for k in ("地层", "砂层", "层序", "分层", "相")):
                     form_i = next((i for i, c in enumerate(w_h) if c in ("层号", "层名", "组", "统")), -1)
                     facies_i = next((i for i, c in enumerate(w_h) if "相" in c), -1)
-                    for r in w_rows[1:]:
-                        if top_i < len(r) and bot_i < len(r):
-                            try:
-                                t_val = float(r[top_i])
-                                b_val = float(r[bot_i]) if bot_i < len(r) and r[bot_i] else t_val + 1.0
-                                if t_val < b_val:
-                                    if form_i >= 0 and form_i < len(r) and r[form_i].strip():
-                                        formation_list.append(IntervalItem(top=t_val, bottom=b_val, name=r[form_i].strip()))
-                                    if facies_i >= 0 and facies_i < len(r) and r[facies_i].strip():
-                                        facies_list.append(FaciesInterval(top=t_val, bottom=b_val, facies=r[facies_i].strip()))
-                            except ValueError:
-                                pass
+                    if top_i >= 0:
+                        for r in w_rows[1:]:
+                            if _col_in_row(top_i, r):
+                                try:
+                                    t_val = float(r[top_i])
+                                    b_val = (
+                                        float(r[bot_i])
+                                        if _col_in_row(bot_i, r) and r[bot_i]
+                                        else t_val + 1.0
+                                    )
+                                    if t_val < b_val:
+                                        if _col_in_row(form_i, r) and r[form_i].strip():
+                                            formation_list.append(IntervalItem(top=t_val, bottom=b_val, name=r[form_i].strip()))
+                                        if _col_in_row(facies_i, r) and r[facies_i].strip():
+                                            facies_list.append(FaciesInterval(top=t_val, bottom=b_val, facies=r[facies_i].strip()))
+                                except ValueError:
+                                    pass
 
                 # 3. Core & Text annotations / photo descriptions / Facies (取心、文本道)
                 if any(k in w_name for k in ("文本", "取心", "说明", "备注")):
                     txt_i = next((i for i, c in enumerate(w_h) if c in ("文本", "描述", "说明", "进尺", "心长")), -1)
                     track_i = next((i for i, c in enumerate(w_h) if c in ("道名", "类型")), -1)
-                    for r in w_rows[1:]:
-                        if top_i < len(r):
-                            try:
-                                t_val = float(r[top_i])
-                                b_val = float(r[bot_i]) if bot_i >= 0 and bot_i < len(r) and r[bot_i] else t_val + 2.0
-                                track_name = r[track_i].strip() if track_i >= 0 and track_i < len(r) else ""
-                                val = r[txt_i].strip() if txt_i >= 0 and txt_i < len(r) else ""
-                                if not val and track_i >= 0 and track_i < len(r) and track_i != txt_i:
-                                    val = r[track_i].strip()
+                    if top_i >= 0:
+                        for r in w_rows[1:]:
+                            if _col_in_row(top_i, r):
+                                try:
+                                    t_val = float(r[top_i])
+                                    b_val = (
+                                        float(r[bot_i])
+                                        if _col_in_row(bot_i, r) and r[bot_i]
+                                        else t_val + 2.0
+                                    )
+                                    track_name = r[track_i].strip() if _col_in_row(track_i, r) else ""
+                                    val = r[txt_i].strip() if _col_in_row(txt_i, r) else ""
+                                    if not val and _col_in_row(track_i, r) and track_i != txt_i:
+                                        val = r[track_i].strip()
 
-                                if val and t_val < b_val:
-                                    if "相" in track_name:
-                                        facies_list.append(FaciesInterval(top=t_val, bottom=b_val, facies=val))
-                                    else:
-                                        text_desc_list.append(IntervalItem(top=t_val, bottom=b_val, name=val))
-                            except ValueError:
-                                pass
+                                    if val and t_val < b_val:
+                                        if "相" in track_name:
+                                            facies_list.append(FaciesInterval(top=t_val, bottom=b_val, facies=val))
+                                        else:
+                                            text_desc_list.append(IntervalItem(top=t_val, bottom=b_val, name=val))
+                                except ValueError:
+                                    pass
 
                 # 4. Standard Horizon Markers (标准层道)
                 if "标准层" in w_name:
                     name_i = next((i for i, c in enumerate(w_h) if c in ("层名", "标准层", "文本")), -1)
-                    if name_i >= 0:
+                    if name_i >= 0 and top_i >= 0:
                         for r in w_rows[1:]:
-                            if top_i < len(r) and name_i < len(r):
+                            if _col_in_row(top_i, r) and _col_in_row(name_i, r):
                                 try:
                                     t_val = float(r[top_i])
                                     n_val = r[name_i].strip()

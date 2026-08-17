@@ -343,7 +343,7 @@ class PaleoMapPage(QWidget):
 
     def _add_periods(self, periods: dict[str, list[dict]]):
         for name, features in periods.items():
-            self._periods.setdefault(name, []).extend(features)
+            self._periods[name] = list(features)
 
         self._period_combo.blockSignals(True)
         self._period_combo.clear()

@@ -31,6 +31,28 @@ def test_paleo_map_page_split_layout(page):
     assert hasattr(page, "export_map_btn")
     assert isinstance(page.export_map_btn, QPushButton)
 
+def test_add_periods_reload_does_not_duplicate(page):
+    """#710: re-adding the same period must replace features, not extend."""
+    feats = [
+        {
+            "type": "Feature",
+            "properties": {"name": "测试相区", "facies": "砂岩"},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [110.0, 20.0], [120.0, 20.0], [120.0, 30.0],
+                    [110.0, 30.0], [110.0, 20.0],
+                ]],
+            },
+        }
+    ]
+    page._add_periods({"K1": feats})
+    first = len(page._periods["K1"])
+    page._add_periods({"K1": feats})
+    assert first == 1
+    assert len(page._periods["K1"]) == first
+
+
 def test_paleo_map_page_overlays(page):
     # Verify zoom controls (zoomIn, zoomOut, fit) moved to right sidebar
     assert hasattr(page, "btn_zoom_in")

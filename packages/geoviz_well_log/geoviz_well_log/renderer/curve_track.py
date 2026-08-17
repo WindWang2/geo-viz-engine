@@ -143,6 +143,11 @@ class CurveTrack(BaseTrack):
             else:
                 self._range_strs[c.name] = c.unit
 
+    @property
+    def curves(self):
+        """Public curve payload for hover/readout probes (#724)."""
+        return self._curves
+
     def _value_to_x(self, value: float, display_range: tuple[float, float],
                     rect: QRectF) -> float:
         lo, hi = display_range

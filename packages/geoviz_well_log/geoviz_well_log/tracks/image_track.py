@@ -37,13 +37,6 @@ class ImageTrack(BaseTrack):
         super().__init__(label=name, width=width, parent=parent)
         self.core_photos: List[CorePhotoSegment] = []
         self.fmi_segments: List[BoreholeImageSegment] = []
-        self._min_depth = 2000.0
-        self._max_depth = 2100.0
-
-    def set_depth_range(self, min_depth: float, max_depth: float):
-        self._min_depth = min_depth
-        self._max_depth = max_depth
-        self.update()
 
     def add_core_photo(self, photo: CorePhotoSegment):
         photo.load_pixmap()
@@ -54,7 +47,7 @@ class ImageTrack(BaseTrack):
 
     def paint_content(self, painter: QPainter, rect: QRectF):
         """Render photo segments in depth viewport rect."""
-        min_depth, max_depth = self._min_depth, self._max_depth
+        min_depth, max_depth = self.depth_top, self.depth_bottom
         depth_span = max(1e-6, max_depth - min_depth)
 
         def depth_to_y(d: float) -> float:

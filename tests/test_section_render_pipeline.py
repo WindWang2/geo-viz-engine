@@ -221,6 +221,59 @@ def test_qpainter_builder_renders_all_duplicate_curves(qtbot):
     assert total_curve_refs == 3, "exactly the three input columns"
 
 
+def test_section_hover_uses_per_well_depth_range(qtbot):
+    """#722: tooltip depth must invert the painted well range, not the global union."""
+    from unittest.mock import patch
+
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+
+    from geoviz_well_log.section.section_canvas import WellSectionCanvas
+
+    app = QApplication.instance() or QApplication([])
+    del app
+
+    well_a = WellLogData(
+        well_name="A",
+        top_depth=0.0,
+        bottom_depth=2000.0,
+        curves=[CurveData(name="GR", depth=[0.0, 2000.0], values=[10.0, 20.0])],
+    )
+    well_b = WellLogData(
+        well_name="B",
+        top_depth=1000.0,
+        bottom_depth=3000.0,
+        curves=[CurveData(name="GR", depth=[1000.0, 3000.0], values=[30.0, 40.0])],
+    )
+    canvas = WellSectionCanvas()
+    qtbot.addWidget(canvas)
+    canvas.set_wells([well_a, well_b])
+    canvas.resize(800, 556)
+
+    offsets = canvas._calculate_well_x_offsets()
+    x_off, well_w = offsets[1]
+    x = x_off + well_w / 2.0
+    y = 56.0 + (canvas.height() - 56.0) / 2.0
+    event = QMouseEvent(
+        QEvent.Type.MouseMove,
+        QPointF(x, y),
+        QPointF(x, y),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    with patch("geoviz_well_log.section.section_canvas.QToolTip") as tooltip:
+        canvas.mouseMoveEvent(event)
+    text = tooltip.showText.call_args[0][1]
+    assert "B" in text
+    import re
+
+    match = re.search(r"深度:\s*([\d.]+)", text)
+    assert match is not None
+    assert float(match.group(1)) == pytest.approx(2000.0, abs=1.0)
+
+
 def test_qpainter_builder_ungrouped_duplicates_each_get_a_track(qtbot):
     from PySide6.QtWidgets import QApplication
 

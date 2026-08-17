@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSizeF, QMarginsF
-from PySide6.QtGui import QPageSize, QPageLayout
+from PySide6.QtGui import QColor, QPageSize, QPageLayout, QPainter, QPixmap
 from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtPrintSupport import QPrinter
-from PySide6.QtGui import QPainter
 
 from typing import TYPE_CHECKING
 
@@ -39,6 +38,10 @@ def export_pdf(canvas: WellLogCanvas, path: str):
 
 
 def export_png(canvas: WellLogCanvas, path: str):
-    """Export to PNG -- raster screenshot of display."""
-    pixmap = canvas.grab()
+    """Export to PNG via paint_all so hover crosshair/info panel stay out."""
+    pixmap = QPixmap(canvas.size())
+    pixmap.fill(QColor("#ffffff"))
+    painter = QPainter(pixmap)
+    canvas.paint_all(painter)
+    painter.end()
     pixmap.save(path, "PNG")
