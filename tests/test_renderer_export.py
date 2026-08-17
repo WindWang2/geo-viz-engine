@@ -49,3 +49,32 @@ def test_export_png_creates_file(qtbot):
         export_png(canvas, path)
         assert os.path.exists(path)
         assert os.path.getsize(path) > 100
+
+
+def test_export_png_omits_hover_crosshair(qtbot, tmp_path):
+    """#725: PNG export must paint_all, not grab() the hover overlay."""
+    from PySide6.QtGui import QColor, QImage, QPixmap
+
+    canvas = _make_canvas()
+    qtbot.addWidget(canvas)
+    canvas.crosshair.set_cursor_pos(80.0, 250.0)
+
+    # Inject a red grab() so any screenshot path is visible in the file.
+    stained = QPixmap(canvas.size())
+    stained.fill(QColor("#ef4444"))
+    canvas.grab = lambda *a, **k: stained
+
+    path = tmp_path / "hover.png"
+    export_png(canvas, str(path))
+    img = QImage(str(path))
+    assert not img.isNull()
+    cursor = QColor("#ef4444")
+    for y in range(img.height()):
+        for x in range(img.width()):
+            c = QColor(img.pixel(x, y))
+            if (
+                abs(c.red() - cursor.red()) <= 8
+                and abs(c.green() - cursor.green()) <= 8
+                and abs(c.blue() - cursor.blue()) <= 8
+            ):
+                raise AssertionError("exported PNG used grab() hover pixels")

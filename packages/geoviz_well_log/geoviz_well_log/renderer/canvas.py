@@ -391,26 +391,27 @@ class WellLogCanvas(QWidget):
         self.set_depth_range(new_top, new_bottom)
         event.accept()
 
-    def _interpolate_curve_val(self, curve, depth: float) -> float | None:
-        if not getattr(curve, "depth", None) or not getattr(curve, "values", None):
+    def _interpolate_curve_val(self, curve, depth: float, *, depths=None, values=None) -> float | None:
+        depths = curve.depth if depths is None else depths
+        vals = curve.values if values is None else values
+        if depths is None or vals is None:
             return None
-        depths = curve.depth
-        vals = curve.values
         if len(depths) != len(vals) or len(depths) == 0:
             return None
-        if depth < depths[0] or depth > depths[-1]:
+        d0, dN = float(depths[0]), float(depths[-1])
+        if depth < d0 or depth > dN:
             return None
         import bisect
         idx = bisect.bisect_left(depths, depth)
         if idx == 0:
-            return vals[0]
+            return float(vals[0])
         if idx >= len(depths):
-            return vals[-1]
-        d0, d1 = depths[idx - 1], depths[idx]
-        v0, v1 = vals[idx - 1], vals[idx]
-        if abs(d1 - d0) < 1e-6:
+            return float(vals[-1])
+        x0, x1 = float(depths[idx - 1]), float(depths[idx])
+        v0, v1 = float(vals[idx - 1]), float(vals[idx])
+        if abs(x1 - x0) < 1e-6:
             return v0
-        t = (depth - d0) / (d1 - d0)
+        t = (depth - x0) / (x1 - x0)
         return v0 + t * (v1 - v0)
 
     def _update_hover_tooltip(self, pos):
@@ -453,15 +454,28 @@ class WellLogCanvas(QWidget):
         lines = [f"📍 深度: {depth:.2f} m  [{label}]"]
 
         if hasattr(target_track, "curves"):
+            sorted_d = getattr(target_track, "_sorted_depths", {})
+            sorted_v = getattr(target_track, "_sorted_values", {})
             for curve in target_track.curves:
-                val = self._interpolate_curve_val(curve, depth)
+                val = self._interpolate_curve_val(
+                    curve,
+                    depth,
+                    depths=sorted_d.get(curve.name),
+                    values=sorted_v.get(curve.name),
+                )
                 if val is not None:
                     unit_str = f" {curve.unit}" if getattr(curve, "unit", "") else ""
                     lines.append(f"  • {curve.name}: {val:.2f}{unit_str}")
         elif hasattr(target_track, "intervals") and target_track.intervals:
             for item in target_track.intervals:
                 if item.top <= depth <= item.bottom:
-                    lines.append(f"  • {item.name} ({item.top:.1f}m - {item.bottom:.1f}m)")
+                    name = (
+                        getattr(item, "name", None)
+                        or getattr(item, "lithology", None)
+                        or getattr(item, "facies", None)
+                    )
+                    if name:
+                        lines.append(f"  • {name} ({item.top:.1f}m - {item.bottom:.1f}m)")
         elif hasattr(target_track, "core_photos") and target_track.core_photos:
             for photo in target_track.core_photos:
                 if photo.depth_top <= depth <= photo.depth_bottom:

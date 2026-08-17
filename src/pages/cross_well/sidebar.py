@@ -323,33 +323,31 @@ class CrossWellSidebar(QWidget):
             else:
                 relations[cname] = None
 
-        # Build groupings. If A matches to B and B to A (or B matches to none)
-        # We group them. To resolve transitive groupings:
-        visited = set()
+        # Union-find so A→C and B→A become one overlay group, not a
+        # singleton leftover when a later chain hits an already-visited target.
+        parent = {c: c for c in self._available_curves}
+
+        def find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: str, b: str) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        for cname, target in relations.items():
+            if target is not None and target in parent and cname in parent:
+                union(cname, target)
+
+        buckets: dict[str, list[str]] = {}
         for cname in self._available_curves:
-            if cname in visited:
-                continue
-            
-            group_members = [cname]
-            visited.add(cname)
-            
-            # Follow target chain
-            curr = cname
-            while relations.get(curr) is not None:
-                target = relations[curr]
-                if target in visited:
-                    if target not in group_members:
-                        # Merge this chain into target's existing group
-                        pass
-                    break
-                group_members.append(target)
-                visited.add(target)
-                curr = target
-                
-            # Filter unique and sort
-            unique_members = sorted(list(set(group_members)))
-            gname = "/".join(unique_members)
-            new_groups[gname] = unique_members
+            buckets.setdefault(find(cname), []).append(cname)
+        for members in buckets.values():
+            unique_members = sorted(members)
+            new_groups["/".join(unique_members)] = unique_members
 
         self._curve_groups = new_groups
         self.curve_groups_changed.emit(new_groups)

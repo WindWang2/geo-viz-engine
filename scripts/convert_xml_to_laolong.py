@@ -152,6 +152,20 @@ def extract_stratigraphy(ws_data: List[List[Optional[str]]]) -> Dict[str, List[D
 
     return result
 
+def _find_curve_sheet(worksheets: Dict) -> List:
+    """Pick the curve table: any 测井曲线* sheet, else the largest sheet with 深度."""
+    for name, rows in worksheets.items():
+        if name and "测井曲线" in name:
+            return rows
+    best_rows: List = []
+    best_n = -1
+    for rows in worksheets.values():
+        if rows and rows[0] and "深度" in rows[0] and len(rows) > best_n:
+            best_rows = rows
+            best_n = len(rows)
+    return best_rows
+
+
 def convert_to_laolong_xls(xml_path: str, output_xls_path: str):
     """Convert XML to LaoLong1-style XLS file."""
     print(f"Parsing XML: {xml_path}")
@@ -160,7 +174,9 @@ def convert_to_laolong_xls(xml_path: str, output_xls_path: str):
     print(f"Found worksheets: {list(worksheets.keys())}")
 
     # Extract curves
-    curves_df = extract_curves(worksheets.get('测井曲线-HZ25-10-1井', []))
+    curves_df = extract_curves(_find_curve_sheet(worksheets))
+    if curves_df.empty or "深度" not in curves_df.columns:
+        raise ValueError("未找到测井曲线工作表（需含“深度”列）")
     print(f"Curves: {len(curves_df)} rows, columns: {list(curves_df.columns)}")
     print(f"Depth range: {curves_df['深度'].min():.2f} - {curves_df['深度'].max():.2f}")
 

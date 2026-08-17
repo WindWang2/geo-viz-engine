@@ -266,7 +266,16 @@ class WellSectionCanvas(QWidget):
         if selected_well_idx != -1:
             well = self._wells[selected_well_idx]
             well_name = getattr(well, "well_name", f"Well-{selected_well_idx+1}")
-            depth = self._transformer.inverse_y_to_depth(well_name, pos.y())
+            header_h = 56.0
+            content_h = max(1.0, self.height() - header_h)
+            rel_y = pos.y() - header_h
+            tracks = self._well_tracks[selected_well_idx]
+            anchor = next((t for t in tracks if getattr(t, "_visible", True)), None)
+            if anchor is not None and anchor.depth_span > 0:
+                depth = anchor.depth_top + (rel_y / content_h) * anchor.depth_span
+            else:
+                span = float(well.bottom_depth) - float(well.top_depth)
+                depth = float(well.top_depth) + (rel_y / content_h) * span
             QToolTip.showText(
                 self.mapToGlobal(pos.toPoint()),
                 f"📍 井名: {well_name}\n深度: {depth:.2f} m",
