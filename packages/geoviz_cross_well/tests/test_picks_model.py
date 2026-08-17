@@ -64,6 +64,18 @@ def test_undo_connect():
     assert pick.depth_for_well("W2") is None
 
 
+def test_undo_connect_overwrite_restores_prior_depth():
+    """#676: undo of a re-connect must restore the previous well depth."""
+    model = HorizonPicksModel()
+    pick_id = model.add_pick("F", "W1", 100.0)
+    model.connect_picks(pick_id, "W2", 200.0)
+    model.connect_picks(pick_id, "W2", 250.0)
+    assert model.get_pick(pick_id).depth_for_well("W2") == 250.0
+
+    assert model.undo()
+    assert model.get_pick(pick_id).depth_for_well("W2") == 200.0
+
+
 def test_undo_delete():
     model = HorizonPicksModel()
     pick_id = model.add_pick("F1", "W1", 100.0)

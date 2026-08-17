@@ -80,6 +80,13 @@ def _fit_zoom_for_bounds(
     return max(0.1, min(10.0, math.log2(scale) + 1.0))
 
 
+def _hemisphere_label(value: float, positive: str, negative: str) -> str:
+    """Format a signed degree as ``60°W`` / ``30°S`` rather than ``-60°E``."""
+    if value < 0:
+        return f"{abs(value):g}°{negative}"
+    return f"{value:g}°{positive}"
+
+
 def _nice_step(span: float, target: int = 5) -> float:
     """Pick a 'nice' round tick step giving roughly `target` ticks across span."""
     if span <= 0:
@@ -165,7 +172,7 @@ def _draw_coordinate_frame(painter, map_rect, viewport, dpi: int) -> None:
         painter.drawLine(QPointF(x, map_y), QPointF(x, map_y - tick))
         painter.drawLine(QPointF(x, map_y + map_h), QPointF(x, map_y + map_h + tick))
         painter.setPen(label_pen)
-        lbl = f"{lng:g}°E"
+        lbl = _hemisphere_label(lng, "E", "W")
         lw = fm.horizontalAdvance(lbl)
         painter.drawText(QPointF(x - lw / 2, map_y - tick - 4), lbl)
         painter.drawText(QPointF(x - lw / 2, map_y + map_h + tick + fm.ascent() + 4), lbl)
@@ -178,7 +185,7 @@ def _draw_coordinate_frame(painter, map_rect, viewport, dpi: int) -> None:
         painter.drawLine(QPointF(map_x, y), QPointF(map_x - tick, y))
         painter.drawLine(QPointF(map_x + map_w, y), QPointF(map_x + map_w + tick, y))
         painter.setPen(label_pen)
-        lbl = f"{lat:g}°N"
+        lbl = _hemisphere_label(lat, "N", "S")
         lw = fm.horizontalAdvance(lbl)
         painter.drawText(QPointF(map_x - tick - 5 - lw, y + fm.ascent() / 2 - 1), lbl)
         painter.drawText(QPointF(map_x + map_w + tick + 5, y + fm.ascent() / 2 - 1), lbl)

@@ -101,6 +101,49 @@ def test_professional_png_creates_file(qtbot):
         path.unlink(missing_ok=True)
 
 
+def test_grid_frame_uses_west_south_hemisphere_labels(qtbot):
+    """#679: western/southern extents must not render as negative °E / °N."""
+    west_south = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"name": "南美", "facies": "砂岩"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[-70.0, -40.0], [-50.0, -40.0], [-50.0, -20.0],
+                                    [-70.0, -20.0], [-70.0, -40.0]]],
+                },
+            }
+        ],
+    }
+    canvas = PaleoMapCanvas()
+    canvas.load_features(west_south["features"], period_name="测试")
+    qtbot.addWidget(canvas)
+    canvas.resize(400, 300)
+    canvas.show()
+    qtbot.waitExposed(canvas)
+
+    with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
+        path = Path(f.name)
+
+    try:
+        export_professional_figure(
+            canvas, str(path), format="svg",
+            title="西经南纬",
+            include_grid_frame=True,
+        )
+        text = ET.tostring(ET.parse(path).getroot(), encoding="unicode")
+        assert "60°W" in text
+        assert "30°S" in text
+        assert "-60°E" not in text
+        assert "-30°N" not in text
+        assert "°E" not in text
+        assert "°N" not in text
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def test_professional_svg_has_legend_when_enabled(qtbot):
     canvas = PaleoMapCanvas()
     canvas.load_features(SAMPLE["features"], period_name="测试")

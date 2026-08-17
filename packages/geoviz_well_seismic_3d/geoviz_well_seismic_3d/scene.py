@@ -495,6 +495,8 @@ class WellSeismicScene:
 
     def set_depth_transform(self, state: DepthTransformState) -> None:
         self._depth_transform = state
+        self._invalidate_traj()
+        self._extract_cache.clear()
 
     def set_vertical_domain(self, domain: VerticalDomain) -> None:
         """Switch the scene-wide vertical domain (shared by 3D and 2D consumers).

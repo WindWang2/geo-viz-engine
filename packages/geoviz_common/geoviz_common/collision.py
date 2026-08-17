@@ -2,7 +2,18 @@
 
 Shared verbatim by geoviz_map and geoviz_paleo_map (label placement).
 """
+import math
+
 from PySide6.QtCore import QRectF
+
+
+def _rect_is_finite(rect: QRectF) -> bool:
+    return (
+        math.isfinite(rect.left())
+        and math.isfinite(rect.right())
+        and math.isfinite(rect.top())
+        and math.isfinite(rect.bottom())
+    )
 
 
 class CollisionDetector:
@@ -15,6 +26,8 @@ class CollisionDetector:
         self._cell_size = cell_size
 
     def _get_cells(self, rect: QRectF):
+        if not _rect_is_finite(rect):
+            return
         # Grid indices
         x1 = int(rect.left() // self._cell_size)
         x2 = int(rect.right() // self._cell_size)
@@ -29,6 +42,8 @@ class CollisionDetector:
             test_rect = rect.adjusted(-self._margin, -self._margin, self._margin, self._margin)
         else:
             test_rect = rect
+        if not _rect_is_finite(test_rect):
+            return False
 
         # Spatial Hash lookup
         for cell in self._get_cells(test_rect):

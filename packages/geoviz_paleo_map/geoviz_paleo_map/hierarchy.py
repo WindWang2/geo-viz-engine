@@ -7,6 +7,7 @@ that have `level`, `id`, and `parent_id` properties.
 from __future__ import annotations
 
 import json
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -110,7 +111,14 @@ class FaciesHierarchy:
                 continue
             if ff.parent_id and ff.parent_id in nodes:
                 nodes[ff.parent_id].children.append(node)
-            elif not ff.parent_id:
+            else:
+                if ff.parent_id:
+                    warnings.warn(
+                        f"Facies feature {ff.id!r} parent_id {ff.parent_id!r} "
+                        "is missing; treating it as a root",
+                        UserWarning,
+                        stacklevel=2,
+                    )
                 roots.append(node)
 
         return cls(roots=roots, by_id=nodes)

@@ -95,16 +95,19 @@ class ConnectPickCmd(PickCommand):
         self.pick_id = pick_id
         self.well = well
         self.depth = depth
+        self._old_depth: float | None = None
 
     def execute(self, model: HorizonPicksModel) -> None:
         pick = model._picks.get(self.pick_id)
-        if pick is not None:
-            pick.set_depth(self.well, self.depth)
+        if pick is None:
+            return
+        self._old_depth = pick.depth_for_well(self.well)
+        pick.set_depth(self.well, self.depth)
 
     def undo(self, model: HorizonPicksModel) -> None:
         pick = model._picks.get(self.pick_id)
         if pick is not None:
-            pick.set_depth(self.well, None)
+            pick.set_depth(self.well, self._old_depth)
 
 
 class CompositePickCmd(PickCommand):
