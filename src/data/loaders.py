@@ -88,6 +88,21 @@ def _match_xml_sidecar(directory: Path, well_name: str | None) -> Path | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def load_well_log_from_las(path: Path, well_name: str | None = None) -> WellLogData:
+    """Load a well from a LAS file (registry loader for .las entries, #577).
+
+    Mirrors the Excel loader contract (``loader_fn(path, well_name=...)``)
+    so the well-log page's background worker can dispatch on registry
+    entries without caring about the source format.
+    """
+    from geoviz_well_log.las_preview import load_las_preview
+
+    data = load_las_preview(str(path))
+    if well_name:
+        data.well_name = well_name
+    return data
+
+
 def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogData:
     import pandas as pd
     

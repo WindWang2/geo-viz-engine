@@ -63,11 +63,31 @@ class WellCatalog:
             if well_name in coords_names and f.exists():
                 registry[well_name] = f
 
-        for w in self.get_coordinates():
+        # Well-file binding (#576): plain substring containment matched
+        # 'HZ21-1-1' against 'HZ21-1-18-….xlsx' (both wells ship in the
+        # coordinates JSON), and the winner depended on glob order — wrong
+        # well-log data displayed under a well name, nondeterministically.
+        # A file binds to a well only when the well name appears as a WHOLE
+        # TOKEN (bounded by non-alphanumeric characters); among token
+        # matches the LONGEST well name wins so the most specific file is
+        # chosen deterministically.
+        def _token_match(well_name: str, file_name: str) -> bool:
+            import re
+
+            pattern = re.compile(
+                r"(?<![0-9A-Za-z])" + re.escape(well_name.upper()) + r"(?![0-9A-Za-z])"
+            )
+            return pattern.search(file_name.upper()) is not None
+
+        files = sorted(
+            list(self._data_dir.glob("*.xlsx")) + list(self._data_dir.glob("*.xls")),
+            key=lambda p: p.name,
+        )
+        for w in sorted(self.get_coordinates(), key=lambda w: len(w.name), reverse=True):
             if w.name in registry:
                 continue
-            for f in list(self._data_dir.glob("*.xlsx")) + list(self._data_dir.glob("*.xls")):
-                if w.name.upper() in f.name.upper():
+            for f in files:
+                if _token_match(w.name, f.name):
                     registry[w.name] = f
                     break
 
@@ -178,8 +198,17 @@ class WellCatalog:
         return sorted(names)
 
     def get_loader_entry(self, well_name: str):
-        """Return (loader_fn, xls_path) or None."""
+        """Return (loader_fn, path) or None, dispatched by file format.
+
+        #577 residual: LAS imports register real parsed wells, but this
+        entry unconditionally returned the Excel loader — clicking an
+        imported LAS well dispatched Excel parsing on a .las path.
+        """
         path = self.get_well_file(well_name)
         if path is None:
             return None
+        if path.suffix.lower() == ".las":
+            from src.data.loaders import load_well_log_from_las
+
+            return load_well_log_from_las, path
         return load_well_log_from_excel, path
