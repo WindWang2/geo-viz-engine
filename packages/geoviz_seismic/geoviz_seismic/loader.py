@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time
 
 import numpy as np
@@ -10,10 +12,79 @@ from .models import SeismicVolumeMeta
 
 logger = logging.getLogger(__name__)
 
-# Cap for the geometry auto-detection probe: header reads are the dominant
-# cost of _open's fallback path, so at most this many traces are sampled
-# instead of scanning the whole file.
-MAX_PROBE_TRACES = 512
+# (abspath, mtime_ns, size) -> (iline_byte, xline_byte) or None (unstructured).
+_GEOMETRY_FIELD_CACHE: dict[tuple[str, int, int], tuple[int, int] | None] = {}
+_GEOMETRY_FIELD_CACHE_LOCK = threading.Lock()
+_MISSING = object()
+
+_HEADER_FIELD_CANDIDATES: tuple[tuple[object, str], ...] = (
+    (segyio.TraceField.CDP, "CDP"),
+    (segyio.TraceField.FieldRecord, "FieldRecord"),
+    (segyio.TraceField.TRACE_SEQUENCE_LINE, "TraceSeqLine"),
+    (segyio.TraceField.EnergySourcePoint, "EnergySourcePt"),
+    (segyio.TraceField.INLINE_3D, "Inline3D"),
+    (segyio.TraceField.CROSSLINE_3D, "Crossline3D"),
+)
+
+
+def clear_geometry_field_cache() -> None:
+    """Drop the per-file geometry-field memo (tests / file-replaced-in-place)."""
+    with _GEOMETRY_FIELD_CACHE_LOCK:
+        _GEOMETRY_FIELD_CACHE.clear()
+
+
+def _geometry_cache_key(path: str) -> tuple[str, int, int]:
+    st = os.stat(path)
+    mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000)))
+    return (os.path.abspath(path), mtime_ns, int(st.st_size))
+
+
+def read_header_attribute(f, field) -> np.ndarray:
+    """Read one trace-header field for every trace as int64.
+
+    Prefers segyio's C-accelerated ``attributes`` collector; falls back to
+    a per-trace header loop only when that path is unavailable.
+    """
+    try:
+        return np.asarray(f.attributes(field)[:], dtype=np.int64)
+    except Exception:
+        n = int(f.tracecount)
+        out = np.empty(n, dtype=np.int64)
+        for i in range(n):
+            out[i] = int(f.header[i][field])
+        return out
+
+
+def detect_iline_xline_fields(f) -> tuple[int, int] | None:
+    """Return ``(iline_byte, xline_byte)`` if two header fields grid the file."""
+    n_traces = int(f.tracecount)
+    if n_traces < 2:
+        return None
+    field_arrays: dict[int, tuple[str, np.ndarray, int]] = {}
+    for field, name in _HEADER_FIELD_CANDIDATES:
+        arr = read_header_attribute(f, field)
+        if arr.size != n_traces:
+            continue
+        nuniq = int(np.unique(arr).size)
+        if nuniq > 1:
+            field_arrays[int(field)] = (name, arr, nuniq)
+
+    fields = list(field_arrays.keys())
+    for i in range(len(fields)):
+        for j in range(i + 1, len(fields)):
+            _name_a, arr_a, n_a = field_arrays[fields[i]]
+            _name_b, arr_b, n_b = field_arrays[fields[j]]
+            if n_a * n_b != n_traces:
+                continue
+            packed = (arr_a.astype(np.int64) << 32) ^ (arr_b.astype(np.int64) & 0xFFFFFFFF)
+            if int(np.unique(packed).size) != n_traces:
+                continue
+            # Field that changes on consecutive traces is the fast axis;
+            # historical loader assigned that byte to segyio's ``iline``.
+            if int(arr_a[0]) != int(arr_a[1]):
+                return int(fields[i]), int(fields[j])
+            return int(fields[j]), int(fields[i])
+    return None
 
 
 class SeismicLoader:
@@ -99,17 +170,118 @@ class SeismicLoader:
         )
         return self._meta
 
+    def _uses_trace_index(self) -> bool:
+        """True when structured ``f.iline`` / ``f.ilines`` accessors are unusable."""
+        f = self._f
+        if f is None:
+            return False
+        if getattr(f, "unstructured", False):
+            return True
+        if getattr(f, "ilines", None) is None or getattr(f, "xlines", None) is None:
+            return True
+        return self._geometry_source == "pseudo"
+
+    @staticmethod
+    def _header_axis_values(axis) -> list:
+        if axis is None:
+            return []
+        try:
+            return list(axis)
+        except TypeError:
+            return []
+
+    def _trace_global_index(self, il_idx: int, xl_idx: int, meta: SeismicVolumeMeta) -> int:
+        return int(il_idx) * int(meta.n_crosslines) + int(xl_idx)
+
+    def _read_inline_from_traces(self, iline: int, meta: SeismicVolumeMeta) -> np.ndarray:
+        f = self._open()
+        step = meta.iline_step if meta.iline_step else 1
+        il_idx = (int(iline) - meta.iline_start) // step
+        if not (0 <= il_idx < meta.n_inlines):
+            raise ValueError(
+                f"Inline {iline} out of range "
+                f"(available: {meta.iline_start}-"
+                f"{meta.iline_start + (meta.n_inlines - 1) * step})."
+            )
+        n_xl, n_t = meta.n_crosslines, meta.n_samples
+        out = np.empty((n_xl, n_t), dtype=np.float32)
+        base = il_idx * n_xl
+        for j in range(n_xl):
+            out[j] = np.asarray(f.trace[base + j], dtype=np.float32)
+        return out
+
+    def _read_crossline_from_traces(self, xline: int, meta: SeismicVolumeMeta) -> np.ndarray:
+        f = self._open()
+        step = meta.xline_step if meta.xline_step else 1
+        xl_idx = (int(xline) - meta.xline_start) // step
+        if not (0 <= xl_idx < meta.n_crosslines):
+            raise ValueError(
+                f"Crossline {xline} out of range "
+                f"(available: {meta.xline_start}-"
+                f"{meta.xline_start + (meta.n_crosslines - 1) * step})."
+            )
+        n_il, n_xl, n_t = meta.n_inlines, meta.n_crosslines, meta.n_samples
+        out = np.empty((n_il, n_t), dtype=np.float32)
+        for i in range(n_il):
+            out[i] = np.asarray(f.trace[i * n_xl + xl_idx], dtype=np.float32)
+        return out
+
+    def _read_timeslice_from_traces(
+        self, sample_idx: int, meta: SeismicVolumeMeta, cancellation_token=None
+    ) -> np.ndarray:
+        f = self._open()
+        if not (0 <= int(sample_idx) < meta.n_samples):
+            raise ValueError(
+                f"Failed to read time slice {sample_idx} from {self._path}: "
+                f"Sample index may be out of range (available: 0-{meta.n_samples - 1})."
+            )
+        n_il, n_xl = meta.n_inlines, meta.n_crosslines
+        out = np.empty((n_il, n_xl), dtype=np.float32)
+        idx = int(sample_idx)
+        for i in range(n_il):
+            if cancellation_token is not None:
+                cancellation_token.raise_if_cancelled()
+            base = i * n_xl
+            for j in range(n_xl):
+                out[i, j] = np.asarray(f.trace[base + j], dtype=np.float32)[idx]
+        return out
+
+    def _volume_from_traces(
+        self, factor: tuple[int, int, int], *, cancellation_token=None
+    ) -> np.ndarray:
+        meta = self._meta or self.inspect()
+        f = self._open()
+        fi, fx, ft = factor
+        n_il, n_xl, n_t = meta.n_inlines, meta.n_crosslines, meta.n_samples
+        il_idx = np.arange(0, n_il, fi)
+        xl_idx = np.arange(0, n_xl, fx)
+        t_idx = np.arange(0, n_t, ft)
+        vol = np.empty((il_idx.size, xl_idx.size, t_idx.size), dtype=np.float32)
+        for i, ii in enumerate(il_idx):
+            if cancellation_token is not None:
+                cancellation_token.raise_if_cancelled()
+            base = int(ii) * n_xl
+            for j, jj in enumerate(xl_idx):
+                vol[i, j, :] = np.asarray(f.trace[base + int(jj)], dtype=np.float32)[t_idx]
+        return vol
+
     def read_inline(self, iline: int) -> np.ndarray:
         """Read one inline slice. Returns shape ``(n_xlines, n_samples)``."""
         try:
             t0 = time.monotonic()
             f = self._open()
-            data = np.asarray(f.iline[iline], dtype=np.float32)
+            meta = self._meta or self.inspect()
+            if self._uses_trace_index():
+                data = self._read_inline_from_traces(iline, meta)
+            else:
+                data = np.asarray(f.iline[iline], dtype=np.float32)
             logger.debug("read_inline(%d): %.3fs, shape=%s", iline,
                          time.monotonic() - t0, data.shape)
             return data
-        except (KeyError, ValueError) as e:
-            ilines = self._f.ilines if self._f else []
+        except (KeyError, ValueError, AttributeError, TypeError) as e:
+            ilines = self._header_axis_values(
+                self._f.ilines if self._f is not None else None
+            )
             raise ValueError(
                 f"Failed to read inline {iline} from {self._path}: "
                 f"{e}. Inline may be out of range "
@@ -121,12 +293,18 @@ class SeismicLoader:
         try:
             t0 = time.monotonic()
             f = self._open()
-            data = np.asarray(f.xline[xline], dtype=np.float32)
+            meta = self._meta or self.inspect()
+            if self._uses_trace_index():
+                data = self._read_crossline_from_traces(xline, meta)
+            else:
+                data = np.asarray(f.xline[xline], dtype=np.float32)
             logger.debug("read_crossline(%d): %.3fs, shape=%s", xline,
                          time.monotonic() - t0, data.shape)
             return data
-        except (KeyError, ValueError) as e:
-            xlines = self._f.xlines if self._f else []
+        except (KeyError, ValueError, AttributeError, TypeError) as e:
+            xlines = self._header_axis_values(
+                self._f.xlines if self._f is not None else None
+            )
             raise ValueError(
                 f"Failed to read crossline {xline} from {self._path}: "
                 f"{e}. Crossline may be out of range "
@@ -148,30 +326,41 @@ class SeismicLoader:
             f = self._open()
             meta = self._meta or self.inspect()
             expected = (meta.n_inlines, meta.n_crosslines)
-            try:
-                data = np.asarray(f.depth_slice[sample_idx], dtype=np.float32)
-            except (AttributeError, KeyError):
-                # Slow path: depth_slice is unavailable, so build the slice
-                # inline by inline. Every trace of the cube is read — warn and
-                # poll the cancellation token so callers can abort early.
-                logger.warning(
-                    "depth_slice unavailable for %s; reading time slice %d "
-                    "via per-inline fallback (O(volume) I/O)",
-                    self._path, sample_idx,
+            if self._uses_trace_index():
+                data = self._read_timeslice_from_traces(
+                    sample_idx, meta, cancellation_token
                 )
-                if cancellation_token is not None:
-                    cancellation_token.raise_if_cancelled()
-                data = np.empty(expected, dtype=np.float32)
-                for i, il in enumerate(f.ilines.tolist()):
+            else:
+                try:
+                    data = np.asarray(f.depth_slice[sample_idx], dtype=np.float32)
+                except (AttributeError, KeyError, TypeError, ValueError):
+                    # Slow path: depth_slice is unavailable, so build the slice
+                    # inline by inline. Every trace of the cube is read — warn and
+                    # poll the cancellation token so callers can abort early.
+                    logger.warning(
+                        "depth_slice unavailable for %s; reading time slice %d "
+                        "via per-inline fallback (O(volume) I/O)",
+                        self._path, sample_idx,
+                    )
                     if cancellation_token is not None:
                         cancellation_token.raise_if_cancelled()
-                    line = np.asarray(f.iline[il], dtype=np.float32)
-                    data[i, :] = line[:, sample_idx]
+                    data = np.empty(expected, dtype=np.float32)
+                    ilines = self._header_axis_values(getattr(f, "ilines", None))
+                    if not ilines:
+                        data = self._read_timeslice_from_traces(
+                            sample_idx, meta, cancellation_token
+                        )
+                    else:
+                        for i, il in enumerate(ilines):
+                            if cancellation_token is not None:
+                                cancellation_token.raise_if_cancelled()
+                            line = np.asarray(f.iline[il], dtype=np.float32)
+                            data[i, :] = line[:, sample_idx]
             data = self._normalize_timeslice_axes(data, meta)
             logger.debug("read_timeslice(%d): %.3fs, shape=%s", sample_idx,
                          time.monotonic() - t0, data.shape)
             return data
-        except (IndexError, KeyError) as e:
+        except (IndexError, KeyError, AttributeError, TypeError) as e:
             meta = self._meta or self.inspect()
             raise ValueError(
                 f"Failed to read time slice {sample_idx} from {self._path}: "
@@ -230,6 +419,9 @@ class SeismicLoader:
             # (CROSSLINE_SORTING), so the global trace index is a simple stride
             # computation (Issue #64).
             sorting = getattr(f, "sorting", None)
+            if self._uses_trace_index() or sorting is None:
+                global_idx = self._trace_global_index(il_idx, xl_idx, meta)
+                return np.asarray(f.trace[global_idx], dtype=np.float32)
             if sorting == segyio.TraceSortingFormat.INLINE_SORTING:
                 global_idx = il_idx * meta.n_crosslines + xl_idx
                 return np.asarray(f.trace[global_idx], dtype=np.float32)
@@ -240,7 +432,7 @@ class SeismicLoader:
             # the requested crossline column.
             inline_data = np.asarray(f.iline[iline], dtype=np.float32)
             return inline_data[xl_idx, :]
-        except (KeyError, IndexError, ValueError) as e:
+        except (KeyError, IndexError, ValueError, AttributeError, TypeError) as e:
             raise ValueError(
                 f"Failed to read trace at ({iline}, {xline}) from {self._path}: {e}"
             ) from e
@@ -270,6 +462,12 @@ class SeismicLoader:
         meta = self.inspect()
         f = self._open()
         fi, fx, ft = factor
+
+        if self._uses_trace_index():
+            vol = self._volume_from_traces(factor, cancellation_token=cancellation_token)
+            self._downsampled = vol
+            self._downsample_factor = factor
+            return vol
 
         # Fast path: use segyio.tools.cube C-extension reader ONLY when reading
         # at full resolution (factor 1,1,1). When downsampling, tools.cube
@@ -314,17 +512,40 @@ class SeismicLoader:
             self._f.close()
             self._f = None
 
-    @staticmethod
-    def _probe_trace_indices(n_traces: int, limit: int = MAX_PROBE_TRACES) -> list[int]:
-        """Evenly spaced trace indices for header probing (at most ``limit``).
+    def _close_handle(self) -> None:
+        if self._f is not None:
+            try:
+                self._f.close()
+            except Exception:
+                pass
+            self._f = None
 
-        The probe spans the whole trace range so geometry auto-detection sees
-        every region of the file, keeping header reads O(limit) instead of
-        O(n_traces) (Issue #64).
-        """
-        if n_traces <= limit:
-            return list(range(n_traces))
-        return [round(x) for x in np.linspace(0, n_traces - 1, limit)]
+    def _open_detected(self, found_il: int, found_xl: int) -> segyio.SegyFile:
+        self._close_handle()
+        try:
+            self._f = segyio.open(
+                self._path, "r", strict=False, ignore_geometry=False,
+                iline=int(found_il), xline=int(found_xl),
+            )
+        except Exception:
+            self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=True)
+        self._geometry_source = "detected_headers"
+        self._geometry_fields = (int(found_il), int(found_xl))
+        return self._f
+
+    def _open_unstructured(self, n_traces: int | None = None) -> segyio.SegyFile:
+        self._close_handle()
+        if n_traces is None:
+            logger.warning("Could not auto-detect geometry. Falling back to unstructured mode.")
+        else:
+            logger.warning(
+                "Could not auto-detect geometry. Falling back to unstructured mode (%d traces).",
+                n_traces,
+            )
+        self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=True)
+        self._geometry_source = "pseudo"
+        self._geometry_fields = None
+        return self._f
 
     def _open(self) -> segyio.SegyFile:
         if self._f is not None:
@@ -333,95 +554,51 @@ class SeismicLoader:
         # 1) Try standard geometry (iline=189, xline=193)
         try:
             self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=False)
+            ilines = getattr(self._f, "ilines", None)
+            xlines = getattr(self._f, "xlines", None)
             # Quick sanity check: if ilines/xlines are valid, we're done
-            if len(self._f.ilines) > 1 and len(self._f.xlines) > 1:
+            if (
+                ilines is not None
+                and xlines is not None
+                and len(ilines) > 1
+                and len(xlines) > 1
+            ):
                 self._geometry_source = "standard_189_193"
                 self._geometry_fields = (
                     int(segyio.TraceField.INLINE_3D),
                     int(segyio.TraceField.CROSSLINE_3D),
                 )
                 return self._f
-            self._f.close()
-            self._f = None
+            self._close_handle()
         except Exception:
-            pass
+            self._close_handle()
         
         # 2) Auto-detect non-standard iline/xline header byte locations
         logger.info("Standard SEGY geometry failed for %s — scanning for alternative header fields...", self._path)
+        cache_key = _geometry_cache_key(self._path)
+        with _GEOMETRY_FIELD_CACHE_LOCK:
+            cached = _GEOMETRY_FIELD_CACHE.get(cache_key, _MISSING)
+
+        if cached is not _MISSING:
+            if cached is None:
+                return self._open_unstructured()
+            return self._open_detected(cached[0], cached[1])
+
         self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=True)
         n_traces = self._f.tracecount
-        
-        # Candidate header fields commonly used for IL/XL in non-standard files
-        candidates = [
-            (segyio.TraceField.CDP, "CDP"),
-            (segyio.TraceField.FieldRecord, "FieldRecord"),
-            (segyio.TraceField.TRACE_SEQUENCE_LINE, "TraceSeqLine"),
-            (segyio.TraceField.EnergySourcePoint, "EnergySourcePt"),
-            (segyio.TraceField.INLINE_3D, "Inline3D"),
-            (segyio.TraceField.CROSSLINE_3D, "Crossline3D"),
-        ]
-        
-        # Probe an evenly spaced sample of at most MAX_PROBE_TRACES traces
-        # instead of scanning every header: the full scan is the dominant cost
-        # of this fallback on large cubes (Issue #64).
-        probe_idx = self._probe_trace_indices(n_traces)
+        found = detect_iline_xline_fields(self._f)
+        self._close_handle()
 
-        # Collect unique values for each candidate from the probed traces
-        field_info = {}
-        for field, name in candidates:
-            vals = {self._f.header[i][field] for i in probe_idx}
-            if len(vals) > 1:
-                field_info[field] = (name, sorted(vals))
+        with _GEOMETRY_FIELD_CACHE_LOCK:
+            _GEOMETRY_FIELD_CACHE[cache_key] = found
 
-        # Find two fields whose product of unique counts equals n_traces, and
-        # confirm the combination really grids the file: every probed trace
-        # must map to a distinct (il, xl) pair.
-        found_il, found_xl = None, None
-        fields = list(field_info.keys())
-        for i in range(len(fields)):
-            for j in range(i + 1, len(fields)):
-                n_a = len(field_info[fields[i]][1])
-                n_b = len(field_info[fields[j]][1])
-                if n_a * n_b != n_traces:
-                    continue
-                combos = {
-                    (self._f.header[idx][fields[i]], self._f.header[idx][fields[j]])
-                    for idx in probe_idx
-                }
-                if len(combos) != len(probe_idx):
-                    continue
-                # Determine which changes faster (that's the "fast" axis)
-                v0 = self._f.header[0][fields[i]]
-                v1 = self._f.header[1][fields[i]]
-                if v0 != v1:
-                    # fields[i] changes every trace → it's the fast axis (iline in segyio terms)
-                    found_il, found_xl = fields[i], fields[j]
-                else:
-                    found_il, found_xl = fields[j], fields[i]
-                break
-            if found_il is not None:
-                break
-        
-        self._f.close()
-        self._f = None
-        
-        if found_il is not None:
-            il_name = field_info[found_il][0]
-            xl_name = field_info[found_xl][0]
-            logger.info("Detected geometry: iline=byte %d (%s), xline=byte %d (%s)",
-                        int(found_il), il_name, int(found_xl), xl_name)
-            self._f = segyio.open(
-                self._path, "r", strict=False, ignore_geometry=False,
-                iline=int(found_il), xline=int(found_xl),
+        if found is not None:
+            logger.info(
+                "Detected geometry: iline=byte %d, xline=byte %d",
+                int(found[0]), int(found[1]),
             )
-            self._geometry_source = "detected_headers"
-            self._geometry_fields = (int(found_il), int(found_xl))
-            return self._f
-        else:
-            # Last resort: assume square grid and open unstructured
-            logger.warning("Could not auto-detect geometry. Falling back to unstructured mode (%d traces).", n_traces)
-            self._f = segyio.open(self._path, "r", strict=False, ignore_geometry=True)
-            return self._f
+            return self._open_detected(found[0], found[1])
+        return self._open_unstructured(n_traces)
 
     def __del__(self):
         self.close()
