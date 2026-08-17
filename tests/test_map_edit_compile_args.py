@@ -2,11 +2,31 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
+import types
 from pathlib import Path
 
 
 def _load_setup(monkeypatch):
     import setuptools
+
+    # CI's fast extra does not install pybind11; stub the import graph so we
+    # can exec setup.py just to reach `_compile_args`.
+    if "pybind11.setup_helpers" not in sys.modules:
+        dummy = types.ModuleType("pybind11")
+        helpers = types.ModuleType("pybind11.setup_helpers")
+
+        class _DummyExt:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class _DummyBuildExt:
+            pass
+
+        helpers.Pybind11Extension = _DummyExt
+        helpers.build_ext = _DummyBuildExt
+        monkeypatch.setitem(sys.modules, "pybind11", dummy)
+        monkeypatch.setitem(sys.modules, "pybind11.setup_helpers", helpers)
 
     monkeypatch.setattr(setuptools, "setup", lambda **_kwargs: None)
     path = Path(__file__).resolve().parents[1] / "native" / "map_edit_core" / "setup.py"
