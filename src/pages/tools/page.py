@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QFrame, QGridLayout, QLineEdit,
 )
 
-from scripts.convert_xml_to_laolong import convert_to_laolong_xls
 from src.utils.paths import get_resources_dir
 from src.pages.tools.dialogs import (
     SEGYHeaderInspectorDialog,
@@ -251,6 +250,8 @@ class ToolsPage(QWidget):
         self._run_btn.setEnabled(False)
         self._run_btn.setText("转换中...")
         try:
+            from scripts.convert_xml_to_laolong import convert_to_laolong_xls
+
             convert_to_laolong_xls(in_path, out_path)
             QMessageBox.information(self, "转换成功", f"文件已成功转换为 LaoLong 格式 Excel。\n输出路径: {out_path}")
         except Exception as e:
