@@ -7,11 +7,34 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLabel, QGroupBox, QMessageBox,
     QFrame, QLineEdit, QHeaderView, QSplitter, QTextEdit, QInputDialog
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtGui import QCursor, QIcon
 
 from src.data.cache import DataCache
 from src.data.well_registry import list_wells, get_well_data
+
+
+class _ExcelImportWorker(QObject):
+    """Parse + register an Excel well file off the GUI thread (#711)."""
+
+    finished = Signal(str)
+    error = Signal(str)
+
+    def __init__(self, path: Path, cache: DataCache):
+        super().__init__()
+        self._path = path
+        self._cache = cache
+
+    def run(self):
+        try:
+            from src.data.loaders import load_well_log_from_excel
+
+            load_well_log_from_excel(self._path)
+            self._cache.catalog.register_well_file(self._path.stem, self._path)
+            self._cache.put_file(str(self._path))
+            self.finished.emit(str(self._path))
+        except Exception as exc:
+            self.error.emit(str(exc))
 
 
 class DataPage(QWidget):
@@ -202,6 +225,8 @@ class DataPage(QWidget):
 
         self._load_well_table()
         self.refresh_kpis()
+        self._import_thread = None
+        self._import_worker = None
 
     def _build_detail_panel(self) -> QFrame:
         """Build the WellDetailPanel side-out frame."""
@@ -457,13 +482,7 @@ class DataPage(QWidget):
                 self.refresh_kpis()
                 QMessageBox.information(self, "已登记", f"地震数据已登记为数据条目（未解析）:\n{path}")
             elif ext in (".xlsx", ".xls"):
-                from src.data.loaders import load_well_log_from_excel
-                load_well_log_from_excel(p)
-                self.cache.catalog.register_well_file(p.stem, p)
-                self.cache.put_file(path)
-                self._load_well_table()
-                self.refresh_kpis()
-                QMessageBox.information(self, "导入完成", f"文件已成功导入:\n{path}")
+                self._start_excel_import(p)
             else:
                 # JSON 及其它暂不支持解析的格式：只登记路径
                 self.cache.put_file(path)
@@ -472,6 +491,50 @@ class DataPage(QWidget):
                 QMessageBox.information(self, "已登记", f"文件已登记但未解析:\n{path}")
         except Exception as e:
             QMessageBox.warning(self, "导入失败", f"无法加载文件:\n{path}\n\n{e}")
+
+    def cleanup(self):
+        thread = self._import_thread
+        if thread is None:
+            return
+        try:
+            if thread.isRunning():
+                thread.quit()
+                thread.wait(2000)
+        except RuntimeError:
+            pass
+        self._import_thread = None
+        self._import_worker = None
+        self.unsetCursor()
+
+    def _start_excel_import(self, path: Path):
+        if self._import_thread is not None:
+            return
+        self.setCursor(QCursor(Qt.CursorShape.WaitCursor))
+        self._import_thread = QThread()
+        self._import_worker = _ExcelImportWorker(path, self.cache)
+        self._import_worker.moveToThread(self._import_thread)
+        self._import_thread.started.connect(self._import_worker.run)
+        self._import_worker.finished.connect(self._on_excel_import_finished)
+        self._import_worker.error.connect(self._on_excel_import_error)
+        self._import_worker.finished.connect(self._import_thread.quit)
+        self._import_worker.error.connect(self._import_thread.quit)
+        self._import_thread.finished.connect(self._on_excel_import_thread_finished)
+        self._import_thread.start()
+
+    def _on_excel_import_finished(self, path: str):
+        self.unsetCursor()
+        self._load_well_table()
+        self.refresh_kpis()
+        QMessageBox.information(self, "导入完成", f"文件已成功导入:\n{path}")
+
+    def _on_excel_import_error(self, message: str):
+        self.unsetCursor()
+        QMessageBox.warning(self, "导入失败", f"无法加载文件:\n{message}")
+
+    def _on_excel_import_thread_finished(self):
+        self._import_thread = None
+        self._import_worker = None
+        self.unsetCursor()
 
     def _import_las_file(self, p: Path):
         """解析 LAS 文件并登记井位；坐标缺失时提示补充或登记为无坐标井。"""

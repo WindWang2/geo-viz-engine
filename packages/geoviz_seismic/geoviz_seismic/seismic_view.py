@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
 from .renderer_3d import Renderer3D
 from .profile_widget import ProfileWidget
 from .loader import SeismicLoader
-from .horizon import HorizonParser
 from .cache import RamSliceCache, SeismicCache
 from .colorbar_widget import ColorbarWidget
 from .workers import (
@@ -22,6 +21,7 @@ from .workers import (
     AttrComputeRequest,
     AttrComputeResult,
     AttrComputeWorker,
+    HorizonLoadWorker,
     SegyLoadWorker,
     SeismicLoadError,
     SeismicLoadResult,
@@ -64,6 +64,7 @@ class SeismicView(QWidget):
         self._segy_worker: SegyLoadWorker | None = None
         self._segy_workers: set[SegyLoadWorker] = set()
         self._synth_worker: SyntheticWorker | None = None
+        self._horizon_worker: HorizonLoadWorker | None = None
 
         # Attribute computation runs off the GUI thread (C3 / curvature /
         # RGB fusion take seconds on large slices).  Results are cached per
@@ -257,6 +258,9 @@ class SeismicView(QWidget):
         if hasattr(self, '_synth_worker') and self._synth_worker is not None:
             if self._synth_worker.isRunning():
                 self._synth_worker.requestInterruption()
+
+        if self._horizon_worker is not None and self._horizon_worker.isRunning():
+            self._horizon_worker.requestInterruption()
 
         self._stop_slice_worker()
         self._stop_attr_worker()
@@ -1544,11 +1548,6 @@ class SeismicView(QWidget):
             "nI": self._meta.n_inlines,
             "nX": self._meta.n_crosslines,
         }
-        parser = HorizonParser(path, unit="ms")
-        grid = parser.parse(axes)
-        filled = parser.fill_nearest(grid)
-
-        # Cycle through colors for multiple horizons
         colors = [
             (1.0, 0.9, 0.2, 0.6),   # gold
             (0.2, 0.9, 0.5, 0.6),    # green
@@ -1557,12 +1556,34 @@ class SeismicView(QWidget):
             (0.8, 0.5, 1.0, 0.6),    # purple
         ]
         idx = len(self._horizon_grids) % len(colors)
+        if self._horizon_worker is not None and self._horizon_worker.isRunning():
+            return
+        self._readout_label.setText(f"正在加载层位: {name}")
+        worker = HorizonLoadWorker(path, axes, name, colors[idx])
+        retain_background_worker(worker)
+        self._horizon_worker = worker
+        worker.done.connect(self._on_horizon_ready)
+        worker.error.connect(self._on_horizon_error)
+        worker.start()
+
+    def _on_horizon_ready(self, result):
+        if self.sender() is not self._horizon_worker:
+            return
+        self._horizon_worker = None
+        name, filled, color = result
         self._horizon_grids[name] = filled
         self._renderer_3d.add_horizon(
-            filled, name=name, color=colors[idx], z_unit="ms"
+            filled, name=name, color=color, z_unit="ms"
         )
         self._sculpt_horizon_combo.addItem(name)
         self._readout_label.setText(f"已加载层位: {name} ({len(self._horizon_grids)} 个)")
+
+    def _on_horizon_error(self, message: str):
+        if self.sender() is not self._horizon_worker:
+            return
+        self._horizon_worker = None
+        self._log.error("Horizon load failed: %s", message)
+        self._readout_label.setText(f"层位加载失败: {message}")
 
     def _remove_horizon(self, name: str):
         self._horizon_grids.pop(name, None)

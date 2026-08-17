@@ -523,6 +523,94 @@ def test_horizon_field_metadata_controls_reordered_xyz_columns(tmp_path: Path):
     assert preview.payload.grid_y[[0, -1]].tolist() == [20.0, 40.0]
 
 
+def test_time_depth_and_surface_parse_only_sampled_rows_in_one_pass(
+    tmp_path: Path, monkeypatch
+):
+    """#703: one file read; shlex/float only the ≤max_points sample, not every row."""
+    import geoviz.previews.dat as dat
+    from geoviz.contracts import PreviewOptions
+
+    n_rows = 4_000
+    sample = 40
+    td_path = tmp_path / "td-large.dat"
+    td_path.write_text(
+        "# Depth Time(ms)\n"
+        + "\n".join(f"{i}.0 {i * 0.5}" for i in range(n_rows))
+        + "\n",
+        encoding="utf-8",
+    )
+    surf_path = tmp_path / "horizon-large.dat"
+    surf_path.write_text(
+        "\n".join(
+            (
+                "# XYZInlineCrossline Format Horizon File From SMI",
+                "# Field: 1 x",
+                "# Field: 2 y",
+                "# Field: 3 z ms",
+                *(
+                    f"{float(i % 80)} {float(i // 80)} {1000.0 + i}"
+                    for i in range(n_rows)
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    real_split = dat._split_data_line
+    real_finite = dat._finite_float
+    real_open = open
+
+    def _count_for(path: Path) -> dict[str, int]:
+        counts = {"open": 0, "split": 0, "finite": 0}
+
+        def counting_open(file, *args, **kwargs):
+            if str(file) == str(path):
+                counts["open"] += 1
+            return real_open(file, *args, **kwargs)
+
+        def counting_split(line):
+            counts["split"] += 1
+            return real_split(line)
+
+        def counting_finite(value):
+            counts["finite"] += 1
+            return real_finite(value)
+
+        monkeypatch.setattr(dat, "open", counting_open, raising=False)
+        monkeypatch.setattr(dat, "_split_data_line", counting_split)
+        monkeypatch.setattr(dat, "_finite_float", counting_finite)
+        return counts
+
+    options = PreviewOptions(max_points=sample, surface_grid_size=8)
+
+    td_counts = _count_for(td_path)
+    td = dat._time_depth_payload(str(td_path), options)
+    assert len(td.depth) == sample
+    assert td_counts["open"] == 1, (
+        f"time-depth must read the DAT once, opened {td_counts['open']} times"
+    )
+    assert td_counts["split"] <= sample + 2, (
+        f"must not shlex every row: {td_counts['split']} splits for {sample} samples"
+    )
+    assert td_counts["finite"] <= 2 * sample + 2, (
+        f"must not float-parse every row: {td_counts['finite']} conversions"
+    )
+
+    surf_counts = _count_for(surf_path)
+    surf = dat._surface_payload(str(surf_path), options)
+    assert surf.grid_z.size > 0
+    assert surf_counts["open"] == 1, (
+        f"surface must read the DAT once, opened {surf_counts['open']} times"
+    )
+    assert surf_counts["split"] <= sample + 2, (
+        f"must not shlex every surface row: {surf_counts['split']} splits"
+    )
+    assert surf_counts["finite"] <= 3 * sample + 3, (
+        f"must not float-parse every surface row: {surf_counts['finite']} conversions"
+    )
+
+
 def test_time_depth_uses_registered_columns_and_sorts_by_depth(time_depth_dat: Path):
     preview = GeoVizEngine.default().prepare(
         _request(time_depth_dat, "time_depth"), PreviewOptions.local()

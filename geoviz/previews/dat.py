@@ -440,10 +440,46 @@ def _supports_with_header(request: PreviewRequest, predicate) -> bool:
 
 
 def _split_data_line(line: str) -> tuple[str, ...]:
+    if '"' not in line and "'" not in line:
+        return tuple(line.split())
     try:
         return tuple(shlex.split(line))
     except ValueError as error:
         raise _DatSchemaError(str(error)) from error
+
+
+def _read_dat_data_lines(path: str) -> tuple[tuple[str, ...], list[str]]:
+    """Single pass: collect header comments and raw data lines (no split/parse)."""
+    header = []
+    header_chars = 0
+    data_lines: list[str] = []
+    with open(path, "r", encoding="utf-8-sig") as stream:
+        for raw_line in stream:
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                header_chars = _retain_header_line(header, header_chars, line)
+                continue
+            data_lines.append(line)
+    if not data_lines:
+        raise _DatSchemaError("no data rows")
+    return tuple(header), data_lines
+
+
+def _parse_selected_lines(data_lines: list[str], indices: np.ndarray, parse_row) -> list[tuple]:
+    selected = []
+    row_width = 0
+    for index in indices:
+        row = _split_data_line(data_lines[int(index)])
+        if not row:
+            raise _DatSchemaError("row count changed while reading")
+        if row_width == 0:
+            row_width = len(row)
+        elif len(row) != row_width:
+            raise _DatSchemaError("inconsistent row width")
+        selected.append(parse_row(row))
+    return selected
 
 
 def _scan_dat(path: str) -> tuple[tuple[str, ...], int, int]:
@@ -702,8 +738,11 @@ def _well_head_payload(
 
 
 def _time_depth_payload(path: str, options: PreviewOptions) -> TimeDepthPreviewPayload:
-    header, row_count, row_width = _scan_dat(path)
-    mapping = _time_depth_mapping(header, row_width)
+    header, data_lines = _read_dat_data_lines(path)
+    first_row = _split_data_line(data_lines[0])
+    if not first_row:
+        raise _DatSchemaError("no data rows")
+    mapping = _time_depth_mapping(header, len(first_row))
 
     def parse_row(row):
         return (
@@ -711,8 +750,8 @@ def _time_depth_payload(path: str, options: PreviewOptions) -> TimeDepthPreviewP
             _finite_float(_value_at(row, mapping["time"])),
         )
 
-    indices = representative_indices(row_count, _sample_limit(options))
-    selected = _selected_rows(path, indices, parse_row)
+    indices = representative_indices(len(data_lines), _sample_limit(options))
+    selected = _parse_selected_lines(data_lines, indices, parse_row)
     depth = np.asarray([row[0] for row in selected], dtype=np.float64)
     time_ms = np.asarray([row[1] for row in selected], dtype=np.float64)
     order = np.argsort(depth, kind="stable")
@@ -723,10 +762,13 @@ def _time_depth_payload(path: str, options: PreviewOptions) -> TimeDepthPreviewP
 
 
 def _surface_payload(path: str, options: PreviewOptions) -> SurfacePreviewPayload:
-    header, row_count, row_width = _scan_dat(path)
+    header, data_lines = _read_dat_data_lines(path)
     if not any(_HORIZON_MARKER in line for line in header):
         raise _DatSchemaError("missing horizon marker")
-    mapping = _horizon_field_mapping(header, row_width)
+    first_row = _split_data_line(data_lines[0])
+    if not first_row:
+        raise _DatSchemaError("no data rows")
+    mapping = _horizon_field_mapping(header, len(first_row))
 
     def parse_row(row):
         return (
@@ -735,8 +777,8 @@ def _surface_payload(path: str, options: PreviewOptions) -> SurfacePreviewPayloa
             _finite_float(_value_at(row, mapping["z"])),
         )
 
-    source_indices = representative_indices(row_count, _sample_limit(options))
-    selected = _selected_rows(path, source_indices, parse_row)
+    source_indices = representative_indices(len(data_lines), _sample_limit(options))
+    selected = _parse_selected_lines(data_lines, source_indices, parse_row)
     source_x = np.asarray([row[0] for row in selected], dtype=np.float64)
     source_y = np.asarray([row[1] for row in selected], dtype=np.float64)
     source_z = np.asarray([row[2] for row in selected], dtype=np.float64)
