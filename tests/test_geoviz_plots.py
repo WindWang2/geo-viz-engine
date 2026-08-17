@@ -666,7 +666,7 @@ def test_scipy_interpolation_masking():
 from geoviz_plots.interpolation.scipy_grid import InterpolationWorker
 
 def test_async_interpolation(qtbot):
-    """Verify that InterpolationWorker runs asynchronously in QThread and emits finished signal."""
+    """Verify that InterpolationWorker runs asynchronously in QThread and emits result_ready."""
     x = np.array([0.0, 1.0, 0.0, 1.0])
     y = np.array([0.0, 0.0, 1.0, 1.0])
     z = np.array([0.0, 10.0, 10.0, 20.0])
@@ -676,12 +676,62 @@ def test_async_interpolation(qtbot):
     worker = InterpolationWorker(x, y, z, grid_x, grid_y, method="linear")
     
     # Track signal emission
-    with qtbot.waitSignal(worker.finished, timeout=2000) as blocker:
+    with qtbot.waitSignal(worker.result_ready, timeout=2000) as blocker:
         worker.start()
         
     grid_z = blocker.args[0]
     assert grid_z.shape == (5, 5)
     assert grid_z[2, 2] == pytest.approx(10.0)
+
+
+def test_interpolation_worker_finished_is_qthread_lifecycle(qtbot):
+    """#689: InterpolationWorker.finished must remain QThread.finished."""
+    from PySide6.QtCore import QThread
+
+    from geoviz_plots.interpolation.scipy_grid import InterpolationWorker
+
+    assert InterpolationWorker.finished is QThread.finished
+    assert hasattr(InterpolationWorker, "result_ready")
+
+    x = np.array([0.0, 1.0, 0.0, 1.0])
+    y = np.array([0.0, 0.0, 1.0, 1.0])
+    z = np.array([0.0, 10.0, 10.0, 20.0])
+    worker = InterpolationWorker(x, y, z, np.linspace(0, 1, 4), np.linspace(0, 1, 4))
+    seen: dict[str, bool] = {}
+    worker.finished.connect(lambda: seen.__setitem__("finished", worker.isFinished()))
+    with qtbot.waitSignal(worker.finished, timeout=2000):
+        worker.start()
+    worker.wait(1000)
+    assert seen.get("finished") is True
+
+
+def test_interpolate_scipy_collinear_fallback_is_detectable(caplog):
+    """#690: linear/cubic Qhull failure must flag nearest fallback."""
+    import logging
+
+    x = np.array([0.0, 1.0, 2.0])
+    y = np.array([0.0, 0.0, 0.0])
+    z = np.array([1.0, 2.0, 3.0])
+    grid_x = np.linspace(0.0, 2.0, 5)
+    grid_y = np.linspace(-1.0, 1.0, 5)
+    status: dict = {}
+    with caplog.at_level(logging.WARNING, logger="geoviz_plots.interpolation.scipy_grid"):
+        grid_z = interpolate_scipy(
+            x, y, z, grid_x, grid_y, method="linear", status=status,
+        )
+    assert status.get("fallback") == "nearest"
+    assert status.get("requested_method") == "linear"
+    assert np.isfinite(grid_z).any()
+    assert "nearest" in caplog.text.lower()
+
+
+def test_interpolate_scipy_unknown_method_does_not_fallback():
+    """#690: unknown method names must raise, not silently become nearest."""
+    x = np.array([0.0, 1.0, 0.0])
+    y = np.array([0.0, 0.0, 1.0])
+    z = np.array([1.0, 2.0, 3.0])
+    with pytest.raises(ValueError, match="Unknown interpolation method"):
+        interpolate_scipy(x, y, z, [0.0, 1.0], [0.0, 1.0], method="not-a-method")
 
 
 from geoviz_plots.surface.marching_squares import extract_contour_lines, extract_filled_contours
@@ -1063,7 +1113,7 @@ def test_factor_interpolate_factor_grid_idw():
     assert len(result["grid_z"]) == 10 and len(result["grid_z"][0]) == 10
     assert result["n_points"] == 4
     assert result["min"] <= result["mean"] <= result["max"]
-    assert result["r_squared"] is None or 0.0 <= result["r_squared"] <= 1.0
+    assert result["r_squared"] is None or math.isfinite(result["r_squared"])
     # grid_z cells are either float or None (JSON-serializable)
     assert all(isinstance(v, float) or v is None for row in result["grid_z"] for v in row)
 
@@ -1199,6 +1249,100 @@ def test_map_edit_feature_editor_topology_rollback():
     # Auto-rollback: vertex unchanged
     ring = editor.features["f1"]["geometry"]["coordinates"][0]
     assert ring[0] == [0, 0]
+
+
+def test_feature_editor_select_at_point_and_multipolygon():
+    """#688: Point clicks must not TypeError; MultiPolygon vertices are walkable."""
+    from geoviz_plots.map_edit import FeatureEditor
+
+    editor = FeatureEditor()
+    editor.load_layer({
+        "type": "FeatureCollection",
+        "features": [
+            {"id": "pt", "geometry": {"type": "Point", "coordinates": [5.0, 5.0]}},
+            {
+                "id": "poly",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
+                },
+            },
+            {
+                "id": "mp",
+                "geometry": {
+                    "type": "MultiPolygon",
+                    "coordinates": [[[[20, 20], [22, 20], [22, 22], [20, 22], [20, 20]]]],
+                },
+            },
+        ],
+    })
+    point_hit = editor.on_pointer_down(5.0, 5.0, tolerance=1.0)
+    assert point_hit is not None
+    assert point_hit["feature_id"] == "pt"
+    assert point_hit["point"] == (5.0, 5.0)
+
+    mp_hit = editor.on_pointer_down(22.0, 20.0, tolerance=1.0)
+    assert mp_hit is not None
+    assert mp_hit["feature_id"] == "mp"
+    assert mp_hit["point"] == (22.0, 20.0)
+
+
+def test_feature_editor_move_does_not_deepcopy_store(monkeypatch):
+    """#684: vertex drag must not deepcopy the whole feature store per move."""
+    import copy
+
+    from geoviz_plots.map_edit import FeatureEditor
+
+    editor = FeatureEditor()
+    editor.load_layer({
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "id": "f1",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
+                },
+            },
+        ],
+    })
+    editor.on_pointer_down(10.0, 0.0, tolerance=1.0)
+    calls = {"n": 0}
+    orig = copy.deepcopy
+
+    def _spy(obj):
+        calls["n"] += 1
+        return orig(obj)
+
+    monkeypatch.setattr(copy, "deepcopy", _spy)
+    assert editor.on_pointer_move(12.0, 0.0, snap=False) is True
+    assert calls["n"] == 0
+    ring = editor.features["f1"]["geometry"]["coordinates"][0]
+    assert ring[1] == [12.0, 0.0]
+
+
+def test_factor_loo_r2_keeps_negative_values():
+    """#687: LOO R² worse than the mean must stay negative, not clamp to 0."""
+    from geoviz_plots.factor.interpolation import _r_squared
+
+    observed = np.array([0.0, 1.0, 2.0, 3.0])
+    preds = np.array([3.0, 2.0, 1.0, 0.0])
+    r2 = _r_squared(observed, preds)
+    assert r2 < 0.0
+
+
+def test_factor_interpolate_grid_reports_nearest_fallback():
+    """#690: collinear 克里金/linear samples must mark the nearest fallback."""
+    from geoviz_plots.factor import interpolate_factor_grid
+
+    pts = [
+        {"x": 0.0, "y": 0.0, "value": 1.0},
+        {"x": 1.0, "y": 0.0, "value": 2.0},
+        {"x": 2.0, "y": 0.0, "value": 3.0},
+    ]
+    result = interpolate_factor_grid(pts, method="克里金", grid_n=5)
+    assert result["degraded"] is True
+    assert result["fallback"] == "nearest"
 
 
 # --- Phase-2 T3: extract_filled_contours extensions (study_area_clip / palette) ---

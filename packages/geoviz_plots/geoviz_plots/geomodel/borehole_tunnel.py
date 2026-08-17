@@ -212,7 +212,14 @@ class TunnelMeshGenerator:
         trajectory = np.array(trajectory, dtype=np.float64)
         if len(trajectory.shape) != 2 or trajectory.shape[1] != 3:
             raise ValueError("Trajectory must be a 2D array of shape (N, 3).")
-            
+
+        if len(trajectory) >= 2:
+            cleaned = [trajectory[0]]
+            for pt in trajectory[1:]:
+                if not np.allclose(pt, cleaned[-1]):
+                    cleaned.append(pt)
+            trajectory = np.array(cleaned, dtype=np.float64)
+
         N_pts = len(trajectory)
         if N_pts < 2:
             raise ValueError("Trajectory must have at least 2 points.")
@@ -254,7 +261,11 @@ class TunnelMeshGenerator:
             
         N_0 /= N_0_norm
         B_0 = np.cross(T_0, N_0)
-        B_0 /= np.linalg.norm(B_0)
+        B_0_norm = np.linalg.norm(B_0)
+        if B_0_norm < 1e-12:
+            B_0 = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+        else:
+            B_0 /= B_0_norm
         
         # 3. Propagate the normal and binormal vectors using Double Reflection Method
         normals = np.zeros((N_pts, 3), dtype=np.float64)
@@ -295,10 +306,18 @@ class TunnelMeshGenerator:
                 
             # Re-orthogonalize to T_curr to prevent accumulation of drift
             N_curr = N_curr - np.dot(N_curr, T_curr) * T_curr
-            N_curr /= np.linalg.norm(N_curr)
-            
+            n_ortho = np.linalg.norm(N_curr)
+            if n_ortho < 1e-12:
+                N_curr = N_prev
+            else:
+                N_curr /= n_ortho
+
             B_curr = np.cross(T_curr, N_curr)
-            B_curr /= np.linalg.norm(B_curr)
+            b_norm = np.linalg.norm(B_curr)
+            if b_norm < 1e-12:
+                B_curr = binormals[i - 1]
+            else:
+                B_curr /= b_norm
             
             normals[i] = N_curr
             binormals[i] = B_curr

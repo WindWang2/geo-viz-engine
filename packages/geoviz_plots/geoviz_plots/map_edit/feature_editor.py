@@ -23,6 +23,86 @@ from typing import Any
 from geoviz_plots.map_edit.api import validate_ring as _validate_ring
 
 
+def _is_xy(pt: Any) -> bool:
+    return (
+        isinstance(pt, (list, tuple))
+        and len(pt) >= 2
+        and isinstance(pt[0], (int, float))
+        and isinstance(pt[1], (int, float))
+    )
+
+
+def _walk_vertex_slots(coords: Any):
+    """Yield ``(container, index)`` for every nested GeoJSON ``[x, y]``."""
+    if not isinstance(coords, (list, tuple)) or not coords:
+        return
+    first = coords[0]
+    if isinstance(first, (int, float)):
+        return
+    if _is_xy(first):
+        for i, pt in enumerate(coords):
+            if _is_xy(pt):
+                yield coords, i
+        return
+    for part in coords:
+        yield from _walk_vertex_slots(part)
+
+
+def _vertex_slots(geom: dict[str, Any]) -> list[tuple[list, int | None]]:
+    coords = geom.get("coordinates", [])
+    gtype = geom.get("type")
+    if gtype == "Point" or (
+        isinstance(coords, list)
+        and len(coords) >= 2
+        and isinstance(coords[0], (int, float))
+    ):
+        return [(coords, None)] if isinstance(coords, list) and len(coords) >= 2 else []
+    return list(_walk_vertex_slots(coords))
+
+
+def _vertex_xy(slot: tuple[list, int | None]) -> tuple[float, float]:
+    container, idx = slot
+    if idx is None:
+        return float(container[0]), float(container[1])
+    pt = container[idx]
+    return float(pt[0]), float(pt[1])
+
+
+def _set_vertex(slot: tuple[list, int | None], x: float, y: float) -> None:
+    container, idx = slot
+    if idx is None:
+        container[0] = float(x)
+        container[1] = float(y)
+        return
+    n = len(container)
+    container[idx] = [float(x), float(y)]
+    if n >= 2:
+        if idx == 0:
+            container[-1] = [float(x), float(y)]
+        elif idx == n - 1:
+            container[0] = [float(x), float(y)]
+
+
+def _rings_for_validation(geom: dict[str, Any]) -> list[list]:
+    coords = geom.get("coordinates") or []
+    gtype = geom.get("type")
+    if gtype == "Polygon":
+        return [ring for ring in coords if isinstance(ring, list) and _is_xy(ring[0] if ring else None)]
+    if gtype == "MultiPolygon":
+        rings: list[list] = []
+        for polygon in coords:
+            if not isinstance(polygon, list):
+                continue
+            rings.extend(
+                ring for ring in polygon
+                if isinstance(ring, list) and _is_xy(ring[0] if ring else None)
+            )
+        return rings
+    if isinstance(coords, list) and coords and _is_xy(coords[0]):
+        return [coords]
+    return []
+
+
 class TopologyError(Exception):
     """Raised when a geometry operation violates topology invariants."""
     pass
@@ -38,6 +118,7 @@ class FeatureEditor:
         self._undo_stack: list[dict[str, dict[str, Any]]] = []
         self._redo_stack: list[dict[str, dict[str, Any]]] = []
         self._uncommitted_base: dict[str, dict[str, Any]] | None = None
+        self._drag_targets: list[tuple[str, int]] | None = None
 
     @property
     def can_undo(self) -> bool:
@@ -55,6 +136,7 @@ class FeatureEditor:
         self._undo_stack.clear()
         self._redo_stack.clear()
         self._uncommitted_base = None
+        self._drag_targets = None
 
         feat_list = []
         if isinstance(feature_collection, dict):
@@ -108,14 +190,9 @@ class FeatureEditor:
         min_dist = float("inf")
 
         for feat_id, feat in self.features.items():
-            geom = feat.get("geometry", {})
-            coords = geom.get("coordinates", [])
-            if not coords:
-                continue
-
-            ring = coords[0] if geom.get("type") == "Polygon" else coords
-            for idx, pt in enumerate(ring):
-                px, py = pt[0], pt[1]
+            slots = _vertex_slots(feat.get("geometry", {}))
+            for idx, slot in enumerate(slots):
+                px, py = _vertex_xy(slot)
                 dist = math.hypot(px - x, py - y)
                 if dist <= tolerance and dist < min_dist:
                     min_dist = dist
@@ -129,7 +206,7 @@ class FeatureEditor:
         if best_selection is not None:
             self.selected_feature_id = best_selection["feature_id"]
             self.selected_vertex_index = best_selection["vertex_index"]
-
+            self._drag_targets = self._find_coincident_vertices(list(best_selection["point"]))
         return best_selection
 
     def on_pointer_down(self, x: float, y: float, tolerance: float = 5.0) -> dict[str, Any] | None:
@@ -157,23 +234,31 @@ class FeatureEditor:
 
     @staticmethod
     def _extract_ring(feat: dict[str, Any]) -> list[list[float]] | None:
-        """Extract polygon ring coordinates from feature dict."""
+        """Extract a mutable list-of-positions ring from a Polygon or LineString."""
         geom = feat.get("geometry", {})
         coords = geom.get("coordinates", [])
         if not coords:
             return None
-        return coords[0] if geom.get("type") == "Polygon" else coords
+        gtype = geom.get("type")
+        if gtype == "Polygon":
+            ring = coords[0]
+            return ring if isinstance(ring, list) and _is_xy(ring[0] if ring else None) else None
+        if gtype in {"Point", "MultiPolygon", "MultiLineString", "GeometryCollection"}:
+            return None
+        if isinstance(coords[0], (int, float)):
+            return None
+        if _is_xy(coords[0]):
+            return coords
+        return None
 
     def _find_coincident_vertices(self, target_point: list[float], tol: float = 1e-4) -> list[tuple[str, int]]:
         """Find all (feature_id, vertex_index) tuples matching target_point."""
         coincident = []
         tx, ty = target_point[0], target_point[1]
         for fid, feat in self.features.items():
-            ring = self._extract_ring(feat)
-            if ring is None:
-                continue
-            for idx, pt in enumerate(ring):
-                if math.hypot(pt[0] - tx, pt[1] - ty) <= tol:
+            for idx, slot in enumerate(_vertex_slots(feat.get("geometry", {}))):
+                px, py = _vertex_xy(slot)
+                if math.hypot(px - tx, py - ty) <= tol:
                     coincident.append((fid, idx))
         return coincident
 
@@ -190,16 +275,14 @@ class FeatureEditor:
         min_dist = snap_tolerance
 
         for fid, feat in self.features.items():
-            ring = self._extract_ring(feat)
-            if ring is None:
-                continue
-            for idx, pt in enumerate(ring):
+            for idx, slot in enumerate(_vertex_slots(feat.get("geometry", {}))):
                 if (fid, idx) in exclude:
                     continue
-                dist = math.hypot(pt[0] - x, pt[1] - y)
+                px, py = _vertex_xy(slot)
+                dist = math.hypot(px - x, py - y)
                 if dist <= min_dist:
                     min_dist = dist
-                    best_pt = (float(pt[0]), float(pt[1]))
+                    best_pt = (px, py)
 
         return best_pt
 
@@ -215,57 +298,52 @@ class FeatureEditor:
             raise ValueError("No vertex currently selected")
 
         feat = self.features[self.selected_feature_id]
-        ring = self._extract_ring(feat)
-        if ring is None:
+        slots = _vertex_slots(feat.get("geometry", {}))
+        if not slots or self.selected_vertex_index >= len(slots):
             return False
 
-        orig_point = list(ring[self.selected_vertex_index])
+        orig_x, orig_y = _vertex_xy(slots[self.selected_vertex_index])
 
-        # Snapshot for auto-rollback
-        backup_features = copy.deepcopy(self.features)
-
-        # Find all coincident shared vertices across adjacent polygons
-        coincident_targets = self._find_coincident_vertices(orig_point)
+        coincident_targets = list(self._drag_targets) if self._drag_targets else []
+        if not coincident_targets:
+            coincident_targets = self._find_coincident_vertices([orig_x, orig_y])
         if not coincident_targets:
             coincident_targets = [(self.selected_feature_id, self.selected_vertex_index)]
 
         coincident_set = set(coincident_targets)
+        backup: list[tuple[str, int, float, float]] = []
+        for fid, v_idx in coincident_targets:
+            f_slots = _vertex_slots(self.features[fid].get("geometry", {}))
+            if 0 <= v_idx < len(f_slots):
+                bx, by = _vertex_xy(f_slots[v_idx])
+                backup.append((fid, v_idx, bx, by))
 
-        # Apply vertex snapping if enabled
         target_x, target_y = x, y
         if snap:
             target_x, target_y = self.find_snap_target(
                 x, y, exclude_targets=coincident_set, snap_tolerance=snap_tolerance
             )
 
-        # Apply new coordinate to all coincident vertices
         touched_feature_ids = set()
         for fid, v_idx in coincident_targets:
             touched_feature_ids.add(fid)
-            f_ring = self._extract_ring(self.features[fid])
-            if f_ring is None:
-                continue
-            n_pts = len(f_ring)
+            f_slots = _vertex_slots(self.features[fid].get("geometry", {}))
+            if 0 <= v_idx < len(f_slots):
+                _set_vertex(f_slots[v_idx], target_x, target_y)
 
-            f_ring[v_idx] = [float(target_x), float(target_y)]
-
-            # Maintain ring closure (ring[0] == ring[-1])
-            if v_idx == 0:
-                f_ring[-1] = [float(target_x), float(target_y)]
-            elif v_idx == n_pts - 1:
-                f_ring[0] = [float(target_x), float(target_y)]
-
-        # Topology Validation for all touched polygon rings
         for fid in touched_feature_ids:
             f_geom = self.features[fid].get("geometry", {})
-            f_coords = f_geom.get("coordinates", [])
-            f_ring = f_coords[0] if f_geom.get("type") == "Polygon" else f_coords
-            errors = _validate_ring(f_ring)
-            if errors:
-                # Auto-rollback on topology error
-                self.features = backup_features
-                err_msg = ", ".join(e.get("message", e.get("code", "invalid")) for e in errors)
-                raise TopologyError(f"Invalid topology on feature '{fid}': {err_msg}")
+            for f_ring in _rings_for_validation(f_geom):
+                if len(f_ring) < 4:
+                    continue
+                errors = _validate_ring(f_ring)
+                if errors:
+                    for bfid, bv_idx, bx, by in backup:
+                        b_slots = _vertex_slots(self.features[bfid].get("geometry", {}))
+                        if 0 <= bv_idx < len(b_slots):
+                            _set_vertex(b_slots[bv_idx], bx, by)
+                    err_msg = ", ".join(e.get("message", e.get("code", "invalid")) for e in errors)
+                    raise TopologyError(f"Invalid topology on feature '{fid}': {err_msg}")
 
         return True
 
@@ -277,13 +355,14 @@ class FeatureEditor:
     ) -> None:
         """Validate feature ring topology and perform automatic rollback on error."""
         geom = self.features[feature_id].get("geometry", {})
-        coords = geom.get("coordinates", [])
-        ring = coords[0] if geom.get("type") == "Polygon" else coords
-        errors = _validate_ring(ring)
-        if errors:
-            self.features = backup_features
-            err_msg = ", ".join(e.get("message", e.get("code", "invalid")) for e in errors)
-            raise TopologyError(f"Invalid topology after {action_context} on '{feature_id}': {err_msg}")
+        for ring in _rings_for_validation(geom):
+            if len(ring) < 4:
+                continue
+            errors = _validate_ring(ring)
+            if errors:
+                self.features = backup_features
+                err_msg = ", ".join(e.get("message", e.get("code", "invalid")) for e in errors)
+                raise TopologyError(f"Invalid topology after {action_context} on '{feature_id}': {err_msg}")
 
     def add_vertex(self, feature_id: str, x: float, y: float, insert_index: int | None = None) -> bool:
         """Insert a new vertex into polygon ring."""

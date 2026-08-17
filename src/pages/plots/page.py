@@ -52,7 +52,7 @@ class _CancellableInterpolationWorker(InterpolationWorker):
                 )
             if token is not None:
                 token.raise_if_cancelled()
-            self.finished.emit(grid_z)
+            self.result_ready.emit(grid_z)
         except JobCancelled:
             pass  # 协作式取消：静默结束，不视为错误
         except Exception as e:
@@ -410,9 +410,9 @@ class PlotsPage(QWidget):
             cancellation_token=CancellationToken(),
         )
         self._worker = worker
-        worker.finished.connect(lambda grid_z, w=worker, gx=grid_x, gy=grid_y: self._on_interpolation_complete(w, gx, gy, grid_z))
+        worker.result_ready.connect(lambda grid_z, w=worker, gx=grid_x, gy=grid_y: self._on_interpolation_complete(w, gx, gy, grid_z))
         worker.error.connect(self._on_interpolation_error)
-        worker.finished.connect(lambda _g, w=worker: self._retire_worker(w))
+        worker.finished.connect(lambda w=worker: self._retire_worker(w))
         worker.error.connect(lambda _m, w=worker: self._retire_worker(w))
         worker.start()
 
