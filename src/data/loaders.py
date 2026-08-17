@@ -562,10 +562,15 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
     import hashlib
     import os
     
-    # Check cache first
-    cache_dir = path.parent / ".cache"
-    if not cache_dir.exists():
+    # Check cache first. Creation is optional: a read-only data dir must
+    # still load the Excel (#700). Register the dir so Settings can purge it (#701).
+    cache_dir: Path | None = path.parent / ".cache"
+    try:
         cache_dir.mkdir(exist_ok=True)
+        from src.utils.cache_metrics import register_well_cache_dir
+        register_well_cache_dir(cache_dir)
+    except OSError:
+        cache_dir = None
         
     try:
         mtime = os.path.getmtime(path)
@@ -590,9 +595,11 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
 
     file_hash = hashlib.md5(f"{path.name}_{mtime}_{xml_mtime}_{well_name}_{PARSER_VERSION}".encode()).hexdigest()
     safe_well_name = "".join([c if c.isalnum() else "_" for c in (well_name or "unknown")])
-    cache_file = cache_dir / f"{safe_well_name}_{file_hash}.json"
+    cache_file = (
+        cache_dir / f"{safe_well_name}_{file_hash}.json" if cache_dir is not None else None
+    )
 
-    if cache_file.exists():
+    if cache_file is not None and cache_file.exists():
         try:
             with open(cache_file, encoding="utf-8") as f:
                 cached = json.load(f)
@@ -601,15 +608,16 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
             print(f"Failed to load cache for {well_name}: {e}")
 
     # Clean up old caches for this well to prevent directory bloat
-    try:
-        for old_cache in cache_dir.glob(f"{safe_well_name}_*.pkl"):
-            if old_cache != cache_file:
-                old_cache.unlink(missing_ok=True)
-        for old_cache in cache_dir.glob(f"{safe_well_name}_*.json"):
-            if old_cache != cache_file:
-                old_cache.unlink(missing_ok=True)
-    except OSError:
-        pass
+    if cache_dir is not None:
+        try:
+            for old_cache in cache_dir.glob(f"{safe_well_name}_*.pkl"):
+                if old_cache != cache_file:
+                    old_cache.unlink(missing_ok=True)
+            for old_cache in cache_dir.glob(f"{safe_well_name}_*.json"):
+                if old_cache != cache_file:
+                    old_cache.unlink(missing_ok=True)
+        except OSError:
+            pass
             
     # Not cached, perform full load
     import pandas as pd
@@ -622,12 +630,13 @@ def load_well_log_from_excel(path: Path, well_name: str | None = None, xml_path:
         data = load_well_log_laolong1(path, well_name)
         
     # Save cache as JSON (safe deserialization; Pydantic-validated on load)
-    try:
-        payload = data.model_dump() if hasattr(data, "model_dump") else data.dict()
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-    except Exception as e:
-        print(f"Failed to save cache for {well_name}: {e}")
+    if cache_file is not None:
+        try:
+            payload = data.model_dump() if hasattr(data, "model_dump") else data.dict()
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"Failed to save cache for {well_name}: {e}")
         
     return data
 

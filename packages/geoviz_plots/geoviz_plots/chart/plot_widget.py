@@ -147,6 +147,8 @@ class PlotWidget(QWidget):
         self._tree_offsets = np.zeros(1, dtype=np.int64)
         self._tree_indices = np.empty((0,), dtype=np.int64)
         self._tree_metadata = _empty_tree_metadata()
+        self._pixel_tree_key = None
+        self._tree_pixel_xy = np.empty((0, 2), dtype=np.float64)
         self.downsample_threshold = 2000
 
     def _reset_kdtree(self):
@@ -156,6 +158,8 @@ class PlotWidget(QWidget):
         self._tree_offsets = np.zeros(1, dtype=np.int64)
         self._tree_indices = np.empty((0,), dtype=np.int64)
         self._tree_metadata = _empty_tree_metadata()
+        self._pixel_tree_key = None
+        self._tree_pixel_xy = np.empty((0, 2), dtype=np.float64)
 
     def _rebuild_kdtree(self):
         """Build a spatial index of all points for fast snapping."""
@@ -199,12 +203,51 @@ class PlotWidget(QWidget):
             compact_nodes=False,
             balanced_tree=False,
         )
+        self._pixel_tree_key = None
         self._tree_metadata = _KDTreeMetadata(
             self._tree_names,
             self._tree_offsets,
             self._tree_indices,
             self._tree_xy,
         )
+
+    def _pixel_points(self) -> np.ndarray:
+        """Map packed data-space tree points to the current plot pixels."""
+        left, right, top, bottom = self.get_plot_rect(self.width(), self.height())
+        plot_w = max(right - left, 1.0)
+        plot_h = max(bottom - top, 1.0)
+        x_range = self.view_xmax - self.view_xmin or 1.0
+        y_range = self.view_ymax - self.view_ymin or 1.0
+        px = left + (self._tree_xy[:, 0] - self.view_xmin) / x_range * plot_w
+        py = bottom - (self._tree_xy[:, 1] - self.view_ymin) / y_range * plot_h
+        return np.column_stack((px, py))
+
+    def _ensure_pixel_kdtree(self) -> None:
+        """Rebuild the snap index in pixel space when the view or size changes."""
+        if self._tree_xy.size == 0:
+            return
+        key = (
+            self.view_xmin,
+            self.view_xmax,
+            self.view_ymin,
+            self.view_ymax,
+            int(self.width()),
+            int(self.height()),
+        )
+        if self._kdtree is not None and self._pixel_tree_key == key:
+            return
+        try:
+            from scipy.spatial import cKDTree as KDTree
+        except ImportError:
+            return
+        self._tree_pixel_xy = np.ascontiguousarray(self._pixel_points())
+        self._kdtree = KDTree(
+            self._tree_pixel_xy,
+            copy_data=False,
+            compact_nodes=False,
+            balanced_tree=False,
+        )
+        self._pixel_tree_key = key
 
     def add_series(self, series):
         """Add a data series (LineSeries or ScatterSeries) to the plot."""
@@ -678,21 +721,14 @@ class PlotWidget(QWidget):
         closest_pt = None  # (series, index, x, y)
         
         if self._kdtree is not None and len(self._tree_indices):
-            # 1. Map mouse to data space
-            mx_data, my_data = self.pixel_to_data(mouse_pos.x(), mouse_pos.y())
-            
-            # 2. Query nearest neighbors in data space
-            # Since aspect ratio might be unequal, we find 10 neighbors and check screen dist
-            _dists, indices = self._kdtree.query(
-                [mx_data, my_data], k=min(10, len(self._tree_indices))
+            self._ensure_pixel_kdtree()
+            _dists, idx = self._kdtree.query(
+                [float(mouse_pos.x()), float(mouse_pos.y())],
+                k=1,
+                distance_upper_bound=closest_dist,
             )
-            
-            if isinstance(indices, (int, np.integer)):
-                indices = [indices]
-                
-            for idx in indices:
-                if idx >= len(self._tree_indices):
-                    continue
+            if np.isfinite(_dists) and int(idx) < len(self._tree_indices):
+                idx = int(idx)
                 series_i = int(
                     np.searchsorted(self._tree_offsets, idx, side="right") - 1
                 )
@@ -700,11 +736,8 @@ class PlotWidget(QWidget):
                 local_idx = int(self._tree_indices[idx])
                 x_val = float(self._tree_xy[idx, 0])
                 y_val = float(self._tree_xy[idx, 1])
-                px, py = self.data_to_pixel(x_val, y_val)
-                dist = math.hypot(mouse_pos.x() - px, mouse_pos.y() - py)
-                if dist < closest_dist:
-                    closest_dist = dist
-                    closest_pt = (s_name, local_idx, x_val, y_val)
+                closest_dist = float(_dists)
+                closest_pt = (s_name, local_idx, x_val, y_val)
         else:
             left, right, top, bottom = self.get_plot_rect(self.width(), self.height())
             plot_w = max(right - left, 1.0)
@@ -883,7 +916,9 @@ class PlotWidget(QWidget):
                 _, py = to_p(self.view_xmin, yt)
                 painter.drawLine(left, py, right, py)
                 
-        # 4. Render Series Data
+        # 4. Render Series Data (clipped so off-view strokes stay in the frame)
+        painter.save()
+        painter.setClipRect(QRectF(left, top, plot_w, plot_h))
         for s in self.series_list:
             if not s.visible or len(s.x) == 0:
                 continue
@@ -920,6 +955,8 @@ class PlotWidget(QWidget):
                     
             elif isinstance(s, ScatterSeries):
                 self.draw_markers(painter, sx, sy, s.marker_style, s.size, s.color, to_p)
+
+        painter.restore()
 
         # 5. Draw interactive hover crosshair & highlight selection
         if self.hover_pos is not None:

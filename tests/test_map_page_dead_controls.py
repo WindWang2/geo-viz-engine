@@ -1,5 +1,6 @@
 """Task 22a.4 — MapPage dead controls (TDD)."""
 import pytest
+from PySide6.QtCore import Qt
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +82,43 @@ def test_map_page_chip_filter_does_not_crash(qtbot):
     page.chip_all.setChecked(True)
     page.chip_interpreted.setChecked(True)
     page.chip_gas.setChecked(True)
+
+
+def test_map_page_chip_filters_differ_by_has_data(qtbot):
+    """#704: 有数据 / 无数据 chips must filter opposite sets, not both has_data."""
+    from src.pages.map.page import MapPage
+    from src.data.cache import DataCache
+
+    page = MapPage(DataCache())
+    qtbot.addWidget(page)
+    if not page.wells:
+        pytest.skip("no well markers to filter")
+
+    for i in range(page.well_list.count()):
+        item = page.well_list.item(i)
+        name = item.data(Qt.UserRole)
+        marker = next((w for w in page.wells if w.name == name), None)
+        if marker is None:
+            continue
+        page.chip_interpreted.setChecked(True)
+        assert item.isHidden() is (not marker.has_data)
+        page.chip_gas.setChecked(True)
+        assert item.isHidden() is marker.has_data
+
+
+def test_map_page_callout_does_not_label_has_data_as_gas(qtbot):
+    """#704: binding a log file is not a gas show."""
+    from src.pages.map.page import MapPage
+    from src.data.cache import DataCache
+
+    page = MapPage(DataCache())
+    qtbot.addWidget(page)
+    with_data = next((w for w in page.wells if w.has_data), None)
+    if with_data is None:
+        pytest.skip("no well with bound logs")
+    page._on_well_clicked(with_data.name)
+    assert "含气" not in page.well_callout_desc.text()
+    assert "有测井" in page.well_callout_desc.text()
 
 
 def test_map_page_ruler_hidden(qtbot):

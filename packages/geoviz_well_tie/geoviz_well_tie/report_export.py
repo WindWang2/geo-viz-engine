@@ -1,20 +1,56 @@
 """Publishing 300 DPI Vector PDF / SVG report exporter for Well-Seismic Tie Workspace."""
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QMarginsF, Qt
-from PySide6.QtGui import QPainter, QFont, QColor, QPen, QBrush, QPageSize, QPageLayout
+from datetime import date
+
+from PySide6.QtCore import QRectF, QMarginsF, QSize, Qt
+from PySide6.QtGui import QPainter, QFont, QColor, QPen, QPageSize, QPageLayout
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtSvg import QSvgGenerator
 
-def export_well_tie_pdf(output_path: str):
+
+def _dash(value) -> str:
+    if value is None or value == "":
+        return "—"
+    return str(value)
+
+
+def export_well_tie_pdf(
+    output_path: str,
+    *,
+    well_name: str | None = None,
+    block: str | None = None,
+    horizon: str | None = None,
+    wavelet: str | None = None,
+    r_score: float | None = None,
+    lag_ms: float | None = None,
+    org: str | None = None,
+    date_str: str | None = None,
+):
     """Export 300 DPI vector PDF or SVG report for well-seismic tie calibration."""
+    page_w_mm, page_h_mm = 297.0, 210.0
     if output_path.endswith(".svg"):
         generator = QSvgGenerator()
         generator.setFileName(output_path)
-        generator.setSize(generator.size())
         generator.setResolution(300)
+        width_px = int(round(page_w_mm / 25.4 * 300.0))
+        height_px = int(round(page_h_mm / 25.4 * 300.0))
+        generator.setSize(QSize(width_px, height_px))
+        generator.setViewBox(QRectF(0, 0, width_px, height_px))
         painter = QPainter(generator)
-        _render_report_page(painter, 297.0 * 3.7795, 210.0 * 3.7795)
+        _render_report_page(
+            painter,
+            float(width_px),
+            float(height_px),
+            well_name=well_name,
+            block=block,
+            horizon=horizon,
+            wavelet=wavelet,
+            r_score=r_score,
+            lag_ms=lag_ms,
+            org=org,
+            date_str=date_str,
+        )
         painter.end()
     else:
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
@@ -24,12 +60,36 @@ def export_well_tie_pdf(output_path: str):
 
         painter = QPainter(printer)
         rect = printer.pageRect(QPrinter.Unit.Point)
-        _render_report_page(painter, rect.width(), rect.height())
+        _render_report_page(
+            painter,
+            rect.width(),
+            rect.height(),
+            well_name=well_name,
+            block=block,
+            horizon=horizon,
+            wavelet=wavelet,
+            r_score=r_score,
+            lag_ms=lag_ms,
+            org=org,
+            date_str=date_str,
+        )
         painter.end()
 
 
-
-def _render_report_page(painter: QPainter, width: float, height: float):
+def _render_report_page(
+    painter: QPainter,
+    width: float,
+    height: float,
+    *,
+    well_name: str | None = None,
+    block: str | None = None,
+    horizon: str | None = None,
+    wavelet: str | None = None,
+    r_score: float | None = None,
+    lag_ms: float | None = None,
+    org: str | None = None,
+    date_str: str | None = None,
+):
     """Render publication-grade report with 3-column title block."""
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -55,9 +115,25 @@ def _render_report_page(painter: QPainter, width: float, height: float):
     r2 = QRectF(tb_rect.x() + col_w, tb_rect.y(), col_w, tb_h)
     r3 = QRectF(tb_rect.x() + 2 * col_w, tb_rect.y(), col_w, tb_h)
 
-    painter.drawText(r1, Qt.AlignmentFlag.AlignCenter, "井名: W101 | 区块: 渤海湾盆地\n层位: ES3 下干柴沟组")
-    painter.drawText(r2, Qt.AlignmentFlag.AlignCenter, "子波: Ricker (30Hz)\n相关系数 R: 0.925 | 偏置: 0 ms")
-    painter.drawText(r3, Qt.AlignmentFlag.AlignCenter, "编制单位: GeoViz Research Engine\n日期: 2026-07-04 | 比例尺: 1:1000")
+    r_text = f"{r_score:.3f}" if r_score is not None else "—"
+    lag_text = f"{lag_ms:.1f} ms" if lag_ms is not None else "—"
+    when = date_str or date.today().isoformat()
+
+    painter.drawText(
+        r1,
+        Qt.AlignmentFlag.AlignCenter,
+        f"井名: {_dash(well_name)} | 区块: {_dash(block)}\n层位: {_dash(horizon)}",
+    )
+    painter.drawText(
+        r2,
+        Qt.AlignmentFlag.AlignCenter,
+        f"子波: {_dash(wavelet)}\n相关系数 R: {r_text} | 偏置: {lag_text}",
+    )
+    painter.drawText(
+        r3,
+        Qt.AlignmentFlag.AlignCenter,
+        f"编制单位: {_dash(org) if org else 'GeoViz Research Engine'}\n日期: {when} | 比例尺: —",
+    )
 
     painter.drawLine(int(tb_rect.x() + col_w), int(tb_rect.y()), int(tb_rect.x() + col_w), int(tb_rect.y() + tb_h))
     painter.drawLine(int(tb_rect.x() + 2 * col_w), int(tb_rect.y()), int(tb_rect.x() + 2 * col_w), int(tb_rect.y() + tb_h))

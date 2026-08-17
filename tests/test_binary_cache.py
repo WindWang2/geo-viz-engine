@@ -50,3 +50,39 @@ def test_json_cache_flow(monkeypatch):
         assert math.isnan(gr_curve_2.values[1])
         assert well_data_2.top_depth == well_data_1.top_depth
         assert well_data_2.bottom_depth == well_data_1.bottom_depth
+
+
+def test_excel_load_survives_readonly_cache_mkdir(monkeypatch, tmp_path):
+    """#700: mkdir failure on .cache must not abort a readable Excel load."""
+    import pandas as pd
+    from unittest.mock import MagicMock
+
+    mock_excel_file = MagicMock()
+    mock_excel_file.sheet_names = ["测井曲线", "岩性道"]
+    monkeypatch.setattr("pandas.ExcelFile", lambda path, engine=None: mock_excel_file)
+
+    def mock_read_excel(path, sheet_name):
+        if sheet_name == "测井曲线":
+            return pd.DataFrame({"深度": [100, 110], "GR": [45, 55]})
+        if sheet_name == "岩性道":
+            return pd.DataFrame({"顶深": [100], "底深": [110], "岩性": ["砂岩"]})
+        return pd.DataFrame()
+
+    monkeypatch.setattr("pandas.read_excel", mock_read_excel)
+
+    fake_excel_path = tmp_path / "ro_well.xlsx"
+    fake_excel_path.touch()
+
+    original_mkdir = Path.mkdir
+
+    def guarded_mkdir(self, *args, **kwargs):
+        if self.name == ".cache":
+            raise PermissionError("read-only data directory")
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", guarded_mkdir)
+
+    well_data = load_well_log_from_excel(fake_excel_path, "Well_RO")
+    assert well_data.well_name == "Well_RO"
+    assert len(well_data.curves) == 1
+    assert not (fake_excel_path.parent / ".cache").exists()

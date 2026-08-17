@@ -9,8 +9,8 @@ from geoviz_seismic import SeismicView
 class SeismicPage(SeismicView):
     """App-level seismic page — inherits and refactors visual layout to premium high-fidelity."""
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def __init__(self, parent=None, auto_load: bool = True):
+        super().__init__(parent, auto_load=auto_load)
 
         # 1. Create right sidebar container (width 226px)
         self.right_sidebar = QFrame()
@@ -91,9 +91,9 @@ class SeismicPage(SeismicView):
         lbl_sec3.setStyleSheet("font-weight: bold; font-size: 13px; color: #1a2433; border: none; margin-top: 12px;")
         sidebar_layout.addWidget(lbl_sec3)
 
-        lbl_tie = QLabel("时间偏置: 0 ms\n相位旋转: 0°\n相关度: 87.4%")
-        lbl_tie.setStyleSheet("color: #2ca36b; font-size: 11.5px; font-weight: bold; border: none; padding: 4px;")
-        sidebar_layout.addWidget(lbl_tie)
+        self._tie_quality_label = QLabel("时间偏置: —\n相位旋转: —\n相关度: 未标定")
+        self._tie_quality_label.setStyleSheet("color: #2ca36b; font-size: 11.5px; font-weight: bold; border: none; padding: 4px;")
+        sidebar_layout.addWidget(self._tie_quality_label)
 
         sidebar_layout.addStretch()
 

@@ -1,4 +1,5 @@
 """Task 22b.1 — ToolsPage dialog backends (TDD)."""
+import numpy as np
 import pytest
 
 
@@ -146,3 +147,39 @@ def test_calamine_compile_invalid_expression():
     dlg = CalamineCompilerDialog()
     ok, msg = dlg._do_compile("GR @#$ SP")
     assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# SEGYHeaderInspectorDialog (#699)
+# ---------------------------------------------------------------------------
+
+def test_segy_header_inspector_shows_text_header_not_trace_header(qtbot, tmp_path):
+    """EBCDIC pane must show f.text[0], not the first trace header dict."""
+    import segyio
+
+    from src.pages.tools.dialogs import SEGYHeaderInspectorDialog
+
+    sgy_path = tmp_path / "header.sgy"
+    spec = segyio.spec()
+    spec.sorting = 2
+    spec.format = 1
+    spec.ilines = [10]
+    spec.xlines = [20]
+    spec.samples = list(range(4))
+    card = "C 1 GEOVIZ TEST EBCDIC HEADER FOR ISSUE 699"
+    with segyio.create(str(sgy_path), spec) as f:
+        f.text[0] = card
+        f.header[0] = {
+            segyio.TraceField.INLINE_3D: 10,
+            segyio.TraceField.CROSSLINE_3D: 20,
+        }
+        f.trace[0] = np.zeros(4, dtype=np.float32)
+
+    dlg = SEGYHeaderInspectorDialog()
+    qtbot.addWidget(dlg)
+    dlg._load_headers(str(sgy_path))
+    text = dlg._text_header.toPlainText()
+    assert "GEOVIZ TEST EBCDIC HEADER" in text
+    assert not text.lstrip().startswith("{")
+    bin_text = dlg._bin_header.toPlainText()
+    assert "Format" in bin_text or "Interval" in bin_text

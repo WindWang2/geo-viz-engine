@@ -45,31 +45,50 @@ def numpy_minmax_downsample(
     full_count = n_full_bins * step
     v_trunc = values[:full_count].reshape(n_full_bins, step)
 
-    # Per-bin argmin/argmax -> column index within each row.
-    col_max = np.argmax(v_trunc, axis=1)
-    col_min = np.argmin(v_trunc, axis=1)
-    row_offsets = np.arange(n_full_bins) * step
-    global_max = row_offsets + col_max
-    global_min = row_offsets + col_min
-
-    # Emit min then max, in index order within each bin (avoid zigzag).
-    # When min_idx < max_idx: emit [min, max]; else [max, min].
-    min_first = global_min <= global_max
-    first = np.where(min_first, global_min, global_max)
-    second = np.where(min_first, global_max, global_min)
-    out_idx = np.empty(n_full_bins * 2, dtype=np.intp)
-    out_idx[0::2] = first
-    out_idx[1::2] = second
+    finite = np.isfinite(v_trunc)
+    if bool(finite.all()):
+        # Fast path: no NaNs, keep the previous 2-points-per-bin layout.
+        col_max = np.argmax(v_trunc, axis=1)
+        col_min = np.argmin(v_trunc, axis=1)
+        row_offsets = np.arange(n_full_bins) * step
+        global_max = row_offsets + col_max
+        global_min = row_offsets + col_min
+        min_first = global_min <= global_max
+        first = np.where(min_first, global_min, global_max)
+        second = np.where(min_first, global_max, global_min)
+        out_idx = np.empty(n_full_bins * 2, dtype=np.intp)
+        out_idx[0::2] = first
+        out_idx[1::2] = second
+    else:
+        # A NaN wins both argmin and argmax, wiping the bin's finite extrema.
+        # Keep finite min/max and emit one NaN so the polyline still breaks.
+        out_parts = [_bin_keep_indices(v_trunc[i]) + i * step for i in range(n_full_bins)]
+        out_idx = (
+            np.concatenate(out_parts) if out_parts else np.empty(0, dtype=np.intp)
+        )
 
     # Trailing partial bin (n not divisible by step).
     if full_count < n:
-        chunk = values[full_count:]
-        mx = full_count + int(np.argmax(chunk))
-        mn = full_count + int(np.argmin(chunk))
-        lo, hi = (mn, mx) if mn <= mx else (mx, mn)
-        out_idx = np.concatenate([out_idx, [lo, hi]])
+        extra = _bin_keep_indices(values[full_count:]) + full_count
+        out_idx = np.concatenate([out_idx, extra]) if out_idx.size else extra
 
     return depths[out_idx], values[out_idx]
+
+
+def _bin_keep_indices(chunk: np.ndarray) -> np.ndarray:
+    """In-bin sample indices to emit for one min/max LOD bin."""
+    finite = np.isfinite(chunk)
+    if not np.any(finite):
+        return np.array([0], dtype=np.intp)
+    filled_min = np.where(finite, chunk, np.inf)
+    filled_max = np.where(finite, chunk, -np.inf)
+    mn = int(np.argmin(filled_min))
+    mx = int(np.argmax(filled_max))
+    if bool(finite.all()):
+        lo, hi = (mn, mx) if mn <= mx else (mx, mn)
+        return np.array([lo, hi], dtype=np.intp)
+    nan_i = int(np.flatnonzero(~finite)[0])
+    return np.unique(np.array([mn, mx, nan_i], dtype=np.intp))
 
 
 _provider: DownsampleFn = numpy_minmax_downsample

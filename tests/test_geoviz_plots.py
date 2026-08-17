@@ -568,6 +568,71 @@ def test_rebuild_kdtree_large_series_is_fast(qtbot):
     assert hit[0] == "pts"
 
 
+def test_check_nearest_point_ranks_by_pixels_not_data_space(qtbot):
+    """#694: a visually-near point must win even when data-space k=10 misses it."""
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(800, 600)
+    target_x, target_y = 50.0, 0.9
+    decoy_x = 52.0
+    xs = [target_x] + [decoy_x + i * 0.01 for i in range(15)]
+    ys = [target_y] + [0.0] * 15
+    widget.add_series(ScatterSeries(xs, ys, name="pts"))
+    widget.set_view_bounds((0.0, 200.0, 0.0, 1.0))
+    mx, my = widget.data_to_pixel(decoy_x, target_y)
+    hit = widget.check_nearest_point(QPointF(mx, my))
+    assert hit is not None
+    assert hit[2] == target_x
+    assert hit[3] == target_y
+
+
+def test_render_plot_clips_series_to_plot_rect(qtbot):
+    """#686: off-view polylines must not paint into the axis margin."""
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    widget = PlotWidget()
+    qtbot.addWidget(widget)
+    widget.resize(400, 300)
+    widget.bg_color = QColor(0, 0, 0)
+    widget.plot_bg_color = QColor(0, 0, 0)
+    widget.grid_color = QColor(0, 0, 0)
+    widget.axis_color = QColor(0, 0, 0)
+    widget.text_color = QColor(0, 0, 0)
+    widget.crosshair_color = QColor(0, 0, 0)
+    widget.highlight_color = QColor(0, 0, 0)
+    widget.add_series(
+        LineSeries(
+            [-10.0, 0.5, 10.0],
+            [-10.0, 0.5, 10.0],
+            name="wide",
+            color=QColor(255, 0, 0),
+            width=3.0,
+        )
+    )
+    widget.set_view_bounds((0.0, 1.0, 0.0, 1.0))
+
+    image = QImage(widget.size(), QImage.Format.Format_RGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    widget.render_plot(painter, widget.width(), widget.height())
+    painter.end()
+
+    left, right, top, bottom = widget.get_plot_rect(widget.width(), widget.height())
+    red_in = 0
+    red_out = 0
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = image.pixelColor(x, y)
+            if color.red() < 200 or color.green() > 40 or color.blue() > 40:
+                continue
+            if left - 2 <= x <= right + 2 and top - 2 <= y <= bottom + 2:
+                red_in += 1
+            else:
+                red_out += 1
+    assert red_in > 0
+    assert red_out == 0
+
+
 def test_cross_plot_paint_large_scatter_is_fast(qtbot):
     """#552: painting 200k points must not walk drawEllipse per sample."""
     import inspect

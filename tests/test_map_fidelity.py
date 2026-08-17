@@ -32,7 +32,10 @@ def test_map_page_layout_and_sidebar(map_page):
     assert isinstance(map_page.chip_all, QPushButton)
     assert isinstance(map_page.chip_interpreted, QPushButton)
     assert isinstance(map_page.chip_gas, QPushButton)
-    assert "46" in map_page.chip_all.text()
+    assert "全部" in map_page.chip_all.text()
+    assert str(len(map_page.wells)) in map_page.chip_all.text()
+    assert "含气" not in map_page.chip_gas.text()
+    assert "已解释" not in map_page.chip_interpreted.text()
     
     # 4. Sidebar contains scroll area / list for wells
     assert hasattr(map_page, "well_list")
