@@ -25,8 +25,16 @@ class LithologyTrack(BaseTrack):
         super().__init__(label=label, width=width, header_height=header_height,
                          parent=parent)
         self._intervals = intervals
+
         self._show_description = show_description
         self._pattern_engine = pattern_engine or _shared_pattern_engine
+
+    @property
+    def intervals(self):
+        """Interval payload (#582): the section canvas discovers stratigraphy
+        tracks via a public ``intervals`` attribute; the private-only
+        ``_intervals`` made its horizon-link/facies-fill layer dead code."""
+        return self._intervals
 
     def _fallback_color(self, lithology: str) -> QColor:
         hex_color = FACIES_COLORS.get(lithology)

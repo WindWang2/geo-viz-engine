@@ -35,6 +35,13 @@ class SystemsTractTrack(BaseTrack):
                          parent=parent)
         self._intervals = intervals
 
+    @property
+    def intervals(self):
+        """Interval payload (#582): the section canvas discovers stratigraphy
+        tracks via a public ``intervals`` attribute; the private-only
+        ``_intervals`` made its horizon-link/facies-fill layer dead code."""
+        return self._intervals
+
     def paint_content(self, painter: QPainter, rect: QRectF):
         painter.save()
         painter.setClipRect(rect.adjusted(-2, -2, 2, 2))
