@@ -70,6 +70,24 @@ def parse_xml_facies(path: Path) -> WellIntervals:
                 if "ZJ" in str(cells[2]): ivs.sequence.append(IntervalItem(top=float(cells[3]), bottom=float(cells[6]), name=str(cells[2])))
     return ivs
 
+def _match_xml_sidecar(directory: Path, well_name: str | None) -> Path | None:
+    """The single XML sidecar in *directory* whose stem identifies the well.
+
+    Association is by well name inside the sidecar filename (the XML
+    worksheets carry no well identity). Zero or multiple matches return
+    None: borrowing another well's interpretation — or guessing between
+    several — would silently corrupt facies display, correlation and export.
+    """
+    name = (well_name or "").strip()
+    if not name:
+        return None
+    matches = sorted(
+        (p for p in directory.glob("*.xml") if name in p.stem),
+        key=lambda p: p.name,
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
 def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogData:
     import pandas as pd
     
@@ -225,14 +243,18 @@ def load_well_log_laolong1(path: Path, well_name: str | None = None) -> WellLogD
         ),
     )
 
-    # Merge with professional XML data if any exists
-    xml_files = sorted(list(path.parent.glob("*.xml")), key=lambda x: len(x.name))
-    if xml_files and not phase:
-        try:
-            xml_ivs = parse_xml_facies(xml_files[0])
-            if xml_ivs.facies.phase: intervals.facies = xml_ivs.facies
-            if xml_ivs.sequence: intervals.sequence = xml_ivs.sequence
-        except Exception: pass
+    # Merge with professional XML data only when a sidecar unambiguously
+    # belongs to this well (#572): the previous shortest-filename pick gave
+    # every well in a shared directory the SAME sidecar's facies/sequence.
+    if not phase:
+        sidecar = _match_xml_sidecar(path.parent, well_name or path.stem)
+        if sidecar is not None:
+            try:
+                xml_ivs = parse_xml_facies(sidecar)
+                if xml_ivs.facies.phase: intervals.facies = xml_ivs.facies
+                if xml_ivs.sequence: intervals.sequence = xml_ivs.sequence
+            except Exception as xml_err:
+                print(f"[loaders] skipping facies sidecar {sidecar.name}: {xml_err}")
 
     all_depths = [d for c in curves for d in c.depth if d == d]
     if not all_depths and intervals.lithology:

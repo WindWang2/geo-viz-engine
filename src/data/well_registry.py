@@ -36,6 +36,20 @@ def get_well_file(well_name: str) -> Path | None:
     return _get_catalog().get_well_file(well_name)
 
 
+def update_well_file(well_name: str, path: Path | str) -> None:
+    """Point an existing registry entry at its replacement file.
+
+    Used when a well's source is replaced in place (e.g. the legacy .xls →
+    .xlsx conversion before AI prediction). Unknown wells raise KeyError:
+    silently registering a new well through an update API would mask
+    upstream state bugs.
+    """
+    catalog = _get_catalog()
+    if catalog.get_well_file(well_name) is None:
+        raise KeyError(f"well '{well_name}' is not registered")
+    catalog.register_well_file(well_name, path)
+
+
 def available_wells() -> set[str]:
     return set(_get_catalog().list_well_names())
 
