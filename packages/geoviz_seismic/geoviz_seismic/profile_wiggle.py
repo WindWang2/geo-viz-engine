@@ -17,6 +17,34 @@ from PySide6.QtWidgets import QWidget
 
 logger = logging.getLogger(__name__)
 
+
+def viewport_decimation(
+    n_traces: int,
+    n_samples: int,
+    width: int,
+    height: int,
+    trace_step: int = 1,
+) -> tuple[int, np.ndarray]:
+    """Decimate traces/samples so at most one sample is drawn per viewport pixel.
+
+    Returns ``(trace_step, sample_indices)``. ``sample_indices`` always includes
+    the first and last sample so the wiggle spans the full time axis.
+    """
+    ts = max(int(trace_step), 1)
+    if width >= 2 and n_traces > 0 and (n_traces + ts - 1) // ts > width:
+        ts = max(ts, (n_traces + width - 1) // width)
+    ss = 1
+    if height >= 2 and n_samples > 1 and (n_samples + ss - 1) // ss > height:
+        ss = max(ss, (n_samples + height - 1) // height)
+    if n_samples <= 0:
+        return ts, np.zeros(0, dtype=np.intp)
+    sample_idx = np.arange(0, n_samples, ss, dtype=np.intp)
+    last = n_samples - 1
+    if sample_idx.size == 0 or int(sample_idx[-1]) != last:
+        sample_idx = np.concatenate((sample_idx, np.asarray([last], dtype=np.intp)))
+    return ts, sample_idx
+
+
 class ProfileWiggle(QWidget):
     """Wiggle-trace profile renderer using high-fidelity Pure QPainter with zero-crossing interpolation."""
 
@@ -51,8 +79,8 @@ class ProfileWiggle(QWidget):
         self._data = data.astype(np.float32, copy=False)
         self._trace_step = trace_step
         self._cached_pixmap = None  # invalidate cached drawing
-
-        self.setMinimumSize(self._data.shape[1], self._data.shape[0])
+        # Do not bind minimumSize to the data shape: a 1500x1500 slice would
+        # lock the 2x2 profile layout to data pixels. Scale to the viewport.
         self.update()
 
     def set_trace_step(self, step: int) -> None:
@@ -97,12 +125,12 @@ class ProfileWiggle(QWidget):
         x_scale = w / max(n_traces, 1)
         y_scale = h / max(n_samples - 1, 1)
 
-        # Adaptive decimation: when more traces would be drawn than there are
-        # visible columns, widen the trace step so at most one trace per pixel
-        # column is emitted (keeps dense sections readable and cheap to draw).
-        trace_step = self._trace_step
-        if (n_traces + trace_step - 1) // trace_step > w:
-            trace_step = max(trace_step, (n_traces + w - 1) // w)
+        # Adaptive decimation: at most one trace per pixel column and one
+        # sample per pixel row (plus the last sample so the axis is closed).
+        trace_step, sample_idx = viewport_decimation(
+            n_traces, n_samples, w, h, self._trace_step
+        )
+        n_draw = int(sample_idx.size)
 
         # Dynamic Gain: allow wiggles to occupy 2.0x their reserved space to naturally overlap
         wiggle_gain = x_scale * trace_step * 2.0
@@ -116,8 +144,8 @@ class ProfileWiggle(QWidget):
 
         fill_brush = QBrush(QColor(0, 0, 0, 200)) # Strong, premium black VA fill
 
-        # Shared per-sample vertical positions (identical for every trace).
-        y_coords = np.arange(n_samples) * y_scale
+        # Shared per-sample vertical positions (identical for every drawn sample).
+        y_coords = sample_idx.astype(np.float64) * y_scale
         y_coords_list = y_coords.tolist()
 
         for t in range(0, n_traces, trace_step):
@@ -126,7 +154,7 @@ class ProfileWiggle(QWidget):
             # Vectorized per-trace geometry (no per-sample Python loop).
             # ``v`` is upcast to float64 so the arithmetic below reproduces
             # the values the old Python loop produced with plain floats.
-            v = (self._data[:, t] / amax).astype(np.float64)
+            v = (self._data[sample_idx, t] / amax).astype(np.float64)
             xs = centre_x + v * wiggle_gain
             pos = v >= 0.0
 
@@ -146,14 +174,14 @@ class ProfileWiggle(QWidget):
             if pos[0]:
                 starts = np.concatenate(([0], starts))
             if pos[-1]:
-                ends = np.concatenate((ends, [n_samples]))
+                ends = np.concatenate((ends, [n_draw]))
             if starts.size:
                 m = starts.size
                 # Interpolated baseline crossings (pos->neg and neg->pos).
                 yc_in = np.empty(m)
                 yc_out = np.empty(m)
                 not_first = starts != 0
-                not_last = ends != n_samples
+                not_last = ends != n_draw
                 frac_in = -v[starts[not_first] - 1] / (
                     v[starts[not_first]] - v[starts[not_first] - 1]
                 )
@@ -167,7 +195,7 @@ class ProfileWiggle(QWidget):
                 yc_out[not_last] = y_coords[ends[not_last] - 1] + frac_out * (
                     y_coords[ends[not_last]] - y_coords[ends[not_last] - 1]
                 )
-                yc_out[~not_last] = y_coords[n_samples - 1]
+                yc_out[~not_last] = y_coords[n_draw - 1]
 
                 # Concatenate every lobe as [baseline-in][curve points][baseline-out].
                 xs_lobe = xs[pos]

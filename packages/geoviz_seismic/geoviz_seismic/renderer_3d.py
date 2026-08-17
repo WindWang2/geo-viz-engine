@@ -1220,6 +1220,14 @@ class Renderer3D(QWidget):
         
         self._volume_spacing = (1, 1, 1)
         self._volume_origin = (0, 0, 0)
+        # Survey→preview mapping for overlays whose inputs are in measured
+        # units (inline/crossline numbers, TWT ms). None dt means "already
+        # in preview-sample / world units" (standalone Renderer3D tests).
+        self._survey_t0_ms = 0.0
+        self._survey_dt_ms: float | None = None
+        self._survey_fi = 1
+        self._survey_fx = 1
+        self._survey_ft = 1
         self._meta = None
         self._cmap_name = "seismic"
         self._il_pos = 0
@@ -1404,13 +1412,45 @@ class Renderer3D(QWidget):
             if needs_normal_rebuild:
                 self._rebuild_volume_visual()
 
+    def set_survey_mapping(
+        self,
+        *,
+        t0_ms: float = 0.0,
+        dt_ms: float | None = None,
+        ds_factor: tuple[int, int, int] = (1, 1, 1),
+    ) -> None:
+        """Record how survey time / IL / XL map onto the loaded preview cube.
+
+        ``dt_ms is None`` leaves overlay APIs in their historical units
+        (sample index for sculpt, world-Z for ``add_horizon``).
+        """
+        self._survey_t0_ms = float(t0_ms)
+        self._survey_dt_ms = None if dt_ms is None else float(dt_ms)
+        df = ds_factor or (1, 1, 1)
+        self._survey_fi = max(int(df[0]), 1)
+        self._survey_fx = max(int(df[1]), 1)
+        self._survey_ft = max(int(df[2]), 1)
+
+    def _sculpt_norm_surface(self, surface_z: np.ndarray) -> np.ndarray:
+        """Map a sculpt grid to the shader's exclusive (0, 1) z interval."""
+        nt = int(self._volume_data_cpu.shape[2])
+        dt = self._survey_dt_ms
+        if dt is not None and dt != 0.0:
+            denom = max(1, nt - 1) * float(dt) * max(int(self._survey_ft), 1)
+            return (
+                (np.asarray(surface_z, dtype=np.float64) - float(self._survey_t0_ms))
+                / denom
+            ).astype(np.float32)
+        return (np.asarray(surface_z, dtype=np.float64) / max(1, nt - 1)).astype(
+            np.float32
+        )
+
     def set_sculpting_surface(self, surface_z: np.ndarray | None, mode: str = "above"):
         self._sculpt_surface = surface_z
         self._sculpt_mode = mode
         if self._volume_visual is not None and isinstance(self._volume_visual, DualGLVolumeItem):
             if surface_z is not None and self._volume_data_cpu is not None:
-                nt = self._volume_data_cpu.shape[2]
-                norm_surface = surface_z / max(1, nt - 1)
+                norm_surface = self._sculpt_norm_surface(surface_z)
             else:
                 norm_surface = None
             self._volume_visual.setSculpting(
@@ -1538,8 +1578,14 @@ class Renderer3D(QWidget):
             slider.blockSignals(was_blocked)
 
     def add_horizon(self, horizon_data: np.ndarray, origin=(0, 0, 0),
-                    spacing=(1, 1), name: str = "horizon", color=(1.0, 0.9, 0.2, 0.6)):
-        """Renders horizon as a 3D mesh surface."""
+                    spacing=(1, 1), name: str = "horizon", color=(1.0, 0.9, 0.2, 0.6),
+                    *, z_unit: str = "world"):
+        """Renders horizon as a 3D mesh surface.
+
+        ``z_unit="ms"`` converts a TWT-ms grid into the preview cube's world
+        coordinates using :meth:`set_survey_mapping` and ``_volume_spacing``.
+        ``z_unit="world"`` (default) keeps the historical raw-Z behaviour.
+        """
         if horizon_data is None:
             return
 
@@ -1552,12 +1598,28 @@ class Renderer3D(QWidget):
         if name in self._horizons:
             self._view.removeItem(self._horizons[name])
 
-        nI, nX = horizon_data.shape
-        x = np.arange(nX, dtype=np.float32) * spacing[1] + origin[0]
-        y = np.arange(nI, dtype=np.float32) * spacing[0] + origin[1]
+        z = np.asarray(horizon_data, dtype=np.float32)
+        nI, nX = z.shape
+        sx_xy = spacing
+        if z_unit == "ms":
+            dt = self._survey_dt_ms
+            si, sx, st = self._volume_spacing
+            if dt is not None and dt != 0.0:
+                ft = max(int(self._survey_ft), 1)
+                z = (
+                    (z.astype(np.float64) - float(self._survey_t0_ms))
+                    / (float(dt) * ft)
+                    * float(st)
+                ).astype(np.float32)
+            if spacing == (1, 1):
+                fi = max(int(self._survey_fi), 1)
+                fx = max(int(self._survey_fx), 1)
+                sx_xy = (float(si) / fi, float(sx) / fx)
+        x = np.arange(nX, dtype=np.float32) * sx_xy[1] + origin[0]
+        y = np.arange(nI, dtype=np.float32) * sx_xy[0] + origin[1]
         xx, yy = np.meshgrid(x, y)
 
-        verts = np.dstack([xx, yy, horizon_data.astype(np.float32)])
+        verts = np.dstack([xx, yy, z])
 
         # Vectorized face construction (#57): each (i, j) quad corner maps to
         # p0=i*nX+j, p1=p0+1, p2=p0+nX, p3=p2+1, split into two triangles
@@ -1776,8 +1838,7 @@ class Renderer3D(QWidget):
             self._volume_visual.setOverlayOpacity(self._overlay_opacity)
             self._volume_visual.setOverlayVisible(self._overlay_visible)
             if self._sculpt_surface is not None and self._volume_data_cpu is not None:
-                nt = self._volume_data_cpu.shape[2]
-                norm_surface = self._sculpt_surface / max(1, nt - 1)
+                norm_surface = self._sculpt_norm_surface(self._sculpt_surface)
             else:
                 norm_surface = None
             self._volume_visual.setSculpting(

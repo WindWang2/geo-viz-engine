@@ -381,6 +381,7 @@ class SeismicView(QWidget):
         )
         spacing = self._compute_balanced_spacing(data.shape)
         self._renderer_3d.load_volume(data, spacing=spacing)
+        self._sync_renderer_survey_mapping()
         self._colorbar.set_range(float(np.nanmin(data)), float(np.nanmax(data)))
 
         # Populate all 3 profile panels
@@ -497,6 +498,7 @@ class SeismicView(QWidget):
                        vol.shape)
         spacing = self._compute_balanced_spacing(vol.shape)
         self._renderer_3d.load_volume(vol, spacing=spacing)
+        self._sync_renderer_survey_mapping()
         self._colorbar.set_range(float(np.nanmin(vol)), float(np.nanmax(vol)))
         
         mid_il = meta.iline_start + (meta.n_inlines // 2) * meta.iline_step
@@ -1142,6 +1144,17 @@ class SeismicView(QWidget):
             float((t_val - m.t0_ms) / dt / ft),
         )
 
+    def _sync_renderer_survey_mapping(self) -> None:
+        """Push TWT / downsample mapping so 3D overlays convert ms → cube."""
+        m = self._meta
+        if m is None:
+            return
+        self._renderer_3d.set_survey_mapping(
+            t0_ms=m.t0_ms,
+            dt_ms=m.dt_ms,
+            ds_factor=self._ds_factor or (1, 1, 1),
+        )
+
     def _update_tb_slider_label(self, slice_type: str, position: int):
         """Update the toolbar slider value label with actual survey coordinate."""
         m = self._meta
@@ -1543,7 +1556,9 @@ class SeismicView(QWidget):
         ]
         idx = len(self._horizon_grids) % len(colors)
         self._horizon_grids[name] = filled
-        self._renderer_3d.add_horizon(filled, name=name, color=colors[idx])
+        self._renderer_3d.add_horizon(
+            filled, name=name, color=colors[idx], z_unit="ms"
+        )
         self._sculpt_horizon_combo.addItem(name)
         self._readout_label.setText(f"已加载层位: {name} ({len(self._horizon_grids)} 个)")
 
