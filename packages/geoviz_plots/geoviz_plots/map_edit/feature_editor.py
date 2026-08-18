@@ -119,6 +119,9 @@ class FeatureEditor:
         self._redo_stack: list[dict[str, dict[str, Any]]] = []
         self._uncommitted_base: dict[str, dict[str, Any]] | None = None
         self._drag_targets: list[tuple[str, int]] | None = None
+        # Median nonzero segment length of the loaded layer; the scale-aware
+        # default for pick/snap tolerances (see _default_tolerance).
+        self._data_scale: float = 1.0
 
     @property
     def can_undo(self) -> bool:
@@ -151,6 +154,35 @@ class FeatureEditor:
             self.features[feat_id] = feat_copy
 
         self._uncommitted_base = copy.deepcopy(self.features)
+        self._data_scale = self._compute_data_scale(feat_list)
+
+    @staticmethod
+    def _compute_data_scale(feat_list: list[dict[str, Any]]) -> float:
+        """Median nonzero segment length of the loaded geometry.
+
+        Informs the scale-aware default pick/snap tolerance. Hard-coded
+        absolute-unit defaults were wrong in both CRS families: a 5.0-unit
+        snap radius is ~555 km on degree-coordinate layers yet coarse on
+        meter layers, and a 1e-4 coincident radius ≈ 11 m on degree layers
+        silently merged distinct vertices (#844).
+        """
+        lengths: list[float] = []
+        for feat in feat_list:
+            pts = [_vertex_xy(s) for s in _vertex_slots(feat.get("geometry", {}))]
+            for a, b in zip(pts, pts[1:]):
+                d = math.hypot(b[0] - a[0], b[1] - a[1])
+                if d > 0:
+                    lengths.append(d)
+        if not lengths:
+            return 1.0
+        lengths.sort()
+        return float(lengths[len(lengths) // 2])
+
+    def _default_tolerance(self) -> float:
+        """Scale-aware pick/snap radius: 1% of the layer's median segment
+        length, so editing behavior tracks the layer's own units instead of
+        a fixed absolute radius (#844)."""
+        return 0.01 * self._data_scale
 
     def commit(self) -> None:
         """Commit current transaction changes into Undo history stack."""
@@ -184,8 +216,15 @@ class FeatureEditor:
         self._uncommitted_base = copy.deepcopy(self.features)
         return True
 
-    def select_at(self, x: float, y: float, tolerance: float = 5.0) -> dict[str, Any] | None:
-        """Perform spatial hit testing to select nearest feature and vertex."""
+    def select_at(self, x: float, y: float, tolerance: float | None = None) -> dict[str, Any] | None:
+        """Perform spatial hit testing to select nearest feature and vertex.
+
+        ``tolerance`` default is scale-aware (1% of the layer's median segment
+        length); a fixed absolute radius is wrong in both degree and meter
+        CRS (#844).
+        """
+        if tolerance is None:
+            tolerance = self._default_tolerance()
         best_selection: dict[str, Any] | None = None
         min_dist = float("inf")
 
@@ -209,7 +248,7 @@ class FeatureEditor:
             self._drag_targets = self._find_coincident_vertices(list(best_selection["point"]))
         return best_selection
 
-    def on_pointer_down(self, x: float, y: float, tolerance: float = 5.0) -> dict[str, Any] | None:
+    def on_pointer_down(self, x: float, y: float, tolerance: float | None = None) -> dict[str, Any] | None:
         """Handle pointer press event: select vertex at (x, y) and start transaction."""
         return self.select_at(x, y, tolerance=tolerance)
 
@@ -218,7 +257,7 @@ class FeatureEditor:
         x: float,
         y: float,
         snap: bool = True,
-        snap_tolerance: float = 5.0,
+        snap_tolerance: float | None = None,
     ) -> bool:
         """Handle pointer move event: update selected vertex position with snapping and topology checks."""
         if self.selected_feature_id is None or self.selected_vertex_index is None:
@@ -251,10 +290,18 @@ class FeatureEditor:
             return coords
         return None
 
-    def _find_coincident_vertices(self, target_point: list[float], tol: float = 1e-4) -> list[tuple[str, int]]:
-        """Find all (feature_id, vertex_index) tuples matching target_point."""
+    def _find_coincident_vertices(self, target_point: list[float], tol: float | None = None) -> list[tuple[str, int]]:
+        """Find all (feature_id, vertex_index) tuples matching target_point.
+
+        ``tol`` None means "same stored position": an epsilon scaled to the
+        point's magnitude (ulp-level), never a fixed map-unit radius — the
+        old absolute 1e-4 is ~11 m on degree layers and silently merged
+        distinct-but-nearby vertices into shared ones (#844).
+        """
         coincident = []
         tx, ty = target_point[0], target_point[1]
+        if tol is None:
+            tol = max(abs(tx), abs(ty), 1.0) * 1e-12
         for fid, feat in self.features.items():
             for idx, slot in enumerate(_vertex_slots(feat.get("geometry", {}))):
                 px, py = _vertex_xy(slot)
@@ -267,9 +314,16 @@ class FeatureEditor:
         x: float,
         y: float,
         exclude_targets: set[tuple[str, int]] | None = None,
-        snap_tolerance: float = 5.0,
+        snap_tolerance: float | None = None,
     ) -> tuple[float, float]:
-        """Find nearest vertex target for snapping within tolerance."""
+        """Find nearest vertex target for snapping within tolerance.
+
+        Default ``snap_tolerance`` is scale-aware (1% of the layer's median
+        segment length); the old fixed 5.0 map units is ~555 km on degree
+        layers and coarse on meter layers (#844).
+        """
+        if snap_tolerance is None:
+            snap_tolerance = self._default_tolerance()
         exclude = exclude_targets or set()
         best_pt = (x, y)
         min_dist = snap_tolerance
@@ -291,7 +345,7 @@ class FeatureEditor:
         x: float,
         y: float,
         snap: bool = True,
-        snap_tolerance: float = 5.0,
+        snap_tolerance: float | None = None,
     ) -> bool:
         """Move selected vertex and coincident shared vertices with snapping, ring closure, and TopologyError auto-rollback."""
         if self.selected_feature_id is None or self.selected_vertex_index is None:

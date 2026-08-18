@@ -1009,9 +1009,11 @@ def merge_rings(
         if merged.geom_type == "Polygon":
             return _polygon_exterior_coords(merged)
         if merged.geom_type == "MultiPolygon":
-            # Take largest polygon by area.
-            largest = max(merged.geoms, key=lambda g: g.area)
-            return _polygon_exterior_coords(largest)
+            # Disjoint operands cannot collapse into a single ring: the old
+            # code silently kept only the largest part and dropped the rest.
+            # Reject instead of truncating geometry (#844). A multi-part
+            # result can also mean the inputs touch at a point.
+            return None
     except Exception:
         return None
     return None
