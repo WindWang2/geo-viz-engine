@@ -140,3 +140,50 @@ def test_propagate_pick_via_dtw_creates_pick_when_feasible(qtbot):
     ):
         created = canvas.propagate_pick_via_dtw("W1", 1500.0, "F1")
     assert len(created) == 1
+
+
+def test_compute_dtw_propagation_is_pure_data(qtbot):
+    """The compute half must not touch the picks model (#826 host contract:
+    worker threads run DTW; GUI threads apply picks)."""
+    import numpy as np
+
+    from geoviz_cross_well.canvas import CrossWellCanvas
+    from geoviz_well_log.models import CurveData
+    from geoviz_well_log.renderer.canvas import WellLogCanvas
+    from geoviz_well_log.renderer.curve_track import CurveTrack
+
+    def _well_canvas(name, n):
+        values = np.linspace(0.0, 100.0, n)
+        depths = np.linspace(1000.0, 3000.0, n)
+        sub = WellLogCanvas()
+        sub.set_tracks([
+            CurveTrack(
+                curves=[CurveData(
+                    name="GR", depth=list(depths), values=list(values),
+                    display_range=(0.0, 200.0),
+                )],
+                label="GR",
+            ),
+        ])
+        return sub
+
+    canvas = CrossWellCanvas()
+    qtbot.addWidget(canvas)
+    canvas.widget.add_canvas(_well_canvas("W1", 200), "W1")
+    canvas.widget.add_canvas(_well_canvas("W2", 200), "W2")
+    before = canvas.picks_model.all_picks()
+
+    pairs = canvas.compute_dtw_propagation("W1", 1500.0)
+    assert isinstance(pairs, list)
+    for item in pairs:
+        assert isinstance(item, tuple) and len(item) == 2
+        name, depth = item
+        assert name == "W2"
+        assert 1000.0 <= float(depth) <= 3000.0
+    # Pure computation: identical model state, no ghost picks created.
+    assert canvas.picks_model.all_picks() == before
+
+    # The legacy convenience API applies the computed pairs on top.
+    created = canvas.propagate_pick_via_dtw("W1", 1500.0, "F1")
+    assert len(created) == len(pairs)
+    assert len(canvas.picks_model.all_picks()) == len(before) + len(pairs)
