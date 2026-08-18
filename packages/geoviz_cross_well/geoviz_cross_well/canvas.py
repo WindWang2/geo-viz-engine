@@ -531,17 +531,20 @@ class CrossWellCanvas(QWidget):
                     return depths, values
         return None
 
-    def propagate_pick_via_dtw(
+    def compute_dtw_propagation(
         self,
         ref_well: str,
         ref_depth: float,
-        formation: str,
         band_radius: int | None = None,
         progress_callback=None,
-    ) -> list[str]:
-        """Propagate a pick from `ref_well` at `ref_depth` to every other well via DTW.
+    ) -> list[tuple[str, float]]:
+        """Compute the DTW propagation WITHOUT touching the picks model.
 
-        Returns the list of newly created DTW ghost pick IDs.
+        Pure-data half of :meth:`propagate_pick_via_dtw` (host issue #826):
+        curve extraction + banded DTW only — safe to run on a worker thread.
+        Model/undo mutations belong to the GUI thread; use this from
+        background workers and apply the returned ``(well_name, depth)``
+        pairs via ``picks_model.add_pick`` on the GUI thread.
 
         ``progress_callback`` receives ``(well_index, well_total)`` after each
         target well finishes, so callers can drive a progress bar.
@@ -558,7 +561,7 @@ class CrossWellCanvas(QWidget):
 
         targets = [(i, c, n) for i, (c, n) in enumerate(zip(canvases, names)) if i != ref_idx]
         total = len(targets)
-        created: list[str] = []
+        pairs: list[tuple[str, float]] = []
         for step, (i, canvas, name) in enumerate(targets, start=1):
             tgt_data = self._extract_curve(canvas)
             if tgt_data is None:
@@ -579,11 +582,38 @@ class CrossWellCanvas(QWidget):
                 if progress_callback is not None:
                     progress_callback(step, total)
                 continue
-            pick_id = self._picks_model.add_pick(
-                formation, name, result.suggested_depth, source="dtw",
-            )
-            created.append(pick_id)
+            pairs.append((name, float(result.suggested_depth)))
             if progress_callback is not None:
                 progress_callback(step, total)
+        return pairs
+
+    def propagate_pick_via_dtw(
+        self,
+        ref_well: str,
+        ref_depth: float,
+        formation: str,
+        band_radius: int | None = None,
+        progress_callback=None,
+    ) -> list[str]:
+        """Propagate a pick from `ref_well` at `ref_depth` to every other well via DTW.
+
+        Returns the list of newly created DTW ghost pick IDs.
+
+        GUI-thread convenience: computes via :meth:`compute_dtw_propagation`
+        then applies every pick to the model. Background callers must use the
+        compute half and apply the pairs on the GUI thread (#826).
+        """
+        pairs = self.compute_dtw_propagation(
+            ref_well,
+            ref_depth,
+            band_radius=band_radius,
+            progress_callback=progress_callback,
+        )
+        created: list[str] = []
+        for name, depth in pairs:
+            pick_id = self._picks_model.add_pick(
+                formation, name, depth, source="dtw",
+            )
+            created.append(pick_id)
         return created
 
