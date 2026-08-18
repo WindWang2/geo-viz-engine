@@ -75,7 +75,11 @@ class FilledContourLayer(PaleoLayer):
         if self._study_area_clip:
             clip_screen = QPolygonF([viewport.world_to_screen(p.x(), p.y())
                                      for p in self._study_area_clip])
-            painter.setClipPath(clip_screen, Qt.ClipOperation.IntersectClip)
+            # setClipPath only accepts a QPainterPath; a bare QPolygonF has no
+            # implicit conversion and the first paint raised a TypeError (#853).
+            clip_path = QPainterPath()
+            clip_path.addPolygon(clip_screen)
+            painter.setClipPath(clip_path, Qt.ClipOperation.IntersectClip)
 
         for band, paths in self._screen_paths(viewport):
             color = QColor(band.color)

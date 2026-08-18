@@ -73,6 +73,12 @@ class PaleoMapCanvas(QWidget):
         # layer list when None so the cache rebuild stays consistent.
         self._filled_contour_layer: FilledContourLayer | None = None
 
+        # Edit-overlay state is created before the first layer composition so
+        # _rebuild_layer_caches can recognize the overlay (it paints directly
+        # each frame instead of through the pixmap cache).
+        self._edit_mode = False
+        self._edit_overlay = EditOverlayLayer()
+
         self._layers: list[PaleoLayer] = self._compose_layers()
         self._rebuild_layer_caches()
         self._current_hover: str | None = None
@@ -101,9 +107,7 @@ class PaleoMapCanvas(QWidget):
         self._locked_panel.level_changed.connect(self.update_lock_level)
 
         # Edit mode
-        self._edit_mode = False
         self._topology_model: TopologyModel | None = None
-        self._edit_overlay = EditOverlayLayer()
         self._undo_mgr = UndoManager()
         self._edit_engine = EditEngine(self._edit_overlay, self._undo_mgr)
         # Wire the (currently empty) facies layer so polygon hit-testing is
@@ -151,12 +155,38 @@ class PaleoMapCanvas(QWidget):
 
         Chrome layers (title/north-arrow/scale-bar/legend) anchor to viewport
         edges and must paint against the real viewport size; we paint them
-        directly each frame instead of caching them.
+        directly each frame instead of caching them. The edit overlay paints
+        directly too: its vertex/edge highlights depend on the live hover and
+        selection state, so a stale cached pixmap would be wrong (#836).
         """
         self._layer_caches = [
-            None if getattr(layer, "is_chrome", False) else LayerPixmapCache(layer)
+            None if (getattr(layer, "is_chrome", False)
+                     or layer is self._edit_overlay)
+            else LayerPixmapCache(layer)
             for layer in self._layers
         ]
+
+    def _sync_edit_overlay(self) -> None:
+        """Keep the edit overlay present in both _layers and _layer_caches.
+
+        The edit_mode setter used to append the overlay to _layers only; the
+        paint loop zips (self._layers, self._layer_caches), so the shorter
+        cache list silently truncated the overlay's paint() away and vertex
+        handles were never drawn (#836). Layer-stack rebuilds
+        (_update_active_layers / load_features / load_hierarchy) also dropped
+        the overlay while edit_mode stayed on, losing it permanently until the
+        mode was toggled. The overlay's cache slot is None (direct paint).
+        """
+        if self._edit_mode:
+            if self._edit_overlay not in self._layers:
+                self._layers.append(self._edit_overlay)
+                self._layer_caches.append(None)
+        else:
+            if self._edit_overlay in self._layers:
+                idx = self._layers.index(self._edit_overlay)
+                del self._layers[idx]
+                if idx < len(self._layer_caches):
+                    del self._layer_caches[idx]
 
     # --- Edit mode properties ---
 
@@ -172,10 +202,7 @@ class PaleoMapCanvas(QWidget):
         self._zoom_pan.enabled = not value
         if not value:
             self._edit_engine.select(None)
-        if value and self._edit_overlay not in self._layers:
-            self._layers.append(self._edit_overlay)
-        elif not value and self._edit_overlay in self._layers:
-            self._layers.remove(self._edit_overlay)
+        self._sync_edit_overlay()
         self.edit_mode_changed.emit(value)
         self._scheduler.schedule()
 
@@ -231,6 +258,7 @@ class PaleoMapCanvas(QWidget):
         self._edit_engine.set_facies_layer(self._facies_layer)
         self._update_locked_panel()
         self._rebuild_layer_caches()
+        self._sync_edit_overlay()
 
         self._loaded_features = features
         self._fit_bounds = self._compute_fit_bounds()
@@ -304,6 +332,7 @@ class PaleoMapCanvas(QWidget):
         self._topology_model = TopologyBuilder.from_hierarchy(hierarchy)
         self._edit_engine.set_model(self._topology_model)
         self._rebuild_layer_caches()
+        self._sync_edit_overlay()
 
         self._loaded_features = []
         for level in ["facies", "sub_facies", "micro_facies"]:
@@ -508,6 +537,7 @@ class PaleoMapCanvas(QWidget):
         self._legend_layer = LegendLayer(seen, self._resolver)
         self._layers = self._compose_layers()
         self._rebuild_layer_caches()
+        self._sync_edit_overlay()
 
     def _update_locked_panel(self) -> None:
         if not hasattr(self, "_locked_panel"):

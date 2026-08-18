@@ -186,6 +186,7 @@ class FaciesStyleResolver:
             base_color=style.base_color,
             alpha=0.4,
             tile_size=float(self._engine._tile_size),
+            pattern_id=style.pattern_id,
         )
 
 

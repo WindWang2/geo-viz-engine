@@ -76,3 +76,39 @@ def test_filled_contour_layer_set_bands_replaces_content():
     p = QPainter(img); layer.paint(p, vp); p.end()
     c = img.pixelColor(100, 100)
     assert not (c.red() == 0xFF and c.green() == 0xFF and c.blue() == 0xFF)
+
+
+def test_filled_contour_layer_study_area_clip_paints():
+    """#853: painting with study_area_clip used to raise TypeError on the
+    first paint — QPainter.setClipPath only accepts a QPainterPath and
+    PySide6 does not implicitly convert a QPolygonF. The layer must clip
+    via an explicit path: colored inside the clip, white outside it."""
+    img, vp = _setup()
+    # Clip polygon in lng/lat (world == plate-carree identity).
+    clip = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]
+    layer = FilledContourLayer([_band()], study_area_clip=clip)
+    p = QPainter(img)
+    try:
+        layer.paint(p, vp)
+    finally:
+        p.end()
+    c = img.pixelColor(100, 100)
+    assert not (c.red() == 0xFF and c.green() == 0xFF and c.blue() == 0xFF), \
+        "band must paint inside the clip region (no TypeError)"
+
+
+def test_filled_contour_layer_study_area_clip_excludes_outside():
+    """#853: the clip polygon must actually clip — a clip that does not cover
+    the band leaves the viewport uncolored."""
+    img, vp = _setup()
+    # Clip polygon far away from the band at the viewport center.
+    clip = [(90.0, 90.0), (95.0, 90.0), (95.0, 95.0), (90.0, 95.0), (90.0, 90.0)]
+    layer = FilledContourLayer([_band()], study_area_clip=clip)
+    p = QPainter(img)
+    try:
+        layer.paint(p, vp)
+    finally:
+        p.end()
+    c = img.pixelColor(100, 100)
+    assert c.red() == 0xFF and c.green() == 0xFF and c.blue() == 0xFF, \
+        "band outside the clip polygon must not paint"

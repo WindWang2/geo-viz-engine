@@ -113,3 +113,33 @@ def test_ormsby_band_weights_ratio_at_zero():
     high = (f4**2 * sinc_sq(f4) - f3**2 * sinc_sq(f3)) / (f4 - f3)
     low = (f2**2 * sinc_sq(f2) - f1**2 * sinc_sq(f1)) / (f2 - f1)
     assert high[0] / low[0] == pytest.approx((f4 + f3) / (f2 + f1), rel=1e-6)
+
+
+def test_tie_evaluator_lag_sign_matches_canonical_auto_tie():
+    """#845: the legacy cross-correlation reported the OPPOSITE lag sign of
+    the canonical auto_tie for identical input (+5 vs −5). Positive lag =
+    the synthetic moves later in time to align with the seismic trace."""
+    from geoviz_well_tie.auto_tie import correlate_synthetic_to_trace
+
+    rng = np.random.default_rng(3)
+    syn = rng.standard_normal(60)
+    # Field trace = synthetic delayed by 5 samples (plus leading noise).
+    seis = np.concatenate([rng.standard_normal(5), syn[:55]])
+
+    r, lag = compute_cross_correlation(syn, seis)
+    shift, _ = correlate_synthetic_to_trace(syn, seis)
+    assert lag == shift, (
+        f"legacy lag {lag} must match the canonical shift {shift} for the "
+        f"same (synthetic, seismic) input"
+    )
+    assert lag == 5, "synthetic must move later (down) by 5 samples"
+    assert r > 0.0
+
+
+def test_tie_evaluator_lag_zero_for_aligned_traces():
+    """#845: perfectly aligned traces must keep lag == 0."""
+    rng = np.random.default_rng(9)
+    syn = rng.standard_normal(80)
+    r, lag, residual = evaluate_tie_quality(syn, syn.copy())
+    assert lag == 0
+    assert np.allclose(residual, 0.0)

@@ -1,4 +1,5 @@
 import importlib
+import os
 import subprocess
 import sys
 import textwrap
@@ -258,12 +259,23 @@ def test_import_geoviz_succeeds_without_optional_packages(tmp_path: Path):
         """
     )
 
+    # Ensure the subprocess can find the repo root (where the top-level
+    # ``geoviz`` package lives) and any workspace packages that may be
+    # referenced via a relative PYTHONPATH in CI/dev setups.
+    repo_root = Path(__file__).resolve().parent.parent
+    raw_pp = os.environ.get("PYTHONPATH", "")
+    extra_pp = os.pathsep.join(
+        str((repo_root / p).resolve()) if not Path(p).is_absolute() else p
+        for p in raw_pp.split(os.pathsep) if p
+    )
+    abs_pp = os.pathsep.join(p for p in (str(repo_root), extra_pp) if p)
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         check=False,
+        env={**os.environ, "PYTHONPATH": abs_pp},
     )
 
     assert result.returncode == 0, result.stderr

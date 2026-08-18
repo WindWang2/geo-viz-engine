@@ -219,8 +219,13 @@ class FaciesPolygonsLayer(PaleoLayer):
                 continue
             # LOD path builder consumes the raw rings, not the QPainterPath;
             # capture them from the freshly built path in the same world space.
+            # toFillPolygons() merges the outer ring and hole subpaths into a
+            # single polygon joined by straight connector edges (and collapses
+            # MultiPolygon parts), so the rebuilt LOD rings drew fake diagonal
+            # borders across edited features with holes (#837). toSubpathPolygons
+            # keeps one polygon per ring, preserving hole and part structure.
             new_polygons = []
-            for ring in new_path.toFillPolygons():
+            for ring in new_path.toSubpathPolygons():
                 pts = np.array(
                     [(pt.x(), pt.y()) for pt in ring], dtype=np.float64
                 )
@@ -259,14 +264,38 @@ class FaciesPolygonsLayer(PaleoLayer):
                             br.left(), br.top(), br.right(), br.bottom(),
                         )
                         self._screen_cache.mark_dirty(item.cache_key)
-        if feature_ids and self._items:
-            min_x = min(item.bbox[0] for item in self._items)
-            min_y = min(item.bbox[1] for item in self._items)
-            max_x = max(item.bbox[2] for item in self._items)
-            max_y = max(item.bbox[3] for item in self._items)
-            self._quadtree_root = QuadtreeNode((min_x, min_y, max_x, max_y))
-            for item in self._items:
-                self._quadtree_root.insert(item)
+        has_level_items = any(
+            t is not None for t in (self._level_quadtrees or {}).values()
+        )
+        if feature_ids and (self._items or has_level_items):
+            if self._items:
+                min_x = min(item.bbox[0] for item in self._items)
+                min_y = min(item.bbox[1] for item in self._items)
+                max_x = max(item.bbox[2] for item in self._items)
+                max_y = max(item.bbox[3] for item in self._items)
+                self._quadtree_root = QuadtreeNode((min_x, min_y, max_x, max_y))
+                for item in self._items:
+                    self._quadtree_root.insert(item)
+            # Hierarchy level trees keep their pre-edit spatial partitioning:
+            # items were refreshed in place above, but their bboxes moved, so
+            # the old nodes cull them wrongly after pan/zoom (#853). Rebuild
+            # each level tree from the (updated) items, like the fill tree.
+            for lvl in list(self._level_quadtrees):
+                old_tree = self._level_quadtrees[lvl]
+                lvl_items = (
+                    list(self._walk_items(old_tree)) if old_tree is not None else []
+                )
+                if not lvl_items:
+                    self._level_quadtrees[lvl] = None
+                    continue
+                lx0 = min(item.bbox[0] for item in lvl_items)
+                ly0 = min(item.bbox[1] for item in lvl_items)
+                lx1 = max(item.bbox[2] for item in lvl_items)
+                ly1 = max(item.bbox[3] for item in lvl_items)
+                node = QuadtreeNode((lx0, ly0, lx1, ly1))
+                for item in lvl_items:
+                    node.insert(item)
+                self._level_quadtrees[lvl] = node
 
     @staticmethod
     def _walk_items(node: QuadtreeNode):
@@ -321,7 +350,13 @@ class FaciesPolygonsLayer(PaleoLayer):
         the app-global QPixmapCache so painting never replays the QPicture.
         """
         tile_px = int(tile)
-        key = f"geoviz_facies_tile:{id(vp.picture)}:{tile_px}:{round(tile, 2)}:{dpr}"
+        # Keyed on the stable pattern_id (never id(picture)): a canvas rebuild
+        # constructs a fresh QPicture that can reuse a freed id, so an id-based
+        # key would return the previous pattern's tile from the process-global
+        # QPixmapCache (#853). tile_px/tile/dpr fully determine the rendered
+        # pixmap; pattern_id disambiguates the picture content.
+        pattern_key = vp.pattern_id if vp.pattern_id is not None else "none"
+        key = f"geoviz_facies_tile:{pattern_key}:{tile_px}:{round(tile, 2)}:{dpr}"
         pm = QPixmap()
         if QPixmapCache.find(key, pm):
             return pm

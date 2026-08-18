@@ -1268,6 +1268,21 @@ def test_map_edit_merge_rings_unions_two_squares():
     assert len(merged) >= 4  # a valid exterior ring
 
 
+def test_map_edit_merge_rings_disjoint_rejects_not_drops():
+    """#844: merging two DISJOINT rings unions into a MultiPolygon and the
+    old code silently kept only the largest part — geometry loss. A union
+    that cannot collapse into one ring must be rejected (None), never
+    truncated to the larger operand."""
+    from geoviz_plots.map_edit import merge_rings, HAS_SHAPELY
+
+    if not HAS_SHAPELY:
+        pytest.skip("shapely not available")
+
+    ring_a = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+    ring_b = [[20, 0], [30, 0], [30, 10], [20, 10], [20, 0]]  # disjoint
+    assert merge_rings(ring_a, ring_b) is None
+
+
 def test_map_edit_feature_editor_load_move_undo():
     """FeatureEditor loads a layer, moves a vertex, and undoes the transaction."""
     from geoviz_plots.map_edit import FeatureEditor
@@ -1514,3 +1529,86 @@ def test_crs_set_project_crs_rejects_invalid_code():
         set_project_crs("NOT_A_CRS")
 
 
+
+
+def test_feature_editor_degree_layer_does_not_merge_nearby_vertices():
+    """#844: the coincident-vertex tolerance was a hard-coded absolute 1e-4
+    map units — on degree-coordinate layers that is ~11 m, silently treating
+    distinct nearby vertices as one shared node. Dragging one must NOT drag
+    a vertex 1e-4 degrees away."""
+    from geoviz_plots.map_edit import FeatureEditor
+
+    editor = FeatureEditor()
+    editor.load_layer({
+        "type": "FeatureCollection",
+        "features": [
+            {"id": "A", "geometry": {"type": "Polygon", "coordinates": [
+                [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]
+            ]}},
+            {"id": "B", "geometry": {"type": "Polygon", "coordinates": [
+                # Vertex 1e-4 degrees north of A's (10, 0) — ~11 m apart.
+                [[10.0, 0.0001], [20.0, 0.0001], [20.0, 10.0], [10.0, 10.0], [10.0, 0.0001]]
+            ]}},
+        ],
+    })
+    editor.on_pointer_down(10.0, 0.0, tolerance=1.0)  # selects A's (10, 0)
+    assert editor.selected_feature_id == "A"
+    editor.on_pointer_move(12.0, 2.0, snap=False)
+    editor.on_pointer_up()
+
+    b_ring = editor.features["B"]["geometry"]["coordinates"][0]
+    assert b_ring[0] == [10.0, 0.0001], (
+        "distinct vertex 1e-4 deg away must NOT be treated as coincident"
+    )
+
+
+def test_feature_editor_degree_layer_snap_default_does_not_jump_degrees():
+    """#844: the snap tolerance defaulted to a fixed 5.0 map units — ~555 km
+    on degree layers; dragging near a vertex 0.5 degrees away snapped to it.
+    The scale-aware default (1% of median segment length) must not snap there,
+    while an explicit large tolerance still does."""
+    from geoviz_plots.map_edit import FeatureEditor
+
+    editor = FeatureEditor()
+    editor.load_layer({
+        "type": "FeatureCollection",
+        "features": [
+            {"id": "A", "geometry": {"type": "Polygon", "coordinates": [
+                [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]
+            ]}},
+            {"id": "B", "geometry": {"type": "Polygon", "coordinates": [
+                [[5.0, 5.5], [15.0, 5.5], [15.0, 20.0], [5.0, 20.0], [5.0, 5.5]]
+            ]}},
+        ],
+    })
+    editor.on_pointer_down(10.0, 0.0, tolerance=1.0)  # selects A's (10, 0)
+    # Drag toward (5, 5); B's (5, 5.5) vertex is 0.5 deg away.
+    editor.on_pointer_move(5.0, 5.0, snap=True)
+    editor.on_pointer_up()
+
+    a_ring = editor.features["A"]["geometry"]["coordinates"][0]
+    moved = a_ring[1]  # A's (10, 0) vertex slot
+    assert moved == [5.0, 5.0], (
+        "scale-aware default snap must not jump 0.5 deg to a distant vertex"
+    )
+
+    # Explicit large tolerance still snaps (mechanism preserved).
+    editor2 = FeatureEditor()
+    editor2.load_layer({
+        "type": "FeatureCollection",
+        "features": [
+            {"id": "A", "geometry": {"type": "Polygon", "coordinates": [
+                [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]
+            ]}},
+            {"id": "B", "geometry": {"type": "Polygon", "coordinates": [
+                [[5.0, 5.5], [15.0, 5.5], [15.0, 20.0], [5.0, 20.0], [5.0, 5.5]]
+            ]}},
+        ],
+    })
+    editor2.on_pointer_down(10.0, 0.0, tolerance=1.0)
+    editor2.on_pointer_move(5.0, 5.0, snap=True, snap_tolerance=10.0)
+    editor2.on_pointer_up()
+    a2_ring = editor2.features["A"]["geometry"]["coordinates"][0]
+    assert a2_ring[1] == [5.0, 5.5], (
+        "explicit snap_tolerance must still snap to the nearby vertex"
+    )

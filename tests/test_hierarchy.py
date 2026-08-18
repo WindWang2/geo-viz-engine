@@ -101,3 +101,42 @@ def test_dangling_parent_id_is_promoted_to_root():
 
     model = TopologyBuilder.from_hierarchy(hier)
     assert model.get_feature("orphan") is not None
+
+
+def test_get_ancestors_terminates_on_cycle():
+    """#853: a cyclic parent_id chain (hand-edited GeoJSON) previously
+    infinite-looped inside get_ancestors and froze the UI; the walk must
+    terminate with a bounded ancestor list."""
+    hier = FaciesHierarchy.from_features([
+        {
+            "type": "Feature",
+            "properties": {"id": "A", "facies": "A", "name": "A",
+                           "level": "facies", "parent_id": "B"},
+            "geometry": {"type": "Polygon", "coordinates": []},
+        },
+        {
+            "type": "Feature",
+            "properties": {"id": "B", "facies": "B", "name": "B",
+                           "level": "facies", "parent_id": "A"},
+            "geometry": {"type": "Polygon", "coordinates": []},
+        },
+    ])
+    # Must return rather than hang.
+    ancestors = hier.get_ancestors("A")
+    assert 1 <= len(ancestors) <= 2
+    # The display-label path (used by hover/context menus) must also finish.
+    label = hier.get_hierarchy_label("A")
+    assert label  # non-empty, built without freezing
+
+
+def test_get_ancestors_self_loop_terminates():
+    """#853: a feature whose parent_id is its own id must terminate too."""
+    hier = FaciesHierarchy.from_features([
+        {
+            "type": "Feature",
+            "properties": {"id": "A", "facies": "A", "name": "A",
+                           "level": "facies", "parent_id": "A"},
+            "geometry": {"type": "Polygon", "coordinates": []},
+        },
+    ])
+    assert hier.get_ancestors("A") == []

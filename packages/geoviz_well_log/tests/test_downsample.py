@@ -102,3 +102,52 @@ def test_curve_track_delegates_to_provider():
     finally:
         set_downsample_provider(None)
     assert seen == [(True, 100)]
+
+
+def test_numpy_downsample_bin_nan_break_index_is_in_bin():
+    """#845 hook-parity: the NaN breakout must sit at the bin's FIRST
+    non-finite index (so the polyline breaks at the hole), not be dropped or
+    grafted elsewhere — the contract injected providers must match."""
+    # One bin (8 samples) with the NaN at offset 3.
+    values = np.array([1.0, 3.0, -5.0, np.nan, 2.0, 4.0, -1.0, 0.0])
+    depths = np.arange(len(values), dtype=np.float64)
+    out_d, out_v = numpy_minmax_downsample(depths, values, 1)
+    nan_depths = out_d[np.isnan(out_v)]
+    assert len(nan_depths) == 1
+    assert float(nan_depths[0]) == 3.0, (
+        "the NaN break sample must sit at the first non-finite index"
+    )
+    # Finite extrema survive the NaN bin.
+    finite = out_v[np.isfinite(out_v)]
+    assert finite.min() == -5.0
+    assert finite.max() == 4.0
+
+
+def test_minmax_bin_indices_document_contract():
+    """#845: the reference helper is public and matches the documented
+    NaN-break semantics for hook providers."""
+    from geoviz_well_log.renderer.downsample import minmax_bin_indices
+
+    # All-finite bin: exactly the min/max indices, sorted by index.
+    idx = minmax_bin_indices(np.array([1.0, 3.0, -5.0, 2.0]))
+    np.testing.assert_array_equal(idx, [1, 2])  # max(1), min(2), sorted
+    # NaN bin: finite min/max plus the FIRST NaN index, sorted by index.
+    idx = minmax_bin_indices(np.array([1.0, np.nan, 3.0, -5.0, np.nan, 2.0]))
+    np.testing.assert_array_equal(idx, [1, 2, 3])  # nan(1), max(2), min(3)
+    # Fully non-finite bin: its first sample.
+    np.testing.assert_array_equal(
+        minmax_bin_indices(np.array([np.nan, np.nan])), [0]
+    )
+
+
+def test_numpy_downsample_floor_binning_with_partial_tail():
+    """#845 hook-parity: binning is floor-based — ``step = n // pixels`` with
+    a trailing partial bin. A ceil-based partition would emit different
+    samples for the same curve (the legacy hook divergence)."""
+    # n=10, pixel_height=3 -> step=3, bins [0:3],[3:6],[6:9], partial [9:10].
+    values = np.arange(10, dtype=np.float64)
+    depths = np.arange(10, dtype=np.float64)
+    out_d, out_v = numpy_minmax_downsample(depths, values, 3)
+    # Per full bin the min+max = the bin edges; the single-sample tail is
+    # kept by the same per-bin rule (min == max, emitted as a pair).
+    np.testing.assert_array_equal(out_v, [0.0, 2.0, 3.0, 5.0, 6.0, 8.0, 9.0, 9.0])
