@@ -27,3 +27,8 @@ class VectorPattern:
     base_color: QColor
     alpha: float
     tile_size: float
+    # Stable pattern identity for cache keys. The picture object itself is
+    # recreated on canvas rebuilds and the process-global QPixmapCache must
+    # never key on id(picture): a fresh QPicture can reuse a freed id and
+    # serve the old pattern's tile (#853).
+    pattern_id: str | None = None

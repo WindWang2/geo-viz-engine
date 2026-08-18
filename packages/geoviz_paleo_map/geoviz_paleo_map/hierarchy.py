@@ -154,13 +154,21 @@ class FaciesHierarchy:
         return self._by_id.get(feature_id)
 
     def get_ancestors(self, feature_id: str) -> list[FaciesFeature]:
-        """Get parent chain from root to this node (exclusive)."""
+        """Get parent chain from root to this node (exclusive).
+
+        A visited set guards against cyclic parent_id data (e.g. hand-edited
+        GeoJSON): an unchecked walk would loop forever and freeze the UI
+        (#853).
+        """
         chain = []
         node = self._by_id.get(feature_id)
         if node is None:
             return chain
+        seen = {feature_id}
         parent_id = node.feature.parent_id
-        while parent_id and parent_id in self._by_id:
+        while (parent_id and parent_id in self._by_id
+               and parent_id not in seen):
+            seen.add(parent_id)
             parent = self._by_id[parent_id]
             chain.append(parent.feature)
             parent_id = parent.feature.parent_id

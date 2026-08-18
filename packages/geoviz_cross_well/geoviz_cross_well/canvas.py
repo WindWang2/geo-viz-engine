@@ -164,14 +164,27 @@ class PickingOverlay(QWidget):
         )
 
     def _paint_twt_axis(self, painter: QPainter):
-        """Render TWT axis labels alongside the leftmost canvas depth axis."""
+        """Render TWT axis labels alongside the leftmost canvas depth axis.
+
+        Uses the leftmost DISPLAYED well that has a calibration table — the
+        old code took tie-table ``well_names()[0]``, so a CSV subset or order
+        mismatch labeled the axis with a different well's calibration, and it
+        called ``calibration.depth_to_twt`` directly, bypassing
+        ``interpolate_twt``'s None-guard when the well-tie extra is absent
+        (#853).
+        """
         overlay = self._widget._overlay
         if not self._widget._canvases:
             return
         first_canvas = self._widget._canvases[0]
-        if not self._seismic_tie.well_names():
+        well = next(
+            (name for name in self._widget._well_names
+             if self._seismic_tie.table_for_well(name) is not None),
+            None,
+        )
+        if well is None:
             return
-        well = self._seismic_tie.well_names()[0]
+        table = self._seismic_tie.table_for_well(well)
 
         font = QFont()
         font.setPointSize(7)
@@ -188,7 +201,7 @@ class PickingOverlay(QWidget):
             return
 
         depth_range = np.linspace(depth_top, depth_bot, 10)
-        twt_values = self._seismic_tie.table_for_well(well).calibration.depth_to_twt(depth_range)
+        twt_values = table.interpolate_twt(depth_range)
 
         for depth, twt in zip(depth_range, twt_values):
             y = overlay.depth_to_y(first_canvas, depth)

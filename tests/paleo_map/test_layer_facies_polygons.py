@@ -1,5 +1,5 @@
 from PySide6.QtCore import QPointF
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QColor, QImage, QPainter
 
 from geoviz_paleo_map.layers.facies_polygons import FaciesPolygonsLayer
 from geoviz_paleo_map.style import FaciesStyleResolver
@@ -385,3 +385,82 @@ def test_vector_pattern_fill_pre_render_not_per_tile_playback(monkeypatch):
     # Generous CI bound: both full paints together stay well under a
     # second (the per-tile loop measured 0.2-1 s per zoom tick alone).
     assert dt < 2.0, f"pattern fill paint took {dt:.2f}s for two frames"
+
+
+def test_vector_tile_cache_key_uses_pattern_id_not_picture_address(monkeypatch):
+    """#853: the tile cache key used id(QPicture) — a canvas rebuild creates
+    a fresh QPicture that can reuse a freed id, so the process-global
+    QPixmapCache would return the previous pattern's tile. The key must
+    embed the stable pattern_id, never the picture object's address."""
+    import geoviz_paleo_map.layers.facies_polygons as fp_mod
+    from PySide6.QtGui import QPicture
+
+    from geoviz_paleo_map.models import VectorPattern
+
+    real_cache = fp_mod.QPixmapCache
+    keys = []
+
+    class RecordingCache:
+        @staticmethod
+        def find(key, pm):
+            return real_cache.find(key, pm)
+
+        @staticmethod
+        def insert(key, pm):
+            keys.append(key)
+            return real_cache.insert(key, pm)
+
+    monkeypatch.setattr(fp_mod, "QPixmapCache", RecordingCache)
+
+    pic = QPicture()
+    vp = VectorPattern(picture=pic, base_color=QColor("red"), alpha=0.4,
+                       tile_size=10, pattern_id="hatch-853-test")
+    FaciesPolygonsLayer._vector_tile_pixmap(vp, 16.0, 1.0)
+
+    assert keys, "the tile render must consult the cache"
+    assert "hatch-853-test" in keys[0]
+    assert str(id(pic)) not in keys[0], (
+        "the QPicture object address must not be part of the cache key"
+    )
+
+
+def test_vector_tile_cache_shared_by_pattern_id_across_pictures(monkeypatch):
+    """#853: two VectorPatterns with the same pattern_id but freshly built
+    QPicture objects (the post-canvas-rebuild situation) must hit the same
+    cache entry; a different pattern_id must use a different key."""
+    import geoviz_paleo_map.layers.facies_polygons as fp_mod
+    from PySide6.QtGui import QPicture
+
+    from geoviz_paleo_map.models import VectorPattern
+
+    real_cache = fp_mod.QPixmapCache
+    finds = []
+
+    class SpyCache:
+        @staticmethod
+        def find(key, pm):
+            finds.append(key)
+            return real_cache.find(key, pm)
+
+        @staticmethod
+        def insert(key, pm):
+            return real_cache.insert(key, pm)
+
+    monkeypatch.setattr(fp_mod, "QPixmapCache", SpyCache)
+
+    vp1 = VectorPattern(picture=QPicture(), base_color=QColor("red"),
+                        alpha=0.4, tile_size=10, pattern_id="shared-853-test")
+    vp2 = VectorPattern(picture=QPicture(), base_color=QColor("red"),
+                        alpha=0.4, tile_size=10, pattern_id="shared-853-test")
+    vp3 = VectorPattern(picture=QPicture(), base_color=QColor("blue"),
+                        alpha=0.4, tile_size=10, pattern_id="dots-853-test")
+
+    FaciesPolygonsLayer._vector_tile_pixmap(vp1, 24.0, 1.0)  # insert
+    FaciesPolygonsLayer._vector_tile_pixmap(vp2, 24.0, 1.0)  # must hit
+    FaciesPolygonsLayer._vector_tile_pixmap(vp3, 24.0, 1.0)  # must miss
+
+    assert len(finds) == 3
+    assert finds[1] == finds[0], (
+        "same pattern_id with a fresh QPicture must reuse the cached tile"
+    )
+    assert finds[2] != finds[0], "different pattern_id must use a different key"

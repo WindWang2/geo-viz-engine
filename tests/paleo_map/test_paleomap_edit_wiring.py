@@ -6,6 +6,10 @@ and the whole polygon-editing feature set (selection, drag, delete, insert/
 delete vertex, edit attributes) was unreachable in the shipped widget — only
 tests that wired the engine manually masked the gap. These tests drive the
 real canvas mouse-press path.
+
+#836: entering edit mode appended the overlay to _layers but never mirrored
+it into _layer_caches, so paintEvent's zip() truncated and the overlay never
+painted; layer-stack rebuilds also dropped it while edit_mode stayed on.
 """
 from __future__ import annotations
 
@@ -141,3 +145,79 @@ def test_resize_preserves_user_viewport(qtbot):
     canvas2._viewport.zoom = 10.0  # would be clamped down by a refit
     _deliver_resize(canvas2, 640, 480)
     assert canvas2._viewport.zoom < 10.0
+
+
+def test_edit_mode_overlay_paint_called(qtbot):
+    """#836: entering edit mode must actually paint the edit overlay.
+
+    The overlay was appended to _layers but never mirrored into
+    _layer_caches; paintEvent iterates zip(_layers, _layer_caches), so the
+    shorter cache list silently truncated the overlay's paint() away and
+    vertex handles were never drawn. The overlay paints directly (cache slot
+    None: hover/selection highlights must be frame-fresh).
+    """
+    from geoviz_paleo_map import PaleoMapCanvas
+
+    canvas = PaleoMapCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(800, 600)
+    canvas.load_features(_TRIANGLE, period_name="测试")
+    canvas.edit_mode = True
+
+    # Both lists must stay in sync so the paint loop does not truncate.
+    assert canvas._edit_overlay in canvas._layers
+    assert len(canvas._layers) == len(canvas._layer_caches)
+    cache_idx = canvas._layers.index(canvas._edit_overlay)
+    assert canvas._layer_caches[cache_idx] is None
+
+    calls = []
+    orig_paint = canvas._edit_overlay.paint
+    canvas._edit_overlay.paint = lambda painter, viewport: calls.append(1)
+    try:
+        canvas.grab()
+    finally:
+        canvas._edit_overlay.paint = orig_paint
+    assert calls, "edit overlay paint() was never called after edit_mode=True"
+
+
+def test_edit_mode_overlay_survives_layer_rebuild(qtbot):
+    """#836: layer-stack rebuilds (_update_active_layers via toggle_lock)
+    rebuilt _layers from _compose_layers and dropped the overlay while
+    edit_mode stayed on — it must be re-synced with its cache slot."""
+    from geoviz_paleo_map import FaciesHierarchy, PaleoMapCanvas
+
+    features = [
+        {
+            "type": "Feature",
+            "properties": {"id": "facies_a", "name": "相A", "facies": "砂岩",
+                           "level": "facies"},
+            "geometry": {"type": "Polygon", "coordinates": [
+                [[100.0, 20.0], [110.0, 20.0], [110.0, 30.0], [100.0, 30.0],
+                 [100.0, 20.0]]]},
+        },
+        {
+            "type": "Feature",
+            "properties": {"id": "sub_b", "name": "亚相B", "facies": "砂岩",
+                           "level": "sub_facies", "parent_id": "facies_a"},
+            "geometry": {"type": "Polygon", "coordinates": [
+                [[100.0, 20.0], [105.0, 20.0], [105.0, 25.0], [100.0, 25.0],
+                 [100.0, 20.0]]]},
+        },
+    ]
+    canvas = PaleoMapCanvas()
+    qtbot.addWidget(canvas)
+    canvas.resize(1200, 800)
+    canvas.load_hierarchy(FaciesHierarchy.from_features(features), "测试时期")
+    canvas.edit_mode = True
+    assert canvas._edit_overlay in canvas._layers
+
+    # A layer rebuild (toggle_lock triggers _update_active_layers) must keep
+    # the overlay present and the two lists in sync.
+    canvas.toggle_lock("facies_a")
+    assert canvas._edit_overlay in canvas._layers
+    assert len(canvas._layers) == len(canvas._layer_caches)
+
+    # Turning edit mode off must clean up both lists symmetrically.
+    canvas.edit_mode = False
+    assert canvas._edit_overlay not in canvas._layers
+    assert len(canvas._layers) == len(canvas._layer_caches)
