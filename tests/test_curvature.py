@@ -220,3 +220,29 @@ class TestCurvatureGpuConsistency:
             coh_gpu = compute_curvature(data, kind=kind, use_gpu=True)
             # GPU/CPU float32 reductions differ by ~1e-3 on noisy random input
             np.testing.assert_allclose(coh_cpu, coh_gpu, atol=5e-3, rtol=1e-3)
+
+
+class TestDipPhysicalUnits:
+    """#845: dip was an INDEX-unit gradient ratio labeled as radians — a
+    plane with slope s gave atan(s) whatever the real trace spacing. With
+    physical spacings passed it must yield the true angle."""
+
+    def test_physical_spacing_converts_index_ratio_to_angle(self):
+        s = 0.5
+        il = np.arange(12, dtype=np.float32)   # axis 0
+        t = np.arange(40, dtype=np.float32)    # axis 2
+        # a = t + s*il  =>  ∂a/∂t = 1, ∂a/∂il = s everywhere.
+        data = (t[None, None, :] + s * il[:, None, None]).astype(np.float32)
+        data = np.broadcast_to(data, (12, 20, 40)).copy()
+
+        dip_index, _ = compute_dip(data)
+        dip_phys, _ = compute_dip(data, dt=2.0, dx_il=4.0, dx_xl=1.0)
+        interior = np.s_[2:-2, 2:-2, 2:-2]
+        # Default spacing keeps the (now documented) index-unit ratio.
+        np.testing.assert_allclose(dip_index[interior], np.arctan(s), atol=1e-3)
+        # Physical spacings: angle = atan(s * dt / dx_il) = atan(0.25).
+        np.testing.assert_allclose(dip_phys[interior],
+                                   np.arctan(s * 2.0 / 4.0), atol=1e-3)
+        # Units matter: the physical angle must differ from the index ratio.
+        assert not np.allclose(dip_phys[interior], dip_index[interior],
+                               atol=1e-3)

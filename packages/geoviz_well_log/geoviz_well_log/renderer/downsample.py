@@ -7,6 +7,17 @@ Provider protocol (ndarray in, ndarray out):
 Default provider is the engine's NumPy implementation. Host applications
 (e.g. paleo_workbench) may inject a C++-accelerated provider at startup via
 ``set_downsample_provider`` — the engine itself has no such dependency.
+
+Contract (the engine default is the reference — injected providers MUST
+match it, or rendering diverges; #845):
+1. **Binning** — floor-based: ``step = len // pixel_height`` full bins plus
+   one trailing partial bin. (A ceil-based partition produces different
+   sample sets for the same curve.)
+2. **NaN handling** — a bin containing any non-finite sample MUST emit its
+   finite min and max *and* one NaN sample at the bin's first non-finite
+   index, in index (depth) order, so the polyline breaks at the hole
+   instead of being bridged (#726 / #845). A fully non-finite bin emits its
+   first sample. Use :func:`minmax_bin_indices` for the reference logic.
 """
 from __future__ import annotations
 
@@ -76,7 +87,23 @@ def numpy_minmax_downsample(
 
 
 def _bin_keep_indices(chunk: np.ndarray) -> np.ndarray:
-    """In-bin sample indices to emit for one min/max LOD bin."""
+    """Reference per-bin sample indices for one min/max LOD bin.
+
+    Public contract helper (:func:`minmax_bin_indices`) — injected providers
+    (e.g. a C++-accelerated host hook) must reproduce this NaN breakout, or
+    holes in the curve get bridged (#845)."""
+    return minmax_bin_indices(chunk)
+
+
+def minmax_bin_indices(chunk: np.ndarray) -> np.ndarray:
+    """In-bin sample indices to emit for one min/max LOD bin.
+
+    Reference semantics (the engine default and the hook contract, #845):
+    keep the finite min/max; when the bin contains any non-finite sample,
+    also emit the FIRST non-finite index so the rendered polyline breaks at
+    the hole. A fully non-finite bin emits its first sample. Output is
+    sorted by index.
+    """
     finite = np.isfinite(chunk)
     if not np.any(finite):
         return np.array([0], dtype=np.intp)

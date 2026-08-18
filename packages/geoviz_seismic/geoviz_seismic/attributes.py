@@ -158,11 +158,16 @@ def compute_spectral_decomposition(
     return result
 
 
-def _power_iteration_c3(traces, n_iter: int = 10):
+def _power_iteration_c3(traces, n_iter: int = 30):
     """Power iteration for λ_max / trace(C) coherence.
 
     Works with both NumPy and CuPy arrays — dispatches via the array's
     module (traces.__class__).
+
+    Default is 30 iterations: 10 left a measurable bias on noisy windows
+    (max |Δ| ≈ 0.07 vs the exact eigenvalue on adversarial re-measurement;
+    ~0.09 on synthetic noise), while 30 converges to machine-visual parity
+    at linear cost (#845).
     """
     xp = traces.__class__.__module__.split(".")[0]
     if xp == "cupy":
@@ -254,7 +259,7 @@ def compute_coherence_c3(
     positions = max(1, max_bytes // (n_traces * wt * 4))
     chunk_xl = max(1, min(n_xl, positions // n_t))
 
-    n_power_iter = 10
+    n_power_iter = 30
 
     for il in range(n_il):
         strip = padded[il : il + wil, :, :]
@@ -369,37 +374,52 @@ def compute_dip(
     axis_il: int = 0,
     axis_xl: int = 1,
     axis_t: int = 2,
+    dt: float = 1.0,
+    dx_il: float = 1.0,
+    dx_xl: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute apparent dip angles (radians) along inline and crossline.
 
     Uses central differences for the spatial gradients and the vertical
     (time) gradient.  The apparent dip is ``atan(∂x/∂t)``.
 
+    ``dt`` / ``dx_il`` / ``dx_xl`` convert the per-index gradients into
+    physical units (e.g. seconds per sample and meters per trace). Left at
+    their defaults of 1.0 the result is an INDEX-unit gradient ratio — a
+    plane with slope s has dip ``atan(s)`` regardless of how many meters
+    or milliseconds an index spans, so the numbers are not physical angles
+    (#845). Pass real spacings to get true radians: a plane with spatial
+    slope ``s`` then has dip ``atan(s * dt / dx)``.
+
     Args:
         data: 3-D seismic amplitude (n_il, n_xl, n_t) or 2-D (n_xl, n_t).
         axis_il: Axis index for the inline direction.
         axis_xl: Axis index for the crossline direction.
         axis_t: Axis index for the time/sample direction.
+        dt: Time sample interval in the time axis unit (per index).
+        dx_il: Inline spacing in the same unit as ``dt`` per inline index.
+        dx_xl: Crossline spacing in the same unit as ``dt`` per crossline index.
 
     Returns:
         (dip_il, dip_xl) arrays with the same shape as *data* and dtype
-        float32.  Values are in ``[-π/2, π/2]``.
+        float32.  Values are in ``[-π/2, π/2]``; physical radians only when
+        the spacing arguments match the data's real sampling.
     """
     data = np.asarray(data, dtype=np.float32)
     was_2d = data.ndim == 2
     if was_2d:
         # 2-D data convention: (n_xl, n_t). Only xl and t gradients exist.
-        grad_xl = np.gradient(data, axis=0)
-        grad_t = np.gradient(data, axis=1)
+        grad_xl = np.gradient(data, dx_xl, axis=0)
+        grad_t = np.gradient(data, dt, axis=1)
         gt_safe = np.where(np.abs(grad_t) < 1e-10, 1e-10, grad_t)
         dip_il = np.zeros_like(data)
         dip_xl = np.arctan(grad_xl / gt_safe).astype(np.float32)
         return dip_il, dip_xl
 
-    # Central differences
-    grad_il = np.gradient(data, axis=axis_il)
-    grad_xl = np.gradient(data, axis=axis_xl)
-    grad_t = np.gradient(data, axis=axis_t)
+    # Central differences, with index spans converted to physical units
+    grad_il = np.gradient(data, dx_il, axis=axis_il)
+    grad_xl = np.gradient(data, dx_xl, axis=axis_xl)
+    grad_t = np.gradient(data, dt, axis=axis_t)
 
     # Avoid division by zero — tiny vertical gradient is treated as flat
     gt_safe = np.where(np.abs(grad_t) < 1e-10, 1e-10, grad_t)

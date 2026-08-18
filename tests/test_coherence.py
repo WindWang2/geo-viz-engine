@@ -119,3 +119,61 @@ class TestCoherenceC3GpuConsistency:
         coh_cpu = compute_coherence_c3(data, win_il=3, win_xl=3, win_t=5, use_gpu=False)
         coh_gpu = compute_coherence_c3(data, win_il=3, win_xl=3, win_t=5, use_gpu=True)
         np.testing.assert_allclose(coh_cpu, coh_gpu, atol=1e-5)
+
+
+def test_coherence_c3_uses_30_power_iterations(monkeypatch):
+    """#845: the C3 power iteration ran only 10 times, leaving a measurable
+    bias on noisy windows (max |Δ| ≈ 0.07–0.09 vs the exact eigenvalue);
+    the shipped iteration count must be ~30 (linear cost)."""
+    import geoviz_seismic.attributes as attrs
+
+    calls = []
+    orig = attrs._power_iteration_c3
+
+    def spy(traces, n_iter=10):
+        calls.append(n_iter)
+        return orig(traces, n_iter)
+
+    monkeypatch.setattr(attrs, "_power_iteration_c3", spy)
+    rng = np.random.default_rng(0)
+    data = rng.standard_normal((4, 6, 20)).astype(np.float32)
+    compute_coherence_c3(data, win_il=1, win_xl=1, win_t=2)
+    assert calls, "power iteration must run"
+    assert all(n >= 30 for n in calls), f"iteration count must be ~30, got {calls}"
+
+
+def test_coherence_c3_converges_to_exact_eigenvalue():
+    """#845: with 30 iterations C3 must match the exact largest-eigenvalue
+    ratio closely on noisy windows — the 10-iteration default left up to
+    ~0.09 error on synthetic noise."""
+    from numpy.lib.stride_tricks import sliding_window_view
+
+    def _exact_c3(traces):
+        A = traces
+        lam = np.linalg.eigvalsh(A @ A.transpose(0, 2, 1))[:, -1]
+        total = np.sum(A ** 2, axis=(1, 2))
+        return np.where(total > 0, lam / total, 1.0)
+
+    def _volume_traces(data, wil, wxl, wt):
+        n_il, n_xl, n_t = data.shape
+        p = np.pad(data, (((wil - 1) // 2,) * 2, ((wxl - 1) // 2,) * 2,
+                          ((wt - 1) // 2,) * 2), mode="reflect")
+        out = []
+        for il in range(n_il):
+            chunk = p[il:il + wil, 0:n_xl + wxl - 1, :]
+            swv = sliding_window_view(chunk, (wxl, wt), axis=(1, 2))
+            out.append(np.ascontiguousarray(swv.transpose(1, 2, 0, 3, 4))
+                       .reshape(-1, wil * wxl, wt))
+        return np.concatenate(out, axis=0)
+
+    t = np.linspace(0, 2 * np.pi, 50, dtype=np.float32)
+    flat = np.tile(np.sin(t), (8, 12, 1))
+    rng = np.random.default_rng(11)
+    data = (flat + 0.4 * rng.standard_normal(flat.shape).astype(np.float32))
+
+    coh = compute_coherence_c3(data, win_il=1, win_xl=1, win_t=2)
+    traces = _volume_traces(data, 3, 3, 5)
+    ref = _exact_c3(traces).reshape(8, 12, 50)
+    d = np.abs(coh - ref)
+    assert d.max() < 0.01, f"30-iteration C3 bias too large: max|Δ|={d.max():.4f}"
+    assert d.mean() < 1e-4, f"mean C3 bias too large: {d.mean():.6f}"
