@@ -24,6 +24,12 @@ class DepthRulerItem(QGraphicsObject):
         self._depth_bottom = 1000.0
         self._height = height
         self._cursor_depth: float | None = None
+        # Top insets excluded from the depth mapping so ruler ticks align
+        # with the well columns' content (widget DepthRuler parity): the
+        # well-name label band above the columns and the track header band
+        # inside them (#114).
+        self._label_inset = 0.0
+        self._header_inset = 0.0
         self.setZValue(100)  # Above wells
 
     def boundingRect(self) -> QRectF:
@@ -39,6 +45,20 @@ class DepthRulerItem(QGraphicsObject):
         self._height = height
         self.update()
 
+    def set_geometry_insets(self, label_px: float = 0.0, header_px: float = 0.0):
+        """Set the vertical insets (px) excluded from the depth-to-Y mapping.
+
+        Mirrors the widget DepthRuler.set_geometry_insets semantics:
+        ``label_px`` is the well-name label band above the columns,
+        ``header_px`` the track header band inside them. Together they keep
+        ruler ticks aligned with the well columns' content — without them
+        the same depth sat a constant label+header offset lower in the
+        columns than on the ruler (#114).
+        """
+        self._label_inset = float(label_px)
+        self._header_inset = float(header_px)
+        self.update()
+
     def set_cursor_depth(self, depth: float | None):
         self._cursor_depth = depth
         self.update()
@@ -48,7 +68,10 @@ class DepthRulerItem(QGraphicsObject):
         if span <= 0:
             return 0.0
         ratio = (depth - self._depth_top) / span
-        return ratio * self._height
+        usable = self._height - self._label_inset - self._header_inset
+        if usable <= 0:
+            return 0.0
+        return self._label_inset + self._header_inset + ratio * usable
 
     def _compute_nice_intervals(self, top: float, bottom: float, height: float) -> float:
         """Shared nice-step policy (see renderer.track_base.nice_depth_interval).
