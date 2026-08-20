@@ -20,7 +20,10 @@ import copy
 import math
 from typing import Any
 
-from geoviz_plots.map_edit.api import validate_ring as _validate_ring
+from geoviz_plots.map_edit.api import (
+    validate_ring as _validate_ring,
+    validate_ring_local as _validate_ring_local,
+)
 
 
 def _is_xy(pt: Any) -> bool:
@@ -150,6 +153,9 @@ class FeatureEditor:
         self._redo_stack: list[dict[str, dict[str, Any]]] = []
         self._uncommitted_base: dict[str, dict[str, Any]] | None = None
         self._drag_targets: list[tuple[str, int]] | None = None
+        # Features touched by moves since the last pointer release; scoped
+        # for the deferred full validation on_pointer_up runs (#118).
+        self._move_touched_features: set[str] = set()
         # Median nonzero segment length of the loaded layer; the scale-aware
         # default for pick/snap tolerances (see _default_tolerance).
         self._data_scale: float = 1.0
@@ -171,6 +177,7 @@ class FeatureEditor:
         self._redo_stack.clear()
         self._uncommitted_base = None
         self._drag_targets = None
+        self._move_touched_features.clear()
 
         feat_list = []
         if isinstance(feature_collection, dict):
@@ -290,17 +297,48 @@ class FeatureEditor:
         snap: bool = True,
         snap_tolerance: float | None = None,
     ) -> bool:
-        """Handle pointer move event: update selected vertex position with snapping and topology checks."""
+        """Handle pointer move event: update selected vertex position with snapping and topology checks.
+
+        Runs the INCREMENTAL adjacent-edge check only (O(V) per move): the
+        full per-ring and whole-geometry validation is deferred to
+        :meth:`on_pointer_up` (#118). A ring that was simple before the drag
+        cannot become self-intersecting without one of the moved vertex's
+        adjacent edges being involved, so intra-ring topology is still
+        caught during the drag.
+        """
         if self.selected_feature_id is None or self.selected_vertex_index is None:
             return False
-        return self.move_selected_vertex(x, y, snap=snap, snap_tolerance=snap_tolerance)
+        return self.move_selected_vertex(
+            x, y, snap=snap, snap_tolerance=snap_tolerance, validation="local"
+        )
 
     def on_pointer_up(self) -> bool:
-        """Handle pointer release event: commit current move transaction and clear active drag."""
-        if self.selected_feature_id is not None and self.selected_vertex_index is not None:
-            self.commit()
-            return True
-        return False
+        """Handle pointer release: full topology validation, then commit.
+
+        Drag moves only ran the incremental adjacent-edge check, so the
+        complete per-ring plus whole-geometry (shapely) validation runs
+        here, BEFORE the transaction commits — ``TopologyError`` still
+        intercepts invalid geometries at commit time. On failure the whole
+        uncommitted transaction (the drag) is rolled back to the state of
+        the last commit / layer load (#118).
+        """
+        if self.selected_feature_id is None or self.selected_vertex_index is None:
+            return False
+        if self._move_touched_features:
+            for fid in sorted(self._move_touched_features):
+                errors = self._validate_feature_full(fid)
+                if errors:
+                    self.rollback()
+                    self._move_touched_features.clear()
+                    err_msg = ", ".join(
+                        e.get("message", e.get("code", "invalid")) for e in errors
+                    )
+                    raise TopologyError(
+                        f"Invalid topology on feature '{fid}': {err_msg}"
+                    )
+        self.commit()
+        self._move_touched_features.clear()
+        return True
 
     @staticmethod
     def _extract_ring(feat: dict[str, Any]) -> list[list[float]] | None:
@@ -377,8 +415,19 @@ class FeatureEditor:
         y: float,
         snap: bool = True,
         snap_tolerance: float | None = None,
+        validation: str = "full",
     ) -> bool:
-        """Move selected vertex and coincident shared vertices with snapping, ring closure, and TopologyError auto-rollback."""
+        """Move selected vertex and coincident shared vertices with snapping, ring closure, and TopologyError auto-rollback.
+
+        ``validation="local"`` (used by :meth:`on_pointer_move` during a
+        drag) checks only the edges adjacent to each moved vertex — O(V)
+        per mouse-move instead of the full O(V^2) ring re-validation — and
+        defers the whole-geometry (shapely) check to pointer release
+        (#118). ``validation="full"`` keeps the complete per-move check for
+        direct callers.
+        """
+        if validation not in {"full", "local"}:
+            raise ValueError("validation must be 'full' or 'local'")
         if self.selected_feature_id is None or self.selected_vertex_index is None:
             raise ValueError("No vertex currently selected")
 
@@ -422,28 +471,86 @@ class FeatureEditor:
                 if 0 <= bv_idx < len(b_slots):
                     _set_vertex(b_slots[bv_idx], bx, by)
 
-        for fid in touched_feature_ids:
-            f_geom = self.features[fid].get("geometry", {})
-            errors: list[dict[str, Any]] = []
-            for f_ring in _rings_for_validation(f_geom):
-                if len(f_ring) < 4:
-                    continue
-                errors = _validate_ring(f_ring)
+        self._move_touched_features.update(touched_feature_ids)
+
+        if validation == "local":
+            # Incremental path: each moved vertex only endangers its own
+            # two adjacent edges (all other edge pairs were unchanged); the
+            # full-ring and whole-geometry checks run on pointer release.
+            for fid, v_idx in coincident_targets:
+                errors = self._validate_feature_local(fid, v_idx)
                 if errors:
-                    break
-            # Ring-level checks cannot express inter-ring relationships (a hole
-            # escaping its exterior) or coincident-vertex degeneracy, so the
-            # assembled geometry is validated too (#880).
-            if not errors:
-                errors = _validate_whole_geometry(f_geom)
-            if errors:
-                _rollback()
-                err_msg = ", ".join(
-                    e.get("message", e.get("code", "invalid")) for e in errors
-                )
-                raise TopologyError(f"Invalid topology on feature '{fid}': {err_msg}")
+                    _rollback()
+                    err_msg = ", ".join(
+                        e.get("message", e.get("code", "invalid")) for e in errors
+                    )
+                    raise TopologyError(f"Invalid topology on feature '{fid}': {err_msg}")
+        else:
+            for fid in touched_feature_ids:
+                errors = self._validate_feature_full(fid)
+                if errors:
+                    _rollback()
+                    err_msg = ", ".join(
+                        e.get("message", e.get("code", "invalid")) for e in errors
+                    )
+                    raise TopologyError(f"Invalid topology on feature '{fid}': {err_msg}")
 
         return True
+
+    def _validate_feature_full(self, feature_id: str) -> list[dict[str, Any]]:
+        """Full validation of one feature: every ring, then the whole geometry."""
+        geom = self.features[feature_id].get("geometry", {})
+        for f_ring in _rings_for_validation(geom):
+            if len(f_ring) < 4:
+                continue
+            errors = _validate_ring(f_ring)
+            if errors:
+                return errors
+        # Ring-level checks cannot express inter-ring relationships (a hole
+        # escaping its exterior) or coincident-vertex degeneracy, so the
+        # assembled geometry is validated too (#880).
+        return _validate_whole_geometry(geom)
+
+    def _validate_feature_local(
+        self, feature_id: str, vertex_index: int
+    ) -> list[dict[str, Any]]:
+        """Incremental validation for one moved vertex slot (#118).
+
+        Validates only the ring containing the slot, and within it only the
+        two edges adjacent to the moved vertex. Falls back to the full
+        feature check when the flat slot index cannot be mapped to a ring
+        (malformed nesting).
+        """
+        feat = self.features.get(feature_id)
+        if feat is None:
+            return []
+        geom = feat.get("geometry", {})
+        located = self._locate_ring_slot(geom, vertex_index)
+        if located is None:
+            return self._validate_feature_full(feature_id)
+        ring, local_index = located
+        return _validate_ring_local(ring, [local_index])
+
+    def _locate_ring_slot(
+        self, geom: dict[str, Any], slot_index: int
+    ) -> tuple[list, int] | None:
+        """Map a flat ``_vertex_slots`` index to ``(ring, local_index)``.
+
+        ``_vertex_slots`` enumerates ring positions in the same nested
+        order ``_rings_for_validation`` extracts rings for well-formed
+        geometries; a count mismatch (malformed nesting) yields ``None`` so
+        callers can fall back to the full check.
+        """
+        rings = _rings_for_validation(geom)
+        total = sum(len(r) for r in rings)
+        if len(_vertex_slots(geom)) != total:
+            return None
+        offset = 0
+        for ring in rings:
+            if offset <= slot_index < offset + len(ring):
+                return ring, slot_index - offset
+            offset += len(ring)
+        return None
 
     def _validate_ring_topology_or_rollback(
         self,

@@ -695,29 +695,10 @@ def _segments_properly_intersect(
 
 
 def _validate_ring_python(ring: list[list[float]] | None) -> list[dict[str, Any]]:
-    if not isinstance(ring, list) or len(ring) < 4:
+    parsed = _ring_points_and_edges(ring)
+    if parsed is None:
         return []
-    pts: list[tuple[float, float]] = []
-    for p in ring:
-        if not isinstance(p, (list, tuple)) or len(p) < 2:
-            return []
-        try:
-            pts.append((float(p[0]), float(p[1])))
-        except (TypeError, ValueError):
-            return []
-
-    closed = pts[0] == pts[-1]
-    # Unique vertex count for segment iteration (exclude closing duplicate).
-    n = len(pts) - 1 if closed else len(pts)
-    if n < 3:
-        return []
-
-    # Build segment list over unique vertices; for closed rings add closing edge.
-    edges: list[tuple[int, int]] = []
-    for i in range(n - 1):
-        edges.append((i, i + 1))
-    if closed:
-        edges.append((n - 1, 0))
+    pts, _closed, _n, edges = parsed
 
     issues: list[dict[str, Any]] = []
     for ei, (i0, i1) in enumerate(edges):
@@ -739,6 +720,76 @@ def _validate_ring_python(ring: list[list[float]] | None) -> list[dict[str, Any]
     return issues
 
 
+def _ring_points_and_edges(ring: list[list[float]] | None):
+    """Parse a ring into ``(points, closed, unique_count, edges)``.
+
+    Edges are built over unique vertices (the closing duplicate is
+    excluded); closed rings get the closing edge appended. Returns ``None``
+    for rings that cannot be validated (too short / malformed positions).
+    """
+    if not isinstance(ring, list) or len(ring) < 4:
+        return None
+    pts: list[tuple[float, float]] = []
+    for p in ring:
+        if not isinstance(p, (list, tuple)) or len(p) < 2:
+            return None
+        try:
+            pts.append((float(p[0]), float(p[1])))
+        except (TypeError, ValueError):
+            return None
+
+    closed = pts[0] == pts[-1]
+    # Unique vertex count for segment iteration (exclude closing duplicate).
+    n = len(pts) - 1 if closed else len(pts)
+    if n < 3:
+        return None
+
+    # Build segment list over unique vertices; for closed rings add closing edge.
+    edges: list[tuple[int, int]] = []
+    for i in range(n - 1):
+        edges.append((i, i + 1))
+    if closed:
+        edges.append((n - 1, 0))
+    return pts, closed, n, edges
+
+
+def _validate_ring_local_python(
+    ring: list[list[float]] | None,
+    moved_vertex_indices: list[int],
+) -> list[dict[str, Any]]:
+    parsed = _ring_points_and_edges(ring)
+    if parsed is None:
+        return []
+    pts, closed, n, edges = parsed
+    ring_len = len(pts)
+
+    changed_edges: set[int] = set()
+    for raw_idx in moved_vertex_indices:
+        if not isinstance(raw_idx, int) or not (0 <= raw_idx < ring_len):
+            continue
+        v = raw_idx
+        if closed and v == ring_len - 1:
+            v = 0  # closing duplicate is vertex 0
+        if not (0 <= v < n):
+            continue
+        for e_idx, (i0, i1) in enumerate(edges):
+            if i0 == v or i1 == v:
+                changed_edges.add(e_idx)
+
+    for ei in sorted(changed_edges):
+        i0, i1 = edges[ei]
+        for ej, (j0, j1) in enumerate(edges):
+            if ej == ei or {i0, i1} & {j0, j1}:
+                continue
+            if _segments_properly_intersect(pts[i0], pts[i1], pts[j0], pts[j1]):
+                return [{
+                    "code": "self_intersection",
+                    "message": f"Edges {i0}-{i1} and {j0}-{j1} intersect",
+                    "edges": ((i0, i1), (j0, j1)),
+                }]
+    return []
+
+
 def validate_ring(ring: list[list[float]] | None) -> list[dict[str, Any]]:
     """Return topology issues for a polygon ring (closed or open).
 
@@ -754,6 +805,25 @@ def validate_ring(ring: list[list[float]] | None) -> list[dict[str, Any]]:
         except Exception:
             pass
     return _validate_ring_python(ring)
+
+
+def validate_ring_local(
+    ring: list[list[float]] | None,
+    moved_vertex_indices: list[int],
+) -> list[dict[str, Any]]:
+    """Incremental self-intersection check after dragging ring vertices.
+
+    Only the edges adjacent to each moved vertex are tested, against the
+    non-adjacent edges of the same ring, with the exact
+    ``_segments_properly_intersect`` predicate of :func:`validate_ring`.
+    When a previously simple ring has a vertex dragged, any NEW
+    self-intersection must involve one of those changed edges (all other
+    edge pairs were already non-crossing), so this matches the full check
+    for drag edits while staying O(V) per mouse-move instead of O(V^2)
+    (#118). ``moved_vertex_indices`` are positions in ``ring`` itself; the
+    closing duplicate maps to vertex 0.
+    """
+    return _validate_ring_local_python(ring, moved_vertex_indices)
 
 
 def validate_adjacency(

@@ -147,8 +147,9 @@ def test_rebuild_dirty_paths_preserves_ring_structure():
 def test_rebuild_dirty_paths_preserves_multipolygon_parts():
     """#837: MultiPolygon ring structure must survive a rebuild. The old
     toFillPolygons() extraction merged a part's hole subpath into its outer
-    ring with connector edges (11 points for 5+5), so part structure was lost.
-    Rebuild must keep every ring standalone (outer + hole + second part)."""
+    ring with connector edges (11 points for 5+5), so part structure was
+    lost. Rebuild must keep every ring standalone, dispatched per part
+    (#118): part 1 keeps outer + hole, part 2 keeps its own ring."""
     features = [
         {
             "type": "Feature",
@@ -171,21 +172,70 @@ def test_rebuild_dirty_paths_preserves_multipolygon_parts():
     layer = FaciesPolygonsLayer(features, FaciesStyleResolver())
     layer.set_topology_model(model)
 
-    # Precondition: rebuilt polygons must contain the standalone rings
-    # (outer 5 + hole 5 + part2 5), not a merged connector-edge polygon.
-    expected_counts = [5, 5, 5]
+    items = [i for i in layer._items if i.feature_id == "A"]
+    assert len(items) == 2, "one item per MultiPolygon part (constructor order)"
 
     model.move_vertex(model._features["A"].rings[0].vertex_ids[1], 6.0, 0.0)
     layer.rebuild_dirty_paths({"A"})
 
-    item = next(i for i in layer._items if i.feature_id == "A")
-    assert [len(r) for r in item.polygons] == expected_counts, (
-        "every ring (outer, hole, second part) must stay standalone — "
-        "toFillPolygons would merge part 1's hole into an 11-point "
-        "connector-edge ring"
+    # Part 1: outer + hole stay standalone rings, moved vertex present.
+    assert [len(r) for r in items[0].polygons] == [5, 5], (
+        "part 1 must keep its outer ring and hole as standalone rings — "
+        "toFillPolygons would merge them into a connector-edge ring"
     )
-    all_pts = np.concatenate(item.polygons)
-    assert np.any(np.all(np.isclose(all_pts, (6.0, 0.0)), axis=1))
+    part1_pts = np.concatenate(items[0].polygons)
+    assert np.any(np.all(np.isclose(part1_pts, (6.0, 0.0)), axis=1))
+    # Part 2: only its own ring, untouched.
+    assert [len(r) for r in items[1].polygons] == [5]
+    part2_pts = np.concatenate(items[1].polygons)
+    assert not np.any(np.all(np.isclose(part2_pts, (6.0, 0.0)), axis=1))
+
+
+def test_rebuild_dirty_paths_dispatches_per_multipolygon_part():
+    """#118: rebuild_dirty_paths stamped the whole-feature path onto EVERY
+    part item — drawing the feature N times, stacking the 0.6 selection
+    fade per part (0.6^N effective opacity) and degenerating each item's
+    quadtree bbox to the whole-feature extent. Each part item must receive
+    only its own part's subpaths."""
+    features = [
+        {
+            "type": "Feature",
+            "properties": {"id": "M", "facies": "砂岩", "name": "砂岩M"},
+            "geometry": {
+                "type": "MultiPolygon",
+                "coordinates": [
+                    [
+                        [[0, 0], [5, 0], [5, 5], [0, 5], [0, 0]],
+                        [[1, 1], [2, 1], [2, 2], [1, 2], [1, 1]],
+                    ],
+                    [
+                        [[10, 10], [15, 10], [15, 15], [10, 15], [10, 10]],
+                    ],
+                ],
+            },
+        },
+    ]
+    model = TopologyBuilder.from_features(features)
+    layer = FaciesPolygonsLayer(features, FaciesStyleResolver())
+    layer.set_topology_model(model)
+
+    items = [i for i in layer._items if i.feature_id == "M"]
+    assert len(items) == 2
+
+    model.move_vertex(model._features["M"].rings[0].vertex_ids[1], 6.0, 0.0)
+    layer.rebuild_dirty_paths({"M"})
+
+    # Subpath count per item is unchanged by the rebuild: part 1 keeps its
+    # two rings (outer + hole), part 2 keeps one.
+    assert len(items[0].path.toSubpathPolygons()) == 2
+    assert len(items[1].path.toSubpathPolygons()) == 1
+
+    # Per-part bboxes (quadtree no longer degenerates to the whole feature):
+    # part 1 spans x in [0, 6] (moved vertex), part 2 spans [10, 15].
+    assert items[0].bbox[0] == 0.0
+    assert items[0].bbox[2] == 6.0
+    assert items[1].bbox[0] == 10.0
+    assert items[1].bbox[2] == 15.0
 
 
 def test_rebuild_dirty_paths_rebuilds_level_quadtrees():

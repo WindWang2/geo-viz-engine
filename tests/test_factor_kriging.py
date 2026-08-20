@@ -85,6 +85,26 @@ def test_empirical_variogram_collapses_exact_duplicates():
     assert np.array_equal(emp_dup["counts"], emp_clean["counts"])
 
 
+def test_empirical_variogram_drops_pairs_beyond_max_dist():
+    """#118: pairs farther than max_dist must be dropped, not clipped into
+    the last lag bin. Four near points (pairwise h <= sqrt(2) < 1.8) plus
+    one far point (h ~ 100) with max_dist=2.0: the far pairs used to land in
+    the last bin (edges step 0.2, bin 9 = (1.8, 2.0]) and pollute its
+    semivariance; the last bin must now stay empty (NaN gamma)."""
+    x = np.array([0.0, 1.0, 0.0, 1.0, 100.0])
+    y = np.array([0.0, 0.0, 1.0, 1.0, 0.0])
+    z = np.array([1.0, 2.0, 3.0, 4.0, 50.0])
+    emp = empirical_variogram(x, y, z, n_lags=10, max_dist=2.0)
+    # Only the 6 near-cluster pairs are binned; the 4 far pairs (h ~ 100)
+    # are out of range and must not inflate any bin.
+    assert int(emp["counts"].sum()) == 6
+    assert int(emp["counts"][-1]) == 0
+    assert np.isnan(emp["gamma"][-1])
+    # The populated bins reflect only near-pair semivariances (max ~ 0.5*9).
+    valid = emp["gamma"][np.isfinite(emp["gamma"])]
+    assert valid.max() < 5.0
+
+
 def test_fit_variogram_returns_finite_positive_params():
     """Fitted range/sill/nugget are finite and non-negative."""
     rng = np.random.default_rng(11)

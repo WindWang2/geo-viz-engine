@@ -127,15 +127,20 @@ class EditEngine:
             ref = self._model.get_feature(self._selected_id) if self._selected_id else None
             positions = self._polygon_drag_positions(ref)
             if ref and positions:
-                affected = set()
+                affected: set = set()
                 for ring in ref.rings:
                     for vid in ring.vertex_ids:
                         pos = positions.get(vid)
                         if pos is None:
                             continue
                         ox, oy = pos
-                        self._model.move_vertex(vid, ox + dx, oy + dy)
-                        affected.add(self._selected_id)
+                        # Union the per-vertex affected sets: a dragged
+                        # polygon's vertices can be shared with neighbouring
+                        # features (TopologyBuilder dedups boundary vertices),
+                        # and those neighbours must rebuild too or their
+                        # paths tear during the drag (#118). The vertex-drag
+                        # path above already consumes this return value.
+                        affected.update(self._model.move_vertex(vid, ox + dx, oy + dy))
                 if self._facies_layer is not None:
                     self._facies_layer.rebuild_dirty_paths(affected)
             return True

@@ -1401,6 +1401,81 @@ def test_feature_editor_move_does_not_deepcopy_store(monkeypatch):
     assert ring[1] == [12.0, 0.0]
 
 
+def test_feature_editor_drag_uses_incremental_ring_validation():
+    """#118: on_pointer_move validates only the edges adjacent to the moved
+    vertex (O(V)) instead of re-checking every edge pair of the ring
+    (O(V^2)) plus the whole geometry via shapely. A drag on a large ring
+    must stay inside a generous per-move budget; the full-ring reference
+    must agree with the incremental result on a bow-tie drag."""
+    import math
+    import time
+
+    from geoviz_plots.map_edit import FeatureEditor
+    from geoviz_plots.map_edit.api import validate_ring, validate_ring_local
+
+    n = 1500
+    ring = [[math.cos(2 * math.pi * i / n) * 10.0,
+             math.sin(2 * math.pi * i / n) * 10.0] for i in range(n)]
+    ring.append(list(ring[0]))
+    editor = FeatureEditor()
+    editor.load_layer({
+        "type": "FeatureCollection",
+        "features": [{"id": "big",
+                      "geometry": {"type": "Polygon", "coordinates": [ring]}}],
+    })
+    editor.on_pointer_down(ring[1][0], ring[1][1], tolerance=0.5)
+
+    t0 = time.perf_counter()
+    for k in range(10):
+        assert editor.on_pointer_move(ring[1][0] + 0.01 * (k + 1), ring[1][1], snap=False) is True
+    elapsed = time.perf_counter() - t0
+    # 10 incremental moves on a 1500-vertex ring: ~ms each locally; the old
+    # full O(V^2) + shapely re-validation measured in whole seconds.
+    assert elapsed < 2.0, f"drag validation regressed: {elapsed:.2f}s for 10 moves"
+
+    # Sufficiency: any self-intersection the full check flags on a dragged
+    # ring involves a moved-vertex-adjacent edge, so the incremental check
+    # flags it too (bow-tie from dragging vertex 0 across the ring).
+    bowtie = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+    dragged = [[10, 5], [10, 0], [10, 10], [0, 10], [10, 5]]
+    assert validate_ring(dragged) != []
+    assert validate_ring_local(dragged, [0]) != []
+    assert validate_ring_local(bowtie, [0]) == []
+
+
+def test_feature_editor_defers_whole_geometry_check_to_pointer_up():
+    """#118: dragging an outer-ring vertex across a hole keeps the outer
+    ring simple (incremental check passes during the move) but makes the
+    assembled Polygon invalid. The full validation must then intercept at
+    pointer release: TopologyError is raised, the drag is rolled back to
+    the last committed state and nothing enters the undo history."""
+    from geoviz_plots.map_edit import FeatureEditor, TopologyError
+
+    editor = FeatureEditor()
+    editor.load_layer({
+        "type": "FeatureCollection",
+        "features": [{
+            "id": "f1",
+            "geometry": {"type": "Polygon", "coordinates": [
+                [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]],      # outer
+                [[3.5, 2], [7, 2], [7, 6], [3.5, 6], [3.5, 2]],    # hole
+            ]},
+        }],
+    })
+    editor.on_pointer_down(10.0, 0.0, tolerance=1.0)  # outer vertex slot 1
+
+    # The move itself succeeds: the outer ring stays simple, only the
+    # shell/hole relationship breaks (invisible to per-ring checks).
+    assert editor.on_pointer_move(5.0, 5.0, snap=False) is True
+
+    with pytest.raises(TopologyError):
+        editor.on_pointer_up()
+
+    ring = editor.features["f1"]["geometry"]["coordinates"][0]
+    assert ring[1] == [10.0, 0.0], "invalid drag must be rolled back entirely"
+    assert not editor.can_undo, "nothing may be committed from an invalid drag"
+
+
 def test_factor_loo_r2_keeps_negative_values():
     """#687: LOO R² worse than the mean must stay negative, not clamp to 0."""
     from geoviz_plots.factor.interpolation import _r_squared
