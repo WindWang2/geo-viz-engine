@@ -14,6 +14,11 @@ from ..models import IntervalItem, CorrelationLink
 from ..renderer.interval_track import IntervalTrack
 from ..renderer.lithology_track import LithologyTrack
 
+# Well columns sit this far down the scene (the well-name label band that
+# WellItem paints above its column). The ruler must account for it plus the
+# per-column track header to align ticks with the columns' content (#114).
+_WELL_LABEL_INSET = 28.0
+
 
 class CrossWellScene(QGraphicsScene):
     """Manages all items in the cross-well canvas: wells, bands, ruler.
@@ -272,20 +277,28 @@ class CrossWellScene(QGraphicsScene):
         for name in self._well_order:
             item = self._well_items.get(name)
             if item:
-                item.setPos(x, 28)
+                item.setPos(x, _WELL_LABEL_INSET)
                 x += item.column_width + spacing
 
     def _update_ruler(self):
         # Ruler covers the union of all well depth ranges
         if not self._well_items:
+            self._ruler.set_geometry_insets(0.0, 0.0)
             self._ruler.set_depth_range(0, 1000)
             self._ruler.set_height(800)
             return
         tops = [item.depth_top for item in self._well_items.values()]
         bottoms = [item.depth_bottom for item in self._well_items.values()]
         self._ruler.set_depth_range(min(tops), max(bottoms))
-        max_h = max(item.column_height for item in self._well_items.values())
-        self._ruler.set_height(max_h)
+        # Map depth over the columns' CONTENT height only: the ruler spans
+        # label inset + header + tallest content, and its insets skip the
+        # first two. Using column_height (header included) without insets
+        # left every tick a constant 28..84 px above the same depth in the
+        # columns (#114).
+        header = max(item.header_height for item in self._well_items.values())
+        content = max(item.content_height for item in self._well_items.values())
+        self._ruler.set_geometry_insets(_WELL_LABEL_INSET, header)
+        self._ruler.set_height(_WELL_LABEL_INSET + header + content)
 
     def _update_scene_rect(self):
         rect = self.itemsBoundingRect().adjusted(-10, -40, 60, 40)
@@ -306,7 +319,9 @@ class CrossWellScene(QGraphicsScene):
     def add_annotation(self, text: str, x: float, depth: float,
                        color: str = "#1a202c") -> AnnotationItem:
         """Add a text annotation at the given scene x and depth position."""
-        y = self._depth_scale * (depth - self._ruler._depth_top) + 28
+        # Same mapping as the ruler ticks (label + header insets applied),
+        # so the annotation lands on the depth it names (#114).
+        y = self._ruler.depth_to_y(depth)
         item = AnnotationItem(text, x, y, color=color)
         self.addItem(item)
         self._update_scene_rect()

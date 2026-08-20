@@ -12,6 +12,12 @@ from geoviz_well_log.renderer.track_base import BaseTrack
 from .datum_transformer import DatumTransformer
 from .inter_well_link import FaciesQuad, HorizonLink, paint_facies_quad, paint_horizon_link
 
+# Vertical bands above a well's track content, mirroring the paint loop in
+# paint_all(): the well-title band (full_rect at y=24) plus the uniform track
+# header passed to export_render (canvas_header_height=32).
+_WELL_TITLE_BAND_H = 24.0
+_TRACK_HEADER_H = 32.0
+
 
 class WellSectionCanvas(QWidget):
     """2D QPainter canvas displaying a sequence of wells with inter-well correlation."""
@@ -126,6 +132,24 @@ class WellSectionCanvas(QWidget):
             cur_x += visible_w + self._inter_well_spacing
         return offsets
 
+    def _column_depth_y(self, track: BaseTrack, depth: float) -> float:
+        """Y of ``depth`` inside a well's rendered track column (#114).
+
+        The paint loop renders each track with its own well depth range
+        stretched over the column content rect (below the 24 px title band
+        and the 32 px shared track header). Horizon links and facies quads
+        must use that same per-column mapping; the global DatumTransformer
+        maps the GLOBAL [min, max] span instead, so its endpoints detached
+        from the painted horizons whenever a well's range differed from the
+        global span (up to 500 px; guaranteed in datum_shift mode).
+        """
+        content_top = _WELL_TITLE_BAND_H + _TRACK_HEADER_H
+        content_rect = QRectF(
+            0.0, content_top, track.width,
+            self.height() - content_top,
+        )
+        return track._depth_to_y(depth, content_rect)
+
     def paint_all(self, painter: QPainter) -> None:
         if not self._well_tracks:
             painter.setPen(QColor(120, 130, 145))
@@ -149,8 +173,6 @@ class WellSectionCanvas(QWidget):
         # 1. Render Facies Quad Fills & Horizon Links across adjacent wells first (background layer)
         if len(self._wells) >= 2:
             for k in range(len(self._wells) - 1):
-                w_left_id = getattr(self._wells[k], "well_name", str(k))
-                w_right_id = getattr(self._wells[k + 1], "well_name", str(k + 1))
                 x1_right = offsets[k][0] + offsets[k][1]
                 x2_left = offsets[k + 1][0]
 
@@ -167,8 +189,8 @@ class WellSectionCanvas(QWidget):
                     for item_l in strat_left.intervals:
                         if item_l.name in right_dict:
                             item_r = right_dict[item_l.name]
-                            y_l = self._transformer.get_depth_y(w_left_id, item_l.top)
-                            y_r = self._transformer.get_depth_y(w_right_id, item_r.top)
+                            y_l = self._column_depth_y(strat_left, item_l.top)
+                            y_r = self._column_depth_y(strat_right, item_r.top)
                             link = HorizonLink(
                                 name=item_l.name,
                                 x_left=x1_right,
@@ -181,9 +203,9 @@ class WellSectionCanvas(QWidget):
                             # If facies fill enabled
                             if self._show_facies_fills:
                                 y1_l = y_l
-                                y2_l = self._transformer.get_depth_y(w_left_id, item_l.bottom)
+                                y2_l = self._column_depth_y(strat_left, item_l.bottom)
                                 y1_r = y_r
-                                y2_r = self._transformer.get_depth_y(w_right_id, item_r.bottom)
+                                y2_r = self._column_depth_y(strat_right, item_r.bottom)
                                 quad = FaciesQuad(
                                     facies_name=item_l.name,
                                     x_left=x1_right,
