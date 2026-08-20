@@ -83,6 +83,37 @@ def _set_vertex(slot: tuple[list, int | None], x: float, y: float) -> None:
             container[0] = [float(x), float(y)]
 
 
+def _validate_whole_geometry(geom: dict[str, Any]) -> list[dict[str, Any]]:
+    """Validate a feature geometry as a whole, not ring by ring.
+
+    Polygon validity is not a per-ring property: interior rings must lie inside
+    the exterior ring and rings must not cross or touch improperly. Checking
+    each ring in isolation therefore accepts genuinely invalid polygons — an
+    outer vertex dragged inside a hole, or a vertex dropped onto another vertex
+    (a bow-tie) — and the per-ring edge-crossing test also misses some
+    crossings depending on which vertex moved (#880).
+
+    Shapely is the OGC oracle and is already a dependency of this package (it
+    backs the merge/split operations in ``api``). When it is unavailable this
+    returns no errors, leaving the per-ring checks as the only guard rather
+    than failing the edit outright.
+    """
+    if geom.get("type") not in {"Polygon", "MultiPolygon"}:
+        return []
+    try:
+        from shapely.geometry import shape
+        from shapely.validation import explain_validity
+    except Exception:  # pragma: no cover - shapely is a declared dependency
+        return []
+    try:
+        shaped = shape(geom)
+    except Exception as exc:  # an unbuildable geometry is itself invalid
+        return [{"code": "invalid_geometry", "message": str(exc)}]
+    if shaped.is_valid:
+        return []
+    return [{"code": "invalid_geometry", "message": str(explain_validity(shaped))}]
+
+
 def _rings_for_validation(geom: dict[str, Any]) -> list[list]:
     coords = geom.get("coordinates") or []
     gtype = geom.get("type")
@@ -385,19 +416,32 @@ class FeatureEditor:
             if 0 <= v_idx < len(f_slots):
                 _set_vertex(f_slots[v_idx], target_x, target_y)
 
+        def _rollback() -> None:
+            for bfid, bv_idx, bx, by in backup:
+                b_slots = _vertex_slots(self.features[bfid].get("geometry", {}))
+                if 0 <= bv_idx < len(b_slots):
+                    _set_vertex(b_slots[bv_idx], bx, by)
+
         for fid in touched_feature_ids:
             f_geom = self.features[fid].get("geometry", {})
+            errors: list[dict[str, Any]] = []
             for f_ring in _rings_for_validation(f_geom):
                 if len(f_ring) < 4:
                     continue
                 errors = _validate_ring(f_ring)
                 if errors:
-                    for bfid, bv_idx, bx, by in backup:
-                        b_slots = _vertex_slots(self.features[bfid].get("geometry", {}))
-                        if 0 <= bv_idx < len(b_slots):
-                            _set_vertex(b_slots[bv_idx], bx, by)
-                    err_msg = ", ".join(e.get("message", e.get("code", "invalid")) for e in errors)
-                    raise TopologyError(f"Invalid topology on feature '{fid}': {err_msg}")
+                    break
+            # Ring-level checks cannot express inter-ring relationships (a hole
+            # escaping its exterior) or coincident-vertex degeneracy, so the
+            # assembled geometry is validated too (#880).
+            if not errors:
+                errors = _validate_whole_geometry(f_geom)
+            if errors:
+                _rollback()
+                err_msg = ", ".join(
+                    e.get("message", e.get("code", "invalid")) for e in errors
+                )
+                raise TopologyError(f"Invalid topology on feature '{fid}': {err_msg}")
 
         return True
 
