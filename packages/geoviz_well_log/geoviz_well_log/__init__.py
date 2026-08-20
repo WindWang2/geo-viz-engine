@@ -63,6 +63,7 @@ from .las_preview import (
     load_las_preview,
     read_sampled_ascii,
     set_las_parser_provider,
+    unique_curve_names,
 )
 from .robust_scale import compute_robust_display_range
 from .xml_preview import load_xml_preview
@@ -125,6 +126,7 @@ __all__ = [
     "load_las_preview",
     "read_sampled_ascii",
     "set_las_parser_provider",
+    "unique_curve_names",
     "compute_robust_display_range",
     # Export
     "export_svg",

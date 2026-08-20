@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -398,10 +398,38 @@ def read_full_ascii(
     )
 
 
+def unique_curve_names(
+    curves: Iterable[LASCurveHeader],
+) -> tuple[str, ...]:
+    """Return stable, collision-free display names for ``curves`` in order.
+
+    Duplicate mnemonics are legal LAS (repeated runs, merged wells). A
+    name-keyed dict keeps only the last column, and the curve-track render
+    caches are keyed on ``CurveData.name`` — so equal names make the later
+    column overwrite the earlier one on screen (#584, #115). The second and
+    later occurrences of a mnemonic get a ``_{n}`` suffix, skipping suffixes
+    that would themselves collide (e.g. a file that literally contains
+    ``GR`` and ``GR_2`` plus a second ``GR``).
+    """
+    taken: set[str] = set()
+    names: list[str] = []
+    for curve in curves:
+        name = curve.mnemonic
+        if name in taken:
+            suffix = 2
+            while f"{curve.mnemonic}_{suffix}" in taken:
+                suffix += 1
+            name = f"{curve.mnemonic}_{suffix}"
+        taken.add(name)
+        names.append(name)
+    return tuple(names)
+
+
 def curve_data_from_arrays(
     header: LASCurveHeader,
     depth: np.ndarray,
     values: np.ndarray,
+    name: str | None = None,
 ) -> CurveData:
     finite = values[np.isfinite(values)]
     if finite.size >= 2:
@@ -409,7 +437,7 @@ def curve_data_from_arrays(
     else:
         display_range = (0.0, 100.0)
     return CurveData(
-        name=header.mnemonic,
+        name=name if name is not None else header.mnemonic,
         unit=header.unit,
         depth=depth.tolist(),
         values=values.tolist(),
@@ -483,8 +511,12 @@ def _load_las_preview_fast(
     sampled_arr = valid_arr[indices]
     depth_array = sampled_arr[:, header.depth_index]
 
+    # Same duplicate-mnemonic disambiguation as the pure-Python path so the
+    # two loaders agree exactly (#115).
+    display_names = unique_curve_names(selected)
+
     curves: list[CurveData] = []
-    for item in selected:
+    for item, name in zip(selected, display_names):
         vals = sampled_arr[:, item.index].copy()
         null_mask = np.isclose(vals, header.null_value, atol=1e-6) | ~np.isfinite(vals)
         vals[null_mask] = np.nan
@@ -497,7 +529,7 @@ def _load_las_preview_fast(
 
         curves.append(
             CurveData.model_construct(
-                name=item.mnemonic,
+                name=name,
                 unit=item.unit,
                 depth=depth_array.tolist(),
                 values=vals.tolist(),
@@ -543,13 +575,19 @@ def load_las_preview(
 
     header = inspect_las_file(path)
     selected = header.non_depth_curves[:max_curves]
+    # Duplicate mnemonics are legal LAS (repeated runs, merged wells). The
+    # curve-track render caches key on CurveData.name, so equal names would
+    # make the second column overwrite the first on screen — disambiguate
+    # with the same ``_{n}`` scheme as the las_parser compatibility API
+    # (#584, #115).
+    display_names = unique_curve_names(selected)
     stride = max(1, math.ceil(header.row_count / max_samples))
     depth, values = read_sampled_ascii(path, header, selected, stride, max_samples)
     if depth.size < 2:
         raise ValueError("LAS contains fewer than two depth rows")
     curves = [
-        curve_data_from_arrays(item, depth, values[item.index])
-        for item in selected
+        curve_data_from_arrays(item, depth, values[item.index], name=name)
+        for item, name in zip(selected, display_names)
     ]
     return WellLogData(
         well_name=header.well_name or Path(path).stem,
@@ -569,4 +607,5 @@ __all__ = [
     "read_full_ascii",
     "read_sampled_ascii",
     "set_las_parser_provider",
+    "unique_curve_names",
 ]

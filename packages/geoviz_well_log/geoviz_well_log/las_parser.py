@@ -14,7 +14,7 @@ from typing import Dict
 
 import numpy as np
 
-from .las_preview import inspect_las_file, read_full_ascii
+from .las_preview import inspect_las_file, read_full_ascii, unique_curve_names
 
 
 @dataclass
@@ -35,21 +35,16 @@ def _parse_file(filepath: str) -> LASParseResult:
         return LASParseResult()
     depth, values = read_full_ascii(filepath, header)
     depth_name = header.curves[header.depth_index].mnemonic
+    non_depth = [curve for curve in header.curves if curve.index != header.depth_index]
+    # Duplicate mnemonics are legal LAS (repeated runs). Last-wins silently
+    # dropped the earlier column (#584); disambiguate with the shared
+    # ``_{n}`` suffix scheme so every column survives and the legacy and
+    # preview loaders agree (#115).
+    names = unique_curve_names(non_depth)
     curves: Dict[str, np.ndarray] = {}
     units: Dict[str, str] = {}
     descriptions: Dict[str, str] = {}
-    for curve in header.curves:
-        if curve.index == header.depth_index:
-            continue
-        name = curve.mnemonic
-        if name in curves:
-            # Duplicate mnemonics are legal LAS (repeated runs). Last-wins
-            # silently dropped the earlier column (#584); disambiguate with
-            # a visible suffix instead so every column survives.
-            suffix = 2
-            while f"{curve.mnemonic}_{suffix}" in curves:
-                suffix += 1
-            name = f"{curve.mnemonic}_{suffix}"
+    for curve, name in zip(non_depth, names):
         curves[name] = values[curve.index]
         units[name] = curve.unit
         descriptions[name] = curve.description
