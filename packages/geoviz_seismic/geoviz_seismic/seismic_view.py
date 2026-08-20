@@ -1040,6 +1040,10 @@ class SeismicView(QWidget):
             self.btn_coord.setText(" 🌐 地理(X/Y)" if mode == "geo" else " 📍 网格(IL/XL)")
         # Actually drive the 3D renderer (labels / grid / bbox follow mode).
         if hasattr(self, "_renderer_3d"):
+            # Keep the renderer's survey meta in sync at the mode switch so
+            # its geo branch has the bin-grid even if the SEGY-ready push
+            # was missed (#116).
+            self._renderer_3d.set_survey_meta(m)
             self._renderer_3d.set_coord_mode(mode)
             # Geo mode: orthogonal planes are still voxel-space while the
             # volume is geo-transformed — hide them for a consistent view.
@@ -1151,7 +1155,12 @@ class SeismicView(QWidget):
         )
 
     def _sync_renderer_survey_mapping(self) -> None:
-        """Push TWT / downsample mapping so 3D overlays convert ms → cube."""
+        """Push TWT / downsample mapping and survey meta to the 3D renderer.
+
+        The survey meta drives the renderer's geo-coordinate mode
+        (world-space grid/bbox, Easting/Northing axis labels); without a
+        bin-grid the renderer explicitly falls back to grid mode (#116).
+        """
         m = self._meta
         if m is None:
             return
@@ -1160,6 +1169,7 @@ class SeismicView(QWidget):
             dt_ms=m.dt_ms,
             ds_factor=self._ds_factor or (1, 1, 1),
         )
+        self._renderer_3d.set_survey_meta(m)
 
     def _update_tb_slider_label(self, slice_type: str, position: int):
         """Update the toolbar slider value label with actual survey coordinate."""

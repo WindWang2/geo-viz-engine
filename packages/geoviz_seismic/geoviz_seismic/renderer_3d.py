@@ -130,6 +130,10 @@ def flush_pending_gl_deletes() -> None:
                 program.removeAllShaders()
             if hasattr(program, "deleteLater"):
                 program.deleteLater()
+            else:
+                # Raw GLuint from pyqtgraph's gl_shaders helpers (the LUT
+                # shader programs): only glDeleteProgram actually frees it.
+                GL.glDeleteProgram(program)
         except Exception:
             logger.debug("pending program delete failed", exc_info=True)
 
@@ -255,42 +259,61 @@ class GLImageLutItem(gl.GLImageItem):
         self._lut_needs_upload = False
 
     def clean(self) -> None:
-        """Release the GPU textures and shader owned by this item.
+        """Release every GL resource owned by this item.
 
-        Idempotent; safe without a current GL context (handles are dropped so
-        stale ids cannot be reused). Called by the renderer when planes are
-        cleared so volume switch / page close loops do not accumulate VRAM.
+        Deletes the R8 index texture, the LUT texture, the per-instance LUT
+        shader program and the position VBO. With a current GL context the
+        objects are deleted immediately. Without one — GUI-thread teardown
+        paths such as volume switch / page close, where ``makeCurrent``
+        failed or was never attempted — ``glDeleteTextures`` is a silent
+        no-op, so the orphaned handles are queued and flushed at the top of
+        the next paint instead of leaking VRAM (see
+        ``queue_gl_texture_delete`` / ``flush_pending_gl_deletes``).
+
+        Idempotent: safe to call twice. If the item is ever repainted after
+        ``clean()``, it re-uploads everything from scratch.
         """
         program = self._lut_shader_program
         self._lut_shader_program = None
         lut_tex, self._lut_tex = self._lut_tex, None
         index_tex, self.texture = self.texture, None
-        ctx = None
         try:
             ctx = QtGui.QOpenGLContext.currentContext()
         except Exception:
             ctx = None
         if ctx is None:
             # No context outside paint: defer so the next paint actually
-            # frees the textures (dropping the ids would leak VRAM).
+            # frees the objects (dropping the ids would leak VRAM).
             queue_gl_texture_delete(lut_tex)
             queue_gl_texture_delete(index_tex)
             queue_gl_program_delete(program)
-            return
-        for tex in (lut_tex, index_tex):
-            if tex is not None:
+        else:
+            tex_ids = [t for t in (index_tex, lut_tex) if t is not None]
+            if tex_ids:
                 try:
-                    GL.glDeleteTextures(1, [int(tex)])
+                    GL.glDeleteTextures(tex_ids)
                 except Exception:
                     pass
-        if program is not None:
-            try:
-                if hasattr(program, "removeAllShaders"):
-                    program.removeAllShaders()
-                if hasattr(program, "deleteLater"):
-                    program.deleteLater()
-            except Exception:
-                pass
+            if program is not None:
+                try:
+                    if hasattr(program, "removeAllShaders"):
+                        program.removeAllShaders()
+                    if hasattr(program, "deleteLater"):
+                        program.deleteLater()
+                    else:
+                        # Raw GLuint from pyqtgraph's gl_shaders helpers.
+                        GL.glDeleteProgram(program)
+                except Exception:
+                    pass
+            vbo = getattr(self, "m_vbo_position", None)
+            if vbo is not None and vbo.isCreated():
+                try:
+                    vbo.destroy()
+                except Exception:
+                    pass
+        # If the item is ever repainted after clean(), re-upload from scratch.
+        self._needUpdate = True
+        self._lut_needs_upload = self._cmap_name is not None
 
     @staticmethod
     def prepare_r8_upload(index_2d: np.ndarray) -> tuple[np.ndarray, int, int]:
@@ -490,42 +513,6 @@ class GLImageLutItem(gl.GLImageItem):
 
         GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
-
-    def clean(self):
-        """Release every GL resource owned by this item.
-
-        Deletes the R8 index texture, the LUT texture, the per-instance LUT
-        shader program and the position VBO. Requires a current GL context —
-        callers that run outside ``paintGL`` must make the owning view's
-        context current first (see ``Renderer3D._clean_gl_items``).
-        Idempotent: safe to call twice.
-        """
-        ctx = QtGui.QOpenGLContext.currentContext()
-        if ctx is None:
-            return
-        tex_ids = [t for t in (self.texture, self._lut_tex) if t is not None]
-        if tex_ids:
-            try:
-                GL.glDeleteTextures(tex_ids)
-            except Exception:
-                pass
-        self.texture = None
-        self._lut_tex = None
-        if self._lut_shader_program is not None:
-            try:
-                GL.glDeleteProgram(self._lut_shader_program)
-            except Exception:
-                pass
-            self._lut_shader_program = None
-        vbo = getattr(self, "m_vbo_position", None)
-        if vbo is not None and vbo.isCreated():
-            try:
-                vbo.destroy()
-            except Exception:
-                pass
-        # If the item is ever repainted after clean(), re-upload from scratch.
-        self._needUpdate = True
-        self._lut_needs_upload = self._cmap_name is not None
 
 
 class DualGLVolumeItem(gl.GLVolumeItem):
@@ -1413,6 +1400,21 @@ class Renderer3D(QWidget):
             if needs_normal_rebuild:
                 self._rebuild_volume_visual()
 
+    def set_survey_meta(self, meta) -> None:
+        """Store the survey metadata (``SeismicVolumeMeta``) driving geo mode.
+
+        The geo branch of :meth:`set_coord_mode` — world-space grid /
+        bounding box and Easting/Northing axis labels — is keyed on this
+        metadata. ``meta=None`` or a meta without ``bin_grid`` disables
+        geographic calibration: if the renderer is currently in geo mode it
+        explicitly falls back to grid mode (fabricated world coordinates
+        would be misleading, #46). Re-applying geo mode with a freshly
+        calibrated meta rebuilds the world-space scene.
+        """
+        self._meta = meta
+        if getattr(self, "_coord_mode", "grid") == "geo":
+            self.set_coord_mode("geo")
+
     def set_survey_mapping(
         self,
         *,
@@ -2053,14 +2055,22 @@ class Renderer3D(QWidget):
         self._view.addItem(self._bbox_visual)
 
     def set_coord_mode(self, mode: str):
-        """Set coordinate system view mode ('grid' for IL/XL or 'geo' for Easting/Northing in meters)."""
+        """Set coordinate system view mode ('grid' for IL/XL or 'geo' for Easting/Northing in meters).
+
+        Geo mode requires survey metadata with a bin-grid calibration (see
+        :meth:`set_survey_meta`). Without one — no survey loaded, or a meta
+        whose ``bin_grid`` is None — geo mode explicitly falls back to grid
+        mode instead of fabricating world coordinates (#46).
+        """
+        meta = getattr(self, "_meta", None)
+        if mode == "geo" and getattr(meta, "bin_grid", None) is None:
+            mode = "grid"
         self._coord_mode = mode
         if not self._loaded or self._volume_data_cpu is None:
             return
 
         ni, nx, nt = self._volume_data_cpu.shape
         si, sx, st = self._volume_spacing
-        meta = getattr(self, "_meta", None)
 
         # Clear old 3D axis labels and bounding box
         for item in getattr(self, '_axis_labels', []):
@@ -2123,10 +2133,10 @@ class Renderer3D(QWidget):
             self._view.addItem(self._bbox_visual)
 
             max_dim = max(wx, wy, nt * st)
-            self._view.setCameraPosition(
-                center=QVector3D(cx, cy, cz),
-                distance=max_dim * 2.2
-            )
+            # setCameraPosition has no ``center`` kwarg in this pyqtgraph
+            # (``pos``); assign opts["center"] like load_volume does.
+            self._view.opts["center"] = QVector3D(cx, cy, cz)
+            self._view.setCameraPosition(distance=max_dim * 2.2)
         else:
             cx = (ni * si) / 2.0
             cy = (nx * sx) / 2.0
@@ -2145,10 +2155,8 @@ class Renderer3D(QWidget):
             self._create_bbox(ni, nx, nt, (si, sx, st))
 
             max_dim = max(ni * si, nx * sx, nt * st)
-            self._view.setCameraPosition(
-                center=QVector3D(cx, cy, cz),
-                distance=max_dim * 2.2
-            )
+            self._view.opts["center"] = QVector3D(cx, cy, cz)
+            self._view.setCameraPosition(distance=max_dim * 2.2)
 
         self._create_axis_labels(ni, nx, nt, (si, sx, st))
         self._update_slice_planes()

@@ -157,3 +157,74 @@ def test_seismic_view_dual_volume_overlay(qtbot):
 
     view._overlay_btn.setChecked(True)
     assert view._renderer_3d._overlay_volume_visual.visible() is True
+
+
+def test_seismic_view_syncs_survey_meta_and_geo_coord_mode(qtbot):
+    """#116: SeismicView must push its survey meta into Renderer3D.
+
+    ``Renderer3D._meta`` was never wired, so the toolbar's geo toggle only
+    changed 2D readouts while the 3D geo branch (world grid/bbox,
+    Easting/Northing labels) stayed dead code.
+    """
+    from geoviz_seismic.models import BinGridGeometry, SeismicVolumeMeta
+    from geoviz_seismic.seismic_view import SeismicView
+
+    view = SeismicView(auto_load=False)
+    qtbot.addWidget(view)
+    view.load_demo(np.random.randn(6, 7, 8).astype(np.float32))
+    # load_demo's meta has no bin grid: renderer got it but stays in grid.
+    assert view._renderer_3d._meta is view._meta
+    assert view._renderer_3d._meta.bin_grid is None
+
+    # Simulate a calibrated SEGY arriving (same path as _on_segy_ready).
+    view._meta = SeismicVolumeMeta(
+        filename="t.sgy",
+        n_inlines=6,
+        n_crosslines=7,
+        n_samples=8,
+        sample_interval=4.0,
+        iline_start=1,
+        iline_step=1,
+        xline_start=1,
+        xline_step=1,
+        dt_ms=4.0,
+        bin_grid=BinGridGeometry(
+            x_origin=500000.0, y_origin=4400000.0,
+            il_spacing_m=25.0, xl_spacing_m=50.0,
+        ),
+    )
+    view._sync_renderer_survey_mapping()
+    assert view._renderer_3d._meta is view._meta
+
+    # Toggle geo via the toolbar button path.
+    view.btn_coord.setChecked(True)
+    view._toggle_coord_mode()
+
+    assert view._renderer_3d._coord_mode == "geo"
+    texts = [getattr(item, "text", "") for item in view._renderer_3d._axis_labels]
+    assert any("Easting" in t for t in texts)
+    assert any("Northing" in t for t in texts)
+
+    # Uncalibrated survey: the toggle reverts and the renderer stays grid.
+    view._meta = SeismicVolumeMeta(
+        filename="demo",
+        n_inlines=6,
+        n_crosslines=7,
+        n_samples=8,
+        sample_interval=4.0,
+        iline_start=1,
+        iline_step=1,
+        xline_start=1,
+        xline_step=1,
+        dt_ms=4.0,
+    )
+    view._sync_renderer_survey_mapping()
+    # set_survey_meta re-applies geo → explicit grid fallback in the renderer.
+    assert view._renderer_3d._coord_mode == "grid"
+    assert not any("Easting" in t for t in
+                   [getattr(i, "text", "") for i in view._renderer_3d._axis_labels])
+
+    view.btn_coord.setChecked(True)
+    view._toggle_coord_mode()
+    assert view.btn_coord.isChecked() is False  # reverted
+    assert view._renderer_3d._coord_mode == "grid"

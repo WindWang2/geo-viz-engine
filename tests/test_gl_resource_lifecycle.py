@@ -170,6 +170,73 @@ def test_lut_item_clean_is_idempotent(fake_gl):
     assert fake_gl.programs == [55]
 
 
+def test_lut_item_clean_without_context_queues_deferred_deletes(monkeypatch):
+    """#116: the no-context branch must queue handles, not silently drop them.
+
+    The b9ac5d93 merge added a second ``GLImageLutItem.clean`` after the
+    deferred-delete version; the later class-body definition shadowed the
+    earlier one, and its ``ctx is None: return`` leaked the R8/LUT textures
+    (and program) on every teardown where ``makeCurrent`` failed.
+    """
+    monkeypatch.setattr(
+        renderer_3d, "QtGui",
+        SimpleNamespace(QOpenGLContext=SimpleNamespace(currentContext=lambda: None)),
+    )
+    renderer_3d._PENDING_GL_TEXTURE_DELETES.clear()
+    renderer_3d._PENDING_GL_PROGRAM_DELETES.clear()
+
+    item = _make_lut_item()
+    item.clean()
+
+    # Handles dropped from the item and queued for the next-paint flush.
+    assert item.texture is None
+    assert item._lut_tex is None
+    assert item._lut_shader_program is None
+    assert sorted(renderer_3d._PENDING_GL_TEXTURE_DELETES) == [11, 12]
+    assert renderer_3d._PENDING_GL_PROGRAM_DELETES == [55]
+    # Repaintable after clean: next paint re-uploads from scratch.
+    assert item._needUpdate is True
+    assert item._lut_needs_upload is True
+
+    # Idempotent: the second call must not re-queue the same ids.
+    item.clean()
+    assert sorted(renderer_3d._PENDING_GL_TEXTURE_DELETES) == [11, 12]
+    assert renderer_3d._PENDING_GL_PROGRAM_DELETES == [55]
+
+    renderer_3d._PENDING_GL_TEXTURE_DELETES.clear()
+    renderer_3d._PENDING_GL_PROGRAM_DELETES.clear()
+
+
+def test_flush_pending_gl_deletes_handles_int_program_ids(monkeypatch):
+    """Queued int (raw GLuint) shader programs must actually be deleted.
+
+    ``queue_gl_program_delete`` is used for pyqtgraph ``gl_shaders`` int
+    handles; the flush loop previously only handled Qt shader-program
+    objects, so deferred programs leaked (#116).
+    """
+    deleted_textures: list = []
+    deleted_programs: list[int] = []
+    monkeypatch.setattr(
+        renderer_3d.GL, "glDeleteTextures", lambda *a: deleted_textures.extend(a[-1])
+    )
+    monkeypatch.setattr(
+        renderer_3d.GL, "glDeleteProgram", lambda program: deleted_programs.append(program)
+    )
+
+    renderer_3d._PENDING_GL_TEXTURE_DELETES.extend([31, 32])
+    renderer_3d._PENDING_GL_PROGRAM_DELETES.append(77)
+    try:
+        renderer_3d.flush_pending_gl_deletes()
+    finally:
+        renderer_3d._PENDING_GL_TEXTURE_DELETES.clear()
+        renderer_3d._PENDING_GL_PROGRAM_DELETES.clear()
+
+    assert sorted(deleted_textures) == [31, 32]
+    assert deleted_programs == [77]
+    assert renderer_3d._PENDING_GL_TEXTURE_DELETES == []
+    assert renderer_3d._PENDING_GL_PROGRAM_DELETES == []
+
+
 # ---------------------------------------------------------------------------
 # Teardown paths invoke clean() on discarded items
 # ---------------------------------------------------------------------------
