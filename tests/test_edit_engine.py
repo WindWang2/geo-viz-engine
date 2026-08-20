@@ -240,6 +240,63 @@ def test_handle_mouse_move_polygon_drag():
     assert result is True
 
 
+def test_polygon_drag_rebuilds_shared_boundary_neighbour():
+    """#118: whole-polygon drag must rebuild the paths of every feature
+    sharing vertices with the dragged polygon (move_vertex's affected set),
+    not only the dragged feature itself — otherwise the neighbour's path
+    tears visually during the drag and only heals on release."""
+    import numpy as np
+
+    from geoviz_paleo_map.layers.facies_polygons import FaciesPolygonsLayer
+    from geoviz_paleo_map.style import FaciesStyleResolver
+    from geoviz_paleo_map.topology import TopologyBuilder
+
+    features = [
+        {"type": "Feature", "properties": {"id": "A", "facies": "砂岩"},
+         "geometry": {"type": "Polygon",
+                      "coordinates": [[[0, 0], [5, 0], [5, 10], [0, 10], [0, 0]]]}},
+        {"type": "Feature", "properties": {"id": "B", "facies": "泥岩"},
+         "geometry": {"type": "Polygon",
+                      "coordinates": [[[5, 0], [10, 0], [10, 10], [5, 10], [5, 0]]]}},
+    ]
+    model = TopologyBuilder.from_features(features)
+    # Precondition: the shared boundary vertices are deduplicated, so
+    # dragging A moves vertices that also belong to B.
+    vids_a = {v for r in model.get_feature("A").rings for v in r.vertex_ids}
+    vids_b = {v for r in model.get_feature("B").rings for v in r.vertex_ids}
+    assert len(vids_a & vids_b) == 2
+
+    layer = FaciesPolygonsLayer(features, FaciesStyleResolver())
+    layer.set_topology_model(model)
+
+    engine, overlay, _ = _make_engine()
+    engine.set_model(model)
+    engine.set_facies_layer(layer)
+    engine.select("A")
+
+    engine._state = EditState.DRAGGING_POLYGON
+    vp = _make_viewport()
+    start = QPointF(400.0, 300.0)
+    wx, wy = vp.screen_to_world(start)
+    engine._drag_start_world = (wx - 1.5, wy - 2.5)  # dx=1.5, dy=2.5
+    ref = model.get_feature("A")
+    engine._drag_polygon_old_positions = {
+        vid: (model.get_vertex(vid).x, model.get_vertex(vid).y)
+        for ring in ref.rings
+        for vid in ring.vertex_ids
+    }
+
+    assert engine.handle_mouse_move(start, vp) is True
+
+    item_b = next(i for i in layer._items if i.feature_id == "B")
+    pts = np.concatenate(item_b.polygons)
+    # B's rebuilt path must contain the shared vertices at their NEW
+    # positions (5+dx, 0+dy) / (5+dx, 10+dy) and no stale (5, 0).
+    assert np.any(np.all(np.isclose(pts, (6.5, 2.5)), axis=1))
+    assert np.any(np.all(np.isclose(pts, (6.5, 12.5)), axis=1))
+    assert not np.any(np.all(np.isclose(pts, (5.0, 0.0)), axis=1))
+
+
 def test_handle_mouse_move_idle():
     engine, overlay, _ = _make_engine()
     model = _make_triangle_model()

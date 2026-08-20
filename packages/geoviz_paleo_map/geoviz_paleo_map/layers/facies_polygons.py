@@ -209,7 +209,9 @@ class FaciesPolygonsLayer(PaleoLayer):
         None) and the hierarchy level-quadtree border items, so the rendered
         geometry follows the edited topology instead of the pre-edit snapshot
         (#544). Style keys (facies name / boundary kind) are refreshed from
-        the model so attribute edits re-render too (#549).
+        the model so attribute edits re-render too (#549). MultiPolygon
+        parts are dispatched per part item — the whole-feature path is no
+        longer stamped onto every part (#118).
         """
         if self._topology_model is None:
             return
@@ -217,20 +219,6 @@ class FaciesPolygonsLayer(PaleoLayer):
             new_path = self._topology_model.build_path(fid)
             if new_path is None:
                 continue
-            # LOD path builder consumes the raw rings, not the QPainterPath;
-            # capture them from the freshly built path in the same world space.
-            # toFillPolygons() merges the outer ring and hole subpaths into a
-            # single polygon joined by straight connector edges (and collapses
-            # MultiPolygon parts), so the rebuilt LOD rings drew fake diagonal
-            # borders across edited features with holes (#837). toSubpathPolygons
-            # keeps one polygon per ring, preserving hole and part structure.
-            new_polygons = []
-            for ring in new_path.toSubpathPolygons():
-                pts = np.array(
-                    [(pt.x(), pt.y()) for pt in ring], dtype=np.float64
-                )
-                if len(pts) >= 2:
-                    new_polygons.append(pts)
             ref = self._topology_model.get_feature(fid)
             facies = (
                 (ref.properties.get("facies") or ref.properties.get("name") or "")
@@ -242,28 +230,42 @@ class FaciesPolygonsLayer(PaleoLayer):
                 if ref is not None
                 else None
             )
-            for item in self._items:
-                if item.feature_id == fid:
-                    item.path = new_path
-                    item.polygons = new_polygons
+            # Dispatch per MultiPolygon part (#118): fill/border items are
+            # created one per part (constructor order), so each part item
+            # must receive only its own part's rings. Stamping the
+            # whole-feature path onto every part item drew the feature N
+            # times (selection fade stacking 0.6^N per part) and degenerated
+            # the quadtree bboxes to the whole-feature extent.
+            part_artifacts = self._topology_part_artifacts(ref)
+            fallback_polygons: list | None = None
+
+            def _assign(items: list) -> None:
+                nonlocal fallback_polygons
+                per_part = len(items) == len(part_artifacts) and part_artifacts
+                artifact_iter = iter(part_artifacts) if per_part else None
+                for item in items:
+                    if artifact_iter is not None:
+                        item_path, item_polygons = next(artifact_iter)
+                    else:
+                        if fallback_polygons is None:
+                            fallback_polygons = self._polygons_from_path(new_path)
+                        item_path, item_polygons = new_path, fallback_polygons
+                    item.path = item_path
+                    item.polygons = item_polygons
                     item.facies_name = facies
                     item.boundary_kind = boundary_kind
-                    br = new_path.boundingRect()
+                    br = item_path.boundingRect()
                     item.bbox = (br.left(), br.top(), br.right(), br.bottom())
                     self._screen_cache.mark_dirty(item.cache_key)
+
+            _assign([item for item in self._items if item.feature_id == fid])
             # Hierarchy border items hold separate copies: rebuild those too.
             for tree in (self._level_quadtrees or {}).values():
                 if tree is None:
                     continue
-                for item in self._walk_items(tree):
-                    if item.feature_id == fid:
-                        item.path = new_path
-                        item.polygons = new_polygons
-                        br = new_path.boundingRect()
-                        item.bbox = (
-                            br.left(), br.top(), br.right(), br.bottom(),
-                        )
-                        self._screen_cache.mark_dirty(item.cache_key)
+                _assign(
+                    [item for item in self._walk_items(tree) if item.feature_id == fid]
+                )
         has_level_items = any(
             t is not None for t in (self._level_quadtrees or {}).values()
         )
@@ -303,6 +305,67 @@ class FaciesPolygonsLayer(PaleoLayer):
         yield from node.items
         for child in node.children or ():
             yield from FaciesPolygonsLayer._walk_items(child)
+
+    def _topology_part_artifacts(self, ref) -> list[tuple[QPainterPath, list]]:
+        """Build one (path, LOD rings) artifact per MultiPolygon part (#118).
+
+        Rings are grouped by ``polygon_ring_counts`` in feature order — the
+        same order the constructor creates one item per part — mirroring
+        ``TopologyModel.build_path`` construction so a single-part feature's
+        artifact matches the whole-feature path exactly. Rings are extracted
+        via ``toSubpathPolygons`` so holes/parts stay standalone (#837).
+        Empty parts are skipped; callers fall back to the whole-feature path
+        when the artifact count does not match the item count.
+        """
+        if ref is None or self._topology_model is None:
+            return []
+        rings = ref.rings
+        counts = list(getattr(ref, "polygon_ring_counts", None) or [])
+        if (
+            getattr(ref, "geometry_type", "Polygon") != "MultiPolygon"
+            or not counts
+            or sum(counts) != len(rings)
+            or any(c <= 0 for c in counts)
+        ):
+            counts = [len(rings)]
+        artifacts: list[tuple[QPainterPath, list]] = []
+        offset = 0
+        for count in counts:
+            path = QPainterPath()
+            for ring in rings[offset:offset + count]:
+                ids = ring.vertex_ids
+                if len(ids) < 3:
+                    continue
+                first = self._topology_model.get_vertex(ids[0])
+                if first is None:
+                    continue
+                path.moveTo(QPointF(first.x, first.y))
+                for vid in ids[1:]:
+                    v = self._topology_model.get_vertex(vid)
+                    if v is not None:
+                        path.lineTo(QPointF(v.x, v.y))
+                path.closeSubpath()
+            offset += count
+            if path.isEmpty():
+                continue
+            path.setFillRule(Qt.FillRule.OddEvenFill)
+            artifacts.append((path, self._polygons_from_path(path)))
+        return artifacts
+
+    @staticmethod
+    def _polygons_from_path(path: QPainterPath) -> list:
+        """Extract standalone rings (one per subpath) as world-space arrays.
+
+        ``toSubpathPolygons`` keeps one polygon per ring — unlike
+        ``toFillPolygons``, which would join holes/parts with fake
+        connector edges (#837).
+        """
+        polygons = []
+        for ring in path.toSubpathPolygons():
+            pts = np.array([(pt.x(), pt.y()) for pt in ring], dtype=np.float64)
+            if len(pts) >= 2:
+                polygons.append(pts)
+        return polygons
 
     @staticmethod
     def _build_item(poly: list[list[list[float]]],

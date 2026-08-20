@@ -15,6 +15,22 @@ def _on_segment(a, b, p, tolerance: float) -> bool:
     )
 
 
+def _contact_strictly_between(a, b, p) -> bool:
+    """True when collinear point ``p`` lies strictly inside segment ``a``-``b``.
+
+    Uses the projection parameter along the segment so degenerate
+    (axis-aligned) configurations stay correct: the check answers whether
+    the contact point is the ``a``/``b`` endpoint itself.
+    """
+    abx = b[0] - a[0]
+    aby = b[1] - a[1]
+    length_sq = abx * abx + aby * aby
+    if length_sq <= 0.0:
+        return False
+    t = ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby) / length_sq
+    return 0.0 < t < 1.0
+
+
 def segments_intersect(
     p1: Tuple[float, float],
     p2: Tuple[float, float],
@@ -22,8 +38,18 @@ def segments_intersect(
     q2: Tuple[float, float],
     *,
     tolerance: float = 1e-12,
+    strict_interior_touch: bool = False,
 ) -> bool:
-    """Return true for crossings, endpoint touches and collinear overlap."""
+    """Return true for crossings, endpoint touches and collinear overlap.
+
+    With ``strict_interior_touch=True`` only contacts located strictly
+    between ``p1`` and ``p2`` count: a touch whose contact point is a
+    ``p1``/``p2`` endpoint itself — including ``p1`` or ``p2`` lying on the
+    ``q`` segment — no longer intersects. The fault-barrier kernel uses this
+    so a grid node that happens to sit exactly on a fault line is not
+    severed from every sample (a vertical fault at an integer grid x used
+    to zero the whole column into a NaN strip, #118).
+    """
     o1 = _orientation(p1, p2, q1)
     o2 = _orientation(p1, p2, q2)
     o3 = _orientation(q1, q2, p1)
@@ -32,6 +58,11 @@ def segments_intersect(
         (o3 > tolerance and o4 < -tolerance) or (o3 < -tolerance and o4 > tolerance)
     ):
         return True
+    if strict_interior_touch:
+        return (
+            (abs(o1) <= tolerance and _contact_strictly_between(p1, p2, q1))
+            or (abs(o2) <= tolerance and _contact_strictly_between(p1, p2, q2))
+        )
     return (
         (abs(o1) <= tolerance and _on_segment(p1, p2, q1, tolerance))
         or (abs(o2) <= tolerance and _on_segment(p1, p2, q2, tolerance))
@@ -58,9 +89,13 @@ def _apply_fault_barriers(
     """Zero out weights for (node, sample) pairs blocked by fault segments, in place.
 
     A pair is blocked when its straight segment intersects any fault segment,
-    using exactly the same test as ``segments_intersect`` (crossings, endpoint
-    touches and collinear overlap). Small inputs reuse the scalar reference
-    loop; larger inputs broadcast the orientation tests over
+    using the same test as ``segments_intersect(..., strict_interior_touch=True)``
+    (proper crossings, collinear overlap, and fault-endpoint contacts located
+    STRICTLY between the node and the sample). Contacts whose contact point
+    is the grid node or the sample itself do NOT block: a node sitting
+    exactly on a fault line must stay reachable from both walls instead of
+    being masked into a NaN strip (#118). Small inputs reuse the scalar
+    reference loop; larger inputs broadcast the orientation tests over
     (cell, sample, fault) arrays, batching fault segments to bound memory.
     """
     tolerance = 1e-12
@@ -73,7 +108,10 @@ def _apply_fault_barriers(
             for sample_index, (sx_, sy_) in enumerate(zip(sample_x, sample_y)):
                 control = (float(sx_), float(sy_))
                 if any(
-                    segments_intersect(node, control, segment_start, segment_end)
+                    segments_intersect(
+                        node, control, segment_start, segment_end,
+                        strict_interior_touch=True,
+                    )
                     for segment_start, segment_end in fault_segments
                 ):
                     weights[local_cell, sample_index] = 0.0
@@ -90,13 +128,11 @@ def _apply_fault_barriers(
     fx2 = np.array([seg[1][0] for seg in fault_segments], dtype=np.float64)
     fy2 = np.array([seg[1][1] for seg in fault_segments], dtype=np.float64)
 
-    # (cell, sample) segment deltas and bounding boxes, shared by all batches.
+    # (cell, sample) segment deltas, shared by all batches.
     dx = sx - cx  # control - node
     dy = sy - cy
-    seg_x_min = np.minimum(cx, sx) - tolerance
-    seg_x_max = np.maximum(cx, sx) + tolerance
-    seg_y_min = np.minimum(cy, sy) - tolerance
-    seg_y_max = np.maximum(cy, sy) + tolerance
+    seg_len_sq = dx * dx + dy * dy
+    reachable_denom = np.where(seg_len_sq > 0.0, seg_len_sq, 1.0)
 
     blocked = np.zeros((num_cells, num_samples), dtype=bool)
     # Each broadcast batch holds 4 float64 orientation arrays per element.
@@ -111,7 +147,7 @@ def _apply_fault_barriers(
         q2y = fy2[f0:f1][None, None, :]
 
         # o1/o2 = orient(node, control, fault_start/end): proper crossing and
-        # endpoint-touch tests on the (node, control) side.
+        # fault-endpoint contact tests on the (node, control) side.
         o1 = dx[..., None] * (q1y - cy[..., None]) - dy[..., None] * (
             q1x - cx[..., None]
         )
@@ -121,22 +157,8 @@ def _apply_fault_barriers(
         node_cross = ((o1 > tolerance) & (o2 < -tolerance)) | (
             (o1 < -tolerance) & (o2 > tolerance)
         )
-        touch_node_side = (
-            (np.abs(o1) <= tolerance)
-            & (q1x >= seg_x_min[..., None])
-            & (q1x <= seg_x_max[..., None])
-            & (q1y >= seg_y_min[..., None])
-            & (q1y <= seg_y_max[..., None])
-        ) | (
-            (np.abs(o2) <= tolerance)
-            & (q2x >= seg_x_min[..., None])
-            & (q2x <= seg_x_max[..., None])
-            & (q2y >= seg_y_min[..., None])
-            & (q2y <= seg_y_max[..., None])
-        )
-
         # o3/o4 = orient(fault_start, fault_end, node/control): proper
-        # crossing and collinear-overlap tests on the fault side.
+        # crossing test on the fault side.
         dqx = q2x - q1x
         dqy = q2y - q1y
         o3 = dqx * (cy[..., None] - q1y) - dqy * (cx[..., None] - q1x)
@@ -144,25 +166,28 @@ def _apply_fault_barriers(
         fault_cross = ((o3 > tolerance) & (o4 < -tolerance)) | (
             (o3 < -tolerance) & (o4 > tolerance)
         )
-        fault_x_min = np.minimum(q1x, q2x) - tolerance
-        fault_x_max = np.maximum(q1x, q2x) + tolerance
-        fault_y_min = np.minimum(q1y, q2y) - tolerance
-        fault_y_max = np.maximum(q1y, q2y) + tolerance
-        touch_fault_side = (
-            (np.abs(o3) <= tolerance)
-            & (cx[..., None] >= fault_x_min)
-            & (cx[..., None] <= fault_x_max)
-            & (cy[..., None] >= fault_y_min)
-            & (cy[..., None] <= fault_y_max)
-        ) | (
-            (np.abs(o4) <= tolerance)
-            & (sx[None, :, None] >= fault_x_min)
-            & (sx[None, :, None] <= fault_x_max)
-            & (sy[None, :, None] >= fault_y_min)
-            & (sy[None, :, None] <= fault_y_max)
+        # Contact test (#118): a fault endpoint blocks only when it lies
+        # STRICTLY between the node and the sample (projection parameter in
+        # the open interval (0, 1)); contacts AT the node or the sample —
+        # including a node sitting exactly on the fault line — do not block.
+        # Unreachable pairs (node == control) cannot have a strictly-inside
+        # contact; their forced t = -1 keeps them unblocked here.
+        t1 = (
+            (q1x - cx[..., None]) * dx[..., None]
+            + (q1y - cy[..., None]) * dy[..., None]
+        ) / reachable_denom[..., None]
+        t2 = (
+            (q2x - cx[..., None]) * dx[..., None]
+            + (q2y - cy[..., None]) * dy[..., None]
+        ) / reachable_denom[..., None]
+        t1 = np.where((seg_len_sq > 0.0)[..., None], t1, -1.0)
+        t2 = np.where((seg_len_sq > 0.0)[..., None], t2, -1.0)
+        touch_strict = (
+            ((np.abs(o1) <= tolerance) & (t1 > 0.0) & (t1 < 1.0))
+            | ((np.abs(o2) <= tolerance) & (t2 > 0.0) & (t2 < 1.0))
         )
 
-        intersects = (node_cross & fault_cross) | touch_node_side | touch_fault_side
+        intersects = (node_cross & fault_cross) | touch_strict
         blocked |= intersects.any(axis=-1)
     weights[blocked] = 0.0
 

@@ -168,7 +168,9 @@ def empirical_variogram(
     Returns a dict with ``lags`` (bin centers), ``gamma`` (mean semivariance
     per bin, ``NaN`` for empty bins), ``counts`` (pairs per bin), ``edges``
     and ``max_dist``. Exact duplicate locations are collapsed to their mean
-    before binning.
+    before binning. Pairs farther than ``max_dist`` are dropped entirely —
+    clipping them into the last lag bin would pollute its semivariance and
+    distort the fit (#118).
     """
     x, y, z = _dedupe_points(x, y, z)
     n = len(z)
@@ -189,7 +191,11 @@ def empirical_variogram(
         raise ValueError("max_dist must be positive")
     n_lags = max(2, int(n_lags))
     edges = np.linspace(0.0, max_dist, n_lags + 1)
-    bins = np.clip(np.searchsorted(edges, h_vals, side="right") - 1, 0, n_lags - 1)
+    bin_idx = np.searchsorted(edges, h_vals, side="right") - 1
+    # Out-of-range pairs (h > max_dist) get bin -1 and are excluded from
+    # every bin below; pairs exactly at max_dist stay in the last
+    # (right-closed) bin, matching the previous behaviour.
+    bins = np.where(h_vals <= max_dist, np.clip(bin_idx, 0, n_lags - 1), -1)
     counts = np.zeros(n_lags, dtype=np.int64)
     gamma = np.full(n_lags, np.nan)
     min_pairs = max(1, int(min_pairs))
