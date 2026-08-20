@@ -436,3 +436,111 @@ def test_normalize_to_index_parity_with_apply_colormap():
     assert idx.dtype == np.uint8
     assert idx.shape == data.shape
     np.testing.assert_array_equal(rgba, lut[idx])
+
+
+# ---------------------------------------------------------------------------
+# Geo coordinate mode (#116): the world-space branch needs survey meta wired
+# in — Renderer3D._meta was previously only ever assigned None, so the whole
+# geo branch (grid/bbox/axis labels, ~120 lines) was dead code.
+# ---------------------------------------------------------------------------
+
+def _geo_meta(with_bin_grid: bool = True):
+    from geoviz_seismic.models import BinGridGeometry, SeismicVolumeMeta
+
+    return SeismicVolumeMeta(
+        filename="test.sgy",
+        n_inlines=8,
+        n_crosslines=9,
+        n_samples=10,
+        sample_interval=4.0,
+        iline_start=100,
+        iline_step=2,
+        xline_start=200,
+        xline_step=2,
+        dt_ms=4.0,
+        bin_grid=(
+            BinGridGeometry(
+                x_origin=500000.0,
+                y_origin=4400000.0,
+                il_azimuth_deg=0.0,
+                il_spacing_m=25.0,
+                xl_spacing_m=50.0,
+            )
+            if with_bin_grid
+            else None
+        ),
+    )
+
+
+def _label_texts(widget):
+    return [getattr(item, "text", "") for item in widget._axis_labels]
+
+
+def test_renderer_3d_geo_coord_mode_uses_survey_meta(qtbot):
+    from geoviz_seismic.renderer_3d import Renderer3D
+
+    widget = Renderer3D()
+    qtbot.addWidget(widget)
+    widget.load_volume(np.random.randn(8, 9, 10).astype(np.float32))
+
+    widget.set_survey_meta(_geo_meta(with_bin_grid=True))
+    widget.set_coord_mode("geo")
+
+    assert widget._coord_mode == "geo"
+    texts = _label_texts(widget)
+    assert any("Easting" in t for t in texts)
+    assert any("Northing" in t for t in texts)
+    # Calibrated geo labels carry the real world extents, not placeholders.
+    il_text = next(t for t in texts if "Easting" in t)
+    assert "500000" in il_text
+
+    meta = widget._meta
+    x0, y0 = meta.il_xl_to_xy(meta.iline_start, meta.xline_start)
+    x1, y1 = meta.il_xl_to_xy(
+        meta.iline_start + 7 * meta.iline_step,
+        meta.xline_start + 8 * meta.xline_step,
+    )
+    center = widget._view.opts["center"]
+    assert center.x() == pytest.approx((x0 + x1) / 2.0)
+    assert center.y() == pytest.approx((y0 + y1) / 2.0)
+
+
+def test_renderer_3d_geo_coord_mode_falls_back_without_bin_grid(qtbot):
+    from geoviz_seismic.renderer_3d import Renderer3D
+
+    widget = Renderer3D()
+    qtbot.addWidget(widget)
+    widget.load_volume(np.random.randn(8, 9, 10).astype(np.float32))
+
+    # Meta without a bin grid (e.g. demo volume / uncalibrated survey).
+    widget.set_survey_meta(_geo_meta(with_bin_grid=False))
+    widget.set_coord_mode("geo")
+    assert widget._coord_mode == "grid"
+    texts = _label_texts(widget)
+    assert any("Inline" in t for t in texts)
+    assert not any("Easting" in t for t in texts)
+
+    # No meta at all (old projects / standalone renderer).
+    widget.set_survey_meta(None)
+    widget.set_coord_mode("geo")
+    assert widget._coord_mode == "grid"
+    assert any("Inline" in t for t in _label_texts(widget))
+
+
+def test_renderer_3d_set_survey_meta_reapplies_geo_mode(qtbot):
+    """Switching to an uncalibrated survey while geo mode is active must
+    explicitly fall back to grid instead of showing fabricated coordinates."""
+    from geoviz_seismic.renderer_3d import Renderer3D
+
+    widget = Renderer3D()
+    qtbot.addWidget(widget)
+    widget.load_volume(np.random.randn(8, 9, 10).astype(np.float32))
+
+    widget.set_survey_meta(_geo_meta(with_bin_grid=True))
+    widget.set_coord_mode("geo")
+    assert widget._coord_mode == "geo"
+
+    # Re-sync with a meta lacking bin_grid (SEGY ready without calibration).
+    widget.set_survey_meta(_geo_meta(with_bin_grid=False))
+    assert widget._coord_mode == "grid"
+    assert any("Inline" in t for t in _label_texts(widget))
