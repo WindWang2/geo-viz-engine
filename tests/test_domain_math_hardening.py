@@ -73,3 +73,107 @@ def test_directional_grid_checks_cancellation_between_chunks():
             max_cells_per_chunk=2,
             cancellation_token=token,
         )
+
+
+def _ramp_samples(seed: int = 5, n: int = 20, span: float = 5.0):
+    rng = np.random.default_rng(seed)
+    x = rng.uniform(0.0, span, n)
+    y = rng.uniform(0.0, span, n)
+    z = x + 0.5 * y
+    return x, y, z
+
+
+def test_directional_trend_grid_preserves_ramp_variance_across_coordinate_scales():
+    """#112: kernel axes are normalized by the sample span, so the trend
+    retains the input variation at any coordinate scale (degree-like small
+    spans and metre-like UTM spans) instead of collapsing to a flat mean
+    field (7.2% variance retention) or the nearest-neighbour fallback."""
+    from geoviz import directional_trend_grid
+
+    for scale in (1.0, 1e-3, 1e3):
+        x, y, z = _ramp_samples(span=5.0)
+        gx = np.linspace(0.0, 5.0, 30) * scale
+        gy = np.linspace(0.0, 5.0, 30) * scale
+        grid = directional_trend_grid(x * scale, y * scale, z, gx, gy)
+        assert np.all(np.isfinite(grid))
+        ratio = float(np.nanstd(grid)) / float(np.std(z))
+        assert ratio >= 0.5, f"scale={scale}: std ratio {ratio:.3f} < 0.5"
+
+
+def test_directional_trend_grid_utm_scale_is_not_nearest_neighbour():
+    """#112: metric-scale (UTM) input with default a/b must not degenerate
+    into the anisotropic nearest-neighbour field (exact match was observed
+    before the fix)."""
+    from geoviz import directional_trend_grid, rotate_to_uv
+
+    x, y, _ = _ramp_samples()
+    x = x * 1000.0
+    y = y * 1000.0
+    z = 0.001 * x + 0.0005 * y
+    gx = np.linspace(0.0, 5000.0, 30)
+    gy = np.linspace(0.0, 5000.0, 30)
+
+    grid = directional_trend_grid(x, y, z, gx, gy)
+
+    xx, yy = np.meshgrid(gx, gy)
+    u, v = rotate_to_uv(xx - x[:, None, None], yy - y[:, None, None], azimuth_deg=0.0)
+    dist = np.hypot(u / 1.0, v / 0.4)
+    nearest = z[np.argmin(dist, axis=0)]
+    assert not np.allclose(grid, nearest)
+
+
+def test_directional_trend_grid_is_scale_and_shift_invariant():
+    """#112: normalizing the axes by the sample span makes the trend field
+    invariant under affine rescaling of the input coordinates."""
+    from geoviz import directional_trend_grid
+
+    x, y, z = _ramp_samples(span=5.0)
+    gx = np.linspace(0.0, 5.0, 20)
+    gy = np.linspace(0.0, 5.0, 20)
+
+    base = directional_trend_grid(x, y, z, gx, gy, azimuth_deg=30.0)
+    transformed = directional_trend_grid(
+        x * 0.001 + 7.0, y * 0.001 - 3.0, z,
+        gx * 0.001 + 7.0, gy * 0.001 - 3.0,
+        azimuth_deg=30.0,
+    )
+    assert np.allclose(base, transformed)
+
+
+def test_directional_trend_grid_degenerate_sample_sets():
+    """#112: empty / single / coincident samples degrade gracefully instead
+    of dividing by a zero span."""
+    from geoviz import directional_trend_grid
+
+    gx = np.linspace(0.0, 1.0, 4)
+    gy = np.linspace(0.0, 1.0, 4)
+
+    empty = directional_trend_grid(np.array([]), np.array([]), np.array([]), gx, gy)
+    assert empty.shape == (4, 4)
+    assert np.all(np.isnan(empty))
+
+    single = directional_trend_grid(
+        np.array([0.4]), np.array([0.6]), np.array([12.5]), gx, gy
+    )
+    assert np.all(np.isfinite(single))
+    assert np.allclose(single, 12.5)
+
+    coincident = directional_trend_grid(
+        np.array([0.4, 0.4]), np.array([0.6, 0.6]), np.array([2.0, 6.0]), gx, gy
+    )
+    assert np.allclose(coincident, 4.0)  # unweighted mean of coincident samples
+
+
+def test_directional_factor_grid_retains_default_sample_variance():
+    """#112: the 制备页 ``方向趋势`` default synthetic sample path (degree
+    coordinates, default a=1.0/b=0.4) must retain at least half of the input
+    variance (measured 7.2% before the fix)."""
+    from geoviz_plots.factor.interpolation import interpolate_factor_grid, synthetic_sample_points
+
+    pts = synthetic_sample_points(seed=42, factor_type="地层厚度", count=8)
+    zs = np.asarray([p["value"] for p in pts])
+    out = interpolate_factor_grid(pts, method="方向趋势", grid_n=30)
+    gz = np.asarray(
+        [[np.nan if v is None else v for v in row] for row in out["grid_z"]]
+    )
+    assert float(np.nanstd(gz)) / float(np.std(zs)) >= 0.5
