@@ -80,6 +80,34 @@ def damaged_binary_las(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.fixture
+def duplicate_mnemonic_las(tmp_path: Path) -> Path:
+    """Legal LAS with two ``GR`` columns (repeated run / merged well)."""
+    path = tmp_path / "duplicate-mnemonic.las"
+    path.write_text(
+        "\n".join(
+            [
+                "~VERSION INFORMATION",
+                " VERS. 2.0 : CWLS LOG ASCII STANDARD",
+                " WRAP. NO : one line per depth step",
+                "~WELL INFORMATION",
+                " WELL. DUP-GR-01 : WELL NAME",
+                " NULL. -999.25 : NULL VALUE",
+                "~CURVE INFORMATION",
+                " DEPT.M : depth",
+                " GR.gAPI : gamma run 1",
+                " GR.gAPI : gamma run 2",
+                "~ASCII",
+                " 1000.0 20.0 40.0",
+                " 1000.5 21.0 41.0",
+                " 1001.0 22.0 42.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _request(path: Path, *, semantic_type: str = "well_log", format: str = "las") -> PreviewRequest:
     return PreviewRequest("well-1", str(path), semantic_type, format, "Bounded well")
 
@@ -391,4 +419,92 @@ def test_las_parser_provider_hook_and_fast_path(bounded_las: Path, tmp_path: Pat
         assert data_malformed.well_name == data_slow.well_name
     finally:
         set_las_parser_provider(None)
+
+
+def test_unique_curve_names_suffixes_collisions(duplicate_mnemonic_las: Path):
+    """Direct check of the shared naming scheme, including suffix collisions."""
+    from geoviz_well_log import LASCurveHeader, unique_curve_names
+
+    header = inspect_las_file(str(duplicate_mnemonic_las))
+    assert unique_curve_names(header.non_depth_curves) == ("GR", "GR_2")
+
+    # A file that literally contains GR, GR_2 plus another GR: the second GR
+    # must skip the taken GR_2 rather than collide with it.
+    curves = (
+        LASCurveHeader(index=1, mnemonic="GR", unit="gAPI", description=""),
+        LASCurveHeader(index=2, mnemonic="GR_2", unit="gAPI", description=""),
+        LASCurveHeader(index=3, mnemonic="GR", unit="gAPI", description=""),
+        LASCurveHeader(index=4, mnemonic="GR", unit="gAPI", description=""),
+    )
+    assert unique_curve_names(curves) == ("GR", "GR_2", "GR_3", "GR_4")
+
+
+def test_load_las_preview_disambiguates_duplicate_mnemonics(duplicate_mnemonic_las: Path):
+    """#115: both same-named columns survive with distinct values (slow path)."""
+    data = load_las_preview(str(duplicate_mnemonic_las))
+    names = [c.name for c in data.curves]
+    assert names == ["GR", "GR_2"]
+
+    by_name = {c.name: c for c in data.curves}
+    assert by_name["GR"].values[0] == pytest.approx(20.0)
+    assert by_name["GR_2"].values[0] == pytest.approx(40.0)
+    assert by_name["GR"].values != by_name["GR_2"].values
+
+
+def test_load_las_preview_fast_path_disambiguates_duplicate_mnemonics(
+    duplicate_mnemonic_las: Path,
+):
+    """#115: the C++-provider fast path agrees with the pure-Python path."""
+    from geoviz import set_las_parser_provider
+
+    def fake_parser(content: str, null_value: float):
+        lines = content.splitlines()
+        ascii_idx = next(i for i, l in enumerate(lines) if l.strip().startswith("~A")) + 1
+        rows = [[float(x) for x in l.split()] for l in lines[ascii_idx:] if l.strip()]
+        arr = np.array(rows, dtype=np.float64)
+        return tuple(f"C{i}" for i in range(arr.shape[1])), arr
+
+    try:
+        set_las_parser_provider(fake_parser)
+        data_fast = load_las_preview(str(duplicate_mnemonic_las), fast=True)
+    finally:
+        set_las_parser_provider(None)
+
+    assert [c.name for c in data_fast.curves] == ["GR", "GR_2"]
+    by_name = {c.name: c for c in data_fast.curves}
+    assert by_name["GR"].values[0] == pytest.approx(20.0)
+    assert by_name["GR_2"].values[0] == pytest.approx(40.0)
+
+
+def test_duplicate_mnemonic_curves_render_as_two_cache_entries(duplicate_mnemonic_las: Path):
+    """#115: the name-keyed render caches keep both columns after the fix.
+
+    CurveTrack keys ``_sorted_values``/``_sorted_depths`` on curve name;
+    equal names previously made the second column overwrite the first on
+    screen (end-to-end: only the last column's data was visible).
+    """
+    from geoviz_well_log.renderer.curve_track import CurveTrack
+
+    data = load_las_preview(str(duplicate_mnemonic_las))
+    track = CurveTrack(list(data.curves), label="GR", width=140)
+    track.set_depth_range(data.top_depth, data.bottom_depth)
+
+    assert set(track._sorted_values) == {"GR", "GR_2"}
+    assert len(track._downsampled_cache) == 0  # filled lazily on paint
+    assert track._sorted_values["GR"][0] == pytest.approx(20.0)
+    assert track._sorted_values["GR_2"][0] == pytest.approx(40.0)
+
+
+def test_las_parser_names_agree_with_preview_for_duplicate_mnemonics(
+    duplicate_mnemonic_las: Path,
+):
+    """#115/#584: the legacy parser and the preview loader use one scheme."""
+    from geoviz_well_log.las_parser import parse_las_file
+
+    result = parse_las_file(str(duplicate_mnemonic_las))
+    assert set(result.curves) == {"GR", "GR_2"}
+    assert result.curves["GR"][0] == pytest.approx(20.0)
+    assert result.curves["GR_2"][0] == pytest.approx(40.0)
+    assert result.units["GR_2"] == "gAPI"
+    assert result.descriptions["GR_2"] == "gamma run 2"
 
