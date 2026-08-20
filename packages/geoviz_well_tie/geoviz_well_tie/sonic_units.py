@@ -18,7 +18,13 @@ import numpy as np
 US_FT_TO_US_M = 3.28084
 
 _US_PER_M = frozenset({"us/m", "usm", "um"})
-_US_PER_FT = frozenset({"us/f", "us/ft", "usf", "uf"})
+# "usft"/"usecft"/"microsecft" are separator-less LAS spellings that do not end
+# in "/ft". They were recognised by the well-tie host's former private table, so
+# they must stay recognised now that this module is the single sonic unit table
+# and the host delegates to it (#879).
+_US_PER_FT = frozenset(
+    {"us/f", "us/ft", "usf", "uf", "usft", "usecft", "microsecft"}
+)
 
 
 def canonical_sonic_unit(unit: str | None) -> str | None:

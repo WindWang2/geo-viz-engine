@@ -248,7 +248,15 @@ def interpolate_idw(
                 fault_segments,
             )
         totals = np.sum(weights, axis=1)
-        populated = totals > epsilon
+        # Depopulation test: totals are a SUM OF WEIGHTS, not a distance. The
+        # `epsilon` above is the distance floor applied before exponentiation;
+        # comparing the weight sum against it wrongly depopulates distant cells
+        # at high power, where a perfectly well-defined positive total falls
+        # below 1e-12 (UTM coordinates at power>=4: a ~1 km nearest-well
+        # distance yields weights ~1e-12 each). IDW is sum(w*z)/sum(w) and is
+        # defined for ANY positive weight sum. The workbench batch path was
+        # fixed by #844; this engine kernel was missed (#877).
+        populated = totals > 0.0
         values = np.full(stop - start, np.nan, dtype=np.float64)
         values[populated] = (
             np.sum(weights[populated] * z, axis=1) / totals[populated]
