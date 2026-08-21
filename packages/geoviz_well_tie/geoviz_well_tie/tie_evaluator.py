@@ -60,12 +60,22 @@ def evaluate_tie_quality(synthetic: np.ndarray, seismic: np.ndarray) -> Tuple[fl
 
     ``lag_shift`` is positive when the synthetic should move later in time
     to align with the seismic trace (canonical auto-tie convention, #845).
+
+    ``amplitude_residual`` is ``|synthetic - seismic|`` sampled on the
+    *lag-aligned* overlap segment: seismic sample ``i`` is differenced
+    against synthetic sample ``i - lag_shift``. The previous zero-lag
+    differencing reported signal-level residuals for traces whose own
+    correlation lag was non-zero (#117), e.g. ~1.2 mean amplitude residual
+    for a 10-sample rolled copy of the trace that lines up exactly once
+    the estimated lag is applied.
     """
     max_r, lag = compute_cross_correlation(synthetic, seismic)
 
-    n = min(len(synthetic), len(seismic))
-    syn_crop = synthetic[:n]
-    seis_crop = seismic[:n]
+    syn = np.asarray(synthetic, dtype=np.float64)
+    seis = np.asarray(seismic, dtype=np.float64)
+    if len(syn) == 0 or len(seis) == 0:
+        return max_r, lag, np.empty(0, dtype=np.float64)
 
-    residual = np.abs(syn_crop - seis_crop)
+    i_syn = np.arange(max(0, -lag), min(len(syn), len(seis) - lag))
+    residual = np.abs(syn[i_syn] - seis[i_syn + lag])
     return max_r, lag, residual

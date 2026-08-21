@@ -98,7 +98,10 @@ def generate_synthetic_twt(
 
     dt_sec = dt_ms / 1000.0
     n_ref = len(reflectivity)
-    n_wavelet = min(81, max(21, n_ref if n_ref > 0 else 21))
+    # Force an odd wavelet length: with 'same'-mode convolution an even
+    # length shifts the synthetic by one sample because the nominal centre
+    # falls between samples (n_ref=40 used to peak one sample late, #117).
+    n_wavelet = min(81, max(21, n_ref | 1))
 
     if wavelet_type == "ormsby":
         w = ormsby_wavelet(n_wavelet, dt=dt_sec, f1=f1, f2=f2, f3=f3, f4=f4)
@@ -110,6 +113,21 @@ def generate_synthetic_twt(
 
 DEFAULT_SONIC_CLIP = (10.0, 1000.0)
 DEFAULT_WAVELET_HALF_LENGTH_S = 0.064
+
+
+def _interpolate_nan(values: np.ndarray) -> np.ndarray:
+    """Fill NaN gaps by linear interpolation over the sample index.
+
+    Edge NaNs (no valid neighbour on one side) take the nearest finite
+    value. An all-NaN array is returned unchanged — there is nothing to
+    interpolate from, and the caller's downstream NaNs remain visible.
+    """
+    values = np.asarray(values, dtype=np.float64)
+    good = np.isfinite(values)
+    if good.all() or not good.any():
+        return values
+    idx = np.arange(len(values))
+    return np.interp(idx, idx[good], values[good])
 
 
 def synthetic_from_logs(
@@ -140,6 +158,13 @@ def synthetic_from_logs(
             reciprocal, guarding against zero/negative sonic samples. Pass
             ``None`` to disable.
 
+    NaN handling: NaN samples in *sonic* or *density* are filled by linear
+    interpolation over the sample index before impedance computation (edge
+    NaNs take the nearest finite value). Without this, a single NaN log
+    sample poisons the two reflectivity interfaces it touches and — after
+    convolution — the entire wavelet aperture around them (#117). Inputs
+    that are entirely NaN still yield an all-NaN synthetic.
+
     Returns:
         ``(N-1,)`` float32 synthetic trace, or an empty array when fewer than two
         log samples are supplied.
@@ -154,7 +179,12 @@ def synthetic_from_logs(
     if sonic_clip is not None:
         sonic = np.clip(sonic, sonic_clip[0], sonic_clip[1])
 
+    sonic = _interpolate_nan(sonic)
+    density = _interpolate_nan(density)
+
     reflectivity = compute_reflectivity(sonic, density)
-    n_wavelet = int(round(2.0 * half_length_s / dt_s)) + 1
+    # |1 keeps the aperture odd so 'same'-mode convolution stays zero-phase
+    # for any half_length_s/dt_s combination (#117).
+    n_wavelet = (int(round(2.0 * half_length_s / dt_s)) + 1) | 1
     wavelet = ricker_wavelet(n_wavelet, dt=dt_s, peak_freq=wavelet_freq)
     return generate_synthetic(reflectivity, wavelet)

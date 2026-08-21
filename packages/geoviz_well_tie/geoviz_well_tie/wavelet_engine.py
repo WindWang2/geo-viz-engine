@@ -45,18 +45,26 @@ def generate_ormsby_wavelet(f1: float = 5.0, f2: float = 10.0, f3: float = 40.0,
     return t, w
 
 def extract_statistical_wavelet(seismic_data: np.ndarray, dt: float = 0.002, length: float = 0.1) -> Tuple[np.ndarray, np.ndarray]:
-    """Extract zero-phase statistical wavelet from seismic trace data autocorrelation."""
+    """Extract zero-phase statistical wavelet from seismic trace data autocorrelation.
+
+    Traces too short for the requested aperture (fewer than ``n_samples//2 + 1``
+    samples) fall back to a Ricker wavelet of the requested length, matching the
+    empty-input behaviour. The previous code kept slicing with a negative stop
+    index and silently returned samples wrapped around from the wrong end of the
+    autocorrelation (a 10-sample trace yielded a garbage 16-sample wavelet, #117).
+    """
     data = np.nan_to_num(np.asarray(seismic_data, dtype=np.float64))
+    n_samples = int(length / dt)
+    if n_samples % 2 == 0:
+        n_samples += 1
     if len(data) == 0:
         return generate_ricker_wavelet(30.0, dt, length)
 
     autocorr = np.correlate(data, data, mode="full")
-    n_samples = int(length / dt)
-    if n_samples % 2 == 0:
-        n_samples += 1
-
     mid = len(autocorr) // 2
     half = n_samples // 2
+    if half > mid:
+        return generate_ricker_wavelet(30.0, dt, length)
     w = autocorr[mid - half : mid + half + 1]
 
     # Apply Hanning window
