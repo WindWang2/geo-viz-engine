@@ -12,7 +12,11 @@ class WellTieCalibration:
     operations for aligning synthetic seismograms with real seismic data.
 
     Args:
-        depths_m: Depth array in metres (MD or TVD).
+        depths_m: Depth array in metres (MD or TVD). Ascending order is the
+            canonical form; a strictly descending array (as found in merged
+            LAS exports) is accepted and internally reversed, since
+            :func:`numpy.interp` requires an increasing xp array and would
+            otherwise produce garbage (#117).
         twt_ms: Two-way travel time array in milliseconds (same length as *depths_m*).
     """
 
@@ -24,6 +28,9 @@ class WellTieCalibration:
             )
         self._depths = np.asarray(depths_m, dtype=np.float64)
         self._twt = np.asarray(twt_ms, dtype=np.float64)
+        if len(self._depths) > 1 and self._depths[0] > self._depths[-1]:
+            self._depths = self._depths[::-1].copy()
+            self._twt = self._twt[::-1].copy()
 
     @property
     def depths(self) -> np.ndarray:
@@ -73,15 +80,41 @@ class WellTieCalibration:
     ) -> WellTieCalibration:
         """Create a calibration from sonic logs (integrated travel time).
 
+        Non-finite depth/sonic samples are masked before integration (a NaN
+        sonic interval would otherwise poison the cumulative TWT of every
+        deeper sample, #117), and a strictly descending depth array is
+        reversed so the integrated TWT comes out increasing from the
+        wellhead instead of negative (#117).
+
         Args:
             depths_m: Depth array in metres.
             sonic_us_m: Sonic transit time in µs/m.
 
         Returns:
             New :class:`WellTieCalibration` with TWT derived from sonic.
+
+        Raises:
+            ValueError: If fewer than two finite depth/sonic samples remain
+                after masking, or the input lengths differ.
         """
         depths = np.asarray(depths_m, dtype=np.float64)
         sonic = np.asarray(sonic_us_m, dtype=np.float64)
+        if len(depths) != len(sonic):
+            raise ValueError(
+                f"depths_m and sonic_us_m must have same length, "
+                f"got {len(depths)} and {len(sonic)}"
+            )
+        finite = np.isfinite(depths) & np.isfinite(sonic)
+        depths = depths[finite]
+        sonic = sonic[finite]
+        if len(depths) < 2:
+            raise ValueError(
+                "from_sonic needs at least two finite depth/sonic samples, "
+                f"got {len(depths)}"
+            )
+        if depths[0] > depths[-1]:
+            depths = depths[::-1].copy()
+            sonic = sonic[::-1].copy()
         dz = np.diff(depths)
         # Trapezoidal one-way time (µs) over each interval, then convert to
         # two-way travel time in milliseconds: OWT_µs * 2 / 1000 = TWT_ms.
