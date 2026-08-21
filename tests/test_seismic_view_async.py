@@ -123,6 +123,36 @@ def test_cache_miss_requests_worker_instead_of_blocking(qtbot, monkeypatch):
     assert fake.requests == [("inline", 100 + 4 * 2, 7)]
 
 
+def test_time_cache_miss_paints_preview_then_requests_worker(qtbot, monkeypatch):
+    """2D Time panel should track the slider via the preview cube, not wait ~400ms."""
+    view, fake = _make_view(qtbot, monkeypatch)
+    view._meta = type("M", (), {
+        "iline_start": 100, "iline_step": 1,
+        "xline_start": 200, "xline_step": 1,
+        "n_inlines": 10, "n_crosslines": 12, "n_samples": 20,
+    })()
+    view._ds_factor = (2, 2, 2)
+    view._loader = object()
+    view._segy_generation = 1
+    vol = np.arange(5 * 6 * 10, dtype=np.float32).reshape(5, 6, 10)
+    view._renderer_3d._volume_data_cpu = vol
+    view._renderer_3d._loaded = True
+    applied = []
+
+    def _capture(stype, pos, data):
+        applied.append((stype, pos, tuple(data.shape), float(data[0, 0])))
+
+    monkeypatch.setattr(view, "_update_profile_panel", _capture)
+    view._pending_slice = {"time": 4}
+    view._apply_pending_slice()
+    assert fake.requests == [("time", 8, 1)]
+    assert applied[0][0] == "time"
+    assert applied[0][1] == 8
+    assert applied[0][2] == (12, 10)  # .T of cropped (nI, nX)
+    # voxel (0,0,4) tiled by the (2,2) upsample
+    assert applied[0][3] == pytest.approx(float(vol[0, 0, 4]))
+
+
 def test_slice_ready_updates_panel_and_cache(qtbot, monkeypatch):
     view, fake = _make_view(qtbot, monkeypatch)
     view._meta = type("M", (), {

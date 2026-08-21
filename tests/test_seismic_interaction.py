@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt, QPoint, QPointF
+from PySide6.QtGui import QVector3D
 
 from geoviz_seismic.profile_vd import ProfileVD
 from geoviz_seismic.models import SliceInfo
@@ -179,6 +180,29 @@ def test_renderer_3d_set_position_external(qtbot):
     widget.set_position_external("inline", 5)
     assert widget._il_pos == 5
     assert any(st == "inline" and pos == 5 for st, pos in received)
+
+
+def test_set_position_external_time_defers_plane_rebuild(qtbot):
+    """Time slider must not GL-rebuild on every mouse-move (IL/XL already debounce)."""
+    from geoviz_seismic.renderer_3d import Renderer3D
+
+    widget = Renderer3D()
+    qtbot.addWidget(widget)
+    data = np.random.randn(8, 9, 12).astype(np.float32)
+    widget.load_volume(data, spacing=(1.0, 1.0, 2.0))
+
+    old_t = int(widget._t_pos)
+    old_z = widget._img_t.transform().map(QVector3D(0, 0, 0)).z()
+    new_t = 0 if old_t != 0 else 3
+    widget.set_position_external("time", new_t)
+    assert widget._t_pos == new_t
+    assert widget._active_time_pos == new_t
+    # Geometry stays put until the host debounce calls _update_slice_planes_for.
+    still_z = widget._img_t.transform().map(QVector3D(0, 0, 0)).z()
+    assert still_z == pytest.approx(old_z)
+    widget._update_slice_planes_for({"time"})
+    moved_z = widget._img_t.transform().map(QVector3D(0, 0, 0)).z()
+    assert moved_z != pytest.approx(old_z)
 
 
 def test_renderer_3d_cursor_sphere(qtbot):

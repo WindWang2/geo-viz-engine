@@ -260,22 +260,91 @@ def test_time_axis_endpoint_label_shows_ms_range(qtbot):
     assert any("364" in t for t in labels)
 
 
-def test_panel_slice_info_time_axis_scaled_by_downsample(qtbot):
-    """Inline panel's vertical (time) axis must account for the sample-axis
-    downsample factor: row r is TWT = t0 + r*ft*dt_ms."""
-    from geoviz_seismic.models import SeismicVolumeMeta
+def test_panel_slice_info_full_res_time_axis_is_native_twt(qtbot):
+    """SEGY 2D panels are native resolution (one row = one sample).
+
+    Multiplying TWT by the 3D preview stride ft stretched 1800 ms to
+    10800 ms on 200P (Image #1: 2D 0–10800 vs 3D T=900 mid of 1800 ms).
+    """
+    from geoviz_seismic.seismic_view import SeismicView
+
+    view = SeismicView(auto_load=False)
+    qtbot.addWidget(view)
+    data = np.zeros((8, 8, 16), dtype=np.float32)
+    view.load_demo(data)
+    view._meta.n_samples = 901
+    view._meta.dt_ms = 2.0
+    view._meta.t0_ms = 0.0
+    view._ds_factor = (5, 4, 6)  # 3D preview stride, must NOT scale 2D full-res
+
+    info = view._build_slice_info("inline", 4485, (901, 411))
+    assert info.axis_v_label == "Time (ms)"
+    assert len(info.axis_v_values) == 901
+    assert info.axis_v_values[0] == pytest.approx(0.0)
+    assert info.axis_v_values[1] == pytest.approx(2.0)
+    assert info.axis_v_values[-1] == pytest.approx(1800.0)
+
+
+def test_panel_slice_info_preview_rows_scale_by_downsample(qtbot):
+    """Preview-shaped panels (n_rows != native n_samples): row r is
+    TWT = t0 + r*ft*dt_ms so the axis still spans the full survey."""
     from geoviz_seismic.seismic_view import SeismicView
 
     view = SeismicView(auto_load=False)
     qtbot.addWidget(view)
     data = np.zeros((80, 80, 250), dtype=np.float32)
     view.load_demo(data)
+    view._meta.n_samples = 250 * 6  # native sample count
     view._meta.dt_ms = 4.0
     view._meta.t0_ms = 0.0
     view._ds_factor = (1, 1, 6)
 
-    info = view._build_slice_info("inline", 40, data[40, :, :].T.shape)
+    info = view._build_slice_info("inline", 40, (250, 80))  # preview rows
     assert info.axis_v_label == "Time (ms)"
     assert len(info.axis_v_values) == 250
     assert info.axis_v_values[1] == pytest.approx(6 * 4.0)
     assert info.axis_v_values[-1] == pytest.approx(249 * 6 * 4.0)
+
+
+def _gl_read_r8_with_alignment(packed, width, height, alignment):
+    """Replicate glTexImage2D row start for a tightly packed R8 buffer."""
+    stride = (width + alignment - 1) // alignment * alignment
+    buf = np.ascontiguousarray(packed).reshape(-1)
+    out = np.zeros((height, width), dtype=packed.dtype)
+    for y in range(height):
+        start = y * stride
+        end = start + width
+        if end <= buf.size:
+            out[y] = buf[start:end]
+        elif start < buf.size:
+            n = buf.size - start
+            out[y, :n] = buf[start:]
+    return out
+
+
+def test_r8_time_plane_width_shears_under_gl_align4():
+    """3D and 2D time slices are the same array (corr=1 when strided).
+
+    Image #2's diagonal stripes are GL reading the 129-wide R8 upload with
+    default UNPACK_ALIGNMENT=4. RGBA uploads are immune (4 bytes/pixel).
+    """
+    from geoviz_seismic.renderer_3d import GLImageLutItem
+
+    rng = np.random.default_rng(0)
+    idx = rng.integers(0, 256, (129, 103), dtype=np.uint8)  # 200P time-plane shape
+    upload, width, height = GLImageLutItem.prepare_r8_upload(idx)
+    assert (width, height) == (129, 103)
+    assert width % 4 == 1
+
+    sheared = _gl_read_r8_with_alignment(upload, width, height, alignment=4)
+    tight = _gl_read_r8_with_alignment(upload, width, height, alignment=1)
+    c_bad = float(np.corrcoef(sheared.ravel().astype(float), upload.ravel().astype(float))[0, 1])
+    c_ok = float(np.corrcoef(tight.ravel().astype(float), upload.ravel().astype(float))[0, 1])
+    assert c_bad < 0.2
+    assert c_ok == pytest.approx(1.0)
+
+    import inspect
+    src = inspect.getsource(GLImageLutItem._uploadIndexTexture)
+    assert "GL_UNPACK_ALIGNMENT" in src, (
+        "R8 upload must set GL_UNPACK_ALIGNMENT=1 or 129-wide time planes stripe"
+    )

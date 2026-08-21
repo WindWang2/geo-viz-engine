@@ -437,24 +437,31 @@ class GLImageLutItem(gl.GLImageItem):
                 geom_w, geom_h, max_tex, width, height,
             )
 
-        if context is not None and not context.isOpenGLES():
-            GL.glTexImage2D(
-                GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_R8, width, height, 0,
-                GL.GL_RED, GL.GL_UNSIGNED_BYTE, None,
-            )
-            if GL.glGetTexLevelParameteriv(GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_TEXTURE_WIDTH) == 0:
-                logger.warning(
-                    "OpenGL rejected 2D R8 texture %dx%d; skipping upload "
-                    "(plane stays empty until a smaller slice arrives).",
-                    width, height,
+        # R8 is 1 byte/pixel. Default GL_UNPACK_ALIGNMENT=4 shears any
+        # width not divisible by 4 into diagonal stripes (200P time plane
+        # is 129 wide — Image #2). RGBA never hits this (4 bytes/pixel).
+        GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 1)
+        try:
+            if context is not None and not context.isOpenGLES():
+                GL.glTexImage2D(
+                    GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_R8, width, height, 0,
+                    GL.GL_RED, GL.GL_UNSIGNED_BYTE, None,
                 )
-                GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
-                return
+                if GL.glGetTexLevelParameteriv(GL.GL_PROXY_TEXTURE_2D, 0, GL.GL_TEXTURE_WIDTH) == 0:
+                    logger.warning(
+                        "OpenGL rejected 2D R8 texture %dx%d; skipping upload "
+                        "(plane stays empty until a smaller slice arrives).",
+                        width, height,
+                    )
+                    GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+                    return
 
-        GL.glTexImage2D(
-            GL.GL_TEXTURE_2D, 0, GL.GL_R8, width, height, 0,
-            GL.GL_RED, GL.GL_UNSIGNED_BYTE, data,
-        )
+            GL.glTexImage2D(
+                GL.GL_TEXTURE_2D, 0, GL.GL_R8, width, height, 0,
+                GL.GL_RED, GL.GL_UNSIGNED_BYTE, data,
+            )
+        finally:
+            GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 4)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
 
         # Geometry extents still follow the original (sx, sy) size so the
@@ -3119,31 +3126,38 @@ class Renderer3D(QWidget):
         if not self._loaded:
             return
         if slice_type == "time":
+            # Same as IL/XL: record the new index only. Rebuilding the
+            # horizontal plane here made every Time-slider mouse-move a
+            # GL extract+upload (~433ms SEGY timeslice I/O is the 2D
+            # path; the 3D preview sync was still tens of ms × 100Hz).
+            pos = int(position)
             current = self._active_time_pos
             visibility = bool(
                 self._time_slice_visibility.get(
-                    int(current) if current is not None else int(position),
+                    int(current) if current is not None else pos,
                     True,
                 )
             )
-            pairs = [
-                (sample, visible)
-                for sample, visible in self.get_time_slices()
-                if sample != current and sample != int(position)
+            kept = [
+                sample
+                for sample in self._time_slice_positions
+                if sample != current and sample != pos
             ]
-            pairs.append((int(position), visibility))
-            self.set_time_slices(
-                pairs,
-                active=int(position),
-                opacity=self._time_slice_opacity,
-                enabled=self._time_slices_enabled,
-            )
+            kept.append(pos)
+            self._time_slice_positions = sorted(dict.fromkeys(kept))[:8]
+            self._time_slice_visibility = {
+                p: bool(self._time_slice_visibility.get(p, True))
+                for p in self._time_slice_positions
+            }
+            self._time_slice_visibility[pos] = visibility
+            self._active_time_pos = pos
+            self._t_pos = pos
             slider = self._t_slider
             slider.blockSignals(True)
-            slider.setValue(int(position))
-            slider._val_label.setText(str(int(position)))
+            slider.setValue(pos)
+            slider._val_label.setText(str(pos))
             slider.blockSignals(False)
-            self.slice_changed.emit(slice_type, int(position))
+            self.slice_changed.emit(slice_type, pos)
             return
         slider_map = {
             "inline": (self._il_slider, "_il_pos"),

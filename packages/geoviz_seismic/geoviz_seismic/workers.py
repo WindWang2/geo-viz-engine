@@ -550,6 +550,11 @@ class SliceReadWorker(QThread):
         return loader.read_timeslice(pos), meta, 1
 
     def _prefetch(self, loader, meta, slice_type: str, pos: int, step: int, gen: int) -> None:
+        # A native timeslice is O(volume) (~400ms on 200P). Prefetching
+        # ±1/±2 neighbours blocked the worker for ~2s after every Time
+        # slider tick and made the 2D Time panel feel frozen.
+        if slice_type == "time":
+            return
         bounds = {
             "inline": (meta.iline_start, meta.iline_start + (meta.n_inlines - 1) * meta.iline_step),
             "crossline": (meta.xline_start, meta.xline_start + (meta.n_crosslines - 1) * meta.xline_step),

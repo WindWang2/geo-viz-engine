@@ -902,11 +902,16 @@ class SeismicView(QWidget):
         n_h = data_shape[1] if len(data_shape) > 1 else data_shape[0]
         n_v = data_shape[0]
 
-        # Preview rows span ft original samples each (the volume is strided by
-        # ds_factor), so TWT = t0 + r*ft*dt — same convention as the slider
-        # labels and the arbitrary-slice panel.
+        # Full-res 2D profiles have one row per native sample (n_v ==
+        # n_samples) so TWT steps by dt_ms. Preview-shaped panels skip
+        # ft samples per row. Do not apply ft to full-res rows — that
+        # stretched 1800 ms to 10800 ms on 200P.
         df = self._ds_factor or (1, 1, 1)
-        dt_row = float(m.dt_ms) * max(int(df[2]), 1)
+        ft = max(int(df[2]), 1)
+        if n_v == int(m.n_samples):
+            dt_row = float(m.dt_ms)
+        else:
+            dt_row = float(m.dt_ms) * ft
 
         if slice_type == "inline":
             h_arr = np.arange(n_h) * m.xline_step + m.xline_start
@@ -1315,12 +1320,33 @@ class SeismicView(QWidget):
                 self._latest_slice_request[slice_type] = actual_pos
                 self._update_profile_panel(slice_type, actual_pos, cached.T)
             else:
-                # Async: worker reads from disk; panel updates on slice_ready
-                self._ensure_slice_worker()
+                # Time slices cost ~400ms of SEGY I/O. Paint the in-memory
+                # preview cube first so the 2D panel tracks the slider;
+                # full-res replaces it when the worker returns.
                 self._latest_slice_request[slice_type] = actual_pos
+                if slice_type == "time":
+                    self._paint_time_preview(position, actual_pos, m, df)
+                self._ensure_slice_worker()
                 self._slice_worker.request(
                     slice_type, actual_pos, self._segy_generation
                 )
+
+    def _paint_time_preview(self, preview_idx: int, actual_pos: int, meta, df) -> None:
+        """Nearest-neighbour upscale of the 3D preview timeslice onto the 2D panel."""
+        vol = getattr(self._renderer_3d, "_volume_data_cpu", None)
+        if vol is None:
+            return
+        n_il = int(getattr(meta, "n_inlines", 0) or 0)
+        n_xl = int(getattr(meta, "n_crosslines", 0) or 0)
+        if n_il < 1 or n_xl < 1:
+            return
+        t_p = max(0, min(int(vol.shape[2]) - 1, int(preview_idx)))
+        prev = np.asarray(vol[:, :, t_p])
+        fi = max(int(df[0]), 1)
+        fx = max(int(df[1]), 1)
+        disp = np.repeat(np.repeat(prev, fi, axis=0), fx, axis=1)
+        disp = disp[:n_il, :n_xl]
+        self._update_profile_panel("time", actual_pos, disp.T)
 
     @Slot(str, int, object, int)
     def _on_slice_ready(self, slice_type: str, actual_pos: int, data, generation: int):

@@ -52,6 +52,34 @@ def test_worker_reads_and_prefetches(qapp, small_segy_path, qtbot):
     assert all(abs(p - mid_il) <= 2 * meta.iline_step for p in pref_positions)
 
 
+def test_worker_does_not_prefetch_timeslices(qapp, small_segy_path, qtbot):
+    """Timeslice I/O is O(volume); prefetch would stall the Time slider."""
+    from geoviz_seismic.workers import SliceReadWorker
+    from geoviz_seismic.loader import SeismicLoader
+
+    loader = SeismicLoader(str(small_segy_path))
+    meta = loader.inspect()
+    mid_t = meta.n_samples // 2
+    loader.close()
+
+    worker = SliceReadWorker()
+    results = []
+    prefetches = []
+    worker.slice_ready.connect(lambda *a: results.append(a))
+    worker.prefetch_ready.connect(lambda *a: prefetches.append(a))
+    worker.start()
+    try:
+        worker.set_volume(str(small_segy_path), 1)
+        worker.request("time", mid_t, 1)
+        qtbot.waitUntil(lambda: len(results) == 1, timeout=10000)
+        qtbot.wait(200)
+    finally:
+        worker.stop()
+
+    assert results[0][0] == "time"
+    assert prefetches == []
+
+
 def test_worker_latest_wins(qapp, small_segy_path, qtbot):
     from geoviz_seismic.workers import SliceReadWorker
     from geoviz_seismic.loader import SeismicLoader
