@@ -79,7 +79,8 @@ def test_isosurface_scaled_by_spacing(qtbot):
     faces = np.array([[0, 0, 0]], dtype=np.int32)
     r.set_isosurface(verts, faces)
     md = r._isosurface_item.opts['meshdata']
-    np.testing.assert_allclose(md.vertexes()[0], [2.0, 1.0, 3.0], atol=1e-6)
+    # Time-down mapping: voxel z=1 of nt=8 -> world Z = (8-1)*3.0
+    np.testing.assert_allclose(md.vertexes()[0], [2.0, 1.0, 21.0], atol=1e-6)
 
 
 def test_volume_data_accessor(qtbot):

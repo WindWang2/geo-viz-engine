@@ -902,9 +902,15 @@ class SeismicView(QWidget):
         n_h = data_shape[1] if len(data_shape) > 1 else data_shape[0]
         n_v = data_shape[0]
 
+        # Preview rows span ft original samples each (the volume is strided by
+        # ds_factor), so TWT = t0 + r*ft*dt — same convention as the slider
+        # labels and the arbitrary-slice panel.
+        df = self._ds_factor or (1, 1, 1)
+        dt_row = float(m.dt_ms) * max(int(df[2]), 1)
+
         if slice_type == "inline":
             h_arr = np.arange(n_h) * m.xline_step + m.xline_start
-            v_arr = np.arange(n_v) * m.dt_ms + m.t0_ms
+            v_arr = np.arange(n_v) * dt_row + m.t0_ms
             return SliceInfo(
                 slice_type=slice_type, position=position,
                 axis_h_label="Crossline", axis_v_label="Time (ms)",
@@ -913,7 +919,7 @@ class SeismicView(QWidget):
             )
         elif slice_type == "crossline":
             h_arr = np.arange(n_h) * m.iline_step + m.iline_start
-            v_arr = np.arange(n_v) * m.dt_ms + m.t0_ms
+            v_arr = np.arange(n_v) * dt_row + m.t0_ms
             return SliceInfo(
                 slice_type=slice_type, position=position,
                 axis_h_label="Inline", axis_v_label="Time (ms)",

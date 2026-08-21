@@ -24,6 +24,39 @@ from .stratal import extract_stratal_slice
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Time-axis world mapping (time-down convention)
+#
+# The 2D profile panels draw sample-0 at the top (industry standard), so the
+# 3D scene must match: sample-0 sits at the TOP of the world box (z = nt*st)
+# and time increases DOWNWARD. All Z-anchored overlays (slice planes, walls,
+# horizons, picks, cursor, annotations, click ray-cast) must go through these
+# two helpers so the mapping stays invertible and consistent.
+# ---------------------------------------------------------------------------
+
+def sample_to_z(sample_index, nt: int, st: float):
+    """Map a preview-volume sample index to its world Z (time-down).
+
+    sample 0    -> z = nt*st (top of the box)
+    sample nt-1 -> z = st    (one voxel above the bottom)
+
+    Fractional indices (e.g. a stratal-surface mean) interpolate linearly.
+    Accepts scalars or arrays (returns the matching type).
+    """
+    z = (float(nt) - np.asarray(sample_index, dtype=np.float64)) * float(st)
+    return float(z) if z.ndim == 0 else z
+
+
+def z_to_sample(z, nt: int, st: float):
+    """Inverse of :func:`sample_to_z`: world Z back to a fractional sample index.
+
+    Accepts scalars or arrays (returns the matching type).
+    """
+    s = float(nt) - np.asarray(z, dtype=np.float64) / float(st)
+    return float(s) if s.ndim == 0 else s
+
+
 def compute_normal_map(data: np.ndarray) -> np.ndarray:
     """Vectorized CPU-based normal map calculation from 3D volume gradient."""
     # Gradient in [z, y, x] order for numpy array [ni, nx, nt] (conventionally)
@@ -1537,9 +1570,16 @@ class Renderer3D(QWidget):
             except Exception:
                 self._view.opts["center"] = QVector3D(cx, cy, cz)
         else:
-            # Center the camera dynamically based on volume size
+            # Center the camera dynamically based on volume size. The default
+            # azimuth sits in the +X/-Y quadrant so BOTH orthogonal walls read
+            # left-to-right like their 2D profile panels (az 45 would mirror
+            # the crossline wall's inline axis).
             self._view.opts["center"] = QVector3D(cx, cy, cz)
-            self._view.setCameraPosition(distance=max(ni * si, nx * sx, nt * st) * 1.5)
+            self._view.setCameraPosition(
+                distance=max(ni * si, nx * sx, nt * st) * 1.5,
+                elevation=30,
+                azimuth=-45,
+            )
 
         # Update grid to floor aligned with volume bounds
         max_grid_len = max(ni * si, nx * sx) * 1.5
@@ -1586,8 +1626,10 @@ class Renderer3D(QWidget):
         """Renders horizon as a 3D mesh surface.
 
         ``z_unit="ms"`` converts a TWT-ms grid into the preview cube's world
-        coordinates using :meth:`set_survey_mapping` and ``_volume_spacing``.
-        ``z_unit="world"`` (default) keeps the historical raw-Z behaviour.
+        coordinates using :meth:`set_survey_mapping` and ``_volume_spacing``,
+        then applies the time-down mapping (see :func:`sample_to_z`) so the
+        horizon lines up with the slice planes. ``z_unit="world"`` (default)
+        keeps the historical raw-Z behaviour.
         """
         if horizon_data is None:
             return
@@ -1609,11 +1651,18 @@ class Renderer3D(QWidget):
             si, sx, st = self._volume_spacing
             if dt is not None and dt != 0.0:
                 ft = max(int(self._survey_ft), 1)
-                z = (
+                # TWT ms -> fractional sample index -> world Z (time-down).
+                # Without a loaded volume there is no time extent to mirror
+                # against, so fall back to the legacy upward mapping.
+                t_samples = (
                     (z.astype(np.float64) - float(self._survey_t0_ms))
                     / (float(dt) * ft)
-                    * float(st)
-                ).astype(np.float32)
+                )
+                vol = self._volume_data_cpu
+                if vol is not None:
+                    z = sample_to_z(t_samples, vol.shape[2], float(st)).astype(np.float32)
+                else:
+                    z = (t_samples * float(st)).astype(np.float32)
             if spacing == (1, 1):
                 fi = max(int(self._survey_fi), 1)
                 fx = max(int(self._survey_fx), 1)
@@ -1645,6 +1694,22 @@ class Renderer3D(QWidget):
         """Return the CPU volume array currently loaded, or None."""
         return self._volume_data_cpu
 
+    def _sample_z(self, sample_index: float) -> float:
+        """World Z for a sample index under the time-down convention (see :func:`sample_to_z`)."""
+        if self._volume_data_cpu is None:
+            return 0.0
+        nt = self._volume_data_cpu.shape[2]
+        st = self._volume_spacing[2]
+        return sample_to_z(sample_index, nt, st)
+
+    def _z_to_sample_index(self, z: float) -> float:
+        """Inverse of :meth:`_sample_z` (see :func:`z_to_sample`)."""
+        if self._volume_data_cpu is None:
+            return 0.0
+        nt = self._volume_data_cpu.shape[2]
+        st = self._volume_spacing[2]
+        return z_to_sample(z, nt, st)
+
     def set_isosurface(self, verts: np.ndarray, faces: np.ndarray,
                        color=(0.9, 0.5, 0.1, 0.8)):
         """Render an isosurface mesh (voxel-index coords), replacing any previous one."""
@@ -1656,7 +1721,8 @@ class Renderer3D(QWidget):
         v = np.asarray(verts, dtype=np.float32).copy()
         v[:, 0] = v[:, 0] * si + oi
         v[:, 1] = v[:, 1] * sx + ox
-        v[:, 2] = v[:, 2] * st + ot
+        # Vectorised time-down mapping for the sample axis
+        v[:, 2] = self._sample_z(v[:, 2]) + ot
         mesh = gl.GLMeshItem(
             vertexes=v,
             faces=np.asarray(faces, dtype=np.int32),
@@ -2167,7 +2233,20 @@ class Renderer3D(QWidget):
         si, sx, st = sp
         max_dim = max(ni * si, nx * sx, nt * st)
         pad = max_dim * 0.08  # Extension beyond bounding box
-        
+
+        # Time ticks read TWT milliseconds when a survey mapping is known
+        # (t0 + s*ft*dt, matching the 2D panels' "Time (ms)" axis); otherwise
+        # they fall back to preview sample indices.
+        dt_ms = getattr(self, "_survey_dt_ms", None)
+        t0_ms = float(getattr(self, "_survey_t0_ms", 0.0) or 0.0)
+        ft = max(int(getattr(self, "_survey_ft", 1)), 1)
+
+        def _tick_time_text(sample_value: float) -> str:
+            s = max(0, min(nt - 1, int(round(sample_value))))
+            if dt_ms:
+                return f"{t0_ms + s * ft * float(dt_ms):.0f}"
+            return str(s)
+
         self._axis_labels = []
         is_geo = getattr(self, "_coord_mode", "grid") == "geo"
         meta = getattr(self, "_meta", None)
@@ -2223,7 +2302,10 @@ class Renderer3D(QWidget):
             )
             t_label = gl.GLTextItem(
                 pos=np.array([0, 0, nt * st + pad * 1.2]),
-                text=f'Time (0-{nt-1})',
+                text=(
+                    f'Time ↓ ({t0_ms:.0f}-{t0_ms + (nt - 1) * ft * float(dt_ms):.0f} ms)'
+                    if dt_ms else f'Time ↓ (0-{nt-1})'
+                ),
                 color=(100, 150, 255, 255)
             )
             for lbl in (il_label, xl_label, t_label):
@@ -2266,10 +2348,11 @@ class Renderer3D(QWidget):
                 self._view.addItem(tick_xl)
                 self._axis_labels.append(tick_xl)
                 
-                pos_t = np.array([-tick_offset, -tick_offset, frac * nt * st])
+                # Time-down: tick for sample value frac*nt sits mirrored on Z
+                pos_t = np.array([-tick_offset, -tick_offset, self._sample_z(frac * nt)])
                 tick_t = gl.GLTextItem(
                     pos=pos_t,
-                    text=str(int(frac * nt)),
+                    text=_tick_time_text(frac * nt),
                     color=(180, 190, 220, 220)
                 )
                 self._view.addItem(tick_t)
@@ -2390,22 +2473,31 @@ class Renderer3D(QWidget):
                 # Fast In-Place Texture & Transform Update
                 self._img_il.setData(il_idx)
                 self._img_il.resetTransform()
-                self._img_il.scale(sx, st, 1)
+                # Negative Y scale mirrors the time axis so sample-0 lands at
+                # world Z top (time-down, matching the 2D profile panels);
+                # the wall hangs from the top of the box.
+                self._img_il.scale(sx, -st, 1)
                 self._img_il.rotate(90, 1, 0, 0)
                 self._img_il.rotate(90, 0, 0, 1)
-                self._img_il.translate(self._il_pos * si, 0, 0)
+                self._img_il.translate(self._il_pos * si, 0, self._sample_z(0))
 
                 self._line_il.resetTransform()
                 self._line_il.translate(self._il_pos * si, 0, 0)
             else:
-                self._img_il = GLImageLutItem(il_idx, cmap_name=self._cmap_name)
-                self._img_il.scale(sx, st, 1)
+                # smooth=True: bilinear filtering of the R8 index texture.
+                # Indices are linear in amplitude, so interpolating them then
+                # looking up the LUT is equivalent to interpolating amplitude
+                # first — avoids the blocky nearest-neighbour look on the
+                # downsampled preview cube.
+                self._img_il = GLImageLutItem(il_idx, cmap_name=self._cmap_name, smooth=True)
+                self._img_il.scale(sx, -st, 1)
                 self._img_il.rotate(90, 1, 0, 0)
                 self._img_il.rotate(90, 0, 0, 1)
-                self._img_il.translate(self._il_pos * si, 0, 0)
+                self._img_il.translate(self._il_pos * si, 0, self._sample_z(0))
                 self._view.addItem(self._img_il)
 
-                il_pts = np.array([[0, 0, 0], [0, nx*sx, 0], [0, nx*sx, nt*st], [0, 0, nt*st], [0, 0, 0]])
+                z_max = self._sample_z(0)  # Top of volume
+                il_pts = np.array([[0, 0, z_max], [0, nx*sx, z_max], [0, nx*sx, 0], [0, 0, 0], [0, 0, z_max]])
                 self._line_il = gl.GLLinePlotItem(pos=il_pts, color=(1, 0, 0, 1), width=2, antialias=True)
                 self._line_il.translate(self._il_pos * si, 0, 0)
                 self._view.addItem(self._line_il)
@@ -2419,20 +2511,23 @@ class Renderer3D(QWidget):
                 # Fast In-Place Texture & Transform Update
                 self._img_xl.setData(xl_idx)
                 self._img_xl.resetTransform()
-                self._img_xl.scale(si, st, 1)
+                # Negative Y scale mirrors time downward; wall hangs from the
+                # top of the box (see inline wall above).
+                self._img_xl.scale(si, -st, 1)
                 self._img_xl.rotate(90, 1, 0, 0)
-                self._img_xl.translate(0, self._xl_pos * sx, 0)
+                self._img_xl.translate(0, self._xl_pos * sx, self._sample_z(0))
 
                 self._line_xl.resetTransform()
                 self._line_xl.translate(0, self._xl_pos * sx, 0)
             else:
-                self._img_xl = GLImageLutItem(xl_idx, cmap_name=self._cmap_name)
-                self._img_xl.scale(si, st, 1)
+                self._img_xl = GLImageLutItem(xl_idx, cmap_name=self._cmap_name, smooth=True)
+                self._img_xl.scale(si, -st, 1)
                 self._img_xl.rotate(90, 1, 0, 0)
-                self._img_xl.translate(0, self._xl_pos * sx, 0)
+                self._img_xl.translate(0, self._xl_pos * sx, self._sample_z(0))
                 self._view.addItem(self._img_xl)
 
-                xl_pts = np.array([[0, 0, 0], [ni*si, 0, 0], [ni*si, 0, nt*st], [0, 0, nt*st], [0, 0, 0]])
+                z_max = self._sample_z(0)  # Top of volume
+                xl_pts = np.array([[0, 0, z_max], [ni*si, 0, z_max], [ni*si, 0, 0], [0, 0, 0], [0, 0, z_max]])
                 self._line_xl = gl.GLLinePlotItem(pos=xl_pts, color=(0, 1, 0, 1), width=2, antialias=True)
                 self._line_xl.translate(0, self._xl_pos * sx, 0)
                 self._view.addItem(self._line_xl)
@@ -2496,7 +2591,7 @@ class Renderer3D(QWidget):
             pair = self._time_plane_items.get(position)
             if pair is None:
                 image = GLImageLutItem(
-                    t_idx, cmap_name=self._cmap_name
+                    t_idx, cmap_name=self._cmap_name, smooth=True
                 )
                 line = gl.GLLinePlotItem(
                     pos=t_pts,
@@ -2512,7 +2607,7 @@ class Renderer3D(QWidget):
                 image.setData(t_idx)
             image.resetTransform()
             image.scale(si, sx, 1)
-            image.translate(0, 0, position * st)
+            image.translate(0, 0, self._sample_z(position))
             image.setOpacity(self._time_slice_opacity)
 
             active = position == self._active_time_pos
@@ -2527,7 +2622,7 @@ class Renderer3D(QWidget):
                 antialias=True,
             )
             line.resetTransform()
-            line.translate(0, 0, position * st)
+            line.translate(0, 0, self._sample_z(position))
             visible = bool(
                 self._planes_visible
                 and self._time_slices_enabled
@@ -2619,7 +2714,7 @@ class Renderer3D(QWidget):
 
             pair = self._stratal_plane_items.get(idx)
             if pair is None:
-                image = GLImageLutItem(idx_img, cmap_name=self._cmap_name)
+                image = GLImageLutItem(idx_img, cmap_name=self._cmap_name, smooth=True)
                 line = gl.GLLinePlotItem(
                     pos=np.array(
                         [[0, 0, 0], [ni * si, 0, 0],
@@ -2639,7 +2734,7 @@ class Renderer3D(QWidget):
 
             image.resetTransform()
             image.scale(si, sx, 1)
-            image.translate(0, 0, mean_t * st)
+            image.translate(0, 0, self._sample_z(mean_t))
             image.setOpacity(self._stratal_opacity)
 
             active = idx == self._stratal_active
@@ -2652,7 +2747,7 @@ class Renderer3D(QWidget):
                 antialias=True,
             )
             line.resetTransform()
-            line.translate(0, 0, mean_t * st)
+            line.translate(0, 0, self._sample_z(mean_t))
             visible = bool(
                 self._planes_visible
                 and self._stratal_enabled
@@ -2747,10 +2842,10 @@ class Renderer3D(QWidget):
             # For simplicity, render the whole curtain as segments between consecutive waypoints
             points = self._arb_polyline
             
-            # Draw the polyline path on the floor (time=t_pos*st) as a magenta line
+            # Draw the polyline path on the floor at the active time plane
             path_pts = []
             for il_idx, xl_idx in points:
-                path_pts.append([il_idx * si, xl_idx * sx, self._t_pos * st])
+                path_pts.append([il_idx * si, xl_idx * sx, self._sample_z(self._t_pos)])
             path_arr = np.array(path_pts, dtype=np.float32)
             
             self._line_arb = gl.GLLinePlotItem(
@@ -2793,11 +2888,13 @@ class Renderer3D(QWidget):
                 d_spatial = float(np.hypot(wx1 - wx0, wy1 - wy0))
                 alpha_deg = float(np.degrees(np.arctan2(wy1 - wy0, wx1 - wx0)))
                 
-                item = gl.GLImageItem(seg_img)
-                item.scale(d_spatial / max(n_cols, 1), st, 1.0)
+                item = gl.GLImageItem(seg_img, smooth=True)
+                # Negative Y scale mirrors time downward (see _create_slice_plane);
+                # curtain hangs from the top of the box.
+                item.scale(d_spatial / max(n_cols, 1), -st, 1.0)
                 item.rotate(90, 1, 0, 0)
                 item.rotate(alpha_deg, 0, 0, 1)
-                item.translate(wx0, wy0, 0)
+                item.translate(wx0, wy0, self._sample_z(0))
                 self._view.addItem(item)
                 self._arb_curtain_items.append(item)
                 
@@ -2930,10 +3027,11 @@ class Renderer3D(QWidget):
             # Intersection point
             hit = origin + direction * t_min
 
-            # Convert world coordinates to volume indices
+            # Convert world coordinates to volume indices.
+            # Z uses the time-down mapping (see sample_to_z/z_to_sample).
             il_idx = hit.x() / si
             xl_idx = hit.y() / sx
-            t_idx = hit.z() / st
+            t_idx = self._z_to_sample_index(hit.z())
 
             il_idx = max(0.0, min(il_idx, ni - 1))
             xl_idx = max(0.0, min(xl_idx, nx - 1))
@@ -3412,7 +3510,7 @@ class Renderer3D(QWidget):
         si, sx, st = self._volume_spacing
 
         pos = np.array([
-            [il * si, xl * sx, t * st]
+            [il * si, xl * sx, self._sample_z(t)]
             for il, xl, t in points
         ], dtype=np.float32)
 
@@ -3436,7 +3534,7 @@ class Renderer3D(QWidget):
         if not self._loaded:
             return
         si, sx, st = self._volume_spacing
-        pos = np.array([[il_val * si, xl_val * sx, t_val * st]], dtype=np.float32)
+        pos = np.array([[il_val * si, xl_val * sx, self._sample_z(t_val)]], dtype=np.float32)
         if self._cursor_sphere is None:
             self._cursor_sphere = gl.GLScatterPlotItem(
                 pos=pos, color=np.array([[1.0, 1.0, 0.0, 1.0]], dtype=np.float32),
@@ -3469,7 +3567,7 @@ class Renderer3D(QWidget):
 
         for il_val, xl_val, t_val, text in annotations:
             try:
-                pos = np.array([il_val * si, xl_val * sx, t_val * st])
+                pos = np.array([il_val * si, xl_val * sx, self._sample_z(t_val)])
                 item = gl.GLTextItem(
                     pos=pos,
                     text=text,

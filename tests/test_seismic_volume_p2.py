@@ -92,8 +92,9 @@ def test_horizon_pick_scene_position_inside_cube(qtbot):
     assert 0.0 <= pos[0, 0] <= 80 * si + 1e-6
     assert 0.0 <= pos[0, 1] <= 80 * sx + 1e-6
     assert 0.0 <= pos[0, 2] <= 250 * st + 1e-6
-    # 800ms / 4ms = sample 200
-    assert pos[0, 2] == pytest.approx(200.0 * st)
+    # 800ms / 4ms = sample 200 of 250; time-down mapping mirrors it:
+    # z = (nt - t) * st
+    assert pos[0, 2] == pytest.approx((250 - 200) * st)
 
 
 def test_add_horizon_ms_mesh_inside_cube(qtbot):
