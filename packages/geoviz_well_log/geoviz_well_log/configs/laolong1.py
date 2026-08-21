@@ -17,7 +17,7 @@ LITHOLOGY_MAPPING = PatternMapping(
         "泥岩": "mudstone", "泥质": "mudstone",
         "页岩": "shale",
         "灰岩": "limestone", "石灰岩": "limestone",
-        "煤": "shale",  # TODO: create coal.svg per GB/T 附录M
+        "煤": "coal",
     },
     colors={
         "白云岩": "#dbeafe", "白云质": "#bfdbfe",

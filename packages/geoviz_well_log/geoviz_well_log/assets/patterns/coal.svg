@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="8" viewBox="0 0 16 8">
+  <defs>
+    <pattern id="pat-coal" patternUnits="userSpaceOnUse" width="16" height="8">
+      <rect width="16" height="8" fill="#111827"/>
+      <!-- 煤: GB/T 附录M 煤岩性符号 — 黑色基底 (实黑填充) -->
+    </pattern>
+  </defs>
+  <rect width="16" height="8" fill="url(#pat-coal)"/>
+</svg>
