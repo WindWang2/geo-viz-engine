@@ -126,22 +126,6 @@ class RamSliceCache:
             return key in self._cache
 
 
-class DualLevelSeismicCache:
-    """Dual-level LRU Cache combining L1 (RAM) and L2 (VRAM handle) budgets."""
-
-    def __init__(self, ram_bytes: int = 512 * 1024 * 1024, vram_bytes: int = 256 * 1024 * 1024):
-        self.ram_cache = RamSliceCache(max_bytes=ram_bytes)
-        self.vram_cache: OrderedDict[Any, Any] = OrderedDict()
-        self.vram_bytes_limit = vram_bytes
-        self.current_vram_bytes = 0
-
-    def get_slice(self, key: Any) -> np.ndarray | None:
-        return self.ram_cache.get(key)
-
-    def put_slice(self, key: Any, data: np.ndarray) -> None:
-        self.ram_cache.put(key, data)
-
-
 # Backward-compatible alias
 class SeismicCache(RamSliceCache):
     def __init__(self, max_slices: int = 50):

@@ -88,9 +88,13 @@ class ProfileVD(QWidget):
         # scan (23ms on a 1.5M-pixel slice) was recomputed on every slice-swap
         # and every clip change, but the clip range is approximately stable
         # across sibling slices of the same volume. Invalidated on clip_pct
-        # change and on volume reload (data shape change).
+        # change and on volume reload. Keyed on (shape, filename, generation)
+        # rather than shape alone — two different volumes with the same shape
+        # must not share a cached P1/P99 (#119). The key is derived from the
+        # current slice's SliceInfo when available; a missing SliceInfo falls
+        # back to (shape,) so tests with bare render() calls remain simple.
         self._clip_range_cache: tuple[float, float] | None = None
-        self._clip_range_shape: tuple[int, ...] | None = None
+        self._clip_range_key: tuple | None = None
 
         # Zoom/pan viewport state
         self._zoom_scale: float = 1.0
@@ -194,6 +198,7 @@ class ProfileVD(QWidget):
             return
         self._clip_pct = pct
         self._clip_range_cache = None  # invalidate; recompute on next _renormalize
+        self._clip_range_key = None
         if self._has_data:
             self._renormalize()
 
@@ -285,6 +290,32 @@ class ProfileVD(QWidget):
     def clip_percentile(self) -> float:
         return self._clip_pct
 
+    def _clip_cache_key(self, slice_info=None) -> tuple:
+        """Build a cache key that distinguishes different volumes of the same shape.
+
+        Two consecutive loads of different surveys can have identical shapes but
+        wildly different amplitude distributions — reusing the previous P1/P99
+        would mis-scale the new volume until the user drags the clip slider.
+        When *slice_info* carries identifying axis values we fold those into
+        the key; otherwise fall back to the bare shape for unit-test call sites
+        that do not provide a SliceInfo (#119)."""
+        si = slice_info if slice_info is not None else self._slice_info
+        shape = tuple(self._data.shape) if self._data is not None else ()
+        if si is None:
+            return (shape,)
+        # Axis arrays encode the concrete volume (start/step/count) through
+        # SeismicVolumeMeta — the first and last tick plus the tick count
+        # cheaply distinguish two volumes of the same shape without storing
+        # the full array.
+        try:
+            h_vals = getattr(si, "axis_h_values", None)
+            v_vals = getattr(si, "axis_v_values", None)
+            h_key = (len(h_vals), h_vals[0] if h_vals else None, h_vals[-1] if h_vals else None) if h_vals is not None else ()
+            v_key = (len(v_vals), v_vals[0] if v_vals else None, v_vals[-1] if v_vals else None) if v_vals is not None else ()
+            return (shape, getattr(si, "slice_type", None), h_key, v_key)
+        except Exception:
+            return (shape,)
+
     def render(
         self,
         data: np.ndarray,
@@ -293,15 +324,16 @@ class ProfileVD(QWidget):
     ) -> None:
         """Convert *data* to an RGBA image and schedule a repaint."""
         self._data = data.astype(np.float32, copy=False)
-        # Reuse clip range cache across sibling slices of the same volume shape
-        # to avoid repeating 15ms+ nanpercentile scans on every slice frame.
-        if self._clip_range_shape != self._data.shape:
+        self._slice_info = slice_info
+        # Reuse clip range cache across sibling slices of the same volume;
+        # invalidate when the volume identity changes (#119).
+        key = self._clip_cache_key(slice_info)
+        if self._clip_range_key != key:
             self._clip_range_cache = None
-            self._clip_range_shape = self._data.shape
+            self._clip_range_key = key
         self._rgba_override = None
         if colormap is not None:
             self._colormap_name = colormap
-        self._slice_info = slice_info
         self._has_data = True
         # Reset viewport on new data
         self._zoom_scale = 1.0
@@ -337,7 +369,7 @@ class ProfileVD(QWidget):
 
         Delegates to ``ColormapManager.normalize_to_index`` with the cached
         percentile clip range. The clip range (lo, hi) is cached across
-        sibling slices of the same volume.
+        sibling slices of the same volume (same shape + axis identity).
 
         On viewport (zoom/pan) changes, ``_build_image_from_normalized``
         re-slices the cached ``_indexed`` array without re-entering here.
@@ -349,9 +381,11 @@ class ProfileVD(QWidget):
             self._indexed = np.zeros(self._data.shape, dtype=np.uint8)
             self._build_image_from_normalized()
             return
-        # Compute or reuse the cached clip range.
-        shape = self._data.shape
-        if self._clip_range_cache is None or self._clip_range_shape != shape:
+        # Compute or reuse the cached clip range. The key includes axis
+        # identity so consecutive loads of two different surveys with the same
+        # shape do not inherit each other's P1/P99 (#119).
+        key = self._clip_cache_key()
+        if self._clip_range_cache is None or self._clip_range_key != key:
             pct = self._clip_pct
             lo = np.nanpercentile(self._data, 100.0 - pct)
             hi = np.nanpercentile(self._data, pct)
@@ -359,7 +393,7 @@ class ProfileVD(QWidget):
                 hi = dmax
                 lo = dmin
             self._clip_range_cache = (float(lo), float(hi))
-            self._clip_range_shape = shape
+            self._clip_range_key = key
         lo, hi = self._clip_range_cache
         self._indexed = ColormapManager.normalize_to_index(
             self._data, lut_size=256, value_range=(lo, hi)

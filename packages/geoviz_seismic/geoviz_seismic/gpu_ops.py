@@ -76,57 +76,6 @@ def slice_volume_gpu(volume: cp.ndarray | np.ndarray,
     return to_cpu(sl)
 
 
-def sample_arbitrary_slice_gpu(volume: cp.ndarray | np.ndarray,
-                               angle_deg: float,
-                               offset_px: float,
-                               keep_on_gpu: bool = False) -> cp.ndarray | np.ndarray:
-    """
-    Resamples volume data along an arbitrary vertical plane cutting through the cube.
-    Leverages affine grid transforms and bi-linear interpolation for speed.
-    
-    Args:
-        volume: 3D array of shape (n_inlines, n_xlines, n_samples)
-        angle_deg: Azimuthal rotation angle in degrees.
-        offset_px: Perpendicular pixel/voxel offset from horizontal center.
-        keep_on_gpu: Return device reference if possible.
-        
-    Returns:
-        2D array of shape (n_samples, diag_size) containing the resampled plane slice.
-    """
-    # Detection block
-    xp = cp if (_CUPY_AVAILABLE and isinstance(volume, cp.ndarray)) else np
-    map_func = cp_map_coords if (xp is cp and cp_map_coords is not None) else sp_map_coords
-
-    ni, nx, nt = volume.shape
-    diag = int(np.hypot(ni, nx))
-    
-    theta = np.radians(angle_deg)
-    cos_t = float(np.cos(theta))
-    sin_t = float(np.sin(theta))
-    
-    # Construct coordinate grid for interpolation
-    # D is distance along the slice plane, T is sample index (depth)
-    d_range = xp.linspace(-diag/2.0, diag/2.0, diag)
-    t_range = xp.arange(nt, dtype=xp.float32)
-    
-    # Meshgrid results in shape (nt, diag), which matches standard 2D layout requirements
-    T, D = xp.meshgrid(t_range, d_range, indexing='ij')
-    
-    # Map coordinates back to original cube indices
-    I_idx = (ni / 2.0) + D * cos_t + offset_px * sin_t
-    X_idx = (nx / 2.0) + D * sin_t - offset_px * cos_t
-    
-    # Combine for interpolation engine, expected shape is (3, nt, diag)
-    interp_grid = xp.stack([I_idx, X_idx, T])
-    
-    # Sample. Use constant fill zero for bounds to hide background.
-    sampled = map_func(volume, interp_grid, order=1, mode='constant', cval=0.0)
-    
-    if keep_on_gpu:
-        return sampled
-    return to_cpu(sampled)
-
-
 def sample_polyline_slice(volume: np.ndarray,
                           points: list[tuple[float, float]],
                           samples_per_unit: float = 1.0) -> tuple[np.ndarray, np.ndarray]:

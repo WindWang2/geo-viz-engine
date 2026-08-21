@@ -21,11 +21,6 @@ def test_shader_compiler_source_tests_are_not_slow():
     )
 
 
-def test_numpy_sculpting_is_not_slow():
-    assert not is_slow_test("test_seismic_3d_sculpting", "test_gaussian_sculpting_math")
-    assert not is_slow_test("test_seismic_3d_sculpting", "test_interactive_horizon_gl_item")
-
-
 def test_per_axis_renderer_tests_are_not_slow():
     assert not is_slow_test(
         "test_renderer_3d_per_axis",

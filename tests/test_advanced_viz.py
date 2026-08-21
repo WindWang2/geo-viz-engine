@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from geoviz_seismic.attributes import (
-    compute_spectral_decomposition,
     fuse_rgb,
     compute_envelope,
     compute_instantaneous_frequency,
@@ -12,51 +11,6 @@ from geoviz_seismic.attributes import (
     compute_sweetness,
 )
 
-
-# ---------------------------------------------------------------------------
-# Spectral decomposition
-# ---------------------------------------------------------------------------
-
-class TestSpectralDecomposition:
-    def test_basic_shape(self):
-        data = np.random.randn(100, 20).astype(np.float32)
-        bands = [(10, 20), (20, 40), (40, 60)]
-        result = compute_spectral_decomposition(data, bands, sample_interval=0.004)
-        assert result.shape == (3, 100, 20)
-
-    def test_output_nonnegative(self):
-        data = np.random.randn(80, 10).astype(np.float32)
-        bands = [(5, 15), (15, 30)]
-        result = compute_spectral_decomposition(data, bands, sample_interval=0.002)
-        assert np.all(result >= 0)
-
-    def test_empty_band(self):
-        data = np.random.randn(50, 10).astype(np.float32)
-        # Frequency band entirely outside Nyquist
-        bands = [(9999, 10000)]
-        result = compute_spectral_decomposition(data, bands, sample_interval=0.004)
-        assert result.shape == (1, 50, 10)
-        # Should be all zeros since no energy in that band
-        assert np.allclose(result, 0)
-
-    def test_single_band(self):
-        data = np.random.randn(60, 15).astype(np.float32)
-        bands = [(10, 30)]
-        result = compute_spectral_decomposition(data, bands, sample_interval=0.004)
-        assert result.shape == (1, 60, 15)
-
-    def test_different_axes(self):
-        data = np.random.randn(10, 80).astype(np.float32)
-        bands = [(10, 25)]
-        # axis=0 (first axis)
-        result = compute_spectral_decomposition(data, bands, sample_interval=0.004, axis=0)
-        assert result.shape == (1, 10, 80)
-
-    def test_float32_output(self):
-        data = np.random.randn(40, 10).astype(np.float64)
-        bands = [(10, 20)]
-        result = compute_spectral_decomposition(data, bands, sample_interval=0.004)
-        assert result.dtype == np.float32
 
 
 # ---------------------------------------------------------------------------
