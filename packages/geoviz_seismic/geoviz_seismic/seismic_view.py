@@ -563,7 +563,22 @@ class SeismicView(QWidget):
     # ------------------------------------------------------------------
 
     def _get_ui_icon(self, name: str) -> QIcon:
-        """Resolve icon from project resources."""
+        """Resolve icon from project resources.
+
+        Prefers the package-bundled ``geoviz_seismic/resources/icons/ui``
+        directory so an installed engine still shows toolbar icons when the
+        workbench's ``src/utils/paths`` helper is absent. Falls back to the
+        legacy ``src/utils/paths.get_resources_dir`` path for monorepo
+        checkouts (#119).
+        """
+        # Package-bundled fallback (installed engine, no src/ on sys.path).
+        try:
+            from pathlib import Path
+            bundled = Path(__file__).with_name("resources") / "icons" / "ui" / name
+            if bundled.is_file():
+                return QIcon(str(bundled))
+        except Exception:
+            pass
         try:
             from src.utils.paths import get_resources_dir
             path = get_resources_dir() / "icons" / "ui" / name

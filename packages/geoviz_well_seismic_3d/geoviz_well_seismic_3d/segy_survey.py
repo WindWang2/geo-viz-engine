@@ -12,8 +12,104 @@ built in **loader** IL/XL space so survey and cube agree without transposing.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Last-resort fallback when trace headers cannot be read; matches the
+# concrete survey packaged with the tests so legacy behaviour is preserved
+# for callers that only pass a text-header string (#119).
+_FALLBACK_IL_SPACING_M = 40.014634
+
+# Set by survey_corners_from_segy so helpers that only receive text headers
+# can recover without re-opening the file. Reset when the text-only path is
+# exercised in isolation (tests call _parse_text_header_classic directly).
+_measured_spacing_cache: float | None = None
+
+
+def _measured_inline_spacing(
+    segy_path: Path | str | None = None,
+) -> float:
+    """Return inline spacing (m) measured from trace headers.
+
+    Prefers the live survey volume on disk when *segy_path* points at a SEGY
+    file, otherwise falls back to the cached value stored by
+    :func:`survey_corners_from_segy` so the classic ``ymin == xmax`` text
+    header recovery still gets a measured value rather than the hardcoded
+    constant. When neither is available the legacy 40.014634 m constant is
+    returned with a warning (#119).
+    """
+    if segy_path is not None:
+        path = Path(segy_path)
+        if path.is_file():
+            try:
+                measured = _inline_spacing_from_segy(path)
+                if measured is not None and measured > 0:
+                    return measured
+            except Exception:
+                pass
+    if _measured_spacing_cache is not None:
+        return _measured_spacing_cache
+    logger.warning(
+        "Inline spacing unavailable from trace headers; falling back to %.6f m. "
+        "Pass the SEGY path through survey_corners_from_segy so spacing can be measured.",
+        _FALLBACK_IL_SPACING_M,
+    )
+    return _FALLBACK_IL_SPACING_M
+
+
+def _inline_spacing_from_segy(segy_path: Path) -> float | None:
+    """Measure inline spacing from consecutive inline SourceY values."""
+    try:
+        import segyio
+    except Exception:
+        return None
+    try:
+        with segyio.open(str(segy_path), "r", ignore_geometry=True) as f:
+            TF = segyio.TraceField
+            n = f.tracecount
+            if n < 2:
+                return None
+            # Try SourceY delta across consecutive inlines at the same crossline
+            # (first crossline column). Fall back to CDP_Y if SourceY is zero.
+            def _inline_y(trace_idx: int) -> float | None:
+                h = f.header[trace_idx]
+                y = float(h[TF.SourceY] or 0)
+                if y == 0:
+                    y = float(h[TF.CDP_Y] or 0)
+                return y if y != 0 else None
+
+            # Scan for the first inline step
+            il0 = int(f.header[0][TF.INLINE_3D] or 0)
+            # Find a second inline to estimate per-inline delta
+            for i in range(1, n):
+                il = int(f.header[i][TF.INLINE_3D] or 0)
+                if il != il0 and il != 0:
+                    y0 = _inline_y(0)
+                    y1 = _inline_y(i)
+                    if y0 is not None and y1 is not None:
+                        d_il = abs(il - il0)
+                        if d_il > 0:
+                            return abs(y1 - y0) / d_il
+                    break
+            # Last resort: overall Y extent over inline count span
+            y_first = _inline_y(0)
+            y_last = _inline_y(n - 1)
+            if y_first is not None and y_last is not None:
+                # Inspect 189/193 line numbers when available
+                try:
+                    ils = sorted({int(f.header[i][TF.INLINE_3D] or 0) for i in range(n) if int(f.header[i][TF.INLINE_3D] or 0) != 0})
+                    if len(ils) >= 2:
+                        span = max(ils) - min(ils)
+                        if span > 0:
+                            return abs(y_last - y_first) / span
+                except Exception:
+                    pass
+    except Exception:
+        return None
+    return None
 
 
 def survey_corners_from_segy(
@@ -67,6 +163,15 @@ def survey_corners_from_segy(
     except Exception:
         pass
 
+    # Measure spacing early while we can still open the file cheaply;
+    # the text-header heuristic depends on it when ymin duplicates xmax.
+    # Best effort — failures keep the legacy fallback path.
+    _spacing_for_this_file: float | None = None
+    try:
+        _spacing_for_this_file = _inline_spacing_from_segy(path)
+    except Exception:
+        pass
+
     with segyio.open(str(path), "r", ignore_geometry=True) as f:
         text = ""
         try:
@@ -77,6 +182,12 @@ def survey_corners_from_segy(
         dt_us = int(f.bin[segyio.BinField.Interval] or 2000)
         dt_ms = dt_us / 1000.0
         t0_ms = float(f.samples[0]) if n_samples else 0.0
+
+        # Cache for _parse_text_header_classic when it needs to infer y1 from
+        # the ymin==xmax degeneracy without re-opening the SEGY.
+        global _measured_spacing_cache
+        if _spacing_for_this_file is not None:
+            _measured_spacing_cache = _spacing_for_this_file
 
         classic = _parse_text_header_classic(text)
         if classic is not None and _corners_match_loader_counts(
@@ -194,11 +305,15 @@ def _parse_text_header_classic(text: str) -> tuple | None:
     x0, x1 = float(m_x.group(1)), float(m_x.group(2))
     if m_y:
         y0, y1 = float(m_y.group(1)), float(m_y.group(2))
-        # Text header often duplicates xmax into ymax; recover from IL spacing
+        # Text header often duplicates xmax into ymax; recover y1 from measured
+        # trace-header spacing. Fall back to 40.014634 only when no survey
+        # file is available to measure from (legacy constant, #119).
         if abs(y1 - x1) < 1.0 and il1 > il0:
-            y1 = y0 + (il1 - il0) * 40.014634
+            spacing = _measured_inline_spacing()
+            y1 = y0 + (il1 - il0) * spacing
     else:
-        y0, y1 = 0.0, (il1 - il0) * 40.014634
+        spacing = _measured_inline_spacing()
+        y0, y1 = 0.0, (il1 - il0) * spacing
     p1 = (il0, xl0, x0, y0)
     p2 = (il0, xl1, x1, y0)
     p3 = (il1, xl1, x1, y1)

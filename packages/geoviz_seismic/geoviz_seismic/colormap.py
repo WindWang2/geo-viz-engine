@@ -63,15 +63,46 @@ def _normalize_and_clip(
     if value_range is not None:
         dmin, dmax = value_range
     else:
-        dmin, dmax = xp.nanmin(data), xp.nanmax(data)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            dmin, dmax = xp.nanmin(data), xp.nanmax(data)
 
-    if dmax == dmin:
-        idx = xp.zeros(data.shape, dtype=xp.int32)
-    else:
-        norm = (data - dmin) / (dmax - dmin)
-        idx = xp.clip(
-            (norm * (lut_size - 1)).astype(xp.int32), 0, lut_size - 1
-        )
+    # NaN samples carry no amplitude and must not masquerade as the
+    # deep-negative end of the colour bar. For the diverging seismic LUT
+    # the neutral centre (white) sits at lut_size//2, so NaN maps there
+    # rather than to LUT[0] (dark blue / "strong negative" #119). Masked
+    # paths (outside-horizon / missing-slice) are handled explicitly by
+    # callers such as joint_widget where alpha masking is available; the
+    # conservative centre value avoids a false-amplitude artefact on
+    # callers that only consume the index. Suppress the companion invalid
+    # warnings from (nan - dmin)/(dmax-dmin) and the int32 cast of NaN.
+    nan_mask = None
+    try:
+        nan_mask = xp.isnan(data)
+    except Exception:
+        nan_mask = None
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        if dmax == dmin:
+            idx = xp.zeros(data.shape, dtype=xp.int32)
+            if nan_mask is not None:
+                try:
+                    if bool(xp.any(nan_mask)):
+                        mid = int(lut_size // 2)
+                        idx = xp.where(nan_mask, xp.asarray(mid, dtype=idx.dtype), idx)
+                except Exception:
+                    pass
+        else:
+            norm = (data - dmin) / (dmax - dmin)
+            idx = xp.clip(
+                (norm * (lut_size - 1)).astype(xp.int32), 0, lut_size - 1
+            )
+            if nan_mask is not None:
+                try:
+                    if bool(xp.any(nan_mask)):
+                        mid = int(lut_size // 2)
+                        idx = xp.where(nan_mask, xp.asarray(mid, dtype=idx.dtype), idx)
+                except Exception:
+                    pass
     return xp, idx
 
 

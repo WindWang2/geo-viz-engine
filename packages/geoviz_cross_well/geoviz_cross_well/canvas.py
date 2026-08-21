@@ -164,27 +164,35 @@ class PickingOverlay(QWidget):
         )
 
     def _paint_twt_axis(self, painter: QPainter):
-        """Render TWT axis labels alongside the leftmost canvas depth axis.
+        """Render TWT axis labels alongside the displayed well that owns them.
 
-        Uses the leftmost DISPLAYED well that has a calibration table — the
-        old code took tie-table ``well_names()[0]``, so a CSV subset or order
-        mismatch labeled the axis with a different well's calibration, and it
-        called ``calibration.depth_to_twt`` directly, bypassing
-        ``interpolate_twt``'s None-guard when the well-tie extra is absent
-        (#853).
+        The axis and its labels are drawn per-canvas on the well whose
+        calibration table they come from. Previously the axis was always drawn
+        beside the leftmost displayed canvas while the calibration was taken
+        from the first well anywhere in the tie table that happened to have a
+        table, so a display with two wells where only the second has a table
+        labelled the first well's depth range with the second well's
+        time-depth curve (#119). Now: iterate canvases left-to-right, draw
+        the first canvas that has a table, and skip the axis altogether when
+        none of the displayed canvases has one.
         """
         overlay = self._widget._overlay
         if not self._widget._canvases:
             return
-        first_canvas = self._widget._canvases[0]
-        well = next(
-            (name for name in self._widget._well_names
-             if self._seismic_tie.table_for_well(name) is not None),
-            None,
-        )
-        if well is None:
+        # Select the first *displayed* canvas whose well has a calibration.
+        axis_canvas = None
+        table = None
+        for idx, canvas in enumerate(self._widget._canvases):
+            if idx >= len(self._widget._well_names):
+                break
+            name = self._widget._well_names[idx]
+            cand = self._seismic_tie.table_for_well(name)
+            if cand is not None:
+                axis_canvas = canvas
+                table = cand
+                break
+        if axis_canvas is None or table is None:
             return
-        table = self._seismic_tie.table_for_well(well)
 
         font = QFont()
         font.setPointSize(7)
@@ -192,11 +200,11 @@ class PickingOverlay(QWidget):
         twt_color = QColor(0, 100, 180)
         painter.setPen(QPen(twt_color, 1.0))
 
-        canvas_left = overlay._canvas_left(first_canvas)
+        canvas_left = overlay._canvas_left(axis_canvas)
         axis_x = canvas_left - 42
 
-        depth_top = CrossWellWidget._y_to_depth(first_canvas, 0)
-        depth_bot = CrossWellWidget._y_to_depth(first_canvas, first_canvas.height())
+        depth_top = CrossWellWidget._y_to_depth(axis_canvas, 0)
+        depth_bot = CrossWellWidget._y_to_depth(axis_canvas, axis_canvas.height())
         if depth_top is None or depth_bot is None:
             return
 
@@ -204,10 +212,10 @@ class PickingOverlay(QWidget):
         twt_values = table.interpolate_twt(depth_range)
 
         for depth, twt in zip(depth_range, twt_values):
-            y = overlay.depth_to_y(first_canvas, depth)
+            y = overlay.depth_to_y(axis_canvas, depth)
             painter.drawText(QPointF(axis_x, y + 3), f"{twt:.0f}")
 
-        painter.drawText(QPointF(axis_x, overlay.depth_to_y(first_canvas, depth_top) - 10), "TWT(ms)")
+        painter.drawText(QPointF(axis_x, overlay.depth_to_y(axis_canvas, depth_top) - 10), "TWT(ms)")
 
 
 class _PickEventFilter(QObject):

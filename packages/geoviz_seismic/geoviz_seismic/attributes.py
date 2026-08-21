@@ -55,13 +55,7 @@ def compute_rms_amplitude(
     Returns:
         RMS amplitude array (same shape, non-negative).
     """
-    kernel = np.ones(2 * window + 1) / (2 * window + 1)
-    # Expand kernel to match data dimensions for convolve
-    for _ in range(data.ndim - 1):
-        kernel = kernel[np.newaxis]
-    # Move target axis to last position for uniform_filter-like behaviour
     data_sq = data.astype(np.float64) ** 2
-    # Use uniform_filter1d via cumsum trick for speed
     from scipy.ndimage import uniform_filter1d
     mean_sq = uniform_filter1d(data_sq, size=2 * window + 1, axis=axis, mode="reflect")
     return np.sqrt(np.maximum(mean_sq, 0)).astype(np.float32)
@@ -91,71 +85,6 @@ def compute_relative_impedance(data: np.ndarray, axis: int = -1) -> np.ndarray:
     return np.cumsum(data, axis=axis).astype(np.float32)
 
 
-def compute_spectral_decomposition(
-    data: np.ndarray,
-    freq_bands: list[tuple[float, float]],
-    sample_interval: float = 1.0,
-    axis: int = -1,
-) -> np.ndarray:
-    """Spectral decomposition via STFT bandpass filter bank.
-
-    Decomposes seismic data into frequency-band energy volumes using
-    short-time Fourier transform. Each band produces an envelope-like
-    attribute representing energy in that frequency range.
-
-    Args:
-        data: 2-D seismic amplitude array (n_samples x n_traces).
-        freq_bands: List of (low_freq, high_freq) tuples in Hz.
-            E.g. [(10, 20), (20, 40), (40, 60)] for three bands.
-        sample_interval: Sample interval in seconds.
-        axis: Time/sample axis (default: last).
-
-    Returns:
-        3-D array of shape (n_bands, n_samples, n_traces) with float32
-        envelope energy per band.
-    """
-    from scipy.signal import stft, istft
-
-    data = np.asarray(data, dtype=np.float32)
-    n_bands = len(freq_bands)
-
-    # STFT parameters — window of ~200ms for decent freq resolution
-    nperseg = min(64, data.shape[axis])
-    noverlap = nperseg // 2
-
-    # Work along the time axis
-    data_ax = np.moveaxis(data, axis, -1)
-    orig_shape = data_ax.shape
-    flat = data_ax.reshape(-1, orig_shape[-1])
-
-    f, t_stft, Zxx = stft(flat, fs=1.0 / sample_interval, nperseg=nperseg,
-                           noverlap=noverlap, axis=-1)
-
-    result = np.zeros((n_bands, *data.shape), dtype=np.float32)
-
-    for i, (flo, fhi) in enumerate(freq_bands):
-        mask = (f >= flo) & (f <= fhi)
-        if not np.any(mask):
-            continue
-        Zxx_band = np.zeros_like(Zxx)
-        # Zxx shape: (n_traces, n_freqs, n_time_frames); mask applies to axis 1
-        Zxx_band[:, mask, :] = Zxx[:, mask, :]
-        _, reconstructed = istft(Zxx_band, fs=1.0 / sample_interval,
-                                 nperseg=nperseg, noverlap=noverlap)
-        # Trim/pad to match original length
-        n_samples = orig_shape[-1]
-        if reconstructed.shape[-1] > n_samples:
-            reconstructed = reconstructed[:, :n_samples]
-        elif reconstructed.shape[-1] < n_samples:
-            pad = np.zeros((*reconstructed.shape[:-1], n_samples - reconstructed.shape[-1]))
-            reconstructed = np.concatenate([reconstructed, pad], axis=-1)
-        # Compute envelope of band-limited signal
-        env = np.abs(_analytic_signal(
-            np.moveaxis(reconstructed.reshape(orig_shape), -1, axis), axis=axis
-        ))
-        result[i] = env.astype(np.float32)
-
-    return result
 
 
 def _power_iteration_c3(traces, n_iter: int = 30):

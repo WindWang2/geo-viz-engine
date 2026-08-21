@@ -15,51 +15,6 @@ from .picks_model import HorizonPick
 from .tops_model import _FORMATION_PALETTE
 
 
-def depth_range_clip_filter(
-    ties: list[dict[str, Any]], vp_top_depth: float, vp_bottom_depth: float
-) -> list[dict[str, Any]]:
-    """Filter out formation ties completely outside the visible viewport depth range."""
-    visible = []
-    for tie in ties:
-        top = tie.get("top_depth", 0.0)
-        bottom = tie.get("bottom_depth", top)
-        # Check if overlaps with [vp_top_depth, vp_bottom_depth]
-        if max(top, bottom) >= vp_top_depth and min(top, bottom) <= vp_bottom_depth:
-            visible.append(tie)
-    return visible
-
-
-def douglas_peucker_simplify(points: np.ndarray, epsilon: float = 0.5) -> np.ndarray:
-    """Douglas-Peucker 2D polyline simplification algorithm using screen pixel tolerance epsilon."""
-    if len(points) <= 2:
-        return points
-
-    # Find point with maximum distance from line between first and last
-    first = points[0]
-    last = points[-1]
-
-    vec = last - first
-    line_len_sq = np.dot(vec, vec)
-
-    if line_len_sq == 0:
-        dists = np.linalg.norm(points - first, axis=1)
-    else:
-        # Perpendicular distance formula
-        num = np.abs(vec[1] * points[:, 0] - vec[0] * points[:, 1] + last[0] * first[1] - last[1] * first[0])
-        dists = num / np.sqrt(line_len_sq)
-
-    index = np.argmax(dists)
-    max_dist = dists[index]
-
-    if max_dist > epsilon:
-        # Recursive call
-        left = douglas_peucker_simplify(points[: index + 1], epsilon)
-        right = douglas_peucker_simplify(points[index:], epsilon)
-        return np.vstack((left[:-1], right))
-    else:
-        return np.array([first, last])
-
-
 def _depth_to_y(canvas: Any, overlay: ConnectionOverlay, depth: float) -> float:
     return overlay.depth_to_y(canvas, depth)
 
