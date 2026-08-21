@@ -949,3 +949,36 @@ def test_horizon_backend_rejects_wrong_widget_or_payload(qtbot):
         backend.release(widget)
 
     assert caught.value.code is ErrorCode.RENDER_ERROR
+
+
+def test_well_head_prepare_surfaces_optional_uwi_column(tmp_path: Path):
+    path = tmp_path / "uwi.dat"
+    path.write_text(
+        "\n".join(
+            [
+                "#WellHead File From SMI",
+                "#Name X Y UWI",
+                "Alpha 100 500 U-001",
+                "Beta 130 480 -",
+                "Gamma 125 525 U-003",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    engine = GeoVizEngine.default()
+    preview = engine.prepare(
+        _request(path, "well_head"), PreviewOptions(max_points=10)
+    )
+    payload = preview.payload
+    assert isinstance(payload, XYPreviewPayload)
+    # Placeholder ("-") passes through verbatim; consumers normalize.
+    assert payload.uwis == ("U-001", "-", "U-003")
+    assert len(payload.uwis) == len(payload.names)
+
+
+def test_well_head_prepare_without_uwi_yields_empty_tuple(well_head_dat: Path):
+    engine = GeoVizEngine.default()
+    preview = engine.prepare(
+        _request(well_head_dat, "well_head"), PreviewOptions(max_points=10)
+    )
+    assert preview.payload.uwis == ()
