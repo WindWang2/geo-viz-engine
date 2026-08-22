@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **井震联合 Time 平面与井序 fence**：`WellPierce` / `pierce_xy_at_z` 在 ActiveTimeSlice 上求井轨迹穿点；按井序连线并抽取井间剖面。`TimeSliceMap2D` 画 Time 平面点井连线。
+- **三维井口编号**：井口用 `GLTextItem` 画进 GLES FBO（QLabel 子控件无法叠到 OpenGL 表面上）。
+- **正交切片 / 三维体互斥**：`set_planes_visible` 在 planes 模式下不再把 DualGL 体砖重新显示出来。
+
+### Changed
+- 三维体砖与正交切片共用 `compute_balanced_spacing`；DualGL 体砖按 time-down（sample-0 在顶）放置。
+- 井间 2D 剖面随控件尺寸重绘，铺满面板。
+
 ## [0.20.0] - 2026-07-04
 
 ### Added

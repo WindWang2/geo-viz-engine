@@ -9,6 +9,47 @@ from .models import TimeDepthTable, VerticalDomain, WellHead, WellTrajectory3D
 _DEFAULT_SAMPLES = 32
 
 
+def pierce_xy_at_z(
+    points: np.ndarray, z: float, *, atol: float = 1e-6
+) -> tuple[float, float] | None:
+    """XY where a trajectory crosses the horizontal plane *z*.
+
+    ``points`` is ``(N, 3)`` in the same vertical units as *z*. Returns
+    ``None`` when the path does not reach that plane.
+    """
+    pts = np.asarray(points, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] != 3 or len(pts) == 0:
+        return None
+    zs = pts[:, 2]
+    z = float(z)
+    exact = np.where(np.abs(zs - z) <= atol)[0]
+    if len(exact):
+        i = int(exact[0])
+        return float(pts[i, 0]), float(pts[i, 1])
+    if len(pts) < 2 or not np.isfinite(z):
+        return None
+    finite = np.isfinite(zs)
+    if not np.any(finite):
+        return None
+    lo = float(np.nanmin(zs))
+    hi = float(np.nanmax(zs))
+    if z < lo - atol or z > hi + atol:
+        return None
+    for i in range(len(pts) - 1):
+        z0, z1 = float(zs[i]), float(zs[i + 1])
+        if not np.isfinite(z0) or not np.isfinite(z1):
+            continue
+        if (z0 - z) * (z1 - z) > 0:
+            continue
+        denom = z1 - z0
+        t = 0.0 if abs(denom) < atol else (z - z0) / denom
+        t = max(0.0, min(1.0, float(t)))
+        x = pts[i, 0] + t * (pts[i + 1, 0] - pts[i, 0])
+        y = pts[i, 1] + t * (pts[i + 1, 1] - pts[i, 1])
+        return float(x), float(y)
+    return None
+
+
 def project_well_trajectory(
     well: WellHead,
     *,

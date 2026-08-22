@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QSlider, QCheckBox,
 )
 
-from .renderer_3d import Renderer3D
+from .renderer_3d import Renderer3D, compute_balanced_spacing
 from .profile_widget import ProfileWidget
 from .loader import SeismicLoader
 from .cache import RamSliceCache, SeismicCache
@@ -244,12 +244,7 @@ class SeismicView(QWidget):
     @staticmethod
     def _compute_balanced_spacing(shape: tuple[int, ...], target: float = 200.0) -> tuple[float, float, float]:
         """Compute spacing that normalizes each axis to approximately *target* visual units."""
-        ni, nx, nt = shape
-        return (
-            target / max(ni, 1),
-            target / max(nx, 1),
-            target / max(nt, 1),
-        )
+        return compute_balanced_spacing(shape, target)
 
     def cleanup(self):
         """Stop background workers and cleanup GPU resources before page switch."""
