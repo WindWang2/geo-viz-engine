@@ -111,3 +111,170 @@ def test_well_overlay_specs_large_tracks_are_fast():
     cached = time.perf_counter() - t1
     assert again is specs
     assert cached < 0.02
+
+
+def test_index_xyz_to_world_sample0_at_box_top():
+    """GL overlays must use Renderer3D time-down Z (sample 0 at top)."""
+    from geoviz_seismic.renderer_3d import sample_to_z
+
+    host = WellSeismicJointWidget.__new__(WellSeismicJointWidget)
+    host._scene = None
+
+    class _Renderer:
+        _volume_spacing = (1.0, 1.0, 2.0)
+        _volume_data_cpu = np.zeros((8, 9, 20), dtype=np.float32)
+
+    host._renderer = _Renderer()
+    world = host._index_xyz_to_world(np.array([[3.0, 4.0, 0.0], [3.0, 4.0, 19.0]]))
+    assert world[0, 0] == pytest.approx(3.0)
+    assert world[0, 1] == pytest.approx(4.0)
+    assert world[0, 2] == pytest.approx(sample_to_z(0, 20, 2.0))
+    assert world[1, 2] == pytest.approx(sample_to_z(19, 20, 2.0))
+    assert world[0, 2] > world[1, 2]
+
+
+def test_traj_without_renderer_stays_in_index_space():
+    scene = _scene_with_gr(1, 32)
+    host = _overlay_host(scene)
+    track = next(iter(scene.gr_well_trajectories().values()))
+    pos = host._traj_to_render(track.points)
+    idx = scene.world_to_render_xyz_array(track.points)
+    np.testing.assert_allclose(pos, idx, atol=1e-5)
+
+
+def test_sync_from_scene_load_volume_uses_balanced_spacing():
+    """Joint 3D cube must use the same axis-balanced spacing as SeismicView."""
+    from geoviz_well_seismic_3d.volume_access import InMemoryVolumeAccess
+
+    data = np.zeros((10, 20, 40), dtype=np.float32)
+    scene = WellSeismicScene()
+    scene.set_survey_from_corners(P1, P2, P3, n_samples=40, dt_ms=2.0)
+    scene.set_volume_access(InMemoryVolumeAccess(data))
+
+    host = WellSeismicJointWidget.__new__(WellSeismicJointWidget)
+    host._scene = scene
+    host._last_volume_key = None
+    host._cmap_applied = False
+    host._profile = None
+    host._gr_legend = None
+    host._well_items = []
+    host._curtain_items = []
+    host._probe_item = None
+    host._overlay_specs_token = None
+    host._overlay_specs_cached = None
+    host._status = type("Status", (), {"setText": lambda self, text: None})()
+    called = {}
+
+    class _Renderer:
+        _loaded = False
+
+        def load_volume(self, arr, **kwargs):
+            called["spacing"] = kwargs.get("spacing")
+            called["shape"] = tuple(arr.shape)
+            self._loaded = True
+
+        def set_render_mode(self, mode):
+            called["mode"] = mode
+
+        def set_colormap(self, name):
+            called["cmap"] = name
+
+        def set_survey_mapping(self, **kwargs):
+            called["survey"] = kwargs
+
+    host._renderer = _Renderer()
+    host.set_well_trajectories = lambda *args, **kwargs: None
+    host.set_fence_curtains = lambda *args, **kwargs: None
+    host.sync_orthogonal_slices = lambda: None
+    host._sync_from_scene()
+    assert called["shape"] == (10, 20, 40)
+    # Same formula SeismicView uses: each axis maps to ~200 world units.
+    assert called["spacing"] == pytest.approx((20.0, 10.0, 5.0))
+
+
+def test_apply_survey_mapping_pushes_t0_dt_strides():
+    host = WellSeismicJointWidget.__new__(WellSeismicJointWidget)
+    scene = WellSeismicScene()
+    scene.set_survey_from_corners(P1, P2, P3, n_samples=901, dt_ms=2.0)
+
+    class _Vol:
+        strides = (5, 4, 6)
+
+    scene._volume = _Vol()
+    host._scene = scene
+    called = {}
+
+    class _Renderer:
+        def set_survey_mapping(self, **kwargs):
+            called.update(kwargs)
+
+    host._renderer = _Renderer()
+    host._apply_survey_mapping()
+    assert called["t0_ms"] == pytest.approx(0.0)
+    assert called["dt_ms"] == pytest.approx(2.0)
+    assert called["ds_factor"] == (5, 4, 6)
+
+
+def test_set_well_trajectories_adds_gl_text_head_labels():
+    """Well-head numbers must be GLTextItem (QLabel children never hit the GLES FBO)."""
+    scene = _scene_with_gr(2, 16)
+    host = _overlay_host(scene)
+    added = []
+
+    class _View:
+        def addItem(self, item):
+            added.append(item)
+
+        def removeItem(self, item):
+            pass
+
+    class _Text:
+        def __init__(self, pos=None, text="", color=None, **_kw):
+            self.pos = pos
+            self.text = text
+            self.color = color
+
+    class _GL:
+        class GLLinePlotItem:
+            def __init__(self, **_kw):
+                pass
+
+        class GLScatterPlotItem:
+            def __init__(self, **_kw):
+                pass
+
+        GLTextItem = _Text
+
+    host._gl = _GL
+    host._renderer = type("R", (), {"_view": _View()})()
+    host._well_items = []
+    host._gr_legend = None
+    host._name_chips = []
+    host._update_gr_legend = lambda: None
+    host.set_well_trajectories(scene.well_trajectories(visible_only=True))
+    labels = [item.text for item in added if isinstance(item, _Text)]
+    assert labels == ["W0", "W1"]
+    for item in added:
+        if isinstance(item, _Text):
+            assert item.color[0] >= 200
+            assert item.color[3] == 255
+
+
+def test_well_name_chips_are_not_shown(qtbot):
+    """QLabel chips duplicate GLTextItem names; they must stay hidden."""
+    from PySide6.QtWidgets import QLabel, QWidget
+
+    view = QWidget()
+    view.resize(400, 300)
+    qtbot.addWidget(view)
+    view.show()
+    leftover = QLabel("A1", view)
+    leftover.show()
+    host = WellSeismicJointWidget.__new__(WellSeismicJointWidget)
+    host._renderer = type("R", (), {"_view": view})()
+    host._name_chips = [leftover]
+    host._gr_legend = None
+    host._sync_well_name_chips()
+    visible = [chip for chip in host._name_chips if chip.isVisible()]
+    assert visible == []
+    assert leftover.isVisible() is False

@@ -122,6 +122,18 @@ class TimeDepthTable:
         return np.interp(twt, self.time_ms, self.md_m)
 
 
+@dataclass(frozen=True)
+class WellPierce:
+    """Well trajectory intersection with the ActiveTimeSlice (survey XY + TWT)."""
+
+    well_id: JointWellId
+    name: str
+    display_name: str
+    x: float
+    y: float
+    z: float
+
+
 @dataclass
 class WellTrajectory3D:
     """Well path in scene coordinates (x, y, z) for the active vertical domain."""

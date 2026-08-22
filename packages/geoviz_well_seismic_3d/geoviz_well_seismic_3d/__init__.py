@@ -18,6 +18,7 @@ from .models import (
     VerticalDomain,
     WellGrTrajectory,
     WellHead,
+    WellPierce,
     WellTrajectory3D,
 )
 from .probe import ProbeState, probe_from_fence_s
@@ -33,6 +34,7 @@ from .volume_access import InMemoryVolumeAccess, VolumeAccess
 from .well_geometry import (
     build_synthetic_seismogram_overlay,
     offset_curve_along_trajectory,
+    pierce_xy_at_z,
     project_well_trajectory,
 )
 
@@ -59,12 +61,14 @@ __all__ = [
     "VolumeRegistration",
     "WellGrTrajectory",
     "WellHead",
+    "WellPierce",
     "WellSeismicScene",
     "WellTrajectory3D",
     "extract_fence_strip",
     "align_horizon_corners_to_loader_axes",
     "horizon_corners_from_dat",
     "offset_curve_along_trajectory",
+    "pierce_xy_at_z",
     "build_synthetic_seismogram_overlay",
     "probe_from_fence_s",
     "project_well_trajectory",

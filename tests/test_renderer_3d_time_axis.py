@@ -34,6 +34,13 @@ def test_sample_to_z_sample0_at_top():
     assert sample_to_z(0, NT, ST) == pytest.approx(NT * ST)
 
 
+def test_compute_balanced_spacing_maps_each_axis_to_target():
+    from geoviz_seismic.renderer_3d import compute_balanced_spacing
+
+    si, sx, st = compute_balanced_spacing((10, 20, 40), target=200.0)
+    assert (si * 10, sx * 20, st * 40) == pytest.approx((200.0, 200.0, 200.0))
+
+
 def test_sample_to_z_last_sample_near_bottom():
     from geoviz_seismic.renderer_3d import sample_to_z
 
@@ -60,6 +67,21 @@ def test_z_to_sample_round_trip():
 
 def _map_point(item, x, y, z=0.0):
     return item.transform().map(QVector3D(x, y, z))
+
+
+def test_volume_visual_sample0_at_box_top(loaded_renderer):
+    """Volume-render brick must occupy the same time-down box as slice planes."""
+    from geoviz_seismic.renderer_3d import sample_to_z
+
+    widget = loaded_renderer
+    vis = widget._volume_visual
+    assert vis is not None
+    matrix = vis.transform()
+    origin = matrix.map(QVector3D(0, 0, 0))
+    far = matrix.map(QVector3D(0, 0, vis.data.shape[2]))
+    assert origin.z() == pytest.approx(sample_to_z(0, NT, ST))
+    assert far.z() == pytest.approx(0.0)
+    assert origin.z() > far.z()
 
 
 def test_time_plane_translated_to_mirrored_height(loaded_renderer):

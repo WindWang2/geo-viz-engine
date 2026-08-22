@@ -18,13 +18,14 @@ from .models import (
     VerticalDomain,
     WellGrTrajectory,
     WellHead,
+    WellPierce,
     WellTrajectory3D,
 )
 from .probe import ProbeState, probe_from_fence_s
 from .registration import VolumeRegistration
 from .survey import Corner, SurveySpec, survey_from_corners
 from .volume_access import VolumeAccess
-from .well_geometry import project_well_trajectory
+from .well_geometry import pierce_xy_at_z, project_well_trajectory
 
 DEFAULT_CURVE_FALLBACK = ("GR", "DT", "RHOB")
 
@@ -72,6 +73,8 @@ class WellSeismicScene:
         self._traj_cache: dict[JointWellId, WellTrajectory3D] | None = None
         self._fences: list[FenceSection] = []
         self._active_fence_id: str | None = None
+        self._fence_well_ids: list[JointWellId] = []
+        self._well_order_fence_id: str | None = None
         # Key: (fence_id, VerticalDomain value, n_along) so Time/Depth extracts coexist
         self._extract_cache: dict[tuple, FenceExtraction] = {}
         self._probe: ProbeState | None = None
@@ -369,6 +372,7 @@ class WellSeismicScene:
         }
         values.update(changes)
         self._orthogonal_slice_state = OrthogonalSliceState(**values)
+        self._sync_well_order_fence()
 
     def _find_time_slice(
         self, time_ms: float | None
@@ -478,6 +482,7 @@ class WellSeismicScene:
             active_time_ms=active_item.time_ms,
             time_opacity=state.time_opacity,
         )
+        self._sync_well_order_fence()
         self._slice_state_warning = (
             f"已丢弃 {dropped} 张越界 Time 切片"
             if dropped
@@ -514,6 +519,7 @@ class WellSeismicScene:
         self._domain = domain
         self._invalidate_traj()
         self._extract_cache.clear()
+        self._sync_well_order_fence()
 
     # ------------------------------------------------------------------
     # Wells
@@ -551,7 +557,10 @@ class WellSeismicScene:
             for well_id in self._well_ids
         }
         self._td_tables = dict(td_tables or {})
+        known = set(self._well_ids)
+        self._fence_well_ids = [wid for wid in self._fence_well_ids if wid in known]
         self._invalidate_traj()
+        self._sync_well_order_fence()
 
     def well_presentations(self) -> list[JointWellPresentation]:
         """Return wells in source order with stable identities and unique labels."""
@@ -849,6 +858,9 @@ class WellSeismicScene:
             for k, v in self._extract_cache.items()
             if not (isinstance(k, tuple) and k and k[0] == fence_id)
         }
+        if fence_id == self._well_order_fence_id:
+            self._well_order_fence_id = None
+            self._fence_well_ids = []
         if self._active_fence_id == fence_id:
             self._active_fence_id = self._fences[-1].id if self._fences else None
 
@@ -868,6 +880,8 @@ class WellSeismicScene:
         """
         self._fences = []
         self._active_fence_id = None
+        self._fence_well_ids = []
+        self._well_order_fence_id = None
         self._extract_cache.clear()
         self._probe = None
 
@@ -881,20 +895,147 @@ class WellSeismicScene:
     def add_well_to_well_fence(
         self, well_refs: list[JointWellId | str], *, name: str = "Wells"
     ) -> FenceSection:
-        xy = []
-        by_id = dict(zip(self._well_ids, self._wells, strict=True))
-        name_counts = Counter(well.name for well in self._wells)
-        by_unique_name = {
-            well.name: well
-            for well in self._wells
-            if name_counts[well.name] == 1
-        }
+        ids: list[JointWellId] = []
+        seen: set[JointWellId] = set()
         for ref in well_refs:
-            w = by_id.get(ref, by_unique_name.get(ref))
-            if w is None:
-                raise KeyError(ref)
-            xy.append((w.x, w.y))
-        fence = FenceSection(name=name, vertices_xy=well_to_well_path(xy))
+            well_id = self._resolve_well_ref(ref)
+            if well_id in seen:
+                continue
+            seen.add(well_id)
+            ids.append(well_id)
+        self._fence_well_ids = ids
+        fence = self._sync_well_order_fence(name=name)
+        if fence is None:
+            raise ValueError("无时深，无法投影到当前 Time")
+        return fence
+
+    @property
+    def fence_well_ids(self) -> list[JointWellId]:
+        return list(self._fence_well_ids)
+
+    def pierce_points_on_active_time(
+        self, *, visible_only: bool = True
+    ) -> list[WellPierce]:
+        """Visible wells that intersect ActiveTimeSlice (Time domain only)."""
+        if self._domain is not VerticalDomain.TIME:
+            return []
+        time_ms = self._orthogonal_slice_state.active_time_ms
+        if time_ms is None:
+            return []
+        presentations = {
+            item.id: item for item in self.well_presentations()
+        }
+        out: list[WellPierce] = []
+        for well_id, traj in self.well_trajectories(visible_only=visible_only).items():
+            if not traj.has_td:
+                continue
+            xy = pierce_xy_at_z(traj.points, float(time_ms))
+            if xy is None:
+                continue
+            info = presentations.get(well_id)
+            out.append(
+                WellPierce(
+                    well_id=well_id,
+                    name=info.name if info is not None else traj.name,
+                    display_name=(
+                        info.display_name if info is not None else traj.name
+                    ),
+                    x=xy[0],
+                    y=xy[1],
+                    z=float(time_ms),
+                )
+            )
+        return out
+
+    def append_fence_well(self, well_ref: JointWellId | str) -> bool:
+        """Append a piercing well to the Time-slice path. Duplicates are ignored."""
+        well_id = self._resolve_well_ref(well_ref)
+        if well_id in self._fence_well_ids:
+            return False
+        piercing = {p.well_id for p in self.pierce_points_on_active_time()}
+        if well_id not in piercing:
+            raise ValueError("无时深，无法投影到当前 Time")
+        self._fence_well_ids.append(well_id)
+        self._sync_well_order_fence()
+        return True
+
+    def pop_fence_well(self) -> JointWellId | None:
+        if not self._fence_well_ids:
+            return None
+        well_id = self._fence_well_ids.pop()
+        self._sync_well_order_fence()
+        return well_id
+
+    def _resolve_well_ref(self, well_ref: JointWellId | str) -> JointWellId:
+        by_id = dict(zip(self._well_ids, self._wells, strict=True))
+        if well_ref in by_id:
+            return JointWellId(str(well_ref))
+        name_counts = Counter(well.name for well in self._wells)
+        for well_id, well in zip(self._well_ids, self._wells, strict=True):
+            if well.name == well_ref and name_counts[well.name] == 1:
+                return well_id
+        raise KeyError(well_ref)
+
+    def _head_xy(self, well_id: JointWellId) -> tuple[float, float]:
+        for item_id, well in zip(self._well_ids, self._wells, strict=True):
+            if item_id == well_id:
+                return float(well.x), float(well.y)
+        raise KeyError(well_id)
+
+    def _drop_well_order_fence(self) -> None:
+        fence_id = self._well_order_fence_id
+        self._well_order_fence_id = None
+        if not fence_id:
+            return
+        self._fences = [f for f in self._fences if f.id != fence_id]
+        self._extract_cache = {
+            k: v
+            for k, v in self._extract_cache.items()
+            if not (isinstance(k, tuple) and k and k[0] == fence_id)
+        }
+        if self._active_fence_id == fence_id:
+            self._active_fence_id = self._fences[-1].id if self._fences else None
+
+    def _sync_well_order_fence(self, *, name: str | None = None) -> FenceSection | None:
+        if not self._fence_well_ids:
+            return None
+        if (
+            self._domain is VerticalDomain.TIME
+            and self._orthogonal_slice_state.active_time_ms is not None
+        ):
+            piercing = {
+                p.well_id: p for p in self.pierce_points_on_active_time(visible_only=False)
+            }
+            xy = []
+            for well_id in self._fence_well_ids:
+                hit = piercing.get(well_id)
+                if hit is not None:
+                    xy.append((hit.x, hit.y))
+        else:
+            xy = [self._head_xy(well_id) for well_id in self._fence_well_ids]
+        if len(xy) < 2:
+            self._drop_well_order_fence()
+            return None
+        verts = well_to_well_path(xy)
+        existing = None
+        if self._well_order_fence_id:
+            for fence in self._fences:
+                if fence.id == self._well_order_fence_id:
+                    existing = fence
+                    break
+        if existing is not None:
+            existing.vertices_xy = np.asarray(verts, dtype=np.float64).reshape(-1, 2)
+            if name:
+                existing.name = name
+            self._extract_cache = {
+                k: v
+                for k, v in self._extract_cache.items()
+                if not (isinstance(k, tuple) and k and k[0] == existing.id)
+            }
+            self._active_fence_id = existing.id
+            return existing
+        fence = FenceSection(name=name or "Wells", vertices_xy=verts)
+        self._well_order_fence_id = fence.id
         return self.add_fence(fence, activate=True)
 
     def active_fence(self) -> FenceSection | None:

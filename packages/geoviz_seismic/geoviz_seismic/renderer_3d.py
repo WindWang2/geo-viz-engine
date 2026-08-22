@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 # The 2D profile panels draw sample-0 at the top (industry standard), so the
 # 3D scene must match: sample-0 sits at the TOP of the world box (z = nt*st)
 # and time increases DOWNWARD. All Z-anchored overlays (slice planes, walls,
-# horizons, picks, cursor, annotations, click ray-cast) must go through these
-# two helpers so the mapping stays invertible and consistent.
+# volume brick, horizons, picks, cursor, annotations, click ray-cast) must
+# go through these two helpers so the mapping stays invertible and consistent.
 # ---------------------------------------------------------------------------
 
 def sample_to_z(sample_index, nt: int, st: float):
@@ -55,6 +55,18 @@ def z_to_sample(z, nt: int, st: float):
     """
     s = float(nt) - np.asarray(z, dtype=np.float64) / float(st)
     return float(s) if s.ndim == 0 else s
+
+
+def compute_balanced_spacing(
+    shape, target: float = 200.0
+) -> tuple[float, float, float]:
+    """Spacing that maps each axis of *shape* to about *target* world units."""
+    ni, nx, nt = int(shape[0]), int(shape[1]), int(shape[2])
+    return (
+        float(target) / max(ni, 1),
+        float(target) / max(nx, 1),
+        float(target) / max(nt, 1),
+    )
 
 
 def compute_normal_map(data: np.ndarray) -> np.ndarray:
@@ -1116,7 +1128,11 @@ class DualGLVolumeItem(gl.GLVolumeItem):
             GL.glUniform1i(loc_sculpt_en, 1 if self._sculpting_enabled else 0)
             
             loc_sculpt_mode = GL.glGetUniformLocation(program, "u_sculpt_mode")
-            mode_val = 0 if self._sculpting_mode == "below" else 1
+            # Shader texcoord.z still increases with sample index. After the
+            # time-down brick transform, later samples sit lower in world Z,
+            # so "above" (keep the upper cube = early time) discards later
+            # samples (mode 0).
+            mode_val = 0 if self._sculpting_mode == "above" else 1
             GL.glUniform1i(loc_sculpt_mode, mode_val)
             
             loc_shading_en = GL.glGetUniformLocation(program, "u_shading_enabled")
@@ -1898,7 +1914,6 @@ class Renderer3D(QWidget):
             cmap_data_overlay[:, 3] = alpha_curve_overlay.astype(np.uint8)
 
             # Instantiate our high-performance custom DualGLVolumeItem
-            si, sx, st = self._volume_spacing
             self._volume_visual = DualGLVolumeItem(vol_data_combined, normal_data=normal_data, sliceDensity=3, smooth=True)
             self._volume_visual.setColormaps(cmap_data_primary, cmap_data_overlay)
             self._volume_visual.setOverlayOpacity(self._overlay_opacity)
@@ -1913,7 +1928,7 @@ class Renderer3D(QWidget):
                 self._sculpt_mode
             )
             self._volume_visual.setShading(self._shading_enabled)
-            self._volume_visual.scale(si * 2, sx * 2, st * 2)
+            self._apply_volume_visual_transform()
 
             self._view.addItem(self._volume_visual)
             if self._mode != "volume":
@@ -1921,6 +1936,28 @@ class Renderer3D(QWidget):
             self._view.update()
         except Exception as e:
             logger.warning(f"Rebuild volume visual failed: {e}", exc_info=True)
+
+    def _apply_volume_visual_transform(
+        self, scale_x: float = 1.0, scale_y: float = 1.0
+    ) -> None:
+        """Place the downsampled volume brick in the time-down world box.
+
+        DualGLVolumeItem is uploaded at [::2], so voxel pitch is 2× spacing.
+        Negative Z scale + a translate to ``sample_to_z(0)`` puts sample 0
+        at the top of the box, matching the orthogonal slice planes.
+        """
+        vis = self._volume_visual
+        vol = self._volume_data_cpu
+        if vis is None or vol is None:
+            return
+        si, sx, st = self._volume_spacing
+        vis.resetTransform()
+        vis.scale(
+            float(si) * 2.0 * float(scale_x),
+            float(sx) * 2.0 * float(scale_y),
+            -float(st) * 2.0,
+        )
+        vis.translate(0.0, 0.0, sample_to_z(0, int(vol.shape[2]), st))
 
     def _get_normal_map(self, primary_data: np.ndarray) -> np.ndarray:
         """Return the cached hillshading normal map for the current volume.
@@ -2173,8 +2210,7 @@ class Renderer3D(QWidget):
             scale_y = wy / max(1, nx * sx)
 
             if self._volume_visual is not None:
-                self._volume_visual.resetTransform()
-                self._volume_visual.scale(si * 2 * scale_x, sx * 2 * scale_y, st * 2)
+                self._apply_volume_visual_transform(scale_x=scale_x, scale_y=scale_y)
 
             max_grid_len = max(wx, wy) * 1.5
             self._base_grid.setSize(max_grid_len, max_grid_len)
@@ -2216,8 +2252,7 @@ class Renderer3D(QWidget):
             cz = (nt * st) / 2.0
 
             if self._volume_visual is not None:
-                self._volume_visual.resetTransform()
-                self._volume_visual.scale(si * 2, sx * 2, st * 2)
+                self._apply_volume_visual_transform()
 
             max_grid_len = max(ni * si, nx * sx) * 1.5
             self._base_grid.setSize(max_grid_len, max_grid_len)
@@ -3083,7 +3118,6 @@ class Renderer3D(QWidget):
             "_img_xl",
             "_line_il",
             "_line_xl",
-            "_volume_visual",
             "_img_arb",
             "_line_arb",
         ):
@@ -3092,6 +3126,14 @@ class Renderer3D(QWidget):
                 continue
             try:
                 item.setVisible(vis)
+            except Exception:
+                pass
+        # Orthogonal-slice mode must not un-hide the DualGL brick: joint
+        # "地震预览体" means the IL/XL/Time planes, not volume fill.
+        volume = getattr(self, "_volume_visual", None)
+        if volume is not None and getattr(self, "_mode", "planes") != "volume":
+            try:
+                volume.setVisible(False)
             except Exception:
                 pass
         time_items = getattr(self, "_time_plane_items", {})

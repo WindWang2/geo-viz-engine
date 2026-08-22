@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 # Workbench seismic scale keys → Renderer3D LUT names (kept consistent with
 # color_scales.SEISMIC_COLOR_SCALES used by the 2D fence profile).
 _RENDER_CMAP = {
@@ -65,6 +66,7 @@ class WellSeismicJointWidget(QWidget):
         self._gl = None
         self._well_items: list = []
         self._curtain_items: list = []
+        self._pierce_items: list = []
         self._probe_item = None
         # Volume identity last uploaded to the renderer (skip redundant
         # whole-volume GPU re-uploads on colour/fence/domain refreshes).
@@ -73,6 +75,7 @@ class WellSeismicJointWidget(QWidget):
         self._overlay_specs_token = None
         self._overlay_specs_cached = None
         self._gr_legend: QLabel | None = None
+        self._name_chips: list[QLabel] = []
         self._status = QLabel("井震联合场景未加载")
         self._status.setStyleSheet("color: #64748b; padding: 4px 8px;")
 
@@ -102,7 +105,17 @@ class WellSeismicJointWidget(QWidget):
         except Exception as exc:  # pragma: no cover
             logger.warning("Renderer3D unavailable: %s", exc)
             self._renderer = None
+            self._name_chips = []
             layout.addWidget(QLabel(f"地震三维渲染不可用: {exc}"), 1)
+
+        try:
+            from .time_map_2d import TimeSliceMap2D
+
+            self._time_map = TimeSliceMap2D(self)
+            self._time_map.well_clicked.connect(self._on_time_map_well)
+            layout.addWidget(self._time_map, 0)
+        except Exception:
+            self._time_map = None
 
         try:
             from .profile_2d import FenceProfile2D
@@ -211,10 +224,19 @@ class WellSeismicJointWidget(QWidget):
         return specs
 
     def take_profile_widget(self):
-        """Detach fence 2D profile for embedding in a separate host panel."""
-        profile = getattr(self, "_profile", None)
-        self._profile = None
-        return profile
+        """Detach fence 2D profile for embedding in a separate host panel.
+
+        The widget keeps its ``_profile`` reference so scene sync still
+        refreshes the (now reparented) strip.
+        """
+        return getattr(self, "_profile", None)
+
+    def take_time_map_widget(self):
+        """Detach ActiveTimeSlice map for embedding in a host panel.
+
+        Keep ``_time_map`` so load/slider sync still paints the map.
+        """
+        return getattr(self, "_time_map", None)
 
     def slice_indices(self) -> tuple[int, int, int] | None:
         """Current orthogonal slice indices (il, xl, sample) if renderer is ready."""
@@ -236,6 +258,21 @@ class WellSeismicJointWidget(QWidget):
         except Exception:
             return None
 
+    def set_seismic_render_mode(self, mode: str) -> None:
+        """Switch the 3D host between orthogonal planes and volume fill."""
+        renderer = self._renderer
+        if renderer is None:
+            return
+        kind = "volume" if str(mode).lower().startswith("vol") else "planes"
+        set_mode = getattr(renderer, "set_render_mode", None)
+        if callable(set_mode):
+            set_mode(kind)
+        if kind == "planes":
+            set_planes = getattr(renderer, "set_planes_visible", None)
+            if callable(set_planes):
+                set_planes(True)
+        self._discard_well_name_chips()
+
     def set_layer_visibility(
         self,
         *,
@@ -254,30 +291,56 @@ class WellSeismicJointWidget(QWidget):
                 self._renderer.setVisible(True)
             except Exception:
                 pass
-            set_planes = getattr(self._renderer, "set_planes_visible", None)
-            if callable(set_planes):
-                try:
-                    set_planes(bool(volume))
-                except Exception:
-                    pass
-            else:
-                # Fallback: hide known plane attributes without hiding widget
-                for attr in ("_img_il", "_img_xl", "_img_t", "_line_il", "_line_xl", "_line_t"):
-                    item = getattr(self._renderer, attr, None)
-                    if item is None:
-                        continue
+            mode = str(getattr(self._renderer, "_mode", "planes") or "planes")
+            if mode == "volume":
+                visual = getattr(self._renderer, "_volume_visual", None)
+                if visual is not None:
                     try:
-                        item.setVisible(bool(volume))
+                        visual.setVisible(bool(volume))
                     except Exception:
                         pass
+                set_planes = getattr(self._renderer, "set_planes_visible", None)
+                if callable(set_planes):
+                    try:
+                        set_planes(False)
+                    except Exception:
+                        pass
+            else:
+                set_planes = getattr(self._renderer, "set_planes_visible", None)
+                if callable(set_planes):
+                    try:
+                        set_planes(bool(volume))
+                    except Exception:
+                        pass
+                else:
+                    for attr in (
+                        "_img_il",
+                        "_img_xl",
+                        "_img_t",
+                        "_line_il",
+                        "_line_xl",
+                        "_line_t",
+                    ):
+                        item = getattr(self._renderer, attr, None)
+                        if item is None:
+                            continue
+                        try:
+                            item.setVisible(bool(volume))
+                        except Exception:
+                            pass
         # Rebuild overlays according to flags
         if scene is not None:
             if wells:
                 self.set_well_trajectories(
                     scene.well_trajectories(visible_only=True)
                 )
+                self.set_time_pierce_overlays()
             else:
                 self.set_well_trajectories({})
+                if not hasattr(self, "_pierce_items") or self._pierce_items is None:
+                    self._pierce_items = []
+                self._clear_items(self._pierce_items)
+                self._discard_well_name_chips()
             if fences:
                 ext = scene.extract_active_fence()
                 self.set_fence_curtains([ext] if ext is not None else [])
@@ -318,6 +381,10 @@ class WellSeismicJointWidget(QWidget):
         if view is None:
             return
         allowed = set(trajectories)
+        presentations = {
+            item.id: item.display_name
+            for item in self._scene.well_presentations()
+        }
         for well_id, spec in self.well_overlay_specs().items():
             if well_id not in allowed:
                 continue
@@ -347,7 +414,21 @@ class WellSeismicJointWidget(QWidget):
             )
             view.addItem(scatter)
             self._well_items.append(scatter)
+            # QLabel children of QOpenGLWidget never composite into the GLES
+            # FBO; GLTextItem paints during paintGL so well-head names show.
+            name = presentations.get(well_id, str(well_id).split(":")[-1])
+            try:
+                text_item = self._gl.GLTextItem(
+                    pos=np.asarray(spec.head_position, dtype=np.float32),
+                    text=str(name),
+                    color=(253, 224, 71, 255),
+                )
+                view.addItem(text_item)
+                self._well_items.append(text_item)
+            except Exception:
+                logger.debug("well-head GLTextItem failed", exc_info=True)
         self._update_gr_legend()
+        self._discard_well_name_chips()
 
     def set_fence_curtains(self, extractions: list) -> None:
         """Public: draw fence curtains from FenceExtraction list (or active only).
@@ -484,7 +565,7 @@ class WellSeismicJointWidget(QWidget):
         *,
         distance: float = 250.0,
         elevation: float = 30.0,
-        azimuth: float = 45.0,
+        azimuth: float = -45.0,
     ) -> None:
         """Public camera pose for host align-view (no private _view digs)."""
         r = self._renderer
@@ -514,6 +595,18 @@ class WellSeismicJointWidget(QWidget):
         if self._renderer is None:
             return None
         return getattr(self._renderer, "_view", None)
+
+    def _discard_well_name_chips(self) -> None:
+        """Drop leftover QLabel well-name chips (GLTextItem is the only label)."""
+        chips = getattr(self, "_name_chips", None) or []
+        for chip in chips:
+            chip.hide()
+            chip.setParent(None)
+            chip.deleteLater()
+        self._name_chips = []
+
+    def _sync_well_name_chips(self) -> None:
+        self._discard_well_name_chips()
 
     def _update_gr_legend(self) -> None:
         if self._gr_legend is None or self._scene is None:
@@ -606,9 +699,12 @@ class WellSeismicJointWidget(QWidget):
                                 load_kw["preserve_camera"] = already
                         except Exception:
                             pass
-                        self._renderer.load_volume(
-                            np.asarray(data, dtype=np.float32), **load_kw
-                        )
+                        data_arr = np.asarray(data, dtype=np.float32)
+                        from geoviz_seismic.renderer_3d import compute_balanced_spacing
+
+                        load_kw["spacing"] = compute_balanced_spacing(data_arr.shape)
+                        self._renderer.load_volume(data_arr, **load_kw)
+                        self._apply_survey_mapping()
                         self._last_volume_key = volume_key
                         # Prevent id() recycling: keep the uploaded array
                         # alive so a cache-evicted re-read cannot alias the
@@ -640,6 +736,7 @@ class WellSeismicJointWidget(QWidget):
         self.set_well_trajectories(
             scene.well_trajectories(visible_only=True)
         )
+        self.set_time_pierce_overlays()
         ext = scene.extract_active_fence()
         curtains = []
         if ext is not None:
@@ -650,12 +747,18 @@ class WellSeismicJointWidget(QWidget):
                 pass
         self.set_fence_curtains(curtains)
 
-        if self._profile is not None:
-            self._profile.set_scene(scene)
+        time_map = getattr(self, "_time_map", None)
+        if time_map is not None:
+            time_map.set_scene(scene)
+        profile = getattr(self, "_profile", None)
+        if profile is not None:
+            profile.set_scene(scene)
 
         if scene.probe is not None:
             p = scene.probe
-            self.set_probe_marker(scene.world_to_render_xyz(p.x, p.y, p.z))
+            self.set_probe_marker(self._index_xyz_to_world(
+                scene.world_to_render_xyz(p.x, p.y, p.z)
+            ))
             idx = scene.probe_slice_indices()
             if idx is not None:
                 self.set_active_time_sample(idx[2])
@@ -680,6 +783,58 @@ class WellSeismicJointWidget(QWidget):
             f"· fences={len(scene.fences)} · {survey_txt}{reg_txt}{preview}"
         )
 
+    def _on_time_map_well(self, well_id: str) -> None:
+        scene = self._scene
+        if scene is None:
+            return
+        try:
+            added = scene.append_fence_well(well_id)
+        except ValueError as exc:
+            self._status.setText(str(exc))
+            return
+        if added:
+            self._sync_from_scene()
+
+    def set_time_pierce_overlays(self) -> None:
+        """Pierce points, names and floor polyline on ActiveTimeSlice."""
+        if not hasattr(self, "_pierce_items") or self._pierce_items is None:
+            self._pierce_items = []
+        self._clear_items(self._pierce_items)
+        scene = self._scene
+        if scene is None or getattr(self, "_gl", None) is None or self._view() is None:
+            return
+        view = self._view()
+        pierces = scene.pierce_points_on_active_time()
+        if not pierces:
+            return
+        gl_pts = []
+        for pierce in pierces:
+            world = self._index_xyz_to_world(
+                scene.world_to_render_xyz(pierce.x, pierce.y, pierce.z)
+            )
+            gl_pts.append((pierce, np.asarray(world, dtype=np.float32)))
+        pos = np.vstack([p[1] for p in gl_pts])
+        scatter = self._gl.GLScatterPlotItem(
+            pos=pos,
+            color=(0.98, 0.80, 0.08, 1.0),
+            size=11,
+        )
+        view.addItem(scatter)
+        self._pierce_items.append(scatter)
+        order = list(scene.fence_well_ids)
+        by_id = {pierce.well_id: world for pierce, world in gl_pts}
+        line = [by_id[wid] for wid in order if wid in by_id]
+        if len(line) >= 2:
+            path = np.vstack(line)
+            item = self._gl.GLLinePlotItem(
+                pos=path,
+                color=(0.13, 0.83, 0.93, 1.0),
+                width=2,
+                antialias=True,
+            )
+            view.addItem(item)
+            self._pierce_items.append(item)
+
     def _on_profile_probe(self, s_m: float, z: float) -> None:
         if self._scene is None:
             return
@@ -687,7 +842,9 @@ class WellSeismicJointWidget(QWidget):
             self._scene.set_probe(s_m, z)
             p = self._scene.probe
             if p is not None:
-                self.set_probe_marker(self._scene.world_to_render_xyz(p.x, p.y, p.z))
+                self.set_probe_marker(self._index_xyz_to_world(
+                    self._scene.world_to_render_xyz(p.x, p.y, p.z)
+                ))
                 idx = self._scene.probe_slice_indices()
                 if idx is not None:
                     self.set_active_time_sample(idx[2])
@@ -697,8 +854,69 @@ class WellSeismicJointWidget(QWidget):
     def _traj_to_render(self, points: np.ndarray) -> np.ndarray:
         scene = self._scene
         if scene is None:
-            return np.asarray(points, dtype=np.float32)
-        return scene.world_to_render_xyz_array(points)
+            idx = np.asarray(points, dtype=np.float32)
+        else:
+            idx = scene.world_to_render_xyz_array(points)
+        return self._index_xyz_to_world(idx)
+
+    def _apply_survey_mapping(self) -> None:
+        """Push TWT / downsample mapping so 3D Z ticks match 2D Time (ms)."""
+        renderer = self._renderer
+        scene = self._scene
+        if renderer is None or scene is None:
+            return
+        survey = scene.survey
+        if survey is None:
+            return
+        vol = scene.volume_access
+        strides = getattr(vol, "strides", None) or (1, 1, 1)
+        set_map = getattr(renderer, "set_survey_mapping", None)
+        if not callable(set_map):
+            return
+        try:
+            set_map(
+                t0_ms=float(getattr(survey, "t0_ms", 0.0) or 0.0),
+                dt_ms=float(getattr(survey, "dt_ms", 0.0) or 0.0) or None,
+                ds_factor=tuple(max(1, int(x)) for x in strides),
+            )
+        except Exception:
+            logger.debug("set_survey_mapping failed", exc_info=True)
+
+    def _index_xyz_to_world(self, idx_xyz) -> np.ndarray:
+        """Volume indices (il, xl, sample) → Renderer3D world (time-down).
+
+        ``world_to_render_xyz`` stays in sample-index space for scene math.
+        GL overlays must use the same Z as slice planes: sample 0 at the
+        top of the box.
+        """
+        pts = np.asarray(idx_xyz, dtype=np.float64)
+        if pts.size == 0:
+            return np.zeros((0, 3), dtype=np.float32)
+        scalar = pts.ndim == 1
+        if scalar:
+            pts = pts.reshape(1, 3)
+        si, sx, st = 1.0, 1.0, 1.0
+        nt = None
+        renderer = getattr(self, "_renderer", None)
+        if renderer is not None:
+            spacing = getattr(renderer, "_volume_spacing", None)
+            if spacing is not None and len(spacing) >= 3:
+                si, sx, st = float(spacing[0]), float(spacing[1]), float(spacing[2])
+            vol = getattr(renderer, "_volume_data_cpu", None)
+            if vol is not None:
+                nt = int(vol.shape[2])
+        out = np.empty((pts.shape[0], 3), dtype=np.float32)
+        out[:, 0] = pts[:, 0] * si
+        out[:, 1] = pts[:, 1] * sx
+        if nt is not None:
+            from geoviz_seismic.renderer_3d import sample_to_z
+
+            out[:, 2] = sample_to_z(pts[:, 2], nt, st)
+        else:
+            out[:, 2] = pts[:, 2] * st
+        if scalar:
+            return out[0]
+        return out
 
     def _curtain_mesh(self, vertices_xy: np.ndarray, ext):
         """Amplitude-coloured curtain strip along fence (#51).
@@ -732,7 +950,7 @@ class WellSeismicJointWidget(QWidget):
                     float(xy[0]), float(xy[1]), float(z)
                 )
                 verts.append([rx, ry, rz])
-        verts = np.asarray(verts, dtype=np.float32)
+        verts = self._index_xyz_to_world(np.asarray(verts, dtype=np.float64))
         faces = []
         for i in range(n_a - 1):
             for k in range(n_v - 1):
