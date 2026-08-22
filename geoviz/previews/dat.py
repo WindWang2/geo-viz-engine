@@ -94,6 +94,10 @@ class XYPreviewPayload:
     diagnostics: XYPreviewDiagnostics = field(
         default_factory=XYPreviewDiagnostics
     )
+    # Optional per-row extra identity surfaced by the well-head backend when
+    # the file declares a ``UWI`` column; empty tuple otherwise.  Aligned
+    # with ``names`` (one entry per valid record).
+    uwis: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -617,6 +621,25 @@ def _well_head_payload(
         raise _DatSchemaError("ambiguous well-head column width")
     row_width = declaration_widths.pop()
 
+    # Optional UWI column: extras are allowed by ``_column_mapping`` but not
+    # returned, so locate a single unambiguous ``uwi`` token among the
+    # declared-width header lines.  The marker line can share the declared
+    # width, so every width-matching line votes; zero or conflicting votes
+    # ⇒ no UWI.
+    uwi_votes: set[int] = set()
+    for line in header:
+        tokens = _header_tokens(line)
+        if len(tokens) != row_width or not tokens:
+            continue
+        matches = [
+            index
+            for index, token in enumerate(tokens)
+            if _normalized_column(token) == "uwi"
+        ]
+        if len(matches) == 1:
+            uwi_votes.add(matches[0])
+    uwi_index: int | None = uwi_votes.pop() if len(uwi_votes) == 1 else None
+
     declared_crs = _source_crs_declaration(header)
     units = _unit_declarations(header)
     declared_x_unit = units.get("x", "")
@@ -658,10 +681,12 @@ def _well_head_payload(
             y = _finite_float(_value_at(row, mapping["y"]))
         except _DatSchemaError as error:
             raise _DatSchemaError("Y 坐标不是有限数值") from error
+        uwi = _value_at(row, uwi_index).strip() if uwi_index is not None else ""
         return (
             name,
             x,
             y,
+            uwi,
         )
 
     selected = []
@@ -733,6 +758,9 @@ def _well_head_payload(
             valid_records=len(selected),
             issues=tuple(issues),
             omitted_issue_count=omitted_issue_count,
+        ),
+        uwis=(
+            tuple(row[3] for row in selected) if uwi_index is not None else ()
         ),
     )
 
