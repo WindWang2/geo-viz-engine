@@ -135,6 +135,30 @@ def test_lttb_small_dataset():
 from geoviz_plots.chart.plot_widget import PlotWidget
 
 
+def test_scatter_series_labels_change_rendered_pixels(qtbot):
+    """ScatterSeries.labels draw per-point text next to the markers."""
+    from PySide6.QtGui import QImage, QPainter
+
+    def render(labels):
+        widget = PlotWidget()
+        widget.add_series(
+            ScatterSeries([0.0, 1.0, 2.0], [0.0, 1.0, 0.5], name="wells", labels=labels)
+        )
+        widget.autofit()
+        image = QImage(400, 300, QImage.Format.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        widget.render_plot(painter, 400, 300)
+        painter.end()
+        return image
+
+    assert render(["A1", "B2", "C3"]) != render(None)
+
+
+def test_scatter_series_default_has_no_labels():
+    assert ScatterSeries([0.0], [0.0]).labels is None
+
+
 def test_plot_widget_emits_distinct_hover_and_click_events(qtbot):
     widget = PlotWidget()
     qtbot.addWidget(widget)

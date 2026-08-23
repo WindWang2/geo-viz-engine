@@ -955,6 +955,11 @@ class PlotWidget(QWidget):
                     
             elif isinstance(s, ScatterSeries):
                 self.draw_markers(painter, sx, sy, s.marker_style, s.size, s.color, to_p)
+                # Per-point labels (well names etc.): only while the series
+                # is not downsampled, so labels stay aligned with points.
+                labels = getattr(s, "labels", None)
+                if labels and sx is s.x:
+                    self.draw_labels(painter, sx, sy, labels, s.size, to_p)
 
         painter.restore()
 
@@ -1103,5 +1108,25 @@ class PlotWidget(QWidget):
             elif style == "cross":
                 painter.drawLine(px - half, py, px + half, py)
                 painter.drawLine(px, py - half, px, py + half)
-                
+
+        painter.restore()
+
+    def draw_labels(self, painter: QPainter, sx, sy, labels, size: float, to_p):
+        """Render per-point text labels just above/right of scatter markers."""
+        painter.save()
+        font = QFont("Arial", 8)
+        painter.setFont(font)
+        painter.setPen(QPen(self.text_color, 1.0, Qt.SolidLine))
+        painter.setBrush(Qt.NoBrush)
+        offset = size / 2.0 + 3.0
+        count = min(len(labels), len(sx), len(sy))
+        for i in range(count):
+            x_val, y_val = sx[i], sy[i]
+            if np.isnan(x_val) or np.isnan(y_val):
+                continue
+            text = str(labels[i])
+            if not text:
+                continue
+            px, py = to_p(x_val, y_val)
+            painter.drawText(px + offset, py - offset, text)
         painter.restore()

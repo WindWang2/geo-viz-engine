@@ -134,9 +134,12 @@ class LineSeries(Series):
 
 class ScatterSeries(Series):
     """Series for scatter plots."""
-    def __init__(self, x=None, y=None, name: str = "", color=None, 
-                 size: float = 6.0, marker_style: str = "circle", 
-                 visible: bool = True):
+    def __init__(self, x=None, y=None, name: str = "", color=None,
+                 size: float = 6.0, marker_style: str = "circle",
+                 visible: bool = True, labels=None):
         super().__init__(x, y, name, color, visible)
         self.size = size
         self.marker_style = marker_style  # "circle", "square", "triangle", "cross"
+        # Optional per-point text labels aligned with x/y (e.g. well names);
+        # rendered next to each marker while the series is not downsampled.
+        self.labels = labels
