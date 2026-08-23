@@ -88,3 +88,22 @@ def test_horizon_sheet_without_top_header_does_not_use_last_column(tmp_path: Pat
     data = load_xml_preview(str(path))
     seq = data.intervals.sequence if data.intervals else []
     assert seq == []
+
+
+def test_witsml_uses_declared_well_name_instead_of_filename(tmp_path: Path):
+    path = tmp_path / "regional_delivery.xml"
+    path.write_text(
+        """<WITSMLComposite xmlns="http://www.witsml.org/schemas/1series">
+  <log>
+    <nameWell>XML-REF-01</nameWell>
+    <logCurveInfo><mnemonic>DEPT</mnemonic></logCurveInfo>
+    <logCurveInfo><mnemonic>GR</mnemonic></logCurveInfo>
+    <logData><data>1000,40</data><data>1001,41</data></logData>
+  </log>
+</WITSMLComposite>""",
+        encoding="utf-8",
+    )
+
+    data = load_xml_preview(str(path))
+
+    assert data.well_name == "XML-REF-01"

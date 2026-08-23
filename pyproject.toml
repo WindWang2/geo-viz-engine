@@ -81,4 +81,3 @@ qt_api = "pyside6"
 markers = [
     "slow: OpenGL/WebEngine tests; skip in fast CI with -m 'not slow'",
 ]
-asyncio_default_fixture_loop_scope = "function"

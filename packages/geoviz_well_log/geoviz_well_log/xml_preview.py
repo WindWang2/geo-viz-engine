@@ -58,6 +58,16 @@ def load_xml_preview(
         t = elem.tag
         return t.rsplit("}", 1)[-1] if "}" in t else t
 
+    # WITSML carries canonical well identity independently from curve data.
+    # Read only the explicit well-name fields; a generic <name> may identify
+    # the log or a curve and must not replace the well identity.
+    for elem in root.iter():
+        if _local_tag(elem).casefold() in {"namewell", "wellname"}:
+            declared_name = (elem.text or "").strip()
+            if declared_name:
+                well_name = declared_name
+                break
+
     # Fast direct child iteration for all worksheets
     sheets_data: dict[str, list[list[str]]] = {}
     for child in root:

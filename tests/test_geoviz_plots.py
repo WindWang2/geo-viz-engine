@@ -1469,11 +1469,11 @@ def test_feature_editor_drag_uses_incremental_ring_validation():
     # Sufficiency: any self-intersection the full check flags on a dragged
     # ring involves a moved-vertex-adjacent edge, so the incremental check
     # flags it too (bow-tie from dragging vertex 0 across the ring).
-    bowtie = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
-    dragged = [[10, 5], [10, 0], [10, 10], [0, 10], [10, 5]]
+    square = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+    dragged = [[5, 15], [10, 0], [10, 10], [0, 10], [5, 15]]
     assert validate_ring(dragged) != []
     assert validate_ring_local(dragged, [0]) != []
-    assert validate_ring_local(bowtie, [0]) == []
+    assert validate_ring_local(square, [0]) == []
 
 
 def test_feature_editor_defers_whole_geometry_check_to_pointer_up():

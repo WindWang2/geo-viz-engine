@@ -51,13 +51,15 @@ class SurfaceWidget(QWidget):
         self.view_ymin = 0.0
         self.view_ymax = 1.0
         
-        # Styling parameters (Dark Theme background, elegant colors)
-        self.bg_color = QColor(25, 25, 25)
-        self.plot_bg_color = QColor(15, 15, 15)
-        self.grid_color = QColor(50, 50, 50, 200)
-        self.axis_color = QColor(200, 200, 200)
-        self.text_color = QColor(210, 210, 210)
-        self.contour_line_color = QColor(240, 240, 240, 180)
+        # Data Manager is a light desktop workspace.  Horizons use the same
+        # slate canvas palette as the surrounding workbench so a surface
+        # preview never opens as an isolated dark panel.
+        self.bg_color = QColor("#f1f5f9")
+        self.plot_bg_color = QColor("#ffffff")
+        self.grid_color = QColor(203, 213, 225, 200)
+        self.axis_color = QColor("#475569")
+        self.text_color = QColor("#0f172a")
+        self.contour_line_color = QColor(51, 65, 85, 180)
         
         # Margins
         self.margin_left = 65
