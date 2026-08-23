@@ -318,7 +318,22 @@ def interpolate_factor_grid(
         interp_status=interp_status,
     )
     grid_z, grid_var = grid_out if want_variance else (grid_out, None)
-    finite = grid_z[np.isfinite(grid_z)]
+    # #941-1/2: keep ndarray for the hot numerical payload — converting to a
+    # nested list of Python floats duplicates the grid (≈8× memory for 2000²)
+    # and costs ~124 ms @1024². Callers that need JSON lists can materialise
+    # them via ``encode_legacy_*`` helpers; the live cache (FactorGridResult)
+    # consumes the ndarray directly (mirrors the plan path).
+    grid_x_arr = np.ascontiguousarray(grid_x, dtype=np.float64)
+    grid_y_arr = np.ascontiguousarray(grid_y, dtype=np.float64)
+    grid_z_arr = np.ascontiguousarray(grid_z, dtype=np.float64)
+    # Normalise non-finite to NaN (engine convention) — keep ndarray.
+    grid_z_arr = np.where(np.isfinite(grid_z_arr), grid_z_arr, np.nan)
+    if grid_var is not None:
+        grid_var_arr = np.ascontiguousarray(grid_var, dtype=np.float64)
+        grid_var_arr = np.where(np.isfinite(grid_var_arr), grid_var_arr, np.nan)
+    else:
+        grid_var_arr = None
+    finite = grid_z_arr[np.isfinite(grid_z_arr)]
     if finite.size == 0:
         raise ValueError("插值结果全为无效值")
     r2 = _leave_one_out_r2(
@@ -329,9 +344,9 @@ def interpolate_factor_grid(
         q=q, b_i=b_i, cancellation_token=cancellation_token,
     )
     out: dict[str, Any] = {
-        "grid_x": [float(v) for v in grid_x],
-        "grid_y": [float(v) for v in grid_y],
-        "grid_z": [[None if not math.isfinite(float(v)) else float(v) for v in row] for row in grid_z],
+        "grid_x": grid_x_arr,
+        "grid_y": grid_y_arr,
+        "grid_z": grid_z_arr,
         "backend": backend,
         "method": method,
         "grid_n": int(grid_n),
@@ -345,12 +360,9 @@ def interpolate_factor_grid(
         "mean": float(np.mean(finite)),
         "r_squared": None if r2 is None else round(float(r2), 4),
     }
-    if grid_var is not None:
-        var_flat = grid_var[np.isfinite(grid_var)]
-        out["grid_var"] = [
-            [None if not math.isfinite(float(v)) else float(v) for v in row]
-            for row in grid_var
-        ]
+    if grid_var_arr is not None:
+        var_flat = grid_var_arr[np.isfinite(grid_var_arr)]
+        out["grid_var"] = grid_var_arr
         out["variance_min"] = float(np.min(var_flat)) if var_flat.size else None
         out["variance_max"] = float(np.max(var_flat)) if var_flat.size else None
     note = mvp_note_for(backend)
