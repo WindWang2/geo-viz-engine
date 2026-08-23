@@ -187,6 +187,13 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "IntervalItem": ("geoviz_well_log.models", "IntervalItem"),
     "LithologyInterval": ("geoviz_well_log.models", "LithologyInterval"),
     "WellIntervals": ("geoviz_well_log.models", "WellIntervals"),
+    # QPainter track renderers reused by workbench track layout modules.
+    "CurveTrack": ("geoviz_well_log.renderer", "CurveTrack"),
+    "IntervalTrack": ("geoviz_well_log.renderer", "IntervalTrack"),
+    "compute_label_policy": ("geoviz_well_log.renderer.label_layout", "compute_label_policy"),
+    "fit_label_text": ("geoviz_well_log.renderer.label_layout", "fit_label_text"),
+    "ECHARTS_BORDER": ("geoviz_well_log.renderer.track_base", "ECHARTS_BORDER"),
+    "ECHARTS_TEXT": ("geoviz_well_log.renderer.track_base", "ECHARTS_TEXT"),
     # Downsample provider hook installed by the workbench at startup.
     "set_downsample_provider": ("geoviz_well_log.renderer.downsample", "set_downsample_provider"),
     "get_downsample_provider": ("geoviz_well_log.renderer.downsample", "get_downsample_provider"),
