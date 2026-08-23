@@ -26,7 +26,7 @@ def _compile_args(compiler_type: str | None = None) -> list[str]:
     """Return compiler flags for the selected compiler (MSVC vs GCC/Clang)."""
     # On Windows default to MSVC unless the chosen compiler is the unix/MinGW one.
     if sys.platform == "win32" and compiler_type != "unix":
-        return ["/O2", "/fp:fast"]
+        return ["/std:c++17", "/utf-8", "/O2", "/fp:fast", "/EHsc"]
     # -ffast-math implies -fno-finite-math-only, which lets the compiler assume
     # NaN/Inf never occur - optimising std::isnan/std::isinf to constant false.
     # Re-enable finite-math handling with -fno-finite-math-only (geometry code
@@ -40,7 +40,11 @@ class BuildExt(build_ext):
 
     def build_extension(self, ext):
         compiler_type = getattr(getattr(self, "compiler", None), "compiler_type", None)
-        ext.extra_compile_args = list(_compile_args(compiler_type))
+        current = list(ext.extra_compile_args or [])
+        for flag in _compile_args(compiler_type):
+            if flag not in current:
+                current.append(flag)
+        ext.extra_compile_args = current
         super().build_extension(ext)
 
 

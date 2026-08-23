@@ -21,6 +21,10 @@ src-tauri/binaries/geoviz-backend
 src-tauri/binaries/geoviz-backend-*
 *.spec
 *.so
+*.pyd
+*.obj
+*.lib
+*.exp
 
 # Env
 .env.local
