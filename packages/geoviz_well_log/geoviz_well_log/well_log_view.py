@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QRectF, QTimer
-from PySide6.QtGui import QPainter, QWheelEvent
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QScrollArea, QWidget
 
 from .renderer.canvas import WellLogCanvas
@@ -9,28 +9,6 @@ from .renderer.depth_ruler import DepthRuler
 from .renderer.interaction import ZoomPanHandler
 from .renderer.overlay import CrosshairOverlay
 from .renderer.track_base import BaseTrack
-
-
-class _CrosshairOverlayWidget(QWidget):
-    """Transparent overlay that paints the crosshair over the canvas."""
-
-    def __init__(self, overlay: CrosshairOverlay, parent=None):
-        super().__init__(parent)
-        self._overlay = overlay
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-
-    def paintEvent(self, event):
-        if not self._overlay.visible:
-            return
-        painter = QPainter(self)
-        self._overlay.paint_overlay(painter, QRectF(self.rect()))
-        painter.end()
-
-    def schedule_repaint(self):
-        """Trigger a deferred repaint after the canvas has been painted."""
-        QTimer.singleShot(0, self.update)
 
 
 class WellLogView(QScrollArea):
@@ -59,10 +37,9 @@ class WellLogView(QScrollArea):
         self._canvas.setMouseTracking(True)
         self._canvas.mouse_moved.connect(self._on_mouse_moved)
         self._canvas.depth_range_changed.connect(self._on_canvas_depth_range_changed)
-
-        self._crosshair_widget = _CrosshairOverlayWidget(self._crosshair, self.viewport())
-        self._crosshair_widget.setGeometry(self.viewport().rect())
-        self._crosshair_widget.show()
+        # The canvas paints the crosshair itself (paintEvent); a second
+        # viewport overlay widget used to paint the same panel again,
+        # producing a doubled hover box (#duplicate-hover-info).
 
         self.verticalScrollBar().valueChanged.connect(self._on_vscroll_changed)
         self._depth_ruler = DepthRuler(self)
@@ -126,7 +103,6 @@ class WellLogView(QScrollArea):
         super().resizeEvent(event)
         self._sync_depth_ruler_geometry()
         self._update_canvas_size()
-        self._crosshair_widget.setGeometry(self.viewport().rect())
 
     def _on_mouse_moved(self, canvas_y: float):
         if not self._canvas.tracks:
@@ -138,7 +114,6 @@ class WellLogView(QScrollArea):
             self._crosshair.set_cursor_y(canvas_y)
             self._depth_ruler.set_cursor_depth(self._crosshair.depth_at_y(canvas_y))
         self._canvas.update()
-        self._crosshair_widget.schedule_repaint()
 
     def wheelEvent(self, event):
         """Forward wheel events to the canvas-owned zoom handler."""

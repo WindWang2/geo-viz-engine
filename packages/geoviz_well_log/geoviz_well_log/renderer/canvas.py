@@ -345,7 +345,10 @@ class WellLogCanvas(QWidget):
                 self._crosshair.set_cursor_pos(float(pos.x()), float(pos.y()))
 
         self.update()
-        self._update_hover_tooltip(event.position())
+        # The painted crosshair panel already shows depth + all track values;
+        # the QToolTip is a fallback for hosts that disable the crosshair.
+        if self._crosshair is None:
+            self._update_hover_tooltip(event.position())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
