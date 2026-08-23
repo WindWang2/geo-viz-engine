@@ -508,3 +508,40 @@ def test_las_parser_names_agree_with_preview_for_duplicate_mnemonics(
     assert result.units["GR_2"] == "gAPI"
     assert result.descriptions["GR_2"] == "gamma run 2"
 
+
+
+@pytest.fixture
+def leading_null_las(tmp_path: Path) -> Path:
+    """Leading all-NULL run covering a full min-max bin (real A1.Las shape)."""
+    path = tmp_path / "leading-null.las"
+    rows = []
+    for index in range(100):
+        gr = "-99999" if index < 20 else f"{50.0 + index:.1f}"
+        rows.append(f"{1000.0 + index * 0.125:.4f} {gr}")
+    path.write_text(
+        "\n".join(
+            [
+                "~VERSION INFORMATION",
+                " VERS. 2.0 : CWLS LOG ASCII STANDARD",
+                "~WELL INFORMATION",
+                " WELL. A1 : WELL NAME",
+                " NULL. -99999 : NULL VALUE",
+                "~CURVE INFORMATION",
+                " DEPT.M : depth",
+                " GR.gAPI : gamma ray",
+                "~ASCII",
+                *rows,
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_load_las_preview_survives_leading_all_null_bin(leading_null_las: Path):
+    # 100 rows > max_samples=10 → min-max binning with step=20, so bin 0 is
+    # all-NULL and its min/max coincide. Duplicate emitted indices used to
+    # stall the streaming sampler at row 0 → "fewer than two depth rows".
+    data = load_las_preview(str(leading_null_las), max_samples=10)
+    assert data.bottom_depth > data.top_depth
+    assert data.curves

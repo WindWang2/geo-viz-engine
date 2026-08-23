@@ -303,7 +303,12 @@ def _minmax_indices(reference: np.ndarray, max_samples: int) -> np.ndarray:
         lo, hi = (lo, hi) if lo <= hi else (hi, lo)
         parts.append(np.asarray([lo, hi], dtype=np.intp))
 
-    return np.concatenate(parts) if parts else np.empty(0, dtype=np.intp)
+    combined = np.concatenate(parts) if parts else np.empty(0, dtype=np.intp)
+    # Bins whose min and max coincide (all-null bins, constant runs) would
+    # otherwise emit the same row twice; collapse to strictly increasing
+    # indices so the streaming sampler in read_sampled_ascii never stalls
+    # waiting for an index that has already passed.
+    return np.unique(combined)
 
 
 def read_sampled_ascii(
