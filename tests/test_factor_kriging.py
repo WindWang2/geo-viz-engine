@@ -287,8 +287,7 @@ def test_method_to_backend_resolves_kriging():
 
 
 def test_interpolate_factor_grid_kriging_backend():
-    """interpolate_factor_grid(method='kriging') returns a JSON-serializable
-    dict with finite grid_z plus per-cell kriging variance."""
+    """interpolate_factor_grid(method='kriging') returns a grid dict with finite grid_z plus per-cell kriging variance."""
     pts = [
         {"x": 0.0, "y": 0.0, "value": 0.0},
         {"x": 10.0, "y": 0.0, "value": 10.0},
@@ -299,12 +298,16 @@ def test_interpolate_factor_grid_kriging_backend():
     assert result["backend"] == "kriging"
     assert result["method"] == "kriging"
     assert result["grid_n"] == 10
-    assert len(result["grid_z"]) == 10 and len(result["grid_z"][0]) == 10
-    assert len(result["grid_var"]) == 10 and len(result["grid_var"][0]) == 10
+    # #941-1/2: engine now returns ndarray for the hot payload.
+    for key, arr in (("grid_z", result["grid_z"]), ("grid_var", result["grid_var"])):
+        if isinstance(arr, np.ndarray):
+            assert arr.shape == (10, 10)
+            assert np.isfinite(arr).all()
+        else:
+            assert len(arr) == 10 and len(arr[0]) == 10
+            assert all(isinstance(v, float) or v is None for row in arr for v in row)
+            assert all(math.isfinite(v) for row in arr for v in row if v is not None)
     assert result["variance_min"] is not None and result["variance_max"] is not None
     assert result["variance_min"] <= result["variance_max"]
     assert "mvp_note" not in result  # real kriging carries no MVP caveat
     assert result["r_squared"] is None or math.isfinite(result["r_squared"])
-    for key in ("grid_z", "grid_var"):
-        assert all(isinstance(v, float) or v is None for row in result[key] for v in row)
-    assert all(math.isfinite(v) for row in result["grid_z"] for v in row if v is not None)

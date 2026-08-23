@@ -363,25 +363,52 @@ def ordinary_kriging(
 
     # Pairwise sample covariance matrix (n x n) and sample-to-target
     # covariance (n x m) — the RHS of the kriging system.
+    # #941-1: chunk the target grid so the (n x m) RHS never materialises
+    # for the full 2000² (4M) grid at once — 80*4M*8 ≈ 2.5 GB for c_mat
+    # alone. A 256k chunk keeps the peak under ~200 MB.
     h = _pairwise_h(x, y)
     a_mat = _covariance(h, variogram_model, range_, sill, nugget)
-    t_h = np.sqrt((x[:, None] - tx[None, :]) ** 2 + (y[:, None] - ty[None, :]) ** 2)
-    c_mat = _covariance(t_h, variogram_model, range_, sill, nugget)
 
     aug = np.empty((n + 1, n + 1), dtype=np.float64)
     aug[:n, :n] = a_mat
     aug[:n, n] = 1.0
     aug[n, :n] = 1.0
     aug[n, n] = 0.0
-    rhs = np.empty((n + 1, m), dtype=np.float64)
-    rhs[:n, :] = c_mat
-    rhs[n, :] = 1.0
 
-    sol = _solve_augmented(aug, rhs, total_sill, ridge)
-    weights = sol[:n, :]
-    mu = sol[n, :]
-    pred = weights.T @ z
-    variance = total_sill - (np.sum(weights * c_mat, axis=0) + mu)
+    # Chunk size: aim for ~256k targets per solve; shrink if n is large.
+    # The per-chunk c_mat is (n x chunk) float64.
+    max_chunk = 262144
+    if n > 0:
+        # Keep per-chunk c_mat under ~256 MB: n*chunk*8 <= 256MB → chunk <= 32M/n
+        max_chunk = min(max_chunk, max(4096, int(32_000_000 // max(1, n))))
+    if m <= max_chunk:
+        t_h = np.sqrt((x[:, None] - tx[None, :]) ** 2 + (y[:, None] - ty[None, :]) ** 2)
+        c_mat = _covariance(t_h, variogram_model, range_, sill, nugget)
+        rhs = np.empty((n + 1, m), dtype=np.float64)
+        rhs[:n, :] = c_mat
+        rhs[n, :] = 1.0
+        sol = _solve_augmented(aug, rhs, total_sill, ridge)
+        weights = sol[:n, :]
+        mu = sol[n, :]
+        pred = weights.T @ z
+        variance = total_sill - (np.sum(weights * c_mat, axis=0) + mu)
+    else:
+        pred = np.empty(m, dtype=np.float64)
+        variance = np.empty(m, dtype=np.float64)
+        for start in range(0, m, max_chunk):
+            stop = min(start + max_chunk, m)
+            tx_c = tx[start:stop]
+            ty_c = ty[start:stop]
+            t_h_c = np.sqrt((x[:, None] - tx_c[None, :]) ** 2 + (y[:, None] - ty_c[None, :]) ** 2)
+            c_mat_c = _covariance(t_h_c, variogram_model, range_, sill, nugget)
+            rhs_c = np.empty((n + 1, stop - start), dtype=np.float64)
+            rhs_c[:n, :] = c_mat_c
+            rhs_c[n, :] = 1.0
+            sol_c = _solve_augmented(aug, rhs_c, total_sill, ridge)
+            weights_c = sol_c[:n, :]
+            mu_c = sol_c[n, :]
+            pred[start:stop] = weights_c.T @ z
+            variance[start:stop] = total_sill - (np.sum(weights_c * c_mat_c, axis=0) + mu_c)
     pred = np.asarray(pred, dtype=np.float64)
     variance = np.asarray(variance, dtype=np.float64)
     variance = np.where(np.isfinite(variance) & (variance >= 0.0), variance, 0.0)

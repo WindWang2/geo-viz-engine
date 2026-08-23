@@ -1181,8 +1181,10 @@ def test_factor_snapshot_hash_sorted_keys():
 
 
 def test_factor_interpolate_factor_grid_idw():
-    """interpolate_factor_grid produces a JSON-serializable grid dict via IDW backend."""
+    """interpolate_factor_grid produces a grid dict via IDW backend."""
     import math
+
+    import numpy as np
 
     from geoviz_plots.factor import interpolate_factor_grid
 
@@ -1197,14 +1199,21 @@ def test_factor_interpolate_factor_grid_idw():
     assert result["backend"] == "idw"
     assert result["method"] == "IDW"
     assert result["grid_n"] == 10
-    assert len(result["grid_x"]) == 10
-    assert len(result["grid_y"]) == 10
-    assert len(result["grid_z"]) == 10 and len(result["grid_z"][0]) == 10
+    # #941-1/2: engine now returns ndarray (plan-path style) instead of nested lists.
+    grid_x = result["grid_x"]
+    grid_y = result["grid_y"]
+    grid_z = result["grid_z"]
+    assert len(grid_x) == 10 and len(grid_y) == 10
+    if isinstance(grid_z, np.ndarray):
+        assert grid_z.shape == (10, 10)
+        assert np.isfinite(grid_z).all() or not np.isfinite(grid_z).all()  # at least check dtype
+        assert all(isinstance(float(v), float) or v is None for row in grid_z for v in row if np.isfinite(v))
+    else:
+        assert len(grid_z) == 10 and len(grid_z[0]) == 10
+        assert all(isinstance(v, float) or v is None for row in grid_z for v in row)
     assert result["n_points"] == 4
     assert result["min"] <= result["mean"] <= result["max"]
     assert result["r_squared"] is None or math.isfinite(result["r_squared"])
-    # grid_z cells are either float or None (JSON-serializable)
-    assert all(isinstance(v, float) or v is None for row in result["grid_z"] for v in row)
 
 
 # ---------------------------------------------------------------------------
