@@ -5,7 +5,7 @@ description = "Cross-well correlation with formation tops, manual picking, and D
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Kevin", email = "kevin@example.com" }]
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "PySide6",
     "pydantic",

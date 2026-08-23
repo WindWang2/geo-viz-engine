@@ -5,7 +5,7 @@ description = "General-purpose 2D plotting and point-to-surface contour renderin
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Kevin", email = "kevin@example.com" }]
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "PySide6",
     "numpy",

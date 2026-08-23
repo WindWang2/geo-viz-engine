@@ -60,5 +60,5 @@ setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExt},
     zip_safe=False,
-    python_requires=">=3.12",
+    python_requires=">=3.12,<3.13",
 )

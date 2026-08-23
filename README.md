@@ -1,7 +1,7 @@
 # GeoViz Engine — 地质数据可视化桌面引擎
 
 ![PySide6](https://img.shields.io/badge/PySide6-6.6+-41CD52?logo=qt)
-![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python)
 ![QPainter](https://img.shields.io/badge/QPainter-Well_Log-41CD52)
 ![pyqtgraph](https://img.shields.io/badge/pyqtgraph-OpenGL-5896FF)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -286,7 +286,7 @@ later on the Qt UI thread.
 
 ### 前置条件
 
-- Python 3.12+
+- Python 3.12
 - 系统依赖：OpenGL 驱动（pyqtgraph OpenGL 需要）
 
 ### 开发模式
