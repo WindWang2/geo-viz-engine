@@ -7,7 +7,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QPushButton, QComboBox, QLabel, QFileDialog, QToolBar,
-    QDoubleSpinBox, QSlider, QCheckBox,
+    QDoubleSpinBox, QSlider, QCheckBox, QMenu, QToolButton, QWidgetAction,
 )
 
 from .renderer_3d import Renderer3D, compute_balanced_spacing
@@ -737,6 +737,11 @@ class SeismicView(QWidget):
         self._annotation_btn.setIcon(self._get_ui_icon("plus.svg"))
         self._annotation_btn.toggled.connect(self._on_annotation_toggled)
 
+        self._well_tie_btn = QPushButton(" 井震标定")
+        self._well_tie_btn.setCheckable(True)
+        self._well_tie_btn.setIcon(self._get_ui_icon("share.svg"))
+        self._well_tie_btn.toggled.connect(self._on_well_tie_toggled)
+
         # Attribute combo + RGB fusion channel selectors
         from . import attribute_pipeline as _ap
         self._attr_combo = QComboBox()
@@ -801,81 +806,172 @@ class SeismicView(QWidget):
         self._coord_mode = "grid"
         self.btn_coord.clicked.connect(self._toggle_coord_mode)
 
+        # --- Dropdown 1: 层位与拾取 (Horizon & Picking Popup Menu) ---
+        self._horizon_menu_btn = QToolButton()
+        self._horizon_menu_btn.setText(" 层位与拾取 ▾")
+        self._horizon_menu_btn.setIcon(self._get_ui_icon("layers.svg"))
+        self._horizon_menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        horizon_menu = QMenu(self)
+
+        act_load_h = horizon_menu.addAction("加载层位…")
+        act_load_h.setIcon(self._get_ui_icon("layers.svg"))
+        act_load_h.triggered.connect(self._load_horizon)
+
+        act_mgr_h = horizon_menu.addAction("层位管理…")
+        act_mgr_h.setIcon(self._get_ui_icon("table.svg"))
+        act_mgr_h.triggered.connect(self._show_horizon_list)
+
+        horizon_menu.addSeparator()
+
+        self._act_pick = horizon_menu.addAction("拾取层位 (点击剖面)")
+        self._act_pick.setCheckable(True)
+        self._act_pick.setIcon(self._get_ui_icon("pin.svg"))
+        self._act_pick.toggled.connect(self._pick_btn.setChecked)
+        self._pick_btn.toggled.connect(self._act_pick.setChecked)
+
+        act_clear_p = horizon_menu.addAction("清除拾取点")
+        act_clear_p.setIcon(self._get_ui_icon("undo.svg"))
+        act_clear_p.triggered.connect(self._on_clear_picks)
+
+        act_export_p = horizon_menu.addAction("导出层位…")
+        act_export_p.setIcon(self._get_ui_icon("export.svg"))
+        act_export_p.triggered.connect(self._on_export_picks)
+
+        horizon_menu.addSeparator()
+        sculpt_sub = horizon_menu.addMenu("层位雕刻 (Sculpt)")
+        sculpt_w = QWidget()
+        sculpt_layout = QHBoxLayout(sculpt_w)
+        sculpt_layout.setContentsMargins(6, 4, 6, 4)
+        sculpt_layout.addWidget(QLabel("层位:"))
+        sculpt_layout.addWidget(self._sculpt_horizon_combo)
+        sculpt_layout.addWidget(QLabel("模式:"))
+        sculpt_layout.addWidget(self._sculpt_mode_combo)
+        sculpt_action = QWidgetAction(sculpt_sub)
+        sculpt_action.setDefaultWidget(sculpt_w)
+        sculpt_sub.addAction(sculpt_action)
+
+        self._horizon_menu_btn.setMenu(horizon_menu)
+
+        # --- Dropdown 2: 渲染与显示 (Render & Display Popup Menu) ---
+        self._render_menu_btn = QToolButton()
+        self._render_menu_btn.setText(" 渲染与显示 ▾")
+        self._render_menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        render_menu = QMenu(self)
+
+        opacity_sub = render_menu.addMenu("透明度预设")
+        for idx, text in enumerate(["锐利", "线性", "S曲线", "阈值"]):
+            act = opacity_sub.addAction(text)
+            act.triggered.connect(lambda _c=False, i=idx: self._opacity_combo.setCurrentIndex(i))
+
+        slice_sub = render_menu.addMenu("剖面方向")
+        for idx, text in enumerate(["Inline", "Crossline", "Time"]):
+            act = slice_sub.addAction(text)
+            act.triggered.connect(lambda _c=False, i=idx: self._slice_type_combo.setCurrentIndex(i))
+
+        act_hillshade = render_menu.addAction("光照效果 (Hillshade)")
+        act_hillshade.setCheckable(True)
+        act_hillshade.toggled.connect(self._hillshade_btn.setChecked)
+        self._hillshade_btn.toggled.connect(act_hillshade.setChecked)
+
+        act_coord = render_menu.addAction("📍 网格坐标 (IL/XL)")
+        act_coord.setCheckable(True)
+        act_coord.setChecked(self.btn_coord.isChecked())
+        act_coord.toggled.connect(self.btn_coord.setChecked)
+        self.btn_coord.toggled.connect(act_coord.setChecked)
+
+        act_anno = render_menu.addAction("标注模式")
+        act_anno.setCheckable(True)
+        act_anno.toggled.connect(self._annotation_btn.setChecked)
+        self._annotation_btn.toggled.connect(act_anno.setChecked)
+
+        act_well_tie = render_menu.addAction("井震标定 (Auto-Tie)")
+        act_well_tie.setCheckable(True)
+        act_well_tie.toggled.connect(self._well_tie_btn.setChecked)
+        self._well_tie_btn.toggled.connect(act_well_tie.setChecked)
+
+        render_menu.addSeparator()
+        act_iso = render_menu.addAction("显示等值面")
+        act_iso.setCheckable(True)
+        act_iso.toggled.connect(self._iso_checkbox.setChecked)
+        self._iso_checkbox.toggled.connect(act_iso.setChecked)
+
+        self._render_menu_btn.setMenu(render_menu)
+
+        # --- Dropdown 3: 叠加与高级 (Overlay & Advanced Popup Menu) ---
+        self._overlay_menu_btn = QToolButton()
+        self._overlay_menu_btn.setText(" 叠加与高级 ▾")
+        self._overlay_menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        overlay_menu = QMenu(self)
+
+        act_overlay = overlay_menu.addAction("开启双体叠加")
+        act_overlay.setCheckable(True)
+        act_overlay.toggled.connect(self._overlay_btn.setChecked)
+        self._overlay_btn.toggled.connect(act_overlay.setChecked)
+
+        overlay_cmap_sub = overlay_menu.addMenu("叠加色标")
+        for cmap in ("jet", "gray", "seismic"):
+            act = overlay_cmap_sub.addAction(cmap)
+            act.triggered.connect(lambda _c=False, cm=cmap: self._overlay_cmap_combo.setCurrentText(cm))
+
+        act_crossplot = overlay_menu.addAction("交叉图分析…")
+        act_crossplot.setIcon(self._get_ui_icon("plots.svg"))
+        act_crossplot.triggered.connect(self._on_crossplot)
+
+        self._overlay_menu_btn.setMenu(overlay_menu)
+
+        # Build Primary Single Row Toolbar
         bar.addWidget(load_btn)
         bar.addWidget(demo_btn)
-        bar.addWidget(self.btn_coord)
-        bar.addWidget(horizon_btn)
-        bar.addWidget(horizon_list_btn)
         bar.addSeparator()
-        bar.addWidget(self._pick_btn)
-        bar.addWidget(clear_pick_btn)
-        bar.addWidget(export_pick_btn)
-        bar.addWidget(self._annotation_btn)
+        bar.addWidget(QLabel(" 3D模式:"))
+        bar.addWidget(self._3d_mode_combo)
+        bar.addWidget(QLabel(" 显示:"))
+        bar.addWidget(self._mode_combo)
+        bar.addWidget(QLabel(" 色标:"))
+        bar.addWidget(self._cmap_combo)
+        bar.addWidget(QLabel(" 属性:"))
+        bar.addWidget(self._attr_combo)
+        bar.addSeparator()
+        bar.addWidget(self._horizon_menu_btn)
+        bar.addWidget(self._render_menu_btn)
+        bar.addWidget(self._overlay_menu_btn)
         bar.addSeparator()
         bar.addWidget(self._slice_label)
         bar.addWidget(self._readout_label)
 
-        # Well-tie toggle button on row 1 (right-aligned via stretch later)
-        self._well_tie_btn = QPushButton(" 井震标定")
-        self._well_tie_btn.setCheckable(True)
-        self._well_tie_btn.setIcon(self._get_ui_icon("share.svg"))
-        self._well_tie_btn.toggled.connect(self._on_well_tie_toggled)
-        bar.addSeparator()
-        bar.addWidget(self._well_tie_btn)
+        # Test compatibility handles on toolbar_row1
+        self._toolbar_row1.addWidget(self._pick_btn)
+        self._pick_btn.hide()
+        self._toolbar_row1.addWidget(self._well_tie_btn)
+        self._well_tie_btn.hide()
 
-        # ----- Row 2: 视图 | 属性 | 切片 -----
-        # ----- Row 2: 视图渲染设定 -----
+        # Row 2 compatibility widgets (hidden from visible layout)
         bar2 = self._toolbar_row2
-        bar2.addWidget(QLabel(" 3D模式:"))
-        bar2.addWidget(self._3d_mode_combo)
         bar2.addWidget(self._opacity_combo)
         bar2.addWidget(self._hillshade_btn)
-        bar2.addWidget(QLabel(" 剖面:"))
         bar2.addWidget(self._slice_type_combo)
-        bar2.addWidget(QLabel(" 显示:"))
-        bar2.addWidget(self._mode_combo)
-        bar2.addWidget(QLabel(" 色标:"))
-        bar2.addWidget(self._cmap_combo)
-        bar2.addSeparator()
-        bar2.addWidget(QLabel(" 雕刻:"))
         bar2.addWidget(self._sculpt_horizon_combo)
         bar2.addWidget(self._sculpt_mode_combo)
-        bar2.addSeparator()
-        bar2.addWidget(QLabel(" 裁剪:"))
         bar2.addWidget(self._clip_spin)
-        bar2.addSeparator()
         bar2.addWidget(self._iso_checkbox)
         bar2.addWidget(self._iso_spin)
+        bar2.hide()
 
-        # ----- Row 3: 叠加、特征属性与切片滑动条 -----
+        # Row 3 compatibility widgets (hidden from visible layout)
         bar3 = self._toolbar_row3
-        bar3.addWidget(QLabel(" 属性:"))
-        bar3.addWidget(self._attr_combo)
-        bar3.addWidget(self._rgb_r_label)
-        bar3.addWidget(self._rgb_r_combo)
-        bar3.addWidget(self._rgb_g_label)
-        bar3.addWidget(self._rgb_g_combo)
-        bar3.addWidget(self._rgb_b_label)
-        bar3.addWidget(self._rgb_b_combo)
         bar3.addWidget(crossplot_btn)
-        bar3.addSeparator()
-        bar3.addWidget(QLabel(" 叠加:"))
         bar3.addWidget(self._overlay_btn)
         bar3.addWidget(self._overlay_cmap_combo)
-        bar3.addWidget(QLabel(" 不透明度:"))
         bar3.addWidget(self._overlay_opacity_slider)
-        bar3.addSeparator()
-        bar3.addWidget(QLabel(" IL:"))
         bar3.addWidget(self._tb_il_label)
         bar3.addWidget(self._tb_il_slider)
-        bar3.addWidget(QLabel(" XL:"))
         bar3.addWidget(self._tb_xl_label)
         bar3.addWidget(self._tb_xl_slider)
-        bar3.addWidget(QLabel(" T:"))
         bar3.addWidget(self._tb_t_label)
         bar3.addWidget(self._tb_t_slider)
+        bar3.hide()
 
-        # Container holding three rows
+        # Single row container
         container = QWidget()
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
