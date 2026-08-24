@@ -1326,7 +1326,7 @@ class Renderer3D(QWidget):
 
     def _init_pyqtgraph(self, layout: QVBoxLayout):
         # Create central 3D widget
-        self._view = gl.GLViewWidget()
+        self._view = gl.GLViewWidget(parent=self)
         # Free GL resources queued by slot-context cleanups at the top of
         # every paint, when the widget's context is actually current.
         _orig_paintGL = self._view.paintGL

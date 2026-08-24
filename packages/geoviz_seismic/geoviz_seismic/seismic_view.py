@@ -94,14 +94,14 @@ class SeismicView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self._renderer_3d = Renderer3D()
-        self._colorbar = ColorbarWidget()
+        self._renderer_3d = Renderer3D(self)
+        self._colorbar = ColorbarWidget(self)
 
         # Create 3 separate profile panels for Inline, Crossline, Time
-        self._profile_il = ProfileWidget()
-        self._profile_xl = ProfileWidget()
-        self._profile_t = ProfileWidget()
-        self._profile_arb = ProfileWidget()
+        self._profile_il = ProfileWidget(self)
+        self._profile_xl = ProfileWidget(self)
+        self._profile_t = ProfileWidget(self)
+        self._profile_arb = ProfileWidget(self)
         
         self._profile_widget = self._profile_il
 
