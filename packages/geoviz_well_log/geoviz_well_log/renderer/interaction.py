@@ -57,7 +57,17 @@ class ZoomPanHandler(QObject):
         if span <= 0:
             return False
 
-        y_ratio = event.position().y() / self._canvas.height()
+        header_h = max((getattr(t, "header_height", 56) for t in self._canvas.tracks), default=56)
+        if callable(header_h):
+            try:
+                header_h = max((t.header_height() for t in self._canvas.tracks), default=56)
+            except Exception:
+                header_h = 56
+
+        canvas_h = self._canvas.height()
+        content_h = max(canvas_h - header_h, 1)
+        mouse_y = event.position().y()
+        y_ratio = max(0.0, min(1.0, (mouse_y - header_h) / content_h))
         cursor_depth = top + y_ratio * span
 
         delta = event.angleDelta().y()

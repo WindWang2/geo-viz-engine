@@ -1025,9 +1025,18 @@ class ProfileVD(QWidget):
             return
 
         if event.button() == Qt.MouseButton.LeftButton:
-            pos = event.position()
-            col_frac = (pos.x() - img_rect.left()) / max(img_rect.width(), 1)
-            row_frac = (pos.y() - img_rect.top()) / max(img_rect.height(), 1)
+            result = self._pixel_to_seismic(event.position())
+            if result is not None:
+                _, _, col_idx, row_idx = result
+                n_cols = self._data.shape[1] if self._data is not None else 1
+                n_rows = self._data.shape[0] if self._data is not None else 1
+                col_frac = col_idx / max(n_cols - 1, 1)
+                row_frac = row_idx / max(n_rows - 1, 1)
+            else:
+                pos = event.position()
+                col_frac = (pos.x() - img_rect.left()) / max(img_rect.width(), 1)
+                row_frac = (pos.y() - img_rect.top()) / max(img_rect.height(), 1)
+
             col_frac = max(0.0, min(1.0, col_frac))
             row_frac = max(0.0, min(1.0, row_frac))
 
@@ -1066,17 +1075,35 @@ class ProfileVD(QWidget):
 
 
 def _find_nearest_index(sorted_values: list, target: float) -> int:
-    """Binary search for nearest index in a sorted list."""
-    lo, hi = 0, len(sorted_values) - 1
-    if hi <= 0:
+    """Binary search for nearest index in an ascending or descending sorted list."""
+    n = len(sorted_values)
+    if n <= 1:
         return 0
+    descending = sorted_values[0] > sorted_values[-1]
+    lo, hi = 0, n - 1
     while lo < hi:
         mid = (lo + hi) // 2
-        if sorted_values[mid] < target:
-            lo = mid + 1
+        if descending:
+            if sorted_values[mid] > target:
+                lo = mid + 1
+            else:
+                hi = mid
         else:
-            hi = mid
-    # Check if previous element is closer
-    if lo > 0 and abs(sorted_values[lo - 1] - target) < abs(sorted_values[lo] - target):
-        return lo - 1
-    return lo
+            if sorted_values[mid] < target:
+                lo = mid + 1
+            else:
+                hi = mid
+    # Check if neighbor is closer
+    candidates = [lo]
+    if lo > 0:
+        candidates.append(lo - 1)
+    if lo < n - 1:
+        candidates.append(lo + 1)
+    best_idx = lo
+    best_diff = abs(sorted_values[lo] - target)
+    for idx in candidates:
+        diff = abs(sorted_values[idx] - target)
+        if diff < best_diff:
+            best_diff = diff
+            best_idx = idx
+    return best_idx

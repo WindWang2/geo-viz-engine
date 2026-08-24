@@ -287,16 +287,6 @@ class SeismicView(QWidget):
         self._slice_worker_stopped = False
         self._slice_worker.ensure_running()
 
-    def __del__(self):
-        # Views are often dropped without cleanup() (tests, page switches);
-        # the long-lived worker threads must not outlive the process or they
-        # abort at interpreter teardown ("QThread: Destroyed while still
-        # running").
-        try:
-            self._stop_slice_worker()
-            self._stop_attr_worker()
-        except Exception:
-            pass
 
     def cancel_pending_segy_load(self) -> None:
         """Invalidate SEGY callbacks and cooperatively stop active file loads."""
@@ -2050,7 +2040,7 @@ class SeismicView(QWidget):
         if not path:
             return
         try:
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write("inline,crossline,time_ms\n")
                 for il, xl, t in self._picked_points:
                     f.write(f"{il:.1f},{xl:.1f},{t:.1f}\n")

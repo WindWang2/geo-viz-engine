@@ -70,14 +70,13 @@ def compute_balanced_spacing(
 
 
 def compute_normal_map(data: np.ndarray) -> np.ndarray:
-    """Vectorized CPU-based normal map calculation from 3D volume gradient."""
-    # Gradient in [z, y, x] order for numpy array [ni, nx, nt] (conventionally)
-    # But seismic data is often [il, xl, t]
-    dz, dy, dx = np.gradient(data)
+    """Vectorized normal map calculation from 3D volume gradient."""
+    # Data shape is [ni, nx, nt] -> Inline (X), Crossline (Y), Time (Z)
+    f_data = data.astype(np.float32, copy=False)
+    d_il, d_xl, d_t = np.gradient(f_data)
     
-    # Pack into normal vector and normalize
-    # Flip gradients to get normal pointing 'up' from reflections
-    N = np.stack([-dx, -dy, -dz], axis=-1)
+    # Pack into normal vector [-d_il, -d_xl, -d_t] pointing away from reflectors
+    N = np.stack([-d_il, -d_xl, -d_t], axis=-1)
     norm = np.linalg.norm(N, axis=-1, keepdims=True)
     norm[norm == 0] = 1.0
     N /= norm
@@ -563,6 +562,9 @@ class GLImageLutItem(gl.GLImageItem):
         for loc in enabled_locs:
             GL.glDisableVertexAttribArray(loc)
 
+        if self._lut_tex is not None:
+            GL.glActiveTexture(GL.GL_TEXTURE1)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
         GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
 
@@ -1186,13 +1188,14 @@ class DualGLVolumeItem(gl.GLVolumeItem):
 
         Deletes the main 3D volume texture (the single largest VRAM block),
         the colormap/horizon/normal textures, the custom shader program and
-        the position VBO. Requires a current GL context — callers that run
-        outside ``paintGL`` must make the owning view's context current first
-        (see ``Renderer3D._clean_gl_items``). Idempotent: safe to call twice.
+        the position VBO. If called without a current context (e.g. during
+        page close or tab switch), handles are queued to queue_gl_texture_delete
+        and queue_gl_program_delete so they are deleted on the next paint flush
+        rather than leaking VRAM. Idempotent: safe to call twice.
         """
-        ctx = QtGui.QOpenGLContext.currentContext()
-        if ctx is None:
-            return
+        program = self._customShaderProgram
+        self._customShaderProgram = None
+
         tex_ids = [
             t for t in (
                 self.texture,
@@ -1202,22 +1205,34 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                 self._normal_tex,
             ) if t is not None
         ]
-        if tex_ids:
-            try:
-                GL.glDeleteTextures(tex_ids)
-            except Exception:
-                pass
         self.texture = None
         self._primary_cmap_tex = None
         self._overlay_cmap_tex = None
         self._sculpt_horizon_tex = None
         self._normal_tex = None
-        if self._customShaderProgram is not None:
-            try:
-                GL.glDeleteProgram(self._customShaderProgram)
-            except Exception:
-                pass
-            self._customShaderProgram = None
+
+        try:
+            ctx = QtGui.QOpenGLContext.currentContext()
+        except Exception:
+            ctx = None
+
+        if ctx is None:
+            for tex in tex_ids:
+                queue_gl_texture_delete(tex)
+            if program is not None:
+                queue_gl_program_delete(program)
+        else:
+            if tex_ids:
+                try:
+                    GL.glDeleteTextures(tex_ids)
+                except Exception:
+                    pass
+            if program is not None:
+                try:
+                    GL.glDeleteProgram(program)
+                except Exception:
+                    pass
+
         vbo = getattr(self, "m_vbo_position", None)
         if vbo is not None and vbo.isCreated():
             try:

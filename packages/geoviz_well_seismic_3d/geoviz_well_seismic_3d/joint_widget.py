@@ -959,6 +959,9 @@ class WellSeismicJointWidget(QWidget):
                 d = c + 1
                 faces.append([a, c, b])
                 faces.append([b, c, d])
+                # Double-sided lighting: opposite winding
+                faces.append([a, b, c])
+                faces.append([b, d, c])
         faces = np.asarray(faces, dtype=np.uint32)
         # 振幅 → 与 2D 剖面/场景配色完全一致的零居中对称色表
         amp = ext.amplitude

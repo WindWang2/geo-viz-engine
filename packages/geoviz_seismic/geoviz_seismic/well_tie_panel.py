@@ -307,7 +307,7 @@ class WellTiePanel(QWidget):
         )
         if not path:
             return
-        with open(path, "w", newline="") as f:
+        with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["depth_m", "twt_ms"])
             for d, t in zip(pairs["depth_m"], pairs["twt_ms"]):

@@ -358,7 +358,7 @@ def interpolate_factor_grid(
         "min": float(np.min(finite)),
         "max": float(np.max(finite)),
         "mean": float(np.mean(finite)),
-        "r_squared": None if r2 is None else round(float(r2), 4),
+        "r_squared": round(float(r2), 4) if (r2 is not None and math.isfinite(r2)) else None,
     }
     if grid_var_arr is not None:
         var_flat = grid_var_arr[np.isfinite(grid_var_arr)]

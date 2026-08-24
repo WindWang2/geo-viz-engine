@@ -292,11 +292,15 @@ def _solve_augmented(aug: np.ndarray, rhs: np.ndarray, total_sill: float, ridge:
         pass
     n = len(aug) - 1
     aug_r = aug.copy()
-    aug_r[:n, :n] = aug_r[:n, :n] + ridge * max(float(total_sill), 1.0) * np.eye(n)
+    aug_r[:n, :n] = aug_r[:n, :n] + max(ridge, 1e-4) * max(float(total_sill), 1.0) * np.eye(n)
     try:
-        return np.linalg.solve(aug_r, rhs)
-    except np.linalg.LinAlgError as exc:  # pragma: no cover - pathological input only
-        raise ValueError("kriging system is singular even after ridge regularization") from exc
+        sol = np.linalg.solve(aug_r, rhs)
+        if np.all(np.isfinite(sol)):
+            return sol
+    except np.linalg.LinAlgError:
+        pass
+    sol, _, _, _ = np.linalg.lstsq(aug_r, rhs, rcond=None)
+    return sol
 
 
 def ordinary_kriging(

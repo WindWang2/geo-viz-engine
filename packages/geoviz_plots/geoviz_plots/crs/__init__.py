@@ -15,24 +15,21 @@ from __future__ import annotations
 from pyproj import CRS, Transformer
 from pyproj.exceptions import CRSError
 
-# Project CRS is process-global: set once by the host (Workstation) at
-# startup, read on every coerce call. Defaults to EPSG:4326 (WGS84 lng/lat)
-# which is the paleo_map Plate Carrée identity - callers that never set a
-# project CRS get the identity transform.
-_project_crs: str = "EPSG:4326"
+import contextvars
+
+_project_crs_var: contextvars.ContextVar[str] = contextvars.ContextVar("project_crs", default="EPSG:4326")
 
 
 def set_project_crs(crs: str) -> None:
     """Set the active project CRS (e.g. ``"EPSG:4547"`` for CGCS2000 / 3-degree Gauss-Kruger zone 39)."""
-    global _project_crs
     # Validate eagerly so a bad code fails at setup, not at first paint.
     CRS.from_user_input(crs)
-    _project_crs = crs
+    _project_crs_var.set(crs)
 
 
 def get_project_crs() -> str:
     """Return the currently active project CRS string."""
-    return _project_crs
+    return _project_crs_var.get()
 
 
 # Known CRS catalog. EPSG codes for the CNPC-standard geodetic datums the

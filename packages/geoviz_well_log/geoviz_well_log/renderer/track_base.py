@@ -110,8 +110,12 @@ class BaseTrack(QWidget):
         self._visible = value
 
     def set_depth_range(self, top: float, bottom: float):
-        self._depth_top = top
-        self._depth_bottom = bottom
+        if bottom < top:
+            top, bottom = bottom, top
+        if bottom == top:
+            bottom = top + 1.0
+        self._depth_top = float(top)
+        self._depth_bottom = float(bottom)
         self.update()
 
     def _depth_to_y(self, depth: float, rect: QRectF) -> float:
