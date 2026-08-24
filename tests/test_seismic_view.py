@@ -73,38 +73,30 @@ def test_seismic_view_set_mode(qtbot):
     assert view.display_mode() == "vd"
 
 
-def test_seismic_view_toolbar_split_into_two_rows(qtbot):
-    """11.6-H regression: toolbar must render as two stacked QToolBars.
-
-    Single-row toolbar overflowed 1280px windows; row 2 carries view/attribute
-    controls and IL/XL/T sliders so row 1 stays compact for primary actions.
-    """
+def test_seismic_view_toolbar_single_row(qtbot):
+    """Toolbar must render as a compact single row with dropdown menus."""
     from PySide6.QtWidgets import QToolBar
     from geoviz_seismic.seismic_view import SeismicView
 
     view = SeismicView(auto_load=False)
     qtbot.addWidget(view)
 
-    # Both rows must exist and be QToolBars
+    # Toolbars exist
     assert isinstance(view._toolbar_row1, QToolBar)
     assert isinstance(view._toolbar_row2, QToolBar)
 
-    # Row 1: primary actions including pick & well-tie
+    # Primary single row actions
     row1_actions = [a for a in view._toolbar_row1.actions()]
-    assert any(view._toolbar_row1.widgetForAction(a) is view._pick_btn
-               for a in row1_actions)
-    assert any(view._toolbar_row1.widgetForAction(a) is view._well_tie_btn
-               for a in row1_actions)
+    row1_widgets = {view._toolbar_row1.widgetForAction(a) for a in row1_actions if view._toolbar_row1.widgetForAction(a) is not None}
+    assert view._3d_mode_combo in row1_widgets
+    assert view._attr_combo in row1_widgets
+    assert view._horizon_menu_btn in row1_widgets
+    assert view._render_menu_btn in row1_widgets
+    assert view._overlay_menu_btn in row1_widgets
 
-    # Row 2 & Row 3: view + attribute + slider controls
-    row_actions = [a for a in view._toolbar_row2.actions()] + [a for a in view._toolbar_row3.actions()]
-    row_widgets = {w for w in (view._toolbar_row2.widgetForAction(a) for a in row_actions) if w is not None} | {w for w in (view._toolbar_row3.widgetForAction(a) for a in row_actions) if w is not None}
-    assert view._3d_mode_combo in row_widgets
-    assert view._attr_combo in row_widgets
-    assert view._tb_il_slider in row_widgets
-    assert view._tb_xl_slider in row_widgets
-    assert view._tb_t_slider in row_widgets
-    assert view._clip_spin in row_widgets
+    # Sub-row toolbars are hidden
+    assert view._toolbar_row2.isHidden()
+    assert view._toolbar_row3.isHidden()
 
 
 def test_seismic_view_dual_volume_overlay(qtbot):
