@@ -1011,6 +1011,11 @@ class WellSeismicScene:
                 hit = piercing.get(well_id)
                 if hit is not None:
                     xy.append((hit.x, hit.y))
+                else:
+                    try:
+                        xy.append(self._head_xy(well_id))
+                    except Exception:
+                        pass
         else:
             xy = [self._head_xy(well_id) for well_id in self._fence_well_ids]
         if len(xy) < 2:

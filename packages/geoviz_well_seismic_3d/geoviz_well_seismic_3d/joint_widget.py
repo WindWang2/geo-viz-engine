@@ -922,8 +922,8 @@ class WellSeismicJointWidget(QWidget):
         """Amplitude-coloured curtain strip along fence (#51).
 
         沿折线按等弧长重采样（与 extract_fence_strip 共用同一参数化，避免
-        非等长线段上顶点索引分数错位），振幅经 ColormapManager 的 seismic
-        色表映射为每顶点颜色，保留整体半透明。
+        非等长线段上顶点索引分数错位），振幅经 colorize_amplitude 映射为与 2D
+        剖面及 3D 体一致的每顶点颜色，保持高垂直分辨率与真实反射纹理。
         """
         if self._gl is None or self._scene is None:
             return None
@@ -931,14 +931,13 @@ class WellSeismicJointWidget(QWidget):
             from pyqtgraph.opengl import MeshData, GLMeshItem
         except Exception:
             return None
-        from geoviz_seismic.colormap import ColormapManager
-
+        from .color_scales import colorize_amplitude
         from .fence import sample_fence_polyline
 
         nt = ext.amplitude.shape[1]
         n_a = ext.amplitude.shape[0]
-        # sample a few vertical levels
-        n_v = min(32, nt)
+        # 高分辨率垂直层级（匹配完整地震采样点，避免稀疏下采样失真）
+        n_v = min(nt, 512)
         t_idx = np.linspace(0, nt - 1, n_v)
         z_vals = np.interp(t_idx, np.arange(nt), ext.sample_axis)
         # 等弧长重采样，沿向索引与 2D VD / extract_fence_strip 完全一致
@@ -961,31 +960,32 @@ class WellSeismicJointWidget(QWidget):
                 faces.append([a, c, b])
                 faces.append([b, c, d])
         faces = np.asarray(faces, dtype=np.uint32)
-        # 振幅 → seismic 色表 → 每顶点 RGBA（GLMeshItem 支持 vertexColors）
+        # 振幅 → 与 2D 剖面/场景配色完全一致的零居中对称色表
         amp = ext.amplitude
         finite = np.isfinite(amp)
         if not np.any(finite):
-            # 全缺失数据：退化为原固定半透明蓝
             colors = np.full(
-                (n_a * n_v, 4), (0.3, 0.5, 0.9, 0.55), dtype=np.float32
+                (n_a * n_v, 4), (0.3, 0.5, 0.9, 0.75), dtype=np.float32
             )
         else:
-            rgba = ColormapManager.apply_colormap(
-                amp, name=ColormapManager.SEISMIC
+            color_scale = self._scene.display_settings.seismic_color_scale
+            rgba = colorize_amplitude(
+                amp, color_scale=color_scale
             )
-            v_idx = t_idx.astype(int)
+            v_idx = np.round(t_idx).astype(int)
+            v_idx = np.clip(v_idx, 0, nt - 1)
             colors = (
                 rgba[:, v_idx, :].reshape(n_a * n_v, 4).astype(np.float32)
                 / 255.0
             )
-            # 无振幅数据处镂空，其余保留整体半透明
+            # 无振幅数据处镂空，其余保留适度半透明/高保真显示
             mask = finite[:, v_idx].reshape(n_a * n_v)
-            colors[:, 3] = np.where(mask, 0.55, 0.0)
+            colors[:, 3] = np.where(mask, 0.85, 0.0)
         md = MeshData(vertexes=verts, faces=faces, vertexColors=colors)
         item = GLMeshItem(
             meshdata=md,
             smooth=False,
-            shader="balloon",
+            shader=None,
             glOptions="translucent",
         )
         return item
