@@ -60,6 +60,32 @@ class TestPaintScheduler:
         qtbot.wait(50)
         assert update_count == 2
 
+    def test_timer_is_destroyed_with_widget(self, qtbot):
+        """paleo-workbench #951: the debounce timer must be parented to the
+        widget. A parentless timer armed at teardown keeps firing after the
+        widget's C++ object is deleted — the activateTimers → notifyInternal2
+        use-after-free behind the CI 3.13 SIGSEGVs."""
+        from PySide6.QtCore import QCoreApplication, QEvent
+
+        from geoviz_paleo_map.paint_scheduler import PaintScheduler
+
+        widget = QWidget()
+        scheduler = PaintScheduler(widget)
+        timer = scheduler._timer
+        assert timer.parent() is widget
+
+        scheduler.schedule()
+        assert timer.isActive()
+
+        widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        # The 16ms single-shot window has fully elapsed; event processing must
+        # not deliver a timeout into the deleted widget, and the parented
+        # timer must be gone with it.
+        qtbot.wait(50)
+        with pytest.raises(RuntimeError):
+            timer.isActive()
+
 
 class TestLayerPixmapCache:
     def test_first_paint_renders_layer(self, qtbot):

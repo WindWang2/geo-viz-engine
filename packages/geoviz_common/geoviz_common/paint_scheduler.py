@@ -11,7 +11,12 @@ class PaintScheduler:
 
     def __init__(self, widget):
         self._widget = widget
-        self._timer = QTimer()
+        # Parent the timer to the widget so it is destroyed (and its pending
+        # timeout cancelled) with the widget. A parentless timer that outlives
+        # its widget keeps firing into a deleted QWidget — the exact
+        # activateTimers→notifyInternal2-on-dead-object SIGSEGV signature of
+        # paleo-workbench #951.
+        self._timer = QTimer(widget)
         self._timer.setSingleShot(True)
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._do_update)
