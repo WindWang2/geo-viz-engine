@@ -114,6 +114,9 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "resolve_anisotropy_params": ("geoviz_plots", "resolve_anisotropy_params"),
     "snapshot_hash": ("geoviz_plots", "snapshot_hash"),
     "synthetic_sample_points": ("geoviz_plots", "synthetic_sample_points"),
+    "fit_variogram": ("geoviz_plots", "fit_variogram"),
+    "kriging_grid": ("geoviz_plots", "kriging_grid"),
+    "leave_one_out_predictions": ("geoviz_plots", "leave_one_out_predictions"),
     # Map-edit geometry API + transactional feature editor (promoted from
     # paleo_workbench/mapping/map_edit_api.py + feature_editor.py).
     # The reference_layers.py adapter (MapReferenceLayer + GDAL) stays in

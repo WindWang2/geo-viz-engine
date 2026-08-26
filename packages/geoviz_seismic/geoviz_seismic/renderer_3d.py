@@ -137,38 +137,93 @@ def prepare_horizon_texture_upload(horizon_grid: np.ndarray):
 # triggered from GUI-thread slots (volume switch, page close) runs WITHOUT
 # one, so glDeleteTextures there is a silent no-op. Collect orphaned handles
 # here and flush them at the top of the next paint, where the context IS
-# current — otherwise load/switch/clear cycles leak VRAM indefinitely.
 # ---------------------------------------------------------------------------
+# Deferred GL resource deletion
+#
+# QOpenGLWidget only has a current context inside paint/initializeGL; cleanup
+# triggered from GUI-thread slots (volume switch, page close) runs WITHOUT
+# one, so glDeleteTextures there is a silent no-op. Collect orphaned handles
+# here and flush them at the top of the next paint, where the context IS
+# current — otherwise load/switch/clear cycles leak VRAM indefinitely.
+# Queues are scoped by QOpenGLContext / QOpenGLWidget to guarantee resources
+# are freed only inside their matching active context.
+# ---------------------------------------------------------------------------
+
+_CONTEXT_PENDING_TEXTURE_DELETES: dict[object, list[int]] = {}
+_CONTEXT_PENDING_PROGRAM_DELETES: dict[object, list] = {}
 
 _PENDING_GL_TEXTURE_DELETES: list[int] = []
 _PENDING_GL_PROGRAM_DELETES: list = []
 
 
-def queue_gl_texture_delete(tex) -> None:
-    """Queue one GL texture name for deletion at the next paint flush."""
+def _get_context_key(context=None):
+    """Resolve a hashable identifier for the given or current QOpenGLContext / QOpenGLWidget."""
+    if context is None:
+        try:
+            context = QtGui.QOpenGLContext.currentContext()
+        except Exception:
+            context = None
+    if context is None:
+        return None
+    try:
+        hash(context)
+        return context
+    except TypeError:
+        return id(context)
+
+
+def queue_gl_texture_delete(tex, context=None) -> None:
+    """Queue one GL texture name for deletion at the next matching context paint flush."""
     try:
         if tex is not None:
-            _PENDING_GL_TEXTURE_DELETES.append(int(tex))
+            tex_id = int(tex)
+            key = _get_context_key(context)
+            if key is not None:
+                _CONTEXT_PENDING_TEXTURE_DELETES.setdefault(key, []).append(tex_id)
+            else:
+                _PENDING_GL_TEXTURE_DELETES.append(tex_id)
     except (TypeError, ValueError):
         pass
 
 
-def queue_gl_program_delete(program) -> None:
+def queue_gl_program_delete(program, context=None) -> None:
+    """Queue one GL shader program for deletion at the next matching context paint flush."""
     if program is not None:
-        _PENDING_GL_PROGRAM_DELETES.append(program)
+        key = _get_context_key(context)
+        if key is not None:
+            _CONTEXT_PENDING_PROGRAM_DELETES.setdefault(key, []).append(program)
+        else:
+            _PENDING_GL_PROGRAM_DELETES.append(program)
 
 
-def flush_pending_gl_deletes() -> None:
-    """Delete queued GL objects; requires a current GL context."""
+def flush_pending_gl_deletes(context=None) -> None:
+    """Delete queued GL objects for the current or specified GL context."""
+    key = _get_context_key(context)
+
+    # Collect textures: context-scoped + unassociated
+    tex_to_delete: list[int] = []
+    if key is not None and key in _CONTEXT_PENDING_TEXTURE_DELETES:
+        tex_to_delete.extend(_CONTEXT_PENDING_TEXTURE_DELETES.pop(key))
     if _PENDING_GL_TEXTURE_DELETES:
-        names = list(_PENDING_GL_TEXTURE_DELETES)
+        tex_to_delete.extend(_PENDING_GL_TEXTURE_DELETES)
         _PENDING_GL_TEXTURE_DELETES.clear()
+
+    if tex_to_delete:
         try:
-            GL.glDeleteTextures(len(names), names)
+            GL.glDeleteTextures(len(tex_to_delete), tex_to_delete)
         except Exception:
             logger.debug("pending texture delete failed", exc_info=True)
-    while _PENDING_GL_PROGRAM_DELETES:
-        program = _PENDING_GL_PROGRAM_DELETES.pop()
+
+    # Collect programs: context-scoped + unassociated
+    prog_to_delete: list = []
+    if key is not None and key in _CONTEXT_PENDING_PROGRAM_DELETES:
+        prog_to_delete.extend(_CONTEXT_PENDING_PROGRAM_DELETES.pop(key))
+    if _PENDING_GL_PROGRAM_DELETES:
+        prog_to_delete.extend(_PENDING_GL_PROGRAM_DELETES)
+        _PENDING_GL_PROGRAM_DELETES.clear()
+
+    while prog_to_delete:
+        program = prog_to_delete.pop()
         try:
             if hasattr(program, "removeAllShaders"):
                 program.removeAllShaders()
@@ -321,16 +376,24 @@ class GLImageLutItem(gl.GLImageItem):
         self._lut_shader_program = None
         lut_tex, self._lut_tex = self._lut_tex, None
         index_tex, self.texture = self.texture, None
+        ctx = None
         try:
             ctx = QtGui.QOpenGLContext.currentContext()
         except Exception:
             ctx = None
         if ctx is None:
-            # No context outside paint: defer so the next paint actually
-            # frees the objects (dropping the ids would leak VRAM).
-            queue_gl_texture_delete(lut_tex)
-            queue_gl_texture_delete(index_tex)
-            queue_gl_program_delete(program)
+            try:
+                view = self.view() if hasattr(self, "view") else None
+                if view is not None and hasattr(view, "context"):
+                    ctx = view.context()
+            except Exception:
+                ctx = None
+
+        if QtGui.QOpenGLContext.currentContext() is None:
+            # No current active context: defer deletion to the matching context's next paint.
+            queue_gl_texture_delete(lut_tex, context=ctx)
+            queue_gl_texture_delete(index_tex, context=ctx)
+            queue_gl_program_delete(program, context=ctx)
         else:
             tex_ids = [t for t in (index_tex, lut_tex) if t is not None]
             if tex_ids:
@@ -1211,16 +1274,24 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         self._sculpt_horizon_tex = None
         self._normal_tex = None
 
+        ctx = None
         try:
             ctx = QtGui.QOpenGLContext.currentContext()
         except Exception:
             ctx = None
-
         if ctx is None:
+            try:
+                view = self.view() if hasattr(self, "view") else None
+                if view is not None and hasattr(view, "context"):
+                    ctx = view.context()
+            except Exception:
+                ctx = None
+
+        if QtGui.QOpenGLContext.currentContext() is None:
             for tex in tex_ids:
-                queue_gl_texture_delete(tex)
+                queue_gl_texture_delete(tex, context=ctx)
             if program is not None:
-                queue_gl_program_delete(program)
+                queue_gl_program_delete(program, context=ctx)
         else:
             if tex_ids:
                 try:

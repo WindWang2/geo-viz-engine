@@ -496,6 +496,7 @@ py::list validate(const py::list& ring) {
 
 PYBIND11_MODULE(map_edit_core, m) {
     m.doc() = "Native geometry hot path for paleo mapping editor";
+    m.attr("__version__") = "0.2.17a0";
     m.def(
         "hit_test",
         &hit_test,

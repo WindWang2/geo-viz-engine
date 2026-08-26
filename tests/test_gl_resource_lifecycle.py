@@ -113,7 +113,7 @@ def test_dual_volume_clean_is_idempotent(fake_gl):
     item.m_vbo_position.destroy.assert_called_once()
 
 
-def test_dual_volume_clean_without_context_is_noop(monkeypatch):
+def test_dual_volume_clean_without_context_queues_deferred_deletes(monkeypatch):
     deleted: list[int] = []
     monkeypatch.setattr(
         renderer_3d.GL, "glDeleteTextures", lambda ids: deleted.extend(list(ids))
@@ -122,11 +122,24 @@ def test_dual_volume_clean_without_context_is_noop(monkeypatch):
         renderer_3d, "QtGui",
         SimpleNamespace(QOpenGLContext=SimpleNamespace(currentContext=lambda: None)),
     )
+    renderer_3d._PENDING_GL_TEXTURE_DELETES.clear()
+    renderer_3d._PENDING_GL_PROGRAM_DELETES.clear()
+
     item = _make_dual_item()
     item.clean()
     assert deleted == []
-    # Ids retained: nothing was deleted, nothing was dropped.
-    assert item.texture == 101
+    # Handles dropped from the item and queued for deferred flush
+    assert item.texture is None
+    assert item._primary_cmap_tex is None
+    assert item._overlay_cmap_tex is None
+    assert item._sculpt_horizon_tex is None
+    assert item._normal_tex is None
+    assert item._customShaderProgram is None
+    assert sorted(renderer_3d._PENDING_GL_TEXTURE_DELETES) == [101, 102, 103, 104, 105]
+    assert renderer_3d._PENDING_GL_PROGRAM_DELETES == [201]
+
+    renderer_3d._PENDING_GL_TEXTURE_DELETES.clear()
+    renderer_3d._PENDING_GL_PROGRAM_DELETES.clear()
 
 
 def test_dual_volume_clean_tolerates_partial_state(fake_gl):
