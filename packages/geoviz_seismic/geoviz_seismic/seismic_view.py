@@ -57,6 +57,10 @@ class SeismicView(QWidget):
         # keeps ordinary project/session teardown bounded.
         self._slice_worker_stopped = True
         self._slice_worker: SliceReadWorker | None = None
+        # Chunked (zarr) interactive path (#1082): None until a DERIVED
+        # store is attached via set_chunked_volume().
+        self._chunked_worker = None
+        self._chunked_geometry = None
         self._meta: SeismicVolumeMeta | None = None
         self._horizon_grids: dict[str, np.ndarray] = {}
         self._ds_factor: tuple[int, int, int] = (1, 1, 1)
@@ -260,6 +264,7 @@ class SeismicView(QWidget):
 
         self._stop_slice_worker()
         self._stop_attr_worker()
+        self._stop_chunked_worker()
 
     def _stop_attr_worker(self) -> None:
         """Stop the attribute worker if one was created (idempotent)."""
@@ -271,6 +276,41 @@ class SeismicView(QWidget):
         if self._slice_worker is not None and not self._slice_worker_stopped:
             self._slice_worker_stopped = True
             self._slice_worker.stop()
+
+    def _stop_chunked_worker(self) -> None:
+        """Stop the chunked (zarr) slice worker if one was attached (#1082)."""
+        worker = self._chunked_worker
+        if worker is not None:
+            self._chunked_worker = None
+            worker.stop()
+
+    def set_chunked_volume(self, store_path, geometry=None) -> None:
+        """Serve 2-D profile browsing from a DERIVED chunked store (#1082/#1079).
+
+        Switches the interactive read path to :class:`ChunkedSliceWorker`
+        (frame-budget LOD during drags, idle refinement to lod0, directional
+        prefetch). The 3-D preview volume and the segyio fallback stay as
+        they are; slice requests route to the chunked worker while it is
+        attached. Attach AFTER the RAW volume was loaded so survey metadata
+        (geometry/axes) already exists.
+        """
+        from geoviz_seismic.chunked_worker import ChunkedSliceWorker
+
+        self._segy_generation += 1
+        self._stop_slice_worker()
+        worker = self._chunked_worker
+        if worker is None:
+            worker = ChunkedSliceWorker()
+            worker.slice_ready.connect(self._on_slice_ready)
+            worker.prefetch_ready.connect(self._on_prefetch_ready)
+            worker.read_error.connect(self._on_slice_read_error)
+            retain_background_worker(worker)
+            app = QCoreApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(worker.stop)
+            self._chunked_worker = worker
+        self._chunked_geometry = geometry
+        worker.set_store(str(store_path), self._segy_generation, geometry=geometry)
 
     def _ensure_slice_worker(self) -> None:
         if self._slice_worker is None:
@@ -1402,10 +1442,19 @@ class SeismicView(QWidget):
                 self._latest_slice_request[slice_type] = actual_pos
                 self._update_profile_panel(slice_type, actual_pos, cached.T)
             else:
+                # Record the user's current position so a late in-flight
+                # result for an older position can't overwrite the panel.
+                self._latest_slice_request[slice_type] = actual_pos
+                if self._chunked_worker is not None:
+                    # DERIVED chunked path (#1082): LOD-selected reads with
+                    # idle refinement; fast enough to skip the preview paint.
+                    self._chunked_worker.request(
+                        slice_type, actual_pos, self._segy_generation
+                    )
+                    continue
                 # Time slices cost ~400ms of SEGY I/O. Paint the in-memory
                 # preview cube first so the 2D panel tracks the slider;
                 # full-res replaces it when the worker returns.
-                self._latest_slice_request[slice_type] = actual_pos
                 if slice_type == "time":
                     self._paint_time_preview(position, actual_pos, m, df)
                 self._ensure_slice_worker()
