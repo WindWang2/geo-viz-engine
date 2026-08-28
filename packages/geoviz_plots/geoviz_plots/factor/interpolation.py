@@ -29,15 +29,18 @@ DEFAULT_GRID_N = 50
 MAX_LOO_SAMPLES = 64
 
 # UI labels (tokens.INTERPOLATION_METHODS) -> engine backends.
-# ISS-KRIG-01: 克里金 / 克里金(MVP·线性) still map to SciPy linear triangulation
-# (labeled MVP placeholder); a REAL variogram-based ordinary-kriging backend
-# is available under the engine name "kriging" (geoviz_plots.factor.kriging).
+# ISS-KRIG-01 resolved (#1049): both 克里金 labels — including the legacy
+# "克里金(MVP·线性)" alias — dispatch to the REAL variogram-based
+# ordinary-kriging backend "kriging" (geoviz_plots.factor.kriging). The
+# SciPy linear-triangulation backend stays reachable under its own engine
+# name "linear" for callers that explicitly want it.
 _METHOD_BACKEND: dict[str, str] = {
     "IDW": "idw",
     "idw": "idw",
-    "克里金": "linear",
-    "克里金(MVP·线性)": "linear",
+    "克里金": "kriging",
+    "克里金(MVP·线性)": "kriging",
     "kriging": "kriging",
+    "linear": "linear",
     "样条": "cubic",
     "方向趋势": "directional",
     "directional": "directional",

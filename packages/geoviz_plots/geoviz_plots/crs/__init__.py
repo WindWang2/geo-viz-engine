@@ -91,7 +91,7 @@ def coerce_to_project_crs(coords, source_crs: str):
     if single:
         coords = coords.reshape(1, 2)
 
-    target = _project_crs
+    target = get_project_crs()
     if _crs_equivalent(source_crs, target):
         out = coords
     else:

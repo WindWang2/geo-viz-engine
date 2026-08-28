@@ -1100,11 +1100,12 @@ def test_contour_draft_segments_to_line_features():
 
 
 def test_factor_method_to_backend_and_mvp_note():
-    """method_to_backend resolves UI labels; mvp_note_for tags the kriging MVP."""
+    """method_to_backend resolves UI labels; mvp_note_for tags the linear MVP."""
     from geoviz_plots.factor import method_to_backend, mvp_note_for
 
     assert method_to_backend("IDW") == "idw"
-    assert method_to_backend("克里金(MVP·线性)") == "linear"
+    assert method_to_backend("克里金(MVP·线性)") == "kriging"  # #1049: real kriging
+    assert method_to_backend("linear") == "linear"
     assert method_to_backend("方向趋势") == "directional"
     assert method_to_backend("unknown") == "idw"  # default fallback
     assert "ISS-KRIG-01" in mvp_note_for("linear")
@@ -1520,7 +1521,7 @@ def test_factor_loo_r2_keeps_negative_values():
 
 
 def test_factor_interpolate_grid_reports_nearest_fallback():
-    """#690: collinear 克里金/linear samples must mark the nearest fallback."""
+    """#690: collinear linear samples must mark the nearest fallback."""
     from geoviz_plots.factor import interpolate_factor_grid
 
     pts = [
@@ -1528,7 +1529,7 @@ def test_factor_interpolate_grid_reports_nearest_fallback():
         {"x": 1.0, "y": 0.0, "value": 2.0},
         {"x": 2.0, "y": 0.0, "value": 3.0},
     ]
-    result = interpolate_factor_grid(pts, method="克里金", grid_n=5)
+    result = interpolate_factor_grid(pts, method="linear", grid_n=5)
     assert result["degraded"] is True
     assert result["fallback"] == "nearest"
 

@@ -279,10 +279,10 @@ def test_kriging_grid_shapes_and_finiteness():
 
 
 def test_method_to_backend_resolves_kriging():
-    """The 'kriging' engine name maps to the kriging backend; existing labels are untouched."""
+    """Both 克里金 labels route to the real kriging backend (#1049)."""
     assert method_to_backend("kriging") == "kriging"
     assert method_to_backend("IDW") == "idw"
-    assert method_to_backend("克里金(MVP·线性)") == "linear"  # MVP label unchanged
+    assert method_to_backend("克里金(MVP·线性)") == "kriging"  # legacy alias, real kriging
     assert mvp_note_for("kriging") is None  # real kriging is not an MVP placeholder
 
 
