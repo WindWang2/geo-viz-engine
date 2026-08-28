@@ -7,6 +7,14 @@ Works in any PySide6 project: ``pip install geoviz-seismic``.
 """
 
 from .cache import SeismicCache
+from .chunked import (
+    ChunkedVolumeReader,
+    SegyVolumeReader,
+    VolumeGeometry,
+    VolumeReader,
+    looks_like_zarr_store,
+    open_volume,
+)
 from .colormap import ColormapManager
 from .vram_cache import VRAM, VramStats, VramTextureCache
 from .crossplot import analyze_lithology_crossplot
@@ -36,6 +44,7 @@ from .stratal import (
 __version__ = "0.4.0"
 
 __all__ = [
+    "ChunkedVolumeReader",
     "ColormapManager",
     "HorizonAxes",
     "HorizonParser",
@@ -53,16 +62,21 @@ __all__ = [
     "VramStats",
     "VramTextureCache",
     "SeismicView",
+    "SegyVolumeReader",
     "BinGridGeometry",
     "SeismicVolumeMeta",
     "SliceInfo",
     "HorizonData",
+    "VolumeGeometry",
+    "VolumeReader",
     "attributes",
     "attribute_pipeline",
     "extract_along_horizon",
     "analyze_lithology_crossplot",
     "blend_rgba",
     "fuse_rgb",
+    "looks_like_zarr_store",
+    "open_volume",
     # Stratal / proportional slicing (pure-numpy engine core)
     "stratal",
     "build_proportional_surfaces",
