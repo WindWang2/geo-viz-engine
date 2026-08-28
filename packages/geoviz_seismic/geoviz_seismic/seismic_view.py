@@ -1505,11 +1505,7 @@ class SeismicView(QWidget):
         if attr_idx == 0:  # 振幅: passthrough, no compute needed
             pw = self._profile_for(slice_type)
             l2_key = self._l2_texture_key(pw, slice_type, position, attr_idx)
-            hit = self._render_l2_hit(pw, l2_key, raw, info)
-            if hit:
-                return
-            pw.update_profile(raw, slice_info=info)
-            self._store_l2_texture(pw, l2_key)
+            self._render_profile_with_l2(pw, l2_key, raw, info)
             return
 
         key = (self._segy_generation, slice_type, position, attr_idx, None)
@@ -1517,12 +1513,23 @@ class SeismicView(QWidget):
         pw = self._profile_for(slice_type)
         if cached is not None:
             l2_key = self._l2_texture_key(pw, slice_type, position, attr_idx)
-            if self._render_l2_hit(pw, l2_key, cached, info):
-                return
-            pw.update_profile(cached, slice_info=info)
-            self._store_l2_texture(pw, l2_key)
+            self._render_profile_with_l2(pw, l2_key, cached, info)
             return
         self._submit_attr(slice_type, position, raw, attr_idx)
+
+    def _volume_identity(self) -> tuple:
+        """Stable identity of the loaded volume, for cross-view L2 keys.
+
+        The SEGY path identifies real surveys (two views on the same file
+        legitimately share one L2 entry); the CPU preview array id covers
+        synthetic/demo volumes.  ``_segy_generation`` alone is per-view and
+        starts at 0 — two views on DIFFERENT files could otherwise collide
+        and serve each other's index textures.
+        """
+        if self._segy_path is not None:
+            return ("segy", self._segy_path)
+        vol = getattr(self._renderer_3d, "_volume_data_cpu", None)
+        return ("demo", id(vol) if vol is not None else None)
 
     def _l2_texture_key(
         self, pw: ProfileWidget, slice_type: str, position: int, attr_idx: int
@@ -1531,14 +1538,24 @@ class SeismicView(QWidget):
 
         Deliberately excludes the colormap: a colormap switch re-colours the
         cached index texture in O(1) and must not invalidate it (nor touch
-        L1).  Includes the clip percentile (changes the index content) and
-        the SEGY generation (a reloaded volume invalidates everything).
+        L1).  Includes the clip percentile (changes the index content), the
+        volume identity + SEGY generation (a different/reloaded volume
+        invalidates everything).
         """
         clip = round(float(pw._vd.clip_percentile()), 2)
         return (
-            "profile", self._segy_generation, slice_type, int(position),
-            int(attr_idx), clip,
+            "profile", self._volume_identity(), self._segy_generation,
+            slice_type, int(position), int(attr_idx), clip,
         )
+
+    def _render_profile_with_l2(
+        self, pw: ProfileWidget, key: tuple, data: np.ndarray, info: SliceInfo
+    ) -> None:
+        """Display *data* on *pw*, serving from / filling the L2 texture cache."""
+        if self._render_l2_hit(pw, key, data, info):
+            return
+        pw.update_profile(data, slice_info=info)
+        self._store_l2_texture(pw, key)
 
     def _render_l2_hit(
         self, pw: ProfileWidget, key: tuple, raw: np.ndarray, info: SliceInfo
@@ -1551,6 +1568,9 @@ class SeismicView(QWidget):
         if cached is None:
             return False
         indexed, clip_range = cached
+        if indexed.shape != getattr(raw, "shape", None):
+            # Stale entry with a different geometry — never serve it.
+            return False
         pw.apply_indexed(raw, indexed, clip_range, slice_info=info)
         return True
 
@@ -1654,9 +1674,7 @@ class SeismicView(QWidget):
             pw._vd.render_rgba(result.display, slice_info=info)
         else:
             l2_key = self._l2_texture_key(pw, result.slice_type, result.position, result.attr_idx)
-            if not self._render_l2_hit(pw, l2_key, result.display, info):
-                pw.update_profile(result.display, slice_info=info)
-                self._store_l2_texture(pw, l2_key)
+            self._render_profile_with_l2(pw, l2_key, result.display, info)
 
     @Slot(object)
     def _on_attr_error(self, error: AttrComputeError):

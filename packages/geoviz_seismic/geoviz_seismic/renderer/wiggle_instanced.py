@@ -49,23 +49,27 @@ class WiggleTraceTexture:
             raise ValueError(f"volume_slice must be 2D array (got {data.ndim}D)")
 
         self.num_traces, self.num_samples = data.shape
+        mock = mock_gl or not HAS_OPENGL or GL is None
 
-        if mock_gl or not HAS_OPENGL or GL is None:
+        if mock:
             if self.texture_id is None:
                 self._mock_id_counter += 1
                 self.texture_id = self._mock_id_counter
-            # Mock uploads still count in the L2 ledger: budget accounting
-            # must be identical on CI and GPU paths.
-            VRAM.put(
-                self._vram_key(),
-                content=None,
-                size_bytes=self.num_traces * self.num_samples * 4,
-                kind="wiggle",
-                handle=int(self.texture_id),
-                release=self._evict_texture,
-            )
-            return
+        else:
+            self._upload_r32f(data)
+        # Both paths reach the ledger: budget accounting is identical on CI
+        # (mock) and GPU paths — R32F = 4 bytes/texel.
+        VRAM.put(
+            self._vram_key(),
+            content=None,
+            size_bytes=self.num_traces * self.num_samples * 4,
+            kind="wiggle",
+            handle=int(self.texture_id) if self.texture_id is not None else None,
+            release=self._evict_texture,
+        )
 
+    def _upload_r32f(self, data: np.ndarray) -> None:
+        """GL texture creation + texImage2D for the real (non-mock) path."""
         if self.texture_id is None:
             self.texture_id = int(GL.glGenTextures(1))
 
@@ -87,15 +91,6 @@ class WiggleTraceTexture:
             data,
         )
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
-        # R32F slice texture into the global L2 ledger (4 bytes/texel).
-        VRAM.put(
-            self._vram_key(),
-            content=None,
-            size_bytes=self.num_traces * self.num_samples * 4,
-            kind="wiggle",
-            handle=int(self.texture_id) if self.texture_id is not None else None,
-            release=self._evict_texture,
-        )
 
     def _vram_key(self) -> tuple:
         return ("wiggle", id(self))
@@ -241,17 +236,22 @@ class WiggleTraceRenderer:
         if lut.shape != (256, 4):
             raise ValueError(f"lut_256 must be shape (256, 4) uint8 (got {lut.shape})")
 
-        if mock_gl or not HAS_OPENGL or GL is None:
+        mock = mock_gl or not HAS_OPENGL or GL is None
+        if mock:
             if self.lut_texture_id is None:
                 self.lut_texture_id = 999
-            VRAM.put(
-                ("wiggle-lut", id(self)),
-                content=None, size_bytes=256 * 4, kind="lut",
-                handle=int(self.lut_texture_id),
-                release=self._evict_lut,
-            )
-            return
+        else:
+            self._upload_lut_texture(lut)
+        # Both paths reach the ledger (256x1 RGBA = 1 KiB).
+        VRAM.put(
+            ("wiggle-lut", id(self)),
+            content=None, size_bytes=256 * 4, kind="lut",
+            handle=int(self.lut_texture_id) if self.lut_texture_id is not None else None,
+            release=self._evict_lut,
+        )
 
+    def _upload_lut_texture(self, lut: np.ndarray) -> None:
+        """GL 1-D LUT creation + texImage1D for the real (non-mock) path."""
         if self.lut_texture_id is None:
             self.lut_texture_id = int(GL.glGenTextures(1))
 
@@ -270,12 +270,6 @@ class WiggleTraceRenderer:
             lut,
         )
         GL.glBindTexture(GL.GL_TEXTURE_1D, 0)
-        VRAM.put(
-            ("wiggle-lut", id(self)),
-            content=None, size_bytes=256 * 4, kind="lut",
-            handle=int(self.lut_texture_id),
-            release=self._evict_lut,
-        )
 
     def _evict_lut(self) -> None:
         """L2 eviction hook: drop the LUT texture; next set_colormap re-uploads."""

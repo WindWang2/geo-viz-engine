@@ -85,7 +85,6 @@ class _VramEntry:
     # Owner-supplied explicit GPU free.  Must leave the owner re-uploadable
     # (e.g. set texture handle to None and raise the needs-upload flag).
     release: Callable[[], None] | None = None
-    touch_count: int = 0
 
 
 @dataclass
@@ -185,7 +184,6 @@ class VramTextureCache:
         with self._lock:
             if key in self._lru:
                 self._lru.move_to_end(key)
-                self._lru[key].touch_count += 1
 
     def put(
         self,
@@ -221,9 +219,6 @@ class VramTextureCache:
             self._add_bytes(kind, int(size_bytes))
             self._apply_budget(protect=key)
 
-    # Convenience alias matching RamSliceCache's vocabulary.
-    register = put
-
     def unregister(self, key: tuple) -> None:
         """Remove an entry the owner has already freed (no release callback).
 
@@ -253,11 +248,6 @@ class VramTextureCache:
     def stats(self) -> dict[str, Any]:
         with self._lock:
             return self._stats.as_dict()
-
-    def resident_kinds(self) -> dict[str, int]:
-        """Per-kind byte usage snapshot."""
-        with self._lock:
-            return dict(self._stats.by_kind)
 
     def __len__(self) -> int:
         with self._lock:
