@@ -21,6 +21,7 @@ from .gpu_ops import (
 )
 from .horizon import horizon_quad_faces
 from .stratal import extract_stratal_slice
+from .vram_cache import VRAM
 
 logger = logging.getLogger(__name__)
 
@@ -356,6 +357,29 @@ class GLImageLutItem(gl.GLImageItem):
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, 256, 1, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, lut)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
         self._lut_needs_upload = False
+        VRAM.put(
+            self._vram_key("lut"),
+            content=None,
+            size_bytes=256 * 4,
+            kind="lut",
+            handle=int(self._lut_tex),
+            release=self._evict_lut_texture,
+        )
+
+    def _vram_key(self, slot: str) -> tuple:
+        return ("lutitem", id(self), slot)
+
+    def _evict_lut_texture(self) -> None:
+        """L2 eviction hook: free the LUT texture, re-upload on next paint."""
+        tex, self._lut_tex = self._lut_tex, None
+        queue_gl_texture_delete(tex)
+        self._lut_needs_upload = True
+
+    def _evict_index_texture(self) -> None:
+        """L2 eviction hook: free the R8 slice texture, re-upload on next paint."""
+        tex, self.texture = self.texture, None
+        queue_gl_texture_delete(tex)
+        self._needUpdate = True
 
     def clean(self) -> None:
         """Release every GL resource owned by this item.
@@ -372,6 +396,11 @@ class GLImageLutItem(gl.GLImageItem):
         Idempotent: safe to call twice. If the item is ever repainted after
         ``clean()``, it re-uploads everything from scratch.
         """
+        # Leave the global L2 ledger first: the owner frees the GL objects
+        # itself below, so no eviction release must fire for them later.
+        VRAM.unregister(self._vram_key("index"))
+        VRAM.unregister(self._vram_key("lut"))
+
         program = self._lut_shader_program
         self._lut_shader_program = None
         lut_tex, self._lut_tex = self._lut_tex, None
@@ -554,6 +583,16 @@ class GLImageLutItem(gl.GLImageItem):
         vbo.allocate(pos, pos.nbytes)
         vbo.release()
 
+        # R8 slice texture: 1 byte per uploaded texel, in the global L2 ledger.
+        VRAM.put(
+            self._vram_key("index"),
+            content=None,
+            size_bytes=int(width) * int(height),
+            kind="ortho3d",
+            handle=int(self.texture) if self.texture is not None else None,
+            release=self._evict_index_texture,
+        )
+
     def getLutShaderProgram(self):
         """Instance-level shader program with the LUT-lookup fragment stage.
 
@@ -587,6 +626,11 @@ class GLImageLutItem(gl.GLImageItem):
             self._needUpdate = False
         if self._lut_needs_upload:
             self._uploadLut()
+
+        # Keep this item's textures MRU in the global L2 ledger while on
+        # screen — an on-screen plane must never be the eviction victim.
+        VRAM.touch(self._vram_key("index"))
+        VRAM.touch(self._vram_key("lut"))
 
         self.setupGLState()
         mat_mvp = self.mvpMatrix()
@@ -732,8 +776,50 @@ class DualGLVolumeItem(gl.GLVolumeItem):
             lut = np.ascontiguousarray(self._overlay_cmap_lut.reshape((1, 256, 4)))
             GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, 256, 1, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, lut)
             GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
-            
+
+        if self._primary_cmap_tex is not None:
+            VRAM.put(
+                self._vram_key("primary_lut"),
+                content=None, size_bytes=256 * 4, kind="lut",
+                handle=int(self._primary_cmap_tex),
+                release=self._evict_primary_lut,
+            )
+        if self._overlay_cmap_tex is not None:
+            VRAM.put(
+                self._vram_key("overlay_lut"),
+                content=None, size_bytes=256 * 4, kind="overlay",
+                handle=int(self._overlay_cmap_tex),
+                release=self._evict_overlay_lut,
+            )
         self._cmap_needs_upload = False
+
+    def _vram_key(self, slot: str) -> tuple:
+        return ("volitem", id(self), slot)
+
+    def _evict_primary_lut(self) -> None:
+        tex, self._primary_cmap_tex = self._primary_cmap_tex, None
+        queue_gl_texture_delete(tex)
+        self._cmap_needs_upload = True
+
+    def _evict_overlay_lut(self) -> None:
+        tex, self._overlay_cmap_tex = self._overlay_cmap_tex, None
+        queue_gl_texture_delete(tex)
+        self._cmap_needs_upload = True
+
+    def _evict_horizon_texture(self) -> None:
+        tex, self._sculpt_horizon_tex = self._sculpt_horizon_tex, None
+        queue_gl_texture_delete(tex)
+        self._sculpt_needs_upload = True
+
+    def _evict_normal_texture(self) -> None:
+        tex, self._normal_tex = self._normal_tex, None
+        queue_gl_texture_delete(tex)
+        self._normal_needs_upload = True
+
+    def _evict_volume_texture(self) -> None:
+        tex, self.texture = self.texture, None
+        queue_gl_texture_delete(tex)
+        self._needUpload = True
 
 
     def _uploadHorizonTexture(self):
@@ -756,6 +842,14 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         data, w, h = prepare_horizon_texture_upload(self._sculpt_horizon_data)
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_R32F, w, h, 0, GL.GL_RED, GL.GL_FLOAT, data)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        VRAM.put(
+            self._vram_key("horizon"),
+            content=None,
+            size_bytes=int(w) * int(h) * 4,  # GL_R32F = 4 bytes/texel
+            kind="horizon",
+            handle=int(self._sculpt_horizon_tex),
+            release=self._evict_horizon_texture,
+        )
         self._sculpt_needs_upload = False
 
     def _uploadNormalTexture(self):
@@ -778,6 +872,14 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         data, w, h, d = prepare_normal_texture_upload(self._normal_data)
         GL.glTexImage3D(GL.GL_TEXTURE_3D, 0, GL.GL_RGB8, w, h, d, 0, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, data)
         GL.glBindTexture(GL.GL_TEXTURE_3D, 0)
+        VRAM.put(
+            self._vram_key("normal"),
+            content=None,
+            size_bytes=int(w) * int(h) * int(d) * 3,  # GL_RGB8 = 3 bytes/voxel
+            kind="normal",
+            handle=int(self._normal_tex),
+            release=self._evict_normal_texture,
+        )
         self._normal_needs_upload = False
 
     def getCustomShaderProgram(self):
@@ -1107,15 +1209,34 @@ class DualGLVolumeItem(gl.GLVolumeItem):
 
         if self._needUpload:
             self._uploadData()
-            
+            # The volume brick is the single largest VRAM block: a
+            # (w, h, d, 4) uint8 3-D texture.
+            if self.texture is not None:
+                w, h, d = (int(s) for s in self.data.shape[:3])
+                VRAM.put(
+                    self._vram_key("volume"),
+                    content=None,
+                    size_bytes=w * h * d * 4,
+                    kind="volume",
+                    handle=int(self.texture),
+                    release=self._evict_volume_texture,
+                )
+
         if self._cmap_needs_upload:
             self._uploadColormaps()
-            
+
         if self._sculpt_needs_upload:
             self._uploadHorizonTexture()
-            
+
         if self._normal_needs_upload:
             self._uploadNormalTexture()
+
+        # Keep the on-screen volume's textures MRU in the global L2 ledger.
+        VRAM.touch(self._vram_key("volume"))
+        VRAM.touch(self._vram_key("primary_lut"))
+        VRAM.touch(self._vram_key("overlay_lut"))
+        VRAM.touch(self._vram_key("horizon"))
+        VRAM.touch(self._vram_key("normal"))
 
         self.setupGLState()
 
@@ -1256,6 +1377,11 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         and queue_gl_program_delete so they are deleted on the next paint flush
         rather than leaking VRAM. Idempotent: safe to call twice.
         """
+        # Leave the global L2 ledger first: the owner frees the GL objects
+        # itself below, so no eviction release must fire for them later.
+        for slot in ("volume", "primary_lut", "overlay_lut", "horizon", "normal"):
+            VRAM.unregister(self._vram_key(slot))
+
         program = self._customShaderProgram
         self._customShaderProgram = None
 
@@ -2202,6 +2328,7 @@ class Renderer3D(QWidget):
                 self._view.removeItem(item)
             except Exception:
                 pass
+        self._unregister_curtain_items(getattr(self, '_arb_curtain_items', []))
         self._arb_curtain_items = []
         self._arb_polyline = None
 
@@ -2584,6 +2711,34 @@ class Renderer3D(QWidget):
             self._slice_range_cache = (lo, hi)
         return self._slice_range_cache
 
+    def _slice_index_l2(
+        self,
+        plane_kind: str,
+        position: int,
+        raw: np.ndarray,
+        value_range: tuple[float, float] | None,
+    ) -> np.ndarray:
+        """L2-cached normalize→index for one 3-D slice-plane texture.
+
+        Re-visiting a plane position (slider sweep, colormap round-trip)
+        skips the CPU normalize pass and re-uploads straight from the cached
+        index texture content.  The key excludes the colormap by design — a
+        colormap switch re-uploads only the 256-entry LUT (O(1)) and leaves
+        both the L1 slices and these index textures valid.
+        """
+        vol = self._volume_data_cpu
+        shape = vol.shape if vol is not None else ()
+        key = (
+            "ortho3d", id(self), int(getattr(self, "_volume_version", 0)),
+            plane_kind, int(position), shape, value_range,
+        )
+        cached = VRAM.get(key)
+        if cached is not None:
+            return cached
+        idx = ColormapManager.normalize_to_index(raw, lut_size=256, value_range=value_range)
+        VRAM.put(key, content=idx, size_bytes=int(idx.nbytes), kind="ortho3d")
+        return idx
+
     def _create_slice_plane(self, axis: str, value_range: tuple[float, float] | None = None):
         """Build or update the slice plane + border for a single axis (inline/crossline/time) in-place."""
         if self._volume_data_cpu is None:
@@ -2595,7 +2750,7 @@ class Renderer3D(QWidget):
         if axis == "inline":
             # 1. Inline — Perpendicular to IL axis (x)
             il_raw = self._get_sliced_data(0, self._il_pos)
-            il_idx = ColormapManager.normalize_to_index(il_raw, lut_size=256, value_range=value_range)
+            il_idx = self._slice_index_l2("inline", self._il_pos, il_raw, value_range)
 
             if self._img_il is not None and self._line_il is not None:
                 # Fast In-Place Texture & Transform Update
@@ -2633,7 +2788,7 @@ class Renderer3D(QWidget):
         elif axis == "crossline":
             # 2. Crossline — Perpendicular to XL axis (y)
             xl_raw = self._get_sliced_data(1, self._xl_pos)
-            xl_idx = ColormapManager.normalize_to_index(xl_raw, lut_size=256, value_range=value_range)
+            xl_idx = self._slice_index_l2("crossline", self._xl_pos, xl_raw, value_range)
 
             if self._img_xl is not None and self._line_xl is not None:
                 # Fast In-Place Texture & Transform Update
@@ -2711,11 +2866,7 @@ class Renderer3D(QWidget):
         )
         for position in positions:
             t_raw = self._get_sliced_data(2, position)
-            t_idx = ColormapManager.normalize_to_index(
-                t_raw,
-                lut_size=256,
-                value_range=value_range,
-            )
+            t_idx = self._slice_index_l2("time", position, t_raw, value_range)
             pair = self._time_plane_items.get(position)
             if pair is None:
                 image = GLImageLutItem(
@@ -2829,8 +2980,11 @@ class Renderer3D(QWidget):
 
         for idx, surface in enumerate(self._stratal_surfaces):
             amp = extract_stratal_slice(self._volume_data_cpu, surface)
-            idx_img = ColormapManager.normalize_to_index(
-                amp, lut_size=256, value_range=value_range,
+            # Stratal keys carry the surface array id: surfaces are replaced
+            # wholesale by set_stratal_slices, so a new list must never be
+            # served an old surface's index texture.
+            idx_img = self._slice_index_l2(
+                f"stratal:{idx}:{id(surface)}", 0, amp, value_range,
             )
             # Representative depth = finite mean of the surface (sample units).
             finite = np.isfinite(surface)
@@ -2933,6 +3087,7 @@ class Renderer3D(QWidget):
                     self._view.removeItem(item)
                 except Exception:
                     pass
+            self._unregister_curtain_items(getattr(self, '_arb_curtain_items', []))
             self._arb_curtain_items = []
 
             self._create_slice_planes()
@@ -3025,6 +3180,7 @@ class Renderer3D(QWidget):
                 item.translate(wx0, wy0, self._sample_z(0))
                 self._view.addItem(item)
                 self._arb_curtain_items.append(item)
+                self._register_curtain_texture(item, seg_img)
                 
                 # Vertical borders for this segment
                 border = np.array([
@@ -3044,6 +3200,36 @@ class Renderer3D(QWidget):
             self.arbitrary_slice_changed.emit(arb_data)
         except Exception as e:
             logger.error(f"Failed to render polyline curtain: {e}")
+
+    def _register_curtain_texture(self, item: "gl.GLImageItem", seg_img: np.ndarray) -> None:
+        """Count one arbitrary-curtain RGBA texture in the global L2 ledger.
+
+        pyqtgraph's GLImageItem uploads lazily at first paint; the handle is
+        read at eviction time (by then it exists if the curtain was shown).
+        The release leaves the item re-uploadable via ``_needUpdate``.
+        """
+        key = ("curtain", id(item))
+
+        def _release(item=item) -> None:
+            tex = getattr(item, "texture", None)
+            item.texture = None
+            queue_gl_texture_delete(tex)
+            item._needUpdate = True
+
+        VRAM.put(
+            key,
+            content=None,
+            size_bytes=int(seg_img.shape[0]) * int(seg_img.shape[1]) * 4,
+            kind="curtain",
+            release=_release,
+        )
+
+    def _unregister_curtain_items(self, items: list) -> None:
+        for item in items:
+            try:
+                VRAM.unregister(("curtain", id(item)))
+            except Exception:
+                pass
 
     def eventFilter(self, obj, event):
         """Detect left-clicks on 3D view for jump-to-position navigation."""

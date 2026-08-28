@@ -14,6 +14,7 @@ from .renderer_3d import Renderer3D, compute_balanced_spacing
 from .profile_widget import ProfileWidget
 from .loader import SeismicLoader
 from .cache import RamSliceCache, SeismicCache
+from .vram_cache import VRAM
 from .colorbar_widget import ColorbarWidget
 from .workers import (
     DEFAULT_MAX_PREVIEW_VOXELS,
@@ -1476,6 +1477,11 @@ class SeismicView(QWidget):
         background worker with a generation guard so the UI thread stays
         responsive, and the panel updates when the result lands.  Cached
         results short-circuit the worker entirely.
+
+        L2 (VRAM texture) layer: the display-ready LUT-index slice texture
+        is cached globally (colormap-independent).  A re-visited slice hits
+        L2 and skips the percentile-scan + normalize pass entirely — only
+        the Indexed8 QImage build runs.
         """
         from . import attribute_pipeline as _ap
 
@@ -1497,15 +1503,71 @@ class SeismicView(QWidget):
             return
 
         if attr_idx == 0:  # 振幅: passthrough, no compute needed
-            self._profile_for(slice_type).update_profile(raw, slice_info=info)
+            pw = self._profile_for(slice_type)
+            l2_key = self._l2_texture_key(pw, slice_type, position, attr_idx)
+            hit = self._render_l2_hit(pw, l2_key, raw, info)
+            if hit:
+                return
+            pw.update_profile(raw, slice_info=info)
+            self._store_l2_texture(pw, l2_key)
             return
 
         key = (self._segy_generation, slice_type, position, attr_idx, None)
         cached = self._attr_cache.get(key)
+        pw = self._profile_for(slice_type)
         if cached is not None:
-            self._profile_for(slice_type).update_profile(cached, slice_info=info)
+            l2_key = self._l2_texture_key(pw, slice_type, position, attr_idx)
+            if self._render_l2_hit(pw, l2_key, cached, info):
+                return
+            pw.update_profile(cached, slice_info=info)
+            self._store_l2_texture(pw, l2_key)
             return
         self._submit_attr(slice_type, position, raw, attr_idx)
+
+    def _l2_texture_key(
+        self, pw: ProfileWidget, slice_type: str, position: int, attr_idx: int
+    ) -> tuple:
+        """Build the L2 texture-cache key for a profile panel slice.
+
+        Deliberately excludes the colormap: a colormap switch re-colours the
+        cached index texture in O(1) and must not invalidate it (nor touch
+        L1).  Includes the clip percentile (changes the index content) and
+        the SEGY generation (a reloaded volume invalidates everything).
+        """
+        clip = round(float(pw._vd.clip_percentile()), 2)
+        return (
+            "profile", self._segy_generation, slice_type, int(position),
+            int(attr_idx), clip,
+        )
+
+    def _render_l2_hit(
+        self, pw: ProfileWidget, key: tuple, raw: np.ndarray, info: SliceInfo
+    ) -> bool:
+        """Serve a panel from the L2 texture cache; return True on a hit."""
+        if pw.mode() != "vd":
+            # Wiggle rendering consumes raw floats; no index texture to reuse.
+            return False
+        cached = VRAM.get(key)
+        if cached is None:
+            return False
+        indexed, clip_range = cached
+        pw.apply_indexed(raw, indexed, clip_range, slice_info=info)
+        return True
+
+    def _store_l2_texture(self, pw: ProfileWidget, key: tuple) -> None:
+        """Publish the just-normalized panel into the L2 texture cache."""
+        if pw.mode() != "vd":
+            return
+        snap = pw._vd.indexed_snapshot()
+        if snap is None:
+            return
+        indexed, clip_range = snap
+        VRAM.put(
+            key,
+            content=(indexed, clip_range),
+            size_bytes=int(indexed.nbytes),
+            kind="slice2d",
+        )
 
     def _profile_for(self, slice_type: str) -> ProfileWidget:
         """Return the profile panel for a slice type (defaults to Time)."""
@@ -1591,7 +1653,10 @@ class SeismicView(QWidget):
         if result.attr_idx == _ap.rgb_index():
             pw._vd.render_rgba(result.display, slice_info=info)
         else:
-            pw.update_profile(result.display, slice_info=info)
+            l2_key = self._l2_texture_key(pw, result.slice_type, result.position, result.attr_idx)
+            if not self._render_l2_hit(pw, l2_key, result.display, info):
+                pw.update_profile(result.display, slice_info=info)
+                self._store_l2_texture(pw, l2_key)
 
     @Slot(object)
     def _on_attr_error(self, error: AttrComputeError):

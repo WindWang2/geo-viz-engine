@@ -364,6 +364,53 @@ class ProfileVD(QWidget):
         self._view_v = (0.0, 1.0)
         self._build_image_from_rgba()
 
+    def indexed_snapshot(self) -> tuple[np.ndarray, tuple[float, float]] | None:
+        """Return ``(indexed, clip_range)`` for the L2 texture cache, or ``None``.
+
+        The uint8 LUT-index array is the display-ready slice texture content
+        (1 byte/pixel, exactly what a GL_R8 upload or the Indexed8 QImage
+        consume).  Together with the clip range it fully reproduces a later
+        :meth:`render_indexed` hit; a following clip-percentile change
+        invalidates via the normal ``_clip_range_cache`` key logic.
+        """
+        if not self._has_data or self._indexed is None or self._clip_range_cache is None:
+            return None
+        if self._rgba_override is not None:
+            # RGB-fusion display: ``_indexed`` is stale from an earlier
+            # amplitude render and must not be published as texture content.
+            return None
+        return self._indexed, self._clip_range_cache
+
+    def render_indexed(
+        self,
+        data: np.ndarray,
+        indexed: np.ndarray,
+        clip_range: tuple[float, float],
+        slice_info=None,
+    ) -> None:
+        """L2-hit fast path: render from a cached LUT-index texture.
+
+        Equivalent to :meth:`render` minus the normalize pass — the
+        percentile scan + index computation is the expensive part of a
+        re-visit (tens of ms on million-sample slices); with the cached
+        ``indexed`` array only the viewport sub-slice + colour-table QImage
+        build runs (single-digit ms).
+        """
+        self._data = data.astype(np.float32, copy=False)
+        self._indexed = np.asarray(indexed, dtype=np.uint8)
+        self._rgba_override = None
+        self._slice_info = slice_info
+        self._has_data = True
+        self._zoom_scale = 1.0
+        self._view_h = (0.0, 1.0)
+        self._view_v = (0.0, 1.0)
+        # Adopt the cached clip range so a later percentile change recomputes
+        # from raw data instead of inheriting a stale range.
+        key = self._clip_cache_key(slice_info)
+        self._clip_range_cache = (float(clip_range[0]), float(clip_range[1]))
+        self._clip_range_key = key
+        self._build_image_from_normalized()
+
     def _renormalize(self):
         """Compute the uint8 LUT-index array from the current slice.
 

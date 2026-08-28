@@ -18,6 +18,9 @@ except ImportError:  # pragma: no cover
     GL = None
     HAS_OPENGL = False
 
+# Global L2 VRAM ledger (never imports GL machinery itself).
+from ..vram_cache import VRAM
+
 # Load shaders from package shaders directory
 _SHADER_PATH = Path(__file__).parent.parent / "shaders" / "wiggle_instanced.glsl"
 if _SHADER_PATH.exists():
@@ -51,6 +54,16 @@ class WiggleTraceTexture:
             if self.texture_id is None:
                 self._mock_id_counter += 1
                 self.texture_id = self._mock_id_counter
+            # Mock uploads still count in the L2 ledger: budget accounting
+            # must be identical on CI and GPU paths.
+            VRAM.put(
+                self._vram_key(),
+                content=None,
+                size_bytes=self.num_traces * self.num_samples * 4,
+                kind="wiggle",
+                handle=int(self.texture_id),
+                release=self._evict_texture,
+            )
             return
 
         if self.texture_id is None:
@@ -74,9 +87,37 @@ class WiggleTraceTexture:
             data,
         )
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        # R32F slice texture into the global L2 ledger (4 bytes/texel).
+        VRAM.put(
+            self._vram_key(),
+            content=None,
+            size_bytes=self.num_traces * self.num_samples * 4,
+            kind="wiggle",
+            handle=int(self.texture_id) if self.texture_id is not None else None,
+            release=self._evict_texture,
+        )
+
+    def _vram_key(self) -> tuple:
+        return ("wiggle", id(self))
+
+    def _evict_texture(self) -> None:
+        """L2 eviction hook: free the R32F texture; next update re-uploads."""
+        tex, self.texture_id = self.texture_id, None
+        if tex is not None and HAS_OPENGL and GL is not None:
+            try:
+                GL.glDeleteTextures([tex])
+            except Exception:
+                # No current context (or mock GL): defer through the shared
+                # queue so the handle is freed at the next matching paint.
+                try:
+                    from ..renderer_3d import queue_gl_texture_delete
+                    queue_gl_texture_delete(tex)
+                except Exception:
+                    pass
 
     def destroy(self, mock_gl: bool = False) -> None:
         """Release OpenGL texture handles and reset dimensions."""
+        VRAM.unregister(self._vram_key())
         if self.texture_id is not None:
             if not mock_gl and HAS_OPENGL and GL is not None:
                 try:
@@ -203,6 +244,12 @@ class WiggleTraceRenderer:
         if mock_gl or not HAS_OPENGL or GL is None:
             if self.lut_texture_id is None:
                 self.lut_texture_id = 999
+            VRAM.put(
+                ("wiggle-lut", id(self)),
+                content=None, size_bytes=256 * 4, kind="lut",
+                handle=int(self.lut_texture_id),
+                release=self._evict_lut,
+            )
             return
 
         if self.lut_texture_id is None:
@@ -223,6 +270,25 @@ class WiggleTraceRenderer:
             lut,
         )
         GL.glBindTexture(GL.GL_TEXTURE_1D, 0)
+        VRAM.put(
+            ("wiggle-lut", id(self)),
+            content=None, size_bytes=256 * 4, kind="lut",
+            handle=int(self.lut_texture_id),
+            release=self._evict_lut,
+        )
+
+    def _evict_lut(self) -> None:
+        """L2 eviction hook: drop the LUT texture; next set_colormap re-uploads."""
+        tex, self.lut_texture_id = self.lut_texture_id, None
+        if tex is not None and HAS_OPENGL and GL is not None:
+            try:
+                GL.glDeleteTextures([tex])
+            except Exception:
+                try:
+                    from ..renderer_3d import queue_gl_texture_delete
+                    queue_gl_texture_delete(tex)
+                except Exception:
+                    pass
 
     def set_gain(self, gain: float) -> None:
         """Set amplitude gain scale factor with NaN validation."""
@@ -238,6 +304,7 @@ class WiggleTraceRenderer:
 
     def destroy(self, mock_gl: bool = False) -> None:
         """Clean up renderer resources (main texture + colormap LUT texture)."""
+        VRAM.unregister(("wiggle-lut", id(self)))
         self.texture.destroy(mock_gl=mock_gl)
         if self.lut_texture_id is not None:
             if not mock_gl and HAS_OPENGL and GL is not None:

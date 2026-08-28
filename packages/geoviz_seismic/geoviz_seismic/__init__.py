@@ -8,6 +8,7 @@ Works in any PySide6 project: ``pip install geoviz-seismic``.
 
 from .cache import SeismicCache
 from .colormap import ColormapManager
+from .vram_cache import VRAM, VramStats, VramTextureCache
 from .crossplot import analyze_lithology_crossplot
 from .horizon import HorizonParser, HorizonAxes, extract_along_horizon
 from .loader import SeismicLoader
@@ -48,6 +49,9 @@ __all__ = [
     "Renderer3D",
     "SeismicCache",
     "SeismicLoader",
+    "VRAM",
+    "VramStats",
+    "VramTextureCache",
     "SeismicView",
     "BinGridGeometry",
     "SeismicVolumeMeta",

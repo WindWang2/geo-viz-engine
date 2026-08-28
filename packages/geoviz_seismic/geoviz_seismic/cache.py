@@ -130,3 +130,14 @@ class RamSliceCache:
 class SeismicCache(RamSliceCache):
     def __init__(self, max_slices: int = 50):
         super().__init__(max_bytes=512 * 1024 * 1024, max_slices=max_slices)
+
+
+# L2 (VRAM) half of the dual-level cache. Defined in vram_cache.py to keep
+# this module free of the GL-adjacent machinery; re-exported so the whole
+# two-level cache is importable from geoviz_seismic.cache.
+from .vram_cache import (  # noqa: E402
+    VRAM,
+    VramStats,
+    VramTextureCache,
+    reset_for_tests,
+)

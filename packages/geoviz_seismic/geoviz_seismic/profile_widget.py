@@ -70,6 +70,23 @@ class ProfileWidget(QWidget):
         """Return the current display mode (``"vd"`` or ``"wiggle"``)."""
         return self._mode
 
+    def apply_indexed(
+        self,
+        data,
+        indexed,
+        clip_range,
+        slice_info=None,
+    ) -> None:
+        """L2-hit fast path: display a cached LUT-index texture (VD mode only).
+
+        Mirrors :meth:`update_profile` bookkeeping (``_current_data`` kept for
+        display-mode switches) but skips the normalize pass via
+        :meth:`ProfileVD.render_indexed`.
+        """
+        self._current_data = data
+        self._current_slice_info = slice_info
+        self._vd.render_indexed(data, indexed, clip_range, slice_info=slice_info)
+
     def set_display_mode(self, mode: Literal["vd", "wiggle"]) -> None:
         """Switch between ``"vd"`` and ``"wiggle"`` display modes and refresh display."""
         if mode == self._mode:
