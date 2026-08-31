@@ -27,6 +27,43 @@ def _global_bytes() -> int:
     return _GLOBAL_BYTES
 
 
+def set_global_budget(max_bytes: int) -> int:
+    """Set the shared byte budget across ALL cache instances (P2-A wiring).
+
+    The workbench's ``ResourceBudget.l1_slice_cache_bytes`` is pushed here at
+    startup/relief time instead of the hardcoded 1 GiB default. Shrinking the
+    budget evicts global-LRU entries immediately; growing it never allocates
+    anything. Returns the previous budget.
+    """
+    global _GLOBAL_MAX_BYTES
+    max_bytes = max(0, int(max_bytes))
+    with _GLOBAL_LOCK:
+        previous = _GLOBAL_MAX_BYTES
+        _GLOBAL_MAX_BYTES = max_bytes
+        # Evict in global LRU order until the shared ledger fits the new cap.
+        # Runs on every live instance's overage helper for bookkeeping parity.
+        while _GLOBAL_BYTES > _GLOBAL_MAX_BYTES and _GLOBAL_LRU:
+            gkey, evicted = _GLOBAL_LRU.popitem(last=False)
+            _GLOBAL_BYTES -= evicted.nbytes
+            inst_id, key = gkey
+            owner = _CACHE_REGISTRY.get(inst_id)
+            if owner is not None and key in owner._cache:
+                owner._current_bytes -= evicted.nbytes
+                del owner._cache[key]
+        return previous
+
+
+def global_stats() -> dict:
+    """Shared-ledger diagnostics (bytes held, budget, instances, entries)."""
+    with _GLOBAL_LOCK:
+        return {
+            "budget_bytes": _GLOBAL_MAX_BYTES,
+            "bytes_now": _GLOBAL_BYTES,
+            "entries": len(_GLOBAL_LRU),
+            "instances": len(_CACHE_REGISTRY),
+        }
+
+
 @dataclass(frozen=True)
 class SliceCacheKey:
     volume_id: str
