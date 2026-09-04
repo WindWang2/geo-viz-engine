@@ -84,11 +84,13 @@ class VolumeGeometry:
 
 
 def _value_to_index(value: int, start: int, step: int, n: int, what: str) -> int:
-    if step <= 0 or n <= 0:
+    # Negative steps are legal: SEG-Y line numbering may decrease along the
+    # file (#1130). Only a zero step is degenerate.
+    if step == 0 or n <= 0:
         raise IndexError(f"{what} grid is degenerate (start={start}, step={step}, n={n})")
     k = round((value - start) / step)
     if k < 0 or k >= n:
-        lo, hi = start, start + (n - 1) * step
+        lo, hi = min(start, start + (n - 1) * step), max(start, start + (n - 1) * step)
         raise IndexError(f"{what} {value} outside survey [{lo}, {hi}]")
     return k
 
@@ -379,7 +381,8 @@ class ChunkedVolumeReader(VolumeReader):
 
         def _axis(spec: dict, n: int) -> tuple[int, int]:
             start, step = spec.get("start"), spec.get("step")
-            if not isinstance(start, int) or not isinstance(step, int) or step <= 0:
+            # Zero/foreign steps fall back; negative steps pass through (#1130).
+            if not isinstance(start, int) or not isinstance(step, int) or step == 0:
                 return 1, 1
             return start, step
 
