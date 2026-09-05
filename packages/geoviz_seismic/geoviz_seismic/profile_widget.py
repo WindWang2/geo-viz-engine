@@ -111,6 +111,23 @@ class ProfileWidget(QWidget):
         """Change the VD colormap."""
         self._vd.set_colormap(name)
 
+    def set_polarity(self, normal: bool = True) -> None:
+        """Flip the displayed amplitude sign on both renderers (display-only)."""
+        self._vd.set_polarity(normal)
+        self._wiggle.set_polarity(normal)
+
+    def set_wiggle_gain(self, gain: float) -> None:
+        """Set the wiggle deflection gain multiplier (display-only)."""
+        self._wiggle.set_gain(gain)
+
+    def polarity_normal(self) -> bool:
+        """True when the display uses the survey's native sign convention."""
+        return self._vd.polarity_normal()
+
+    def wiggle_gain(self) -> float:
+        """Current wiggle deflection gain multiplier."""
+        return self._wiggle.gain()
+
     def set_wiggle_density(self, trace_step: int) -> None:
         """Change the wiggle trace subsampling step."""
         self._wiggle.set_trace_step(trace_step)

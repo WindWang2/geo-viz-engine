@@ -84,6 +84,8 @@ class ProfileVD(QWidget):
 
         # Display gain
         self._clip_pct = 99.0  # percentile clip (P1 to P_clip)
+        # Display polarity (SEG normal by default): +1 native sign, -1 flipped.
+        self._polarity = 1
         # Cached percentile clip range (lo, hi) — the expensive nanpercentile
         # scan (23ms on a 1.5M-pixel slice) was recomputed on every slice-swap
         # and every clip change, but the clip range is approximately stable
@@ -134,6 +136,26 @@ class ProfileVD(QWidget):
         self._colormap_name = name
         if self._has_data and self._indexed is not None:
             self._build_image_from_normalized()
+
+    def set_polarity(self, normal: bool = True) -> None:
+        """Flip the displayed amplitude sign (SEG normal ↔ reversed).
+
+        Polarity is a DISPLAY convention only: the color mapping negates the
+        clip range so positive lobes swap colour, but the stored data, the
+        cursor amplitude readout and picked values stay in the survey's raw
+        sign convention. Re-rendering reuses the cached percentile range —
+        negation swaps (lo, hi); no rescan is needed.
+        """
+        polarity = 1 if normal else -1
+        if polarity == self._polarity and self._has_data:
+            return
+        self._polarity = polarity
+        if self._has_data:
+            self._renormalize()
+
+    def polarity_normal(self) -> bool:
+        """True when the display uses the survey's native sign convention."""
+        return self._polarity > 0
 
     def slice_info(self):
         """Return the :class:`SliceInfo` passed to the last render, or ``None``."""
@@ -442,8 +464,12 @@ class ProfileVD(QWidget):
             self._clip_range_cache = (float(lo), float(hi))
             self._clip_range_key = key
         lo, hi = self._clip_range_cache
+        # Display polarity: normalize the NEGATED slice through the same
+        # cached range — unambiguous sign flip without touching the cached
+        # range or the stored data (raw readouts keep the survey sign).
+        data = self._data if self._polarity > 0 else -self._data
         self._indexed = ColormapManager.normalize_to_index(
-            self._data, lut_size=256, value_range=(lo, hi)
+            data, lut_size=256, value_range=(lo, hi)
         )
         self._build_image_from_normalized()
 

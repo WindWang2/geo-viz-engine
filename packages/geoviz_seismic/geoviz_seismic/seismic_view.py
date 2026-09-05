@@ -648,7 +648,10 @@ class SeismicView(QWidget):
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
 
         self._cmap_combo = QComboBox()
-        self._cmap_combo.addItems(["seismic", "gray", "jet"])
+        # The full registry (ColormapManager) — seismic first as the default.
+        self._cmap_combo.addItems(
+            ["seismic", "seismic_r", "gray", "jet", "hsv", "viridis", "phase_wheel"]
+        )
         self._cmap_combo.currentTextChanged.connect(
             lambda name: [pw.set_colormap(name) for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb)]
         )
@@ -688,6 +691,19 @@ class SeismicView(QWidget):
         self._clip_spin.setDecimals(1)
         self._clip_spin.setFixedWidth(80)
         self._clip_spin.valueChanged.connect(self._on_clip_changed)
+
+        # L5 display controls: wiggle deflection gain (x, display-only) and
+        # the polarity flag consumed by _set_polarity (render menu action).
+        self._gain_spin = QDoubleSpinBox()
+        self._gain_spin.setRange(0.1, 20.0)
+        self._gain_spin.setValue(2.0)
+        self._gain_spin.setSuffix(" x")
+        self._gain_spin.setSingleStep(0.1)
+        self._gain_spin.setDecimals(1)
+        self._gain_spin.setFixedWidth(72)
+        self._gain_spin.setToolTip("Wiggle 挠度增益（仅显示，不改数据）")
+        self._gain_spin.valueChanged.connect(self._on_gain_changed)
+        self._polarity_normal = True
 
         self._iso_checkbox = QCheckBox(" 等值面")
         self._iso_checkbox.setEnabled(False)
@@ -899,6 +915,27 @@ class SeismicView(QWidget):
             act = slice_sub.addAction(text)
             act.triggered.connect(lambda _c=False, i=idx: self._slice_type_combo.setCurrentIndex(i))
 
+        display_sub = render_menu.addMenu("显示参数 (增益/极性)")
+        gain_w = QWidget()
+        gain_layout = QHBoxLayout(gain_w)
+        gain_layout.setContentsMargins(6, 4, 6, 4)
+        gain_layout.addWidget(QLabel("Wiggle 增益:"))
+        gain_layout.addWidget(self._gain_spin)
+        gain_action = QWidgetAction(display_sub)
+        gain_action.setDefaultWidget(gain_w)
+        display_sub.addAction(gain_action)
+
+        # Action semantics: CHECKED = reversed (the label says 反转), so the
+        # handler inverts the flag the panels receive.
+        self._act_polarity = display_sub.addAction("极性反转 (SEG Reverse)")
+        self._act_polarity.setCheckable(True)
+        self._act_polarity.setToolTip("显示级极性反转；数据与读数保持原始符号约定")
+        self._act_polarity.toggled.connect(lambda checked: self._set_polarity(not checked))
+
+        act_reset_display = render_menu.addAction("重置显示参数")
+        act_reset_display.setToolTip("恢复缺省: 削剪 99% / seismic 色标 / 增益 2.0x / 标准极性 / VD")
+        act_reset_display.triggered.connect(self._reset_display_controls)
+
         act_hillshade = render_menu.addAction("光照效果 (Hillshade)")
         act_hillshade.setCheckable(True)
         act_hillshade.toggled.connect(self._hillshade_btn.setChecked)
@@ -984,6 +1021,7 @@ class SeismicView(QWidget):
         bar2.addWidget(self._sculpt_horizon_combo)
         bar2.addWidget(self._sculpt_mode_combo)
         bar2.addWidget(self._clip_spin)
+        bar2.addWidget(self._gain_spin)
         bar2.addWidget(self._iso_checkbox)
         bar2.addWidget(self._iso_spin)
         bar2.hide()
@@ -1913,6 +1951,28 @@ class SeismicView(QWidget):
             mode_text = self._sculpt_mode_combo.currentText()
             mode = "above" if mode_text == "保留上部" else "below"
             self._renderer_3d.set_sculpting_surface(self._horizon_grids[horizon_name], mode)
+
+    def _on_gain_changed(self, value: float) -> None:
+        """Wiggle deflection gain -> every profile panel (display-only)."""
+        for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
+            pw.set_wiggle_gain(value)
+
+    def _set_polarity(self, normal: bool) -> None:
+        """SEG polarity flip -> every profile panel (display-only)."""
+        self._polarity_normal = bool(normal)
+        for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
+            pw.set_polarity(normal)
+
+    def _reset_display_controls(self) -> None:
+        """Restore the factory display settings (clip/cmap/gain/polarity/mode)."""
+        self._clip_spin.setValue(99.0)     # fires _on_clip_changed
+        self._gain_spin.setValue(2.0)      # fires _on_gain_changed
+        if self._act_polarity.isChecked():
+            self._act_polarity.setChecked(False)  # fires _set_polarity(True)
+        if self._cmap_combo.currentText() != "seismic":
+            self._cmap_combo.setCurrentText("seismic")
+        if self._mode_combo.currentIndex() != 0:
+            self._mode_combo.setCurrentIndex(0)
 
     def _on_clip_changed(self, value: float):
         for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
