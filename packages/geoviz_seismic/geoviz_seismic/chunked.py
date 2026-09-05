@@ -155,10 +155,13 @@ class VolumeReader(ABC):
 
     # -- coordinate helpers ------------------------------------------ #
     def _level_index(self, base_index: int, lod: int, axis_len: int) -> int:
-        idx = base_index >> lod
-        if idx >= axis_len >> lod and idx >= (axis_len + (1 << lod) - 1) // (1 << lod):
-            idx = min(idx, ((axis_len + (1 << lod) - 1) // (1 << lod)) - 1)
-        return idx
+        # #135: clamp against the CEIL level extent (the shape the LOD store
+        # is actually written with). For odd axis lengths the floor
+        # (base_index >> lod) is one past the end of the last strided bin —
+        # the tail sample folds into bin ceil-1.
+        f = 1 << lod
+        n_levels = (axis_len + f - 1) // f
+        return min(base_index >> lod, n_levels - 1)
 
     def _level_step(self, step: int, lod: int) -> int:
         return step * (2**lod)
@@ -232,9 +235,65 @@ def _decimate2(arr: np.ndarray, strategy: str) -> np.ndarray:
     if strategy == "mean":
         return a.reshape(h2, 2, w2, 2).mean(axis=(1, 3))
     if strategy == "maxabs":
-        b = a.reshape(h2, 2, w2, 2).reshape(h2, w2, 4)
+        # Flatten each 2x2 block to (drow, dcol): the trailing axes merge
+        # adjacent, so the 4-vector is the block in row-major order. (The
+        # previous reshape merged (drow, col2, dcol) and silently degraded
+        # to 1x4 row segments.)
+        b = a.reshape(h2, 2, w2, 2).transpose(0, 2, 1, 3).reshape(h2, w2, 4)
         idx = np.abs(b).argmax(axis=-1)
         return np.take_along_axis(b, idx[..., None], axis=-1)[..., 0]
+    raise ValueError(f"unknown LOD strategy {strategy!r}")
+
+
+def _pad_even_2d(a: np.ndarray) -> np.ndarray:
+    """Edge-replicate odd tails of a 2-D plane so halving keeps the tail sample."""
+    h, w = a.shape
+    if h % 2:
+        a = np.concatenate([a, a[-1:]], axis=0)
+    if w % 2:
+        a = np.concatenate([a, a[:, -1:]], axis=1)
+    return a
+
+
+def _decimate2_ceil(arr: np.ndarray, strategy: str) -> np.ndarray:
+    """Ceil-extent halving of a 2-D plane (odd tails edge-replicated, #135)."""
+    a = np.asarray(arr, dtype=np.float32)
+    h, w = a.shape
+    h2, w2 = (h + 1) // 2, (w + 1) // 2
+    if h2 == 0 or w2 == 0:
+        return a
+    a = _pad_even_2d(a)
+    if strategy == "stride":
+        return a[::2, ::2].copy()
+    if strategy == "mean":
+        return a.reshape(h2, 2, w2, 2).mean(axis=(1, 3))
+    if strategy == "maxabs":
+        b = a.reshape(h2, 2, w2, 2).transpose(0, 2, 1, 3).reshape(h2, w2, 4)
+        idx = np.abs(b).argmax(axis=-1)
+        return np.take_along_axis(b, idx[..., None], axis=-1)[..., 0]
+    raise ValueError(f"unknown LOD strategy {strategy!r}")
+
+
+def _combine_inline_pair(even: np.ndarray, odd: np.ndarray | None, strategy: str) -> np.ndarray:
+    """Decimate one output inline from its (up to) two source inlines.
+
+    ``mean``/``maxabs`` need both source rows of the pair; ``stride`` only
+    ever reads the even row (the odd row is skipped by [::2], #136).  An odd
+    source tail reuses the last real row (edge-replicate, matching
+    :meth:`ChunkedVolumeReader._decimate3`).
+    """
+    if strategy == "stride":
+        return _decimate2_ceil(even, "stride")
+    if odd is None:
+        odd = even
+    e2 = _decimate2_ceil(even, strategy)
+    o2 = _decimate2_ceil(odd, strategy)
+    if strategy == "mean":
+        return (e2 + o2) * np.float32(0.5)
+    if strategy == "maxabs":
+        # Ties keep the even row: identical to _decimate3's argmax picking
+        # the first (even) cell of the flattened 8-sample bin.
+        return np.where(np.abs(o2) > np.abs(e2), o2, e2)
     raise ValueError(f"unknown LOD strategy {strategy!r}")
 
 
@@ -295,6 +354,9 @@ class ChunkedVolumeReader(VolumeReader):
         )
         self._levels: dict[int, Any] = {0: self._base}
         self.lod_build_seconds: dict[int, float] = {}
+        # #136: output-side buffer budget for build_lod (source reads stream
+        # per output inline; the buffer bounds zarr shard-write batching).
+        self._LOD_BUILD_BUDGET_BYTES = 1 << 30
         self._lod_lock = threading.RLock()
 
     # ------------------------------------------------------------ meta --
@@ -337,11 +399,24 @@ class ChunkedVolumeReader(VolumeReader):
 
     # ------------------------------------------------------------- LOD --
     def _decimate3(self, arr: np.ndarray) -> np.ndarray:
+        """Halve every axis producing the CEIL extent (#135).
+
+        Odd tails are edge-replicated so the last sample participates in the
+        tail bin (stride picks it; mean/maxabs average it in) — the output
+        shape then matches ``_level_shape`` exactly and a built LOD store
+        validates once instead of being rebuilt on every open.
+        """
         ni, nx, nt = arr.shape
-        ni2, nx2, nt2 = ni // 2, nx // 2, nt // 2
+        ni2, nx2, nt2 = (ni + 1) // 2, (nx + 1) // 2, (nt + 1) // 2
         if ni2 == 0 or nx2 == 0 or nt2 == 0:
             return np.asarray(arr, dtype=np.float32)
-        a = np.asarray(arr[: ni2 * 2, : nx2 * 2, : nt2 * 2], dtype=np.float32)
+        a = np.asarray(arr, dtype=np.float32)
+        if ni % 2:
+            a = np.concatenate([a, a[-1:]], axis=0)
+        if nx % 2:
+            a = np.concatenate([a, a[:, -1:]], axis=1)
+        if nt % 2:
+            a = np.concatenate([a, a[..., -1:]], axis=2)
         s = self.lod_strategy
         if s == "stride":
             return a[::2, ::2, ::2].copy()
@@ -372,7 +447,10 @@ class ChunkedVolumeReader(VolumeReader):
             return False
         try:
             doc = json.loads(meta.read_text())
-            return list(doc.get("shape", [])) == list(self._level_shape(lod))
+            if list(doc.get("shape", [])) != list(self._level_shape(lod)):
+                return False
+            attrs = doc.get("attributes") or {}
+            return attrs.get("kernel_semantics") == "ceil-v2"
         except Exception:
             return False
 
@@ -391,7 +469,10 @@ class ChunkedVolumeReader(VolumeReader):
 
                 lower = self._level(lod - 1)
                 src_shape = tuple(int(x) for x in lower.shape)
-                dst_shape = tuple(x // 2 for x in src_shape)
+                # #135: ceil extent — must agree with _level_shape (the
+                # validator) and _level_index (the reader clamp); the old
+                # floor shape made odd-sized volumes invalid forever.
+                dst_shape = tuple((x + 1) // 2 for x in src_shape)
                 t0 = time.perf_counter()
                 dst = self._zarr_mod.create_array(
                     out_path,
@@ -403,19 +484,46 @@ class ChunkedVolumeReader(VolumeReader):
                     overwrite=True,
                     attributes={
                         "lod_strategy": self.lod_strategy,
+                        # #135/#136: ceil extents + per-pair streaming kernel.
+                        # Bumping this invalidates LOD stores written by the
+                        # old floor-shaped / scrambled-maxabs kernel.
+                        "kernel_semantics": "ceil-v2",
                         "base_store": self.path,
                     },
                 )
-                n0 = dst_shape[0]
-                done = 0
-                for i0 in range(0, n0, 64):
-                    i1 = min(i0 + 64, n0)
-                    dst[i0:i1, :, :] = self._decimate3(
-                        np.asarray(lower[i0 * 2 : i1 * 2, :, :])
-                    )
-                    done = i1
-                    if progress is not None:
-                        progress(done / max(n0, 1))
+                n0, n1, n2 = dst_shape
+                src_n0 = src_shape[0]
+                # #136: stream one output inline at a time — read only the
+                # (up to) two source inlines it needs instead of a 128-inline
+                # slab (5-8 GB RSS peak on 100G bases under _lod_lock).
+                # Writes batch into a shard-inline-aligned buffer bounded by
+                # the LOD-build byte budget so zarr shard rewrites stay 1x.
+                out_plane_bytes = n1 * n2 * 4
+                budget = max(1, self._LOD_BUILD_BUDGET_BYTES // out_plane_bytes)
+                buf_rows = max(8, min(128, budget))
+                buf = np.empty((min(buf_rows, n0), n1, n2), dtype=np.float32)
+                filled = 0
+                written = 0
+                last_plane: np.ndarray | None = None
+                for i in range(n0):
+                    even = np.asarray(lower[2 * i, :, :], dtype=np.float32)
+                    last_plane = even
+                    odd = None
+                    if self.lod_strategy != "stride":
+                        if 2 * i + 1 < src_n0:
+                            odd = np.asarray(lower[2 * i + 1, :, :], dtype=np.float32)
+                            last_plane = odd
+                        buf[filled] = _combine_inline_pair(even, odd, self.lod_strategy)
+                    else:
+                        buf[filled] = _decimate2_ceil(even, "stride")
+                    filled += 1
+                    if filled == buf.shape[0] or i == n0 - 1:
+                        dst[written : written + filled] = buf[:filled]
+                        written += filled
+                        filled = 0
+                        if progress is not None:
+                            progress(written / max(n0, 1))
+                del buf, last_plane
                 self.lod_build_seconds[lod] = time.perf_counter() - t0
             self._levels[lod] = self._zarr_mod.open(out_path, mode="r")
             return self.lod_build_seconds.get(lod, 0.0)
@@ -666,11 +774,26 @@ class SegyVolumeReader(VolumeReader):
         t0, t1 = max(0, int(t0)), min(n[2], int(t1))
         if il1 <= il0 or xl1 <= xl0 or t1 <= t0:
             raise ValueError(f"empty window [{il0}:{il1}, {xl0}:{xl1}, {t0}:{t1}]")
-        planes = [
-            self._loader.read_inline(self._il_value(i))[xl0:xl1, t0:t1]
-            for i in range(il0, il1)
-        ]
-        block = np.stack(planes)
+        # #138: window reads must be IO-proportional to the window. segyio
+        # can only read whole inline planes, so a plane read costs
+        # n_xlines traces no matter the window — for narrow windows the
+        # per-trace gather reads strictly less (window traces only), for
+        # wide windows plane reads win on per-trace call overhead. Either
+        # way the result is assembled in place (no planes list + np.stack
+        # double materialisation).
+        n_il_span, n_xl_span, n_t_span = il1 - il0, xl1 - xl0, t1 - t0
+        block = np.empty((n_il_span, n_xl_span, n_t_span), dtype=np.float32)
+        if n_xl_span * 2 >= n[1]:
+            for a, i in enumerate(range(il0, il1)):
+                plane = self._loader.read_inline(self._il_value(i))
+                block[a] = plane[xl0:xl1, t0:t1]
+        else:
+            for a, i in enumerate(range(il0, il1)):
+                ilv = self._il_value(i)
+                for b, j in enumerate(range(xl0, xl1)):
+                    block[a, b] = self._loader.read_trace(
+                        ilv, self._xl_value(j)
+                    )[t0:t1]
         for _ in range(lod):
             block = _decimate3_stride(block)
         return block
