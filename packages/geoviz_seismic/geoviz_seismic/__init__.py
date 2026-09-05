@@ -86,6 +86,14 @@ __all__ = [
     # Qt/OpenGL — lazily imported so headless consumers can skip the GL stack.
     "ClippedGLMeshItem",
     "ClippedGLVolumeItem",
+    # Named scene objects: registry + pick math are importable headless, the
+    # GL item classes inside stay lazy.
+    "PickHit",
+    "SceneObject",
+    "SceneObjectError",
+    "SceneObjectManager",
+    "ray_triangles_first_hit",
+    "screen_point_to_ray",
 ]
 
 

@@ -21,6 +21,7 @@ from .gpu_ops import (
 )
 from .horizon import horizon_quad_faces
 from .stratal import extract_stratal_slice
+from .scene_objects import PickHit, SceneObjectManager
 from .vram_cache import VRAM
 
 logger = logging.getLogger(__name__)
@@ -1686,6 +1687,14 @@ class Renderer3D(QWidget):
         self._bbox_visual = None
         self._cursor_sphere = None  # GLScatterPlotItem for linked cursor
 
+        # Named scene-object registry for host-driven geological overlays
+        # (wells / horizons / faults / volumes / measurements). Lifecycle is
+        # fully owned here — volume reloads and clear() leave it untouched;
+        # hosts reset it explicitly via clear_objects.
+        self._scene_objects = SceneObjectManager(
+            lambda: getattr(self, "_view", None)
+        )
+
     @staticmethod
     def _make_slider(layout: QHBoxLayout, label: str, color: str):
         lbl = QLabel(f"{label}:")
@@ -2073,6 +2082,77 @@ class Renderer3D(QWidget):
     def horizons(self) -> list[str]:
         return list(self._horizons.keys())
 
+    # ------------------------------------------------------------------
+    # Named scene objects (host-driven geological overlays)
+    # ------------------------------------------------------------------
+
+    def add_object(self, name: str, **kwargs):
+        """Create or atomically replace a named overlay object.
+
+        Accepts the :meth:`SceneObjectManager.add_object` kwargs (verts,
+        faces, mode, kind, opacity, clip_planes, ...). Vertices are in
+        renderer/world space — the host owns any domain→render transform.
+        """
+        return self._scene_objects.add_object(name, **kwargs)
+
+    def remove_object(self, name: str) -> bool:
+        return self._scene_objects.remove_object(name)
+
+    def clear_objects(self, kind: str | None = None) -> int:
+        return self._scene_objects.clear(kind)
+
+    def has_object(self, name: str) -> bool:
+        return name in self._scene_objects
+
+    def object_names(self, kind: str | None = None) -> list[str]:
+        return self._scene_objects.names(kind)
+
+    def set_object_visibility(self, name: str, visible: bool) -> None:
+        self._scene_objects.set_visibility(name, visible)
+
+    def set_object_opacity(self, name: str, opacity: float) -> None:
+        self._scene_objects.set_opacity(name, opacity)
+
+    def set_object_color(self, name: str, color) -> None:
+        self._scene_objects.set_color(name, color)
+
+    def set_object_pickable(self, name: str, pickable: bool) -> None:
+        self._scene_objects.set_pickable(name, pickable)
+
+    def set_object_clip_planes(self, name: str, planes) -> None:
+        self._scene_objects.set_clip_planes(name, planes)
+
+    def object_bounds(self, name: str):
+        return self._scene_objects.object_bounds(name)
+
+    def objects_bounds(self, kinds=None, visible_only: bool = True):
+        return self._scene_objects.bounds(kinds=kinds, visible_only=visible_only)
+
+    def pick_object(self, px: float, py: float, kinds=None) -> PickHit | None:
+        """Screen-space ray pick over visible, pickable scene objects."""
+        try:
+            return self._scene_objects.pick_at(px, py, kinds=kinds, view=self._view)
+        except Exception:
+            logger.debug("pick_object failed", exc_info=True)
+            return None
+
+    def fit_to_objects(self, kinds=None, visible_only: bool = True) -> bool:
+        """Fit the camera to the (filtered) scene-object bounds union.
+
+        Returns False (and leaves the camera alone) when no objects match.
+        """
+        b = self._scene_objects.bounds(kinds=kinds, visible_only=visible_only)
+        if b is None:
+            return False
+        center = b.mean(axis=0)
+        extent = float(np.max(b[1] - b[0])) if np.all(np.isfinite(b)) else 0.0
+        if extent <= 0.0:
+            return False
+        self._view.opts["center"] = QVector3D(*(float(c) for c in center))
+        self._view.setCameraPosition(distance=extent * 2.2)
+        self._view.update()
+        return True
+
     def set_colormap(self, cmap_name: str):
         """Change the display colormap and trigger redraw."""
         if not self._loaded:
@@ -2350,7 +2430,12 @@ class Renderer3D(QWidget):
         self._rebuild_volume_visual()
 
     def clear(self):
-        """Reset state and clean visual graph."""
+        """Reset volume/visual state and clean the visual graph.
+
+        Named scene objects (``add_object``) are intentionally **not**
+        touched: geological overlays outlive volume reloads. Hosts reset
+        them explicitly via :meth:`clear_objects`.
+        """
         self._clear_visuals()
         # Full reset also drops the stratal surface state (unlike the
         # load_volume path, which keeps matching surfaces across a reload).

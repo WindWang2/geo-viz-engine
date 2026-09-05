@@ -596,6 +596,84 @@ class WellSeismicJointWidget(QWidget):
             return None
         return getattr(self._renderer, "_view", None)
 
+    # ------------------------------------------------------------------
+    # Named scene objects (geological overlays) — pass-through to Renderer3D
+    # ------------------------------------------------------------------
+    # Hosts push prepared engine-space geometry under stable object names;
+    # the renderer owns GL item lifetime. All methods no-op (with a debug
+    # log) when the 3D renderer is unavailable so hosts degrade gracefully
+    # on GL-less platforms.
+
+    def add_scene_object(self, name: str, **kwargs):
+        renderer = self._renderer
+        if renderer is None:
+            logger.debug("add_scene_object(%s) ignored: no renderer", name)
+            return None
+        return renderer.add_object(name, **kwargs)
+
+    def remove_scene_object(self, name: str) -> bool:
+        if self._renderer is None:
+            return False
+        return self._renderer.remove_object(name)
+
+    def clear_scene_objects(self, kind: str | None = None) -> int:
+        if self._renderer is None:
+            return 0
+        return self._renderer.clear_objects(kind)
+
+    def scene_object_names(self, kind: str | None = None) -> list[str]:
+        if self._renderer is None:
+            return []
+        return self._renderer.object_names(kind)
+
+    def has_scene_object(self, name: str) -> bool:
+        return self._renderer is not None and self._renderer.has_object(name)
+
+    def set_scene_object_visibility(self, name: str, visible: bool) -> None:
+        if self._renderer is not None:
+            self._renderer.set_object_visibility(name, visible)
+
+    def set_scene_object_opacity(self, name: str, opacity: float) -> None:
+        if self._renderer is not None:
+            self._renderer.set_object_opacity(name, opacity)
+
+    def set_scene_object_color(self, name: str, color) -> None:
+        if self._renderer is not None:
+            self._renderer.set_object_color(name, color)
+
+    def set_scene_object_pickable(self, name: str, pickable: bool) -> None:
+        if self._renderer is not None:
+            self._renderer.set_object_pickable(name, pickable)
+
+    def set_scene_object_clip_planes(self, name: str, planes) -> None:
+        if self._renderer is not None:
+            self._renderer.set_object_clip_planes(name, planes)
+
+    def scene_object_bounds(self, name: str):
+        if self._renderer is None:
+            return None
+        return self._renderer.object_bounds(name)
+
+    def scene_objects_bounds(self, kinds=None, visible_only: bool = True):
+        if self._renderer is None:
+            return None
+        return self._renderer.objects_bounds(kinds=kinds, visible_only=visible_only)
+
+    def pick_scene_object(self, px: float, py: float, kinds=None):
+        """Screen-space pick over geological scene objects, or None."""
+        if self._renderer is None:
+            return None
+        return self._renderer.pick_object(px, py, kinds=kinds)
+
+    def fit_to_scene_objects(self, kinds=None, visible_only: bool = True) -> bool:
+        if self._renderer is None:
+            return False
+        return self._renderer.fit_to_objects(kinds=kinds, visible_only=visible_only)
+
+    def index_xyz_to_world(self, idx_xyz) -> np.ndarray:
+        """Public: volume indices (il, xl, sample) → renderer world XYZ."""
+        return self._index_xyz_to_world(idx_xyz)
+
     def _discard_well_name_chips(self) -> None:
         """Drop leftover QLabel well-name chips (GLTextItem is the only label)."""
         chips = getattr(self, "_name_chips", None) or []

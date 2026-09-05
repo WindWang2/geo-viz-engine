@@ -1277,6 +1277,60 @@ class WellSeismicScene:
         t_idx = (z - s.t0_ms) / s.dt_ms if s.dt_ms else z
         return np.column_stack((il_idx, xl_idx, t_idx)).astype(np.float32)
 
+    def render_to_world_xyz_array(self, points: np.ndarray) -> np.ndarray:
+        """Vectorized inverse of :meth:`world_to_render_xyz_array`: (N, 3)
+        render indices → world XY + domain Z.
+
+        Exact symmetric partner of the forward map: registration strides and
+        survey line steps invert on the lattice, and the depth transform is
+        applied in reverse (time ms → depth m) when the scene is in DEPTH
+        domain. Fails closed symmetrically — in DEPTH domain without an
+        available transform the forward map raises, and so does this. With
+        neither registration nor survey set the map is the identity.
+        """
+        pts = np.asarray(points, dtype=np.float64)
+        if pts.size == 0:
+            return np.zeros((0, 3), dtype=np.float32)
+        if pts.ndim == 1:
+            pts = pts.reshape(1, 3)
+        il_idx = pts[:, 0]
+        xl_idx = pts[:, 1]
+        t_idx = pts[:, 2]
+
+        reg = self._registration
+        if reg is not None:
+            s = reg.survey
+            il = s.iline_start + (il_idx * reg.strides[0]) * (s.iline_step or 1)
+            xl = s.xline_start + (xl_idx * reg.strides[1]) * (s.xline_step or 1)
+            z_ms = s.t0_ms + (t_idx * reg.strides[2]) * s.dt_ms
+            x, y = s.il_xl_to_xy(il, xl)
+        elif self._survey is not None:
+            s = self._survey
+            il = s.iline_start + il_idx * (s.iline_step or 1)
+            xl = s.xline_start + xl_idx * (s.xline_step or 1)
+            z_ms = t_idx if not s.dt_ms else s.t0_ms + t_idx * s.dt_ms
+            x, y = s.il_xl_to_xy(il, xl)
+        else:
+            return pts.astype(np.float32)
+
+        z_ms = np.asarray(z_ms, dtype=np.float64)
+        if self._domain is VerticalDomain.DEPTH:
+            z = np.asarray(
+                self._depth_transform.time_ms_to_depth_m(z_ms), dtype=np.float64
+            )
+        else:
+            z = z_ms
+        x = np.asarray(x, dtype=np.float64)
+        y = np.asarray(y, dtype=np.float64)
+        return np.column_stack((x, y, z)).astype(np.float32)
+
+    def render_to_world_xyz(self, i: float, x: float, t: float) -> tuple[float, float, float]:
+        """Scalar convenience wrapper over :meth:`render_to_world_xyz_array`."""
+        mapped = self.render_to_world_xyz_array(
+            np.array([[i, x, t]], dtype=np.float64)
+        )
+        return float(mapped[0, 0]), float(mapped[0, 1]), float(mapped[0, 2])
+
     def _require_volume(self) -> None:
         if self._volume is None:
             raise RuntimeError("No volume access set on WellSeismicScene")
