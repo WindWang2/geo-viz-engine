@@ -670,9 +670,57 @@ class WellSeismicJointWidget(QWidget):
             return False
         return self._renderer.fit_to_objects(kinds=kinds, visible_only=visible_only)
 
+    def camera_pose(self) -> dict:
+        """Public read-back of the current camera pose (view presets).
+
+        Returns the same parameterization :meth:`set_camera_pose` accepts;
+        zeros when the renderer is unavailable.
+        """
+        view = self._view()
+        opts = getattr(view, "opts", {}) or {}
+        return {
+            "distance": float(opts.get("distance", 0.0) or 0.0),
+            "elevation": float(opts.get("elevation", 0.0) or 0.0),
+            "azimuth": float(opts.get("azimuth", 0.0) or 0.0),
+        }
+
     def index_xyz_to_world(self, idx_xyz) -> np.ndarray:
         """Public: volume indices (il, xl, sample) → renderer world XYZ."""
         return self._index_xyz_to_world(idx_xyz)
+
+    def world_xyz_to_index(self, world_xyz) -> np.ndarray:
+        """Public inverse of :meth:`index_xyz_to_world`.
+
+        Renderer world XYZ → fractional volume indices (il, xl, sample).
+        Uses the renderer's volume spacing and the time-down Z convention
+        (see ``sample_to_z``/``z_to_sample``).
+        """
+        pts = np.asarray(world_xyz, dtype=np.float64)
+        if pts.size == 0:
+            return np.zeros((0, 3), dtype=np.float64)
+        scalar = pts.ndim == 1
+        if scalar:
+            pts = pts.reshape(1, 3)
+        si = sx = st = 1.0
+        nt = None
+        renderer = getattr(self, "_renderer", None)
+        if renderer is not None:
+            spacing = getattr(renderer, "_volume_spacing", None)
+            if spacing is not None and len(spacing) >= 3:
+                si, sx, st = float(spacing[0]), float(spacing[1]), float(spacing[2])
+            vol = getattr(renderer, "_volume_data_cpu", None)
+            if vol is not None:
+                nt = int(vol.shape[2])
+        out = np.empty((pts.shape[0], 3), dtype=np.float64)
+        out[:, 0] = pts[:, 0] / si
+        out[:, 1] = pts[:, 1] / sx
+        if nt is not None:
+            from geoviz_seismic.renderer_3d import z_to_sample
+
+            out[:, 2] = z_to_sample(pts[:, 2], nt, st)
+        else:
+            out[:, 2] = pts[:, 2] / st
+        return out[0] if scalar else out
 
     def _discard_well_name_chips(self) -> None:
         """Drop leftover QLabel well-name chips (GLTextItem is the only label)."""

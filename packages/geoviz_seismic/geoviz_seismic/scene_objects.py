@@ -400,14 +400,23 @@ class SceneObjectManager:
         size: float = 6.0,
         text: str = "",
         smooth: bool = True,
+        line_mode: str = "lines",
     ) -> SceneObject:
-        """Create or atomically replace the named object."""
+        """Create or atomically replace the named object.
+
+        ``line_mode`` selects the GLLinePlotItem primitive for
+        ``mode="lines"``: ``"lines"`` renders unconnected segment pairs,
+        ``"line_strip"`` a connected polyline (trajectories, section
+        curves).
+        """
         if not name:
             raise SceneObjectError("object name must be non-empty")
         if mode not in OBJECT_MODES:
             raise SceneObjectError(
                 f"mode must be one of {OBJECT_MODES}, got {mode!r}"
             )
+        if line_mode not in ("lines", "line_strip"):
+            raise SceneObjectError(f"line_mode must be 'lines' or 'line_strip'")
         if kind not in OBJECT_KINDS:
             raise SceneObjectError(f"unknown object kind {kind!r}")
         opacity = float(min(max(float(opacity), 0.0), 1.0))
@@ -447,7 +456,13 @@ class SceneObjectManager:
             color=(*col[:3], base_alpha * opacity),
             base_alpha=base_alpha,
             clip_planes=planes,
-            extra={"width": float(width), "size": float(size), "text": str(text), "smooth": bool(smooth)},
+            extra={
+                "width": float(width),
+                "size": float(size),
+                "text": str(text),
+                "smooth": bool(smooth),
+                "line_mode": line_mode,
+            },
         )
         old = self._objects.get(name)
         item = self._build_item(obj)
@@ -628,7 +643,7 @@ class SceneObjectManager:
                     pos=obj.verts,
                     color=obj.color,
                     width=obj.extra.get("width", 1.0),
-                    mode="lines",
+                    mode=obj.extra.get("line_mode", "lines"),
                     antialias=True,
                 )
             elif obj.mode == "points":
