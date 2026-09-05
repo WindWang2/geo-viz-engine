@@ -548,6 +548,8 @@ def _load_las_preview_fast(
         top_depth=float(np.nanmin(depth_array)),
         bottom_depth=float(np.nanmax(depth_array)),
         curves=curves,
+        total_rows=int(n_valid),
+        decimated=bool(len(indices) < n_valid),
     )
 
 
@@ -599,6 +601,8 @@ def load_las_preview(
         top_depth=float(np.nanmin(depth)),
         bottom_depth=float(np.nanmax(depth)),
         curves=curves,
+        total_rows=int(header.row_count),
+        decimated=bool(stride > 1),
     )
 
 

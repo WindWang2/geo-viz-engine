@@ -73,3 +73,9 @@ class WellLogData(BaseModel):
     facies: list[FaciesInterval] = []
     intervals: Optional[WellIntervals] = None
     custom_tracks: list[dict] = []
+    # #1193 (paleo-workbench): preview decimation provenance. Preview
+    # loaders (min-max binning / strided sampling) set total_rows to the
+    # source row count and decimated=True when rows were dropped, so
+    # inference callers never mistake display data for full resolution.
+    total_rows: Optional[int] = None
+    decimated: bool = False
