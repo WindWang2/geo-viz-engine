@@ -742,9 +742,12 @@ class ProfileVD(QWidget):
         if self._polyline_points:
             self._draw_polyline(painter, img_rect)
 
-        # 6. Draw annotations
+        # 6. Draw annotations and path overlays (independent sources: a
+        # well-trace overlay must render even when no manual annotation
+        # exists — nesting it under _annotations kept it invisible).
         if self._annotations:
             self._draw_annotations(painter, img_rect)
+        if self._path_overlays:
             self._draw_path_overlays(painter, img_rect)
 
         painter.end()
