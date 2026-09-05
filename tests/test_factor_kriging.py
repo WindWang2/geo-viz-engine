@@ -311,3 +311,33 @@ def test_interpolate_factor_grid_kriging_backend():
     assert result["variance_min"] <= result["variance_max"]
     assert "mvp_note" not in result  # real kriging carries no MVP caveat
     assert result["r_squared"] is None or math.isfinite(result["r_squared"])
+
+
+# --- finiteness contract (#145) -----------------------------------------------
+
+
+def test_kriging_filters_nonfinite_samples():
+    """NaN coordinates/values must not poison the system into a NaN surface
+    with variance washed to 0 (#145): non-finite samples are dropped, the
+    remaining ones interpolate finitely."""
+    rng = np.random.default_rng(11)
+    x = rng.uniform(0, 100, 40)
+    y = rng.uniform(0, 100, 40)
+    z = np.sin(x / 10) + np.cos(y / 8)
+    x[5] = np.nan
+    z[9] = np.inf
+    tx = np.linspace(10, 90, 25)
+    pred, var = ordinary_kriging(x, y, z, tx, tx)
+    assert np.all(np.isfinite(pred))
+    assert np.all(np.isfinite(var))
+    assert np.all(var >= 0.0)
+
+
+def test_kriging_all_nan_input_raises():
+    """With no usable samples the engine must fail loudly (the documented
+    contract is finite outputs — never a NaN surface wearing variance 0)."""
+    x = np.array([1.0, 2.0, 3.0, 4.0])
+    y = np.array([1.0, 2.0, 3.0, 4.0])
+    z = np.array([np.nan, np.nan, np.nan, np.nan])
+    with pytest.raises(ValueError):
+        ordinary_kriging(x, y, z, np.array([2.0]), np.array([2.0]))

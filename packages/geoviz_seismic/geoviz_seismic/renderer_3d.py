@@ -150,15 +150,31 @@ def prepare_horizon_texture_upload(horizon_grid: np.ndarray):
 # are freed only inside their matching active context.
 # ---------------------------------------------------------------------------
 
-_CONTEXT_PENDING_TEXTURE_DELETES: dict[object, list[int]] = {}
-_CONTEXT_PENDING_PROGRAM_DELETES: dict[object, list] = {}
+import weakref as _weakref
+
+# #140: keys are held WEAKLY — strong context keys kept entries (texture ids
+# included) alive forever once a 3D view died without another paint (the only
+# flush site), growing the dicts on every page open/close cycle. Weak keys
+# let destroyed contexts' entries vanish, and the aboutToBeDestroyed hook
+# drops them eagerly (the driver frees that context's GL objects anyway).
+_CONTEXT_PENDING_TEXTURE_DELETES: "dict[object, list[int]]" = _weakref.WeakKeyDictionary()
+_CONTEXT_PENDING_PROGRAM_DELETES: "dict[object, list]" = _weakref.WeakKeyDictionary()
+_CONTEXT_PENDING_BUFFER_DELETES: "dict[object, list]" = _weakref.WeakKeyDictionary()
 
 _PENDING_GL_TEXTURE_DELETES: list[int] = []
 _PENDING_GL_PROGRAM_DELETES: list = []
+_PENDING_GL_BUFFER_DELETES: list = []
+
+_DROP_HOOKED_CONTEXTS: "_weakref.WeakSet" = _weakref.WeakSet()
 
 
 def _get_context_key(context=None):
-    """Resolve a hashable identifier for the given or current QOpenGLContext / QOpenGLWidget."""
+    """Resolve a hashable identifier for the given or current QOpenGLContext / QOpenGLWidget.
+
+    Returns the context OBJECT (weakly keyed in the pending maps) or None —
+    the old ``id()`` fallback let a recycled context address delete another
+    context's handles, which is worse than leaving them for the driver.
+    """
     if context is None:
         try:
             context = QtGui.QOpenGLContext.currentContext()
@@ -168,9 +184,38 @@ def _get_context_key(context=None):
         return None
     try:
         hash(context)
+        _hook_context_drop(context)
         return context
     except TypeError:
-        return id(context)
+        return None
+
+
+def _hook_context_drop(context) -> None:
+    """Drop a context's pending entries when the context is destroyed — its
+    GL objects die with it, so queueing deletes would be pointless and the
+    entries would otherwise linger until GC."""
+    if context in _DROP_HOOKED_CONTEXTS:
+        return
+    try:
+        context.aboutToBeDestroyed.connect(
+            lambda ctx=context: drop_pending_gl_deletes(ctx)
+        )
+        _DROP_HOOKED_CONTEXTS.add(context)
+    except Exception:
+        pass
+
+
+def drop_pending_gl_deletes(context) -> None:
+    """Forget every queued delete for *context* (call on context teardown)."""
+    for table in (
+        _CONTEXT_PENDING_TEXTURE_DELETES,
+        _CONTEXT_PENDING_PROGRAM_DELETES,
+        _CONTEXT_PENDING_BUFFER_DELETES,
+    ):
+        try:
+            table.pop(context, None)
+        except Exception:
+            pass
 
 
 def queue_gl_texture_delete(tex, context=None) -> None:
@@ -236,6 +281,33 @@ def flush_pending_gl_deletes(context=None) -> None:
                 GL.glDeleteProgram(program)
         except Exception:
             logger.debug("pending program delete failed", exc_info=True)
+
+    # Collect buffers: context-scoped + unassociated (#141)
+    buf_to_delete: list = []
+    if key is not None and key in _CONTEXT_PENDING_BUFFER_DELETES:
+        buf_to_delete.extend(_CONTEXT_PENDING_BUFFER_DELETES.pop(key))
+    if _PENDING_GL_BUFFER_DELETES:
+        buf_to_delete.extend(_PENDING_GL_BUFFER_DELETES)
+        _PENDING_GL_BUFFER_DELETES.clear()
+
+    while buf_to_delete:
+        vbo = buf_to_delete.pop()
+        try:
+            if vbo is not None and vbo.isCreated():
+                vbo.destroy()
+        except Exception:
+            logger.debug("pending buffer delete failed", exc_info=True)
+
+
+def queue_gl_buffer_delete(vbo, context=None) -> None:
+    """Queue one QOpenGLBuffer for destruction at the next matching paint
+    flush (#141: clean() without a current context must not leak VBOs)."""
+    if vbo is not None:
+        key = _get_context_key(context)
+        if key is not None:
+            _CONTEXT_PENDING_BUFFER_DELETES.setdefault(key, []).append(vbo)
+        else:
+            _PENDING_GL_BUFFER_DELETES.append(vbo)
 
 
 class GLImageLutItem(gl.GLImageItem):
@@ -423,6 +495,12 @@ class GLImageLutItem(gl.GLImageItem):
             queue_gl_texture_delete(lut_tex, context=ctx)
             queue_gl_texture_delete(index_tex, context=ctx)
             queue_gl_program_delete(program, context=ctx)
+            # #141: the position VBO leaked here — only the else branch
+            # destroyed it. Defer it like the textures/program (parity with
+            # DualGLVolumeItem.clean(), which releases it unconditionally).
+            vbo = getattr(self, "m_vbo_position", None)
+            if vbo is not None and vbo.isCreated():
+                queue_gl_buffer_delete(vbo, context=ctx)
         else:
             tex_ids = [t for t in (index_tex, lut_tex) if t is not None]
             if tex_ids:
@@ -1221,6 +1299,11 @@ class DualGLVolumeItem(gl.GLVolumeItem):
                     handle=int(self.texture),
                     release=self._evict_volume_texture,
                 )
+                # #143: the freshly uploaded volume must survive THIS paint —
+                # the overlay/horizon/normal VRAM.put calls below can trigger
+                # global LRU eviction that would otherwise free it right
+                # before its bind.
+                VRAM.pin(self._vram_key("volume"))
 
         if self._cmap_needs_upload:
             self._uploadColormaps()
@@ -1262,7 +1345,12 @@ class DualGLVolumeItem(gl.GLVolumeItem):
         self.m_vbo_position.release()
         enabled_locs = [loc_pos, loc_tex]
 
-        # Bind 3D texture to unit 0
+        # Bind 3D texture to unit 0. #143: a budget-pressure eviction can
+        # null self.texture mid-paint (VRAM.put for overlays triggers global
+        # LRU eviction); binding None raises and aborts the frame.
+        if self.texture is None:
+            logger.debug("volume texture evicted mid-paint; skipping frame draw")
+            return
         GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glBindTexture(GL.GL_TEXTURE_3D, self.texture)
         
@@ -1366,6 +1454,10 @@ class DualGLVolumeItem(gl.GLVolumeItem):
             GL.glBindTexture(GL.GL_TEXTURE_3D, 0)
             
         GL.glActiveTexture(GL.GL_TEXTURE0)
+
+        # #143: this frame is done — the volume may be evicted again from the
+        # NEXT pressure event onward.
+        VRAM.release(self._vram_key("volume"))
 
     def clean(self):
         """Release every GL resource owned by this item.

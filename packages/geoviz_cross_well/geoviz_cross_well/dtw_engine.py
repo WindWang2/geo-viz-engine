@@ -35,6 +35,18 @@ class DTWEngine:
         if not np.all(np.isfinite(ref_curve)) or not np.all(np.isfinite(target_curve)):
             return DTWResult(suggested_depth=0.0, cost=1.0, confidence=0.0, feasible=False)
 
+        # #144: the depth arrays are indexed and interpolated against — a
+        # length mismatch IndexErrors mid-solve and NaN/Inf depths pick wrong
+        # reference points or return suggested_depth=NaN with feasible=True.
+        ref_depths_arr = np.asarray(ref_depths, dtype=np.float64).ravel()
+        target_depths_arr = np.asarray(target_depths, dtype=np.float64).ravel()
+        if len(ref_depths_arr) != n or len(target_depths_arr) != m:
+            return DTWResult(suggested_depth=0.0, cost=1.0, confidence=0.0, feasible=False)
+        if not np.all(np.isfinite(ref_depths_arr)) or not np.all(
+            np.isfinite(target_depths_arr)
+        ):
+            return DTWResult(suggested_depth=0.0, cost=1.0, confidence=0.0, feasible=False)
+
         # The Sakoe-Chiba band covers cells |j-i| <= band_radius, so the
         # endpoint (n-1, m-1) is inside the band iff |m-n| <= band_radius.
         # Backtracking from an uncomputed endpoint collapses to a single-cell

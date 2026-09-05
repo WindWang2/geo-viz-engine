@@ -10,6 +10,7 @@ import math
 from pathlib import Path
 from typing import Any
 import numpy as np
+from PySide6 import QtGui
 
 try:
     from OpenGL import GL
@@ -99,11 +100,15 @@ class WiggleTraceTexture:
         """L2 eviction hook: free the R32F texture; next update re-uploads."""
         tex, self.texture_id = self.texture_id, None
         if tex is not None and HAS_OPENGL and GL is not None:
-            try:
-                GL.glDeleteTextures([tex])
-            except Exception:
-                # No current context (or mock GL): defer through the shared
-                # queue so the handle is freed at the next matching paint.
+            # #142: glDeleteTextures with NO current context is a silent
+            # no-op, not an exception — the old try/except fallback was dead
+            # code and every eviction outside a paint leaked the handle.
+            if QtGui.QOpenGLContext.currentContext() is not None:
+                try:
+                    GL.glDeleteTextures([tex])
+                except Exception:
+                    pass
+            else:
                 try:
                     from ..renderer_3d import queue_gl_texture_delete
                     queue_gl_texture_delete(tex)
@@ -115,10 +120,18 @@ class WiggleTraceTexture:
         VRAM.unregister(self._vram_key())
         if self.texture_id is not None:
             if not mock_gl and HAS_OPENGL and GL is not None:
-                try:
-                    GL.glDeleteTextures([self.texture_id])
-                except Exception:
-                    pass
+                # #142: no-context deletes are silent no-ops — defer instead.
+                if QtGui.QOpenGLContext.currentContext() is not None:
+                    try:
+                        GL.glDeleteTextures([self.texture_id])
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        from ..renderer_3d import queue_gl_texture_delete
+                        queue_gl_texture_delete(self.texture_id)
+                    except Exception:
+                        pass
             self.texture_id = None
         self.num_traces = 0
         self.num_samples = 0

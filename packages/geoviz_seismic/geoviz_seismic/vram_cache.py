@@ -136,6 +136,7 @@ class VramTextureCache:
             # configuration bound, applied in set_budget().
             self._max_bytes = int(max_bytes)
         self._lock = threading.RLock()
+        self._pinned: dict[tuple, int] = {}
         self._lru: OrderedDict[tuple, _VramEntry] = OrderedDict()
         self._stats = VramStats(budget_bytes=self._max_bytes)
 
@@ -219,6 +220,25 @@ class VramTextureCache:
             self._add_bytes(kind, int(size_bytes))
             self._apply_budget(protect=key)
 
+    def pin(self, key: tuple) -> None:
+        """Protect *key* from LRU eviction until :meth:`release` (nested).
+
+        Used by paint paths: a texture uploaded for the frame in flight must
+        not be evicted by the VRAM.put calls of sibling textures in the SAME
+        paint (#143) — eviction would null the owner's handle mid-paint and
+        abort the frame on bind.
+        """
+        with self._lock:
+            self._pinned[key] = self._pinned.get(key, 0) + 1
+
+    def release(self, key: tuple) -> None:
+        with self._lock:
+            count = self._pinned.get(key, 0) - 1
+            if count > 0:
+                self._pinned[key] = count
+            else:
+                self._pinned.pop(key, None)
+
     def unregister(self, key: tuple) -> None:
         """Remove an entry the owner has already freed (no release callback).
 
@@ -235,6 +255,7 @@ class VramTextureCache:
         with self._lock:
             entries = list(self._lru.values())
             self._lru.clear()
+            self._pinned.clear()
             self._stats.bytes_now = 0
             self._stats.entries = 0
             self._stats.by_kind.clear()
@@ -298,7 +319,7 @@ class VramTextureCache:
         while self._stats.bytes_now > self._max_bytes:
             victim_key = None
             for cand_key in self._lru:  # OrderedDict iterates LRU-first
-                if cand_key != protect:
+                if cand_key != protect and cand_key not in self._pinned:
                     victim_key = cand_key
                     break
             if victim_key is None:
@@ -327,5 +348,6 @@ def reset_for_tests(cache: VramTextureCache | None = None) -> None:
     target = cache if cache is not None else VRAM
     with target._lock:
         target._lru.clear()
+        target._pinned.clear()
         budget = target._max_bytes
         target._stats = VramStats(budget_bytes=budget)

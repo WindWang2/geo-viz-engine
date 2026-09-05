@@ -28,6 +28,14 @@ class ConstantVelocityDepth:
 
     v0_m_s: float = 3000.0
 
+    def __post_init__(self) -> None:
+        # #147: v0<=0 divides by zero (depth→time) and flattens TWT to a
+        # zero depth surface (time→depth). The module is fail-closed by
+        # contract — a degenerate velocity must be rejected, not silently
+        # applied.
+        if not (float(self.v0_m_s) > 0.0) or not np.isfinite(self.v0_m_s):
+            raise ValueError(f"v0_m_s must be a positive finite velocity, got {self.v0_m_s!r}")
+
     def time_ms_to_depth_m(self, time_ms: float | np.ndarray) -> float | np.ndarray:
         return (np.asarray(time_ms, dtype=np.float64) * 1e-3) * self.v0_m_s / 2.0
 

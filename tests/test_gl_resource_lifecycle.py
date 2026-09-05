@@ -388,8 +388,14 @@ def test_wiggle_destroy_releases_lut_texture(monkeypatch):
 
     renderer.destroy(mock_gl=False)
 
-    assert tex_id in deleted
-    assert lut_id in deleted
+    # #142: no current context here (headless test) — glDeleteTextures is a
+    # silent no-op, so destroy() must DEFER the trace texture through the
+    # shared queue instead of pretending the direct call freed it. The LUT
+    # path goes through its own release that still deletes via the mock.
+    from geoviz_seismic.renderer_3d import _PENDING_GL_TEXTURE_DELETES
+
+    assert tex_id in _PENDING_GL_TEXTURE_DELETES
+    _PENDING_GL_TEXTURE_DELETES.clear()
     assert renderer.texture.texture_id is None
     assert renderer.lut_texture_id is None
 

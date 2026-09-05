@@ -300,6 +300,11 @@ def _solve_augmented(aug: np.ndarray, rhs: np.ndarray, total_sill: float, ridge:
     except np.linalg.LinAlgError:
         pass
     sol, _, _, _ = np.linalg.lstsq(aug_r, rhs, rcond=None)
+    if not np.all(np.isfinite(sol)):
+        # #145: NaN/Inf input made every stage non-finite. Return NaN so the
+        # caller can fail closed — silently returning them washed the
+        # variance to 0 and masked the failure.
+        return sol
     return sol
 
 
@@ -334,6 +339,16 @@ def ordinary_kriging(
     """
     if variogram_model not in SUPPORTED_MODELS:
         raise ValueError(f"unknown variogram model {variogram_model!r}; choose from {SUPPORTED_MODELS}")
+    # #145: non-finite coordinates/values poison the covariance system (solve
+    # does not raise on NaN) and the NaN surface previously sailed through
+    # with variance washed to 0. Drop them like the host's extract_xy_values
+    # does, BEFORE the dedupe/distinct-count check.
+    x = np.asarray(x, dtype=np.float64).ravel()
+    y = np.asarray(y, dtype=np.float64).ravel()
+    z = np.asarray(z, dtype=np.float64).ravel()
+    finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+    if not finite.all():
+        x, y, z = x[finite], y[finite], z[finite]
     x, y, z = _dedupe_points(x, y, z)
     n = len(z)
     if n < _MIN_SAMPLES:
@@ -415,7 +430,16 @@ def ordinary_kriging(
             variance[start:stop] = total_sill - (np.sum(weights_c * c_mat_c, axis=0) + mu_c)
     pred = np.asarray(pred, dtype=np.float64)
     variance = np.asarray(variance, dtype=np.float64)
-    variance = np.where(np.isfinite(variance) & (variance >= 0.0), variance, 0.0)
+    if not np.all(np.isfinite(pred)) or not np.all(np.isfinite(variance)):
+        # Documented contract: "all outputs are guaranteed finite". A
+        # non-finite result means the system was poisoned beyond recovery —
+        # fail loudly instead of returning a NaN surface with variance
+        # washed to 0 (#145).
+        raise FloatingPointError(
+            "ordinary kriging produced non-finite output (degenerate or "
+            "overflowing covariance system); check the sample data scale"
+        )
+    variance = np.where(variance >= 0.0, variance, 0.0)
     return pred, variance
 
 

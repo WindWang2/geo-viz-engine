@@ -617,11 +617,27 @@ class SeismicLoader:
             il = int(f.ilines[il_idx])
             line = np.asarray(f.iline[il], dtype=np.float32)
             vol[i, :, :] = line[np.array(xl_indices)][:, np.array(t_indices)]
-        self._downsampled = vol
-        self._downsample_factor = factor
+        self._cache_downsampled(vol, factor)
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
         return vol
+
+    # #139: bounds for in-RAM volume retention. The full-resolution cube
+    # path refuses volumes above _FULL_VOLUME_BUDGET_BYTES; the strided
+    # preview result is only cached when it fits _DOWNSAMPLED_CACHE_MAX_BYTES
+    # (larger results are returned without instance-level retention, so a
+    # big preview cannot pin its RAM for the loader's lifetime).
+    _FULL_VOLUME_BUDGET_BYTES = 4 * 1024**3
+    _DOWNSAMPLED_CACHE_MAX_BYTES = 256 * 1024**2
+
+    def _cache_downsampled(self, vol: np.ndarray, factor: tuple[int, int, int]) -> None:
+        if vol.nbytes <= self._DOWNSAMPLED_CACHE_MAX_BYTES:
+            self._downsampled = vol
+            self._downsample_factor = factor
+        else:
+            # Too big to pin: drop any previous cached volume.
+            self._downsampled = None
+            self._downsample_factor = None
 
     def close(self):
         """Close the underlying SEGY file handle."""

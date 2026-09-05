@@ -68,3 +68,20 @@ def test_region_label_skips_chrome_footprint(qtbot):
     layer.paint(p, vp)
     p.end()
     assert "测试相区" not in layer.visible_labels
+
+
+# --- huge-rect O(1) rejection (#146) ------------------------------------------
+
+
+def test_huge_finite_rect_rejected_without_grid_walk():
+    """A finite-but-huge rect (projection blow-up) used to walk ~1e14 hash
+    cells and hang the UI thread; it must be rejected in O(1) (#146)."""
+    from PySide6.QtCore import QRectF
+
+    from geoviz_common.collision import CollisionDetector
+
+    det = CollisionDetector(cell_size=120.0)
+    huge = QRectF(-1e9, -1e9, 2e9, 2e9)
+    assert det.try_add(huge) is False  # rejected, not walked
+    # normal labels still work after the reject
+    assert det.try_add(QRectF(0.0, 0.0, 80.0, 20.0)) is True

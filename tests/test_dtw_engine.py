@@ -187,3 +187,42 @@ def test_compute_dtw_propagation_is_pure_data(qtbot):
     created = canvas.propagate_pick_via_dtw("W1", 1500.0, "F1")
     assert len(created) == len(pairs)
     assert len(canvas.picks_model.all_picks()) == len(before) + len(pairs)
+
+
+# --- depth-array validation (#144) -------------------------------------------
+
+
+def _audit_curves(n=64):
+    depths = np.linspace(1000.0, 1600.0, n)
+    curve = np.sin(depths / 50.0) + 0.1 * np.cos(depths / 17.0)
+    return depths, curve
+
+
+def test_dtw_mismatched_depth_lengths_infeasible():
+    from geoviz_cross_well.dtw_engine import DTWEngine
+
+    ref_d, ref_c = _audit_curves(64)
+    tgt_d, tgt_c = _audit_curves(64)
+    result = DTWEngine().correlate(ref_c, ref_d, tgt_c, tgt_d[:-4])
+    assert result.feasible is False
+
+
+def test_dtw_nonfinite_depths_infeasible():
+    from geoviz_cross_well.dtw_engine import DTWEngine
+
+    ref_d, ref_c = _audit_curves(64)
+    tgt_d, tgt_c = _audit_curves(64)
+    tgt_d = tgt_d.copy()
+    tgt_d[7] = np.nan  # non-finite depth would silently corrupt the pick
+    result = DTWEngine().correlate(ref_c, ref_d, tgt_c, tgt_d)
+    assert result.feasible is False
+
+
+def test_dtw_valid_depths_still_feasible():
+    from geoviz_cross_well.dtw_engine import DTWEngine
+
+    ref_d, ref_c = _audit_curves(64)
+    tgt_d, tgt_c = _audit_curves(64)
+    result = DTWEngine().correlate(ref_c, ref_d, tgt_c, tgt_d)
+    assert result.feasible is True
+    assert np.isfinite(result.suggested_depth)

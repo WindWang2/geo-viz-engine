@@ -129,10 +129,15 @@ class VolumeRegistration:
     def time_ms_to_sample_idx(self, time_ms: float | np.ndarray) -> float | np.ndarray:
         s = self.survey
         t = np.asarray(time_ms, dtype=np.float64)
-        if s.dt_ms and s.dt_ms > 0:
-            native_t = (t - s.t0_ms) / s.dt_ms
-        else:
-            native_t = t
+        if not (s.dt_ms and s.dt_ms > 0):
+            # #147: treating TWT milliseconds as sample indices silently maps
+            # 2500 ms to sample 2500. Fail closed — the sample domain is
+            # unusable without a parsed sample interval.
+            raise ValueError(
+                "survey dt_ms is missing or non-positive; cannot convert "
+                "TWT ms to sample indices (fail-closed, #147)"
+            )
+        native_t = (t - s.t0_ms) / s.dt_ms
         out = native_t / self.strides[2]
         if out.ndim == 0:
             return float(out)
