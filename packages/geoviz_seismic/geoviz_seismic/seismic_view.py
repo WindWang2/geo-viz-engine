@@ -61,6 +61,10 @@ class SeismicView(QWidget):
         # store is attached via set_chunked_volume().
         self._chunked_worker = None
         self._chunked_geometry = None
+        # Full-resolution arbitrary line (L5): survey-space polyline of the
+        # last drawn arbitrary line + one-shot reader worker (chunked only).
+        self._arb_survey_points: list[tuple[float, float]] | None = None
+        self._arbitrary_worker = None
         self._meta: SeismicVolumeMeta | None = None
         self._horizon_grids: dict[str, np.ndarray] = {}
         self._ds_factor: tuple[int, int, int] = (1, 1, 1)
@@ -265,6 +269,7 @@ class SeismicView(QWidget):
         self._stop_slice_worker()
         self._stop_attr_worker()
         self._stop_chunked_worker()
+        self._stop_arbitrary_worker()
 
     def _stop_attr_worker(self) -> None:
         """Stop the attribute worker if one was created (idempotent)."""
@@ -276,6 +281,13 @@ class SeismicView(QWidget):
         if self._slice_worker is not None and not self._slice_worker_stopped:
             self._slice_worker_stopped = True
             self._slice_worker.stop()
+
+    def _stop_arbitrary_worker(self) -> None:
+        """Cooperative stop for the full-resolution arbitrary reader."""
+        worker = self._arbitrary_worker
+        self._arbitrary_worker = None
+        if worker is not None:
+            worker.stop()
 
     def _stop_chunked_worker(self) -> None:
         """Stop the chunked (zarr) slice worker if one was attached (#1082)."""
@@ -1150,6 +1162,71 @@ class SeismicView(QWidget):
             index_points.append((il_idx, xl_idx))
         
         self._renderer_3d.set_arbitrary_polyline(index_points)
+        self._request_fullres_arbitrary(index_points)
+
+    def _request_fullres_arbitrary(self, index_points) -> None:
+        """Ask the chunked store for a full-resolution gather (L5, #1080).
+
+        The 3-D curtain keeps sampling the preview volume; the arbitrary
+        PROFILE deserves full resolution. Survey-space conversion mirrors
+        ``_preview_to_survey_coords`` (preview index × downsample factor ×
+        survey step + origin). Without a chunked store the request is a
+        no-op — the preview-quality panel stays honest rather than silently
+        degrading full-volume reads through segyio random IO.
+        """
+        if self._chunked_worker is None or self._meta is None:
+            return
+        m = self._meta
+        df = getattr(self, "_ds_factor", (1, 1, 1)) or (1, 1, 1)
+        fi, fx = int(df[0]), int(df[1])
+        survey_points = [
+            (
+                m.iline_start + il_idx * fi * m.iline_step,
+                m.xline_start + xl_idx * fx * m.xline_step,
+            )
+            for il_idx, xl_idx in index_points
+        ]
+        self._arb_survey_points = survey_points
+        if self._arbitrary_worker is None:
+            from geoviz_seismic.chunked_worker import ArbitraryLineWorker
+
+            worker = ArbitraryLineWorker()
+            worker.arbitrary_ready.connect(self._on_fullres_arbitrary)
+            retain_background_worker(worker)
+            app = QCoreApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(worker.stop)
+            self._arbitrary_worker = worker
+            worker.start()
+        worker_store = getattr(self._chunked_worker, "_store_path", None)
+        if worker_store:
+            self._arbitrary_worker.set_store(worker_store, self._segy_generation)
+        self._arbitrary_worker.request_line(survey_points)
+
+    @Slot(object, int)
+    def _on_fullres_arbitrary(self, data, generation: int):
+        """Render the chunked full-resolution gather into the arbitrary panel."""
+        if generation != self._segy_generation or data is None or not data.size:
+            return
+        m = self._meta
+        # read_arbitrary_line(lod=0): rows are FULL-resolution samples of the
+        # chunked store, columns are the requested polyline points.
+        info = SliceInfo(
+            slice_type="arbitrary",
+            position=0,
+            axis_h_label="Trace",
+            axis_v_label="Time (ms)" if m else "Sample",
+            axis_h_values=list(range(int(data.shape[1]))),
+            axis_v_values=(
+                (np.arange(int(data.shape[0])) * (m.dt_ms if m else 1.0)
+                 + (m.t0_ms if m else 0.0)).tolist()
+                if m
+                else list(range(int(data.shape[0])))
+            ),
+        )
+        self._profile_arb.update_profile(
+            np.ascontiguousarray(data.T), slice_info=info
+        )
 
     @Slot(str, int)
     def _on_slice_changed(self, slice_type: str, position: int):

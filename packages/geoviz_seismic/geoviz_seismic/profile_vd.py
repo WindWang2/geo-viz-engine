@@ -108,6 +108,11 @@ class ProfileVD(QWidget):
         # Synthetic overlay state
         self._synthetic_overlay: dict | None = None
 
+        # Path overlays (well traces, fault sticks…) in seismic coordinates:
+        # list of {h_values, v_values, label, color} dicts. Polyline only —
+        # these are display annotations, never picked data.
+        self._path_overlays: list[dict] = []
+
         # Cursor signal throttle (~60 fps)
         self._cursor_timer = QTimer(self)
         self._cursor_timer.setInterval(16)
@@ -258,6 +263,72 @@ class ProfileVD(QWidget):
         """Remove the synthetic trace overlay."""
         self._synthetic_overlay = None
         self.update()
+
+    def set_path_overlays(self, paths) -> None:
+        """Set polyline overlays drawn on the section (display-only).
+
+        Each path dict carries ``h_values``/``v_values`` (seismic section
+        coordinates, e.g. crossline / TWT ms), an optional ``label`` and a
+        ``color`` hex string. Typical use: calibrated well traces projected
+        onto an inline/crossline section, or fault sticks. The data itself
+        lives in the caller — this widget only draws.
+        """
+        import numpy as _np
+        cleaned = []
+        for path in paths or []:
+            h = _np.asarray(path.get("h_values", ()), dtype=float)
+            v = _np.asarray(path.get("v_values", ()), dtype=float)
+            if h.size != v.size or h.size == 0:
+                continue
+            keep = _np.isfinite(h) & _np.isfinite(v)
+            cleaned.append(
+                {
+                    "h_values": h[keep],
+                    "v_values": v[keep],
+                    "label": str(path.get("label", "") or ""),
+                    "color": str(path.get("color", "#1f77b4")),
+                }
+            )
+        self._path_overlays = cleaned
+        self.update()
+
+    def clear_path_overlays(self) -> None:
+        """Remove every polyline overlay."""
+        self._path_overlays = []
+        self.update()
+
+    def _draw_path_overlays(self, painter: QPainter, img_rect):
+        """Draw well/fault polylines through the seismic→pixel mapping."""
+        if not self._path_overlays or self._slice_info is None:
+            return
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QPolygonF
+
+        for path in self._path_overlays:
+            h_values, v_values = path["h_values"], path["v_values"]
+            if h_values.size < 1:
+                continue
+            points = []
+            for h_val, v_val in zip(h_values, v_values):
+                pixel = self._seismic_to_pixel(float(h_val), float(v_val))
+                if pixel is not None:
+                    points.append(QPointF(pixel[0], pixel[1]))
+            if len(points) < 1:
+                continue
+            color = QColor(path["color"])
+            pen = QPen(color, 1.8)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            if len(points) >= 2:
+                painter.drawPolyline(QPolygonF(points))
+            # Marked point at the first visible sample + label above it.
+            head = points[0]
+            painter.drawEllipse(head, 2.5, 2.5)
+            if path["label"]:
+                label_pen = QPen(color, 1)
+                painter.setPen(label_pen)
+                painter.setFont(QFont("Monospace", 8))
+                painter.drawText(int(head.x()) + 4, int(head.y()) - 4, path["label"])
 
     def _draw_synthetic_overlay(self, painter: QPainter, img_rect):
         """Draw the synthetic wiggle trace overlay on the seismic section."""
@@ -674,6 +745,7 @@ class ProfileVD(QWidget):
         # 6. Draw annotations
         if self._annotations:
             self._draw_annotations(painter, img_rect)
+            self._draw_path_overlays(painter, img_rect)
 
         painter.end()
 

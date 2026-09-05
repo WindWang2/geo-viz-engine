@@ -111,6 +111,14 @@ class ProfileWidget(QWidget):
         """Change the VD colormap."""
         self._vd.set_colormap(name)
 
+    def set_path_overlays(self, paths) -> None:
+        """Set polyline overlays (well traces / fault sticks) on the VD panel."""
+        self._vd.set_path_overlays(paths)
+
+    def clear_path_overlays(self) -> None:
+        """Remove every polyline overlay."""
+        self._vd.clear_path_overlays()
+
     def set_polarity(self, normal: bool = True) -> None:
         """Flip the displayed amplitude sign on both renderers (display-only)."""
         self._vd.set_polarity(normal)
