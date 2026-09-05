@@ -205,6 +205,7 @@ class ArbitraryLineWorker(QThread):
     """
 
     arbitrary_ready = Signal(object, int)  # ndarray (n_points, n_samples), generation
+    read_error = Signal(int)  # generation whose gather failed
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -231,19 +232,30 @@ class ArbitraryLineWorker(QThread):
             self._cond.wakeAll()
 
     def stop(self) -> None:
+        """Cooperative stop: interrupt + wake + bounded wait (teardown safe).
+
+        Mirrors :meth:`ChunkedSliceWorker.stop` — without the wait the thread
+        can outlive the QThread wrapper and abort the process at destruction
+        ("QThread: Destroyed while thread is still running").
+        """
+        self.requestInterruption()
         with QMutexLocker(self._mutex):
             self._stop = True
             self._cond.wakeAll()
+        self.wait(1500)
 
     def run(self) -> None:  # noqa: D102 - QThread entry point
         while True:
             with QMutexLocker(self._mutex):
+                # TIMED wait + interruption check: an untimed cond wait can
+                # never observe requestInterruption, hanging teardown.
                 while (
                     not self._stop
+                    and not self.isInterruptionRequested()
                     and (self._points is None or self._store_path is None)
                 ):
-                    self._cond.wait(self._mutex)
-                if self._stop:
+                    self._cond.wait(self._mutex, 50)
+                if self._stop or self.isInterruptionRequested():
                     return
                 points = self._points
                 self._points = None
@@ -255,6 +267,10 @@ class ArbitraryLineWorker(QThread):
                 reader = open_volume(store_path)
                 data = reader.read_arbitrary_line(points, lod=0, interpolate=True)
             except Exception:
-                continue  # store replaced/failed; the next request retries
+                # A failed gather must not die silently: the profile panel
+                # holds the previous (stale) image otherwise. Emit the failed
+                # generation so the consumer can drop/mark it.
+                self.read_error.emit(int(generation))
+                continue
             if data is not None and data.size:
                 self.arbitrary_ready.emit(data, int(generation))

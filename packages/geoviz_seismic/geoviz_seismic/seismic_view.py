@@ -322,6 +322,11 @@ class SeismicView(QWidget):
                 app.aboutToQuit.connect(worker.stop)
             self._chunked_worker = worker
         self._chunked_geometry = geometry
+        # A new store's geometry may differ: a gather from the previous
+        # store must never linger as if it were current.
+        if self._arb_survey_points is not None:
+            self._arb_survey_points = None
+            self._profile_arb.set_overlay_text("切换存储…")
         worker.set_store(str(store_path), self._segy_generation, geometry=geometry)
 
     def _ensure_slice_worker(self) -> None:
@@ -1192,6 +1197,7 @@ class SeismicView(QWidget):
 
             worker = ArbitraryLineWorker()
             worker.arbitrary_ready.connect(self._on_fullres_arbitrary)
+            worker.read_error.connect(self._on_fullres_arbitrary_error)
             retain_background_worker(worker)
             app = QCoreApplication.instance()
             if app is not None:
@@ -1202,6 +1208,14 @@ class SeismicView(QWidget):
         if worker_store:
             self._arbitrary_worker.set_store(worker_store, self._segy_generation)
         self._arbitrary_worker.request_line(survey_points)
+
+    @Slot(int)
+    def _on_fullres_arbitrary_error(self, generation: int) -> None:
+        """A failed gather drops the stale panel image instead of faking it."""
+        if generation != self._segy_generation:
+            return
+        self._profile_arb.set_overlay_text("任意线读取失败")
+        self._arb_survey_points = None
 
     @Slot(object, int)
     def _on_fullres_arbitrary(self, data, generation: int):

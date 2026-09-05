@@ -106,15 +106,18 @@ class TestProfileWiggleControls:
 
 
 class TestSeismicViewToolbar:
+    # auto_load=False: the default constructor spawns the synthetic-preview
+    # auto-load QThread, which outlives widget teardown in tests and aborts
+    # the interpreter at exit ("QThread: Destroyed while thread …").
     def test_colormap_combo_lists_the_full_registry(self, qapp, qtbot):
-        view = SeismicView()
+        view = SeismicView(auto_load=False)
         qtbot.addWidget(view)
         listed = {view._cmap_combo.itemText(i) for i in range(view._cmap_combo.count())}
         assert listed == set(ColormapManager._COLORMAPS)
         assert view._cmap_combo.currentText() == "seismic"
 
     def test_polarity_and_gain_reach_every_profile_panel(self, qapp, qtbot):
-        view = SeismicView()
+        view = SeismicView(auto_load=False)
         qtbot.addWidget(view)
         panels = [view._profile_il, view._profile_xl, view._profile_t, view._profile_arb]
         view._gain_spin.setValue(3.5)
@@ -123,7 +126,7 @@ class TestSeismicViewToolbar:
         assert all(not pw.polarity_normal() for pw in panels)
 
     def test_reset_display_controls_restores_factory_state(self, qapp, qtbot):
-        view = SeismicView()
+        view = SeismicView(auto_load=False)
         qtbot.addWidget(view)
         view._clip_spin.setValue(80.0)
         view._gain_spin.setValue(9.0)
