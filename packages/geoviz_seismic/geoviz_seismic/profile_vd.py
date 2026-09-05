@@ -145,11 +145,13 @@ class ProfileVD(QWidget):
     def set_polarity(self, normal: bool = True) -> None:
         """Flip the displayed amplitude sign (SEG normal ↔ reversed).
 
-        Polarity is a DISPLAY convention only: the color mapping negates the
-        clip range so positive lobes swap colour, but the stored data, the
-        cursor amplitude readout and picked values stay in the survey's raw
-        sign convention. Re-rendering reuses the cached percentile range —
-        negation swaps (lo, hi); no rescan is needed.
+        Polarity is a DISPLAY convention only: the displayed image of sample
+        x under reversed polarity equals the normal image of -x (an
+        involution), computed by normalizing the NEGATED slice through the
+        SAME cached percentile range — no rescan, and asymmetric clip
+        windows stay honest because the negation happens to the data, not to
+        the range. The stored data, the cursor amplitude readout and picked
+        values keep the survey's raw sign convention.
         """
         polarity = 1 if normal else -1
         if polarity == self._polarity and self._has_data:
