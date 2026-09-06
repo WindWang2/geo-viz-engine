@@ -61,6 +61,10 @@ class SeismicView(QWidget):
         # store is attached via set_chunked_volume().
         self._chunked_worker = None
         self._chunked_geometry = None
+        # Full-resolution arbitrary line (L5): survey-space polyline of the
+        # last drawn arbitrary line + one-shot reader worker (chunked only).
+        self._arb_survey_points: list[tuple[float, float]] | None = None
+        self._arbitrary_worker = None
         self._meta: SeismicVolumeMeta | None = None
         self._horizon_grids: dict[str, np.ndarray] = {}
         self._ds_factor: tuple[int, int, int] = (1, 1, 1)
@@ -265,6 +269,7 @@ class SeismicView(QWidget):
         self._stop_slice_worker()
         self._stop_attr_worker()
         self._stop_chunked_worker()
+        self._stop_arbitrary_worker()
 
     def _stop_attr_worker(self) -> None:
         """Stop the attribute worker if one was created (idempotent)."""
@@ -276,6 +281,13 @@ class SeismicView(QWidget):
         if self._slice_worker is not None and not self._slice_worker_stopped:
             self._slice_worker_stopped = True
             self._slice_worker.stop()
+
+    def _stop_arbitrary_worker(self) -> None:
+        """Cooperative stop for the full-resolution arbitrary reader."""
+        worker = self._arbitrary_worker
+        self._arbitrary_worker = None
+        if worker is not None:
+            worker.stop()
 
     def _stop_chunked_worker(self) -> None:
         """Stop the chunked (zarr) slice worker if one was attached (#1082)."""
@@ -310,6 +322,11 @@ class SeismicView(QWidget):
                 app.aboutToQuit.connect(worker.stop)
             self._chunked_worker = worker
         self._chunked_geometry = geometry
+        # A new store's geometry may differ: a gather from the previous
+        # store must never linger as if it were current.
+        if self._arb_survey_points is not None:
+            self._arb_survey_points = None
+            self._profile_arb.set_overlay_text("切换存储…")
         worker.set_store(str(store_path), self._segy_generation, geometry=geometry)
 
     def _ensure_slice_worker(self) -> None:
@@ -648,7 +665,10 @@ class SeismicView(QWidget):
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
 
         self._cmap_combo = QComboBox()
-        self._cmap_combo.addItems(["seismic", "gray", "jet"])
+        # The full registry (ColormapManager) — seismic first as the default.
+        self._cmap_combo.addItems(
+            ["seismic", "seismic_r", "gray", "jet", "hsv", "viridis", "phase_wheel"]
+        )
         self._cmap_combo.currentTextChanged.connect(
             lambda name: [pw.set_colormap(name) for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb)]
         )
@@ -688,6 +708,19 @@ class SeismicView(QWidget):
         self._clip_spin.setDecimals(1)
         self._clip_spin.setFixedWidth(80)
         self._clip_spin.valueChanged.connect(self._on_clip_changed)
+
+        # L5 display controls: wiggle deflection gain (x, display-only) and
+        # the polarity flag consumed by _set_polarity (render menu action).
+        self._gain_spin = QDoubleSpinBox()
+        self._gain_spin.setRange(0.1, 20.0)
+        self._gain_spin.setValue(2.0)
+        self._gain_spin.setSuffix(" x")
+        self._gain_spin.setSingleStep(0.1)
+        self._gain_spin.setDecimals(1)
+        self._gain_spin.setFixedWidth(72)
+        self._gain_spin.setToolTip("Wiggle 挠度增益（仅显示，不改数据）")
+        self._gain_spin.valueChanged.connect(self._on_gain_changed)
+        self._polarity_normal = True
 
         self._iso_checkbox = QCheckBox(" 等值面")
         self._iso_checkbox.setEnabled(False)
@@ -899,6 +932,27 @@ class SeismicView(QWidget):
             act = slice_sub.addAction(text)
             act.triggered.connect(lambda _c=False, i=idx: self._slice_type_combo.setCurrentIndex(i))
 
+        display_sub = render_menu.addMenu("显示参数 (增益/极性)")
+        gain_w = QWidget()
+        gain_layout = QHBoxLayout(gain_w)
+        gain_layout.setContentsMargins(6, 4, 6, 4)
+        gain_layout.addWidget(QLabel("Wiggle 增益:"))
+        gain_layout.addWidget(self._gain_spin)
+        gain_action = QWidgetAction(display_sub)
+        gain_action.setDefaultWidget(gain_w)
+        display_sub.addAction(gain_action)
+
+        # Action semantics: CHECKED = reversed (the label says 反转), so the
+        # handler inverts the flag the panels receive.
+        self._act_polarity = display_sub.addAction("极性反转 (SEG Reverse)")
+        self._act_polarity.setCheckable(True)
+        self._act_polarity.setToolTip("显示级极性反转；数据与读数保持原始符号约定")
+        self._act_polarity.toggled.connect(lambda checked: self._set_polarity(not checked))
+
+        act_reset_display = render_menu.addAction("重置显示参数")
+        act_reset_display.setToolTip("恢复缺省: 削剪 99% / seismic 色标 / 增益 2.0x / 标准极性 / VD")
+        act_reset_display.triggered.connect(self._reset_display_controls)
+
         act_hillshade = render_menu.addAction("光照效果 (Hillshade)")
         act_hillshade.setCheckable(True)
         act_hillshade.toggled.connect(self._hillshade_btn.setChecked)
@@ -984,6 +1038,7 @@ class SeismicView(QWidget):
         bar2.addWidget(self._sculpt_horizon_combo)
         bar2.addWidget(self._sculpt_mode_combo)
         bar2.addWidget(self._clip_spin)
+        bar2.addWidget(self._gain_spin)
         bar2.addWidget(self._iso_checkbox)
         bar2.addWidget(self._iso_spin)
         bar2.hide()
@@ -1112,6 +1167,80 @@ class SeismicView(QWidget):
             index_points.append((il_idx, xl_idx))
         
         self._renderer_3d.set_arbitrary_polyline(index_points)
+        self._request_fullres_arbitrary(index_points)
+
+    def _request_fullres_arbitrary(self, index_points) -> None:
+        """Ask the chunked store for a full-resolution gather (L5, #1080).
+
+        The 3-D curtain keeps sampling the preview volume; the arbitrary
+        PROFILE deserves full resolution. Survey-space conversion mirrors
+        ``_preview_to_survey_coords`` (preview index × downsample factor ×
+        survey step + origin). Without a chunked store the request is a
+        no-op — the preview-quality panel stays honest rather than silently
+        degrading full-volume reads through segyio random IO.
+        """
+        if self._chunked_worker is None or self._meta is None:
+            return
+        m = self._meta
+        df = getattr(self, "_ds_factor", (1, 1, 1)) or (1, 1, 1)
+        fi, fx = int(df[0]), int(df[1])
+        survey_points = [
+            (
+                m.iline_start + il_idx * fi * m.iline_step,
+                m.xline_start + xl_idx * fx * m.xline_step,
+            )
+            for il_idx, xl_idx in index_points
+        ]
+        self._arb_survey_points = survey_points
+        if self._arbitrary_worker is None:
+            from geoviz_seismic.chunked_worker import ArbitraryLineWorker
+
+            worker = ArbitraryLineWorker()
+            worker.arbitrary_ready.connect(self._on_fullres_arbitrary)
+            worker.read_error.connect(self._on_fullres_arbitrary_error)
+            retain_background_worker(worker)
+            app = QCoreApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(worker.stop)
+            self._arbitrary_worker = worker
+            worker.start()
+        worker_store = getattr(self._chunked_worker, "_store_path", None)
+        if worker_store:
+            self._arbitrary_worker.set_store(worker_store, self._segy_generation)
+        self._arbitrary_worker.request_line(survey_points)
+
+    @Slot(int)
+    def _on_fullres_arbitrary_error(self, generation: int) -> None:
+        """A failed gather drops the stale panel image instead of faking it."""
+        if generation != self._segy_generation:
+            return
+        self._profile_arb.set_overlay_text("任意线读取失败")
+        self._arb_survey_points = None
+
+    @Slot(object, int)
+    def _on_fullres_arbitrary(self, data, generation: int):
+        """Render the chunked full-resolution gather into the arbitrary panel."""
+        if generation != self._segy_generation or data is None or not data.size:
+            return
+        m = self._meta
+        # read_arbitrary_line(lod=0): rows are FULL-resolution samples of the
+        # chunked store, columns are the requested polyline points.
+        info = SliceInfo(
+            slice_type="arbitrary",
+            position=0,
+            axis_h_label="Trace",
+            axis_v_label="Time (ms)" if m else "Sample",
+            axis_h_values=list(range(int(data.shape[1]))),
+            axis_v_values=(
+                (np.arange(int(data.shape[0])) * (m.dt_ms if m else 1.0)
+                 + (m.t0_ms if m else 0.0)).tolist()
+                if m
+                else list(range(int(data.shape[0])))
+            ),
+        )
+        self._profile_arb.update_profile(
+            np.ascontiguousarray(data.T), slice_info=info
+        )
 
     @Slot(str, int)
     def _on_slice_changed(self, slice_type: str, position: int):
@@ -1913,6 +2042,28 @@ class SeismicView(QWidget):
             mode_text = self._sculpt_mode_combo.currentText()
             mode = "above" if mode_text == "保留上部" else "below"
             self._renderer_3d.set_sculpting_surface(self._horizon_grids[horizon_name], mode)
+
+    def _on_gain_changed(self, value: float) -> None:
+        """Wiggle deflection gain -> every profile panel (display-only)."""
+        for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
+            pw.set_wiggle_gain(value)
+
+    def _set_polarity(self, normal: bool) -> None:
+        """SEG polarity flip -> every profile panel (display-only)."""
+        self._polarity_normal = bool(normal)
+        for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
+            pw.set_polarity(normal)
+
+    def _reset_display_controls(self) -> None:
+        """Restore the factory display settings (clip/cmap/gain/polarity/mode)."""
+        self._clip_spin.setValue(99.0)     # fires _on_clip_changed
+        self._gain_spin.setValue(2.0)      # fires _on_gain_changed
+        if self._act_polarity.isChecked():
+            self._act_polarity.setChecked(False)  # fires _set_polarity(True)
+        if self._cmap_combo.currentText() != "seismic":
+            self._cmap_combo.setCurrentText("seismic")
+        if self._mode_combo.currentIndex() != 0:
+            self._mode_combo.setCurrentIndex(0)
 
     def _on_clip_changed(self, value: float):
         for pw in (self._profile_il, self._profile_xl, self._profile_t, self._profile_arb):
