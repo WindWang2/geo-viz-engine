@@ -41,6 +41,7 @@ __all__ = [
     "SceneObject",
     "SceneObjectManager",
     "ray_triangles_first_hit",
+    "ray_segments_closest",
     "screen_point_to_ray",
 ]
 
@@ -147,6 +148,9 @@ class SceneObject:
     # Alpha as submitted (before the opacity multiplier), so set_opacity can
     # rescale from the base instead of compounding on the previous value.
     base_alpha: float = 1.0
+    # Ray-to-geometry tolerance for line/point picking (engine units); 0
+    # disables non-mesh picking.
+    pick_radius: float = 0.0
     clip_planes: tuple | None = None
     extra: dict = field(default_factory=dict)
     item: object | None = None
@@ -199,6 +203,57 @@ def ray_triangles_first_hit(
     idx = np.flatnonzero(hit)
     best = idx[np.argmin(t[idx])]
     return float(t[best]), int(best)
+
+
+def ray_segments_closest(
+    origin: np.ndarray,
+    direction: np.ndarray,
+    verts: np.ndarray,
+    *,
+    pick_radius: float,
+    max_distance: float | None = None,
+) -> tuple[float, int] | None:
+    """Nearest ray-to-polyline hit (engine space).
+
+    ``verts`` is the (N, 3) polyline. For every segment the closest points
+    between the ray and the segment are refined with two clamped sweeps
+    (exact for the picking tolerances used here); a hit counts when the
+    perpendicular distance is within ``pick_radius``. Returns
+    ``(ray_distance, segment_index)`` or ``None``.
+    """
+    if len(verts) < 2 or pick_radius <= 0.0:
+        return None
+    o = np.asarray(origin, dtype=np.float64)
+    d = np.asarray(direction, dtype=np.float64)
+    a = np.asarray(verts[:-1], dtype=np.float64)
+    u = np.asarray(verts[1:], dtype=np.float64) - a
+    seg_len2 = np.einsum("ij,ij->i", u, u)
+    ok = seg_len2 > 1e-24
+    if not np.any(ok):
+        return None
+    # two clamped sweeps of the closest-point parameters
+    sc = np.full(len(a), 0.5)
+    tc = np.zeros(len(a))
+    for _ in range(2):
+        p_seg = a + sc[:, None] * u
+        tc = (p_seg - o) @ d
+        tc = np.clip(tc, 0.0, None)
+        p_ray = o + tc[:, None] * d
+        w = p_ray - p_seg
+        sc = np.where(ok, np.einsum("ij,ij->i", w, u) / np.where(ok, seg_len2, 1.0), 0.0)
+        sc = np.clip(sc, 0.0, 1.0)
+    p_seg = a + sc[:, None] * u
+    tc = (p_seg - o) @ d
+    tc = np.clip(tc, 0.0, None)
+    p_ray = o + tc[:, None] * d
+    dist = np.linalg.norm(p_ray - p_seg, axis=1)
+    dist = np.where(ok, dist, np.inf)
+    if max_distance is not None:
+        dist = np.where(tc <= float(max_distance), dist, np.inf)
+    idx = int(np.argmin(dist))
+    if not np.isfinite(dist[idx]) or dist[idx] > float(pick_radius):
+        return None
+    return float(tc[idx]), idx
 
 
 def screen_point_to_ray(
@@ -353,6 +408,23 @@ class SceneObjectManager:
         obj = self._objects.get(name)
         return None if obj is None else obj.bounds
 
+    def bounds_of_names(self, names: Iterable[str]) -> np.ndarray | None:
+        """Union AABB of the named objects (fit-to-selected)."""
+        mins: list[np.ndarray] = []
+        maxs: list[np.ndarray] = []
+        for name in names:
+            obj = self._objects.get(str(name))
+            if obj is None:
+                continue
+            b = obj.bounds
+            if b is None:
+                continue
+            mins.append(b[0])
+            maxs.append(b[1])
+        if not mins:
+            return None
+        return np.array([np.min(mins, axis=0), np.max(maxs, axis=0)])
+
     def bounds(
         self,
         *,
@@ -401,6 +473,7 @@ class SceneObjectManager:
         text: str = "",
         smooth: bool = True,
         line_mode: str = "lines",
+        pick_radius: float = 0.0,
     ) -> SceneObject:
         """Create or atomically replace the named object.
 
@@ -455,6 +528,7 @@ class SceneObjectManager:
             vertex_colors=vc,
             color=(*col[:3], base_alpha * opacity),
             base_alpha=base_alpha,
+            pick_radius=float(max(float(pick_radius), 0.0)),
             clip_planes=planes,
             extra={
                 "width": float(width),
@@ -576,28 +650,50 @@ class SceneObjectManager:
         kind_set = None if kinds is None else set(kinds)
         best: PickHit | None = None
         for obj in self._objects.values():
-            if not (obj.pickable and obj.visible and obj.mode == "mesh"):
+            if not (obj.pickable and obj.visible):
                 continue
             if kind_set is not None and obj.kind not in kind_set:
                 continue
-            if obj.faces is None or len(obj.faces) == 0:
-                continue
-            hit = ray_triangles_first_hit(
-                origin, direction, obj.verts, obj.faces, max_distance=max_distance
-            )
+            hit = None
+            if obj.mode == "mesh":
+                if obj.faces is None or len(obj.faces) == 0:
+                    continue
+                tri_hit = ray_triangles_first_hit(
+                    origin, direction, obj.verts, obj.faces, max_distance=max_distance
+                )
+                if tri_hit is not None:
+                    dist, face_index = tri_hit
+                    point = origin + direction * dist
+                    hit = PickHit(
+                        name=obj.name,
+                        kind=obj.kind,
+                        point=(float(point[0]), float(point[1]), float(point[2])),
+                        distance=dist,
+                        face_index=face_index,
+                    )
+            elif obj.mode == "lines" and obj.pick_radius > 0.0:
+                seg_hit = ray_segments_closest(
+                    origin,
+                    direction,
+                    obj.verts,
+                    pick_radius=obj.pick_radius,
+                    max_distance=max_distance,
+                )
+                if seg_hit is not None:
+                    dist, seg_index = seg_hit
+                    point = origin + direction * dist
+                    hit = PickHit(
+                        name=obj.name,
+                        kind=obj.kind,
+                        point=(float(point[0]), float(point[1]), float(point[2])),
+                        distance=dist,
+                        face_index=seg_index,
+                    )
             if hit is None:
                 continue
-            dist, face_index = hit
-            if best is not None and dist >= best.distance:
+            if best is not None and hit.distance >= best.distance:
                 continue
-            point = origin + direction * dist
-            best = PickHit(
-                name=obj.name,
-                kind=obj.kind,
-                point=(float(point[0]), float(point[1]), float(point[2])),
-                distance=dist,
-                face_index=face_index,
-            )
+            best = hit
         return best
 
     def pick_at(

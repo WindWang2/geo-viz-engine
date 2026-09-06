@@ -1961,6 +1961,10 @@ class Renderer3D(QWidget):
                     *, z_unit: str = "world"):
         """Renders horizon as a 3D mesh surface.
 
+        Volume-coupled single-slot display: cleared by :meth:`clear` and
+        replaced on reload. For host-owned geological overlays (named,
+        persisting across volume reloads) use :meth:`add_object`.
+
         ``z_unit="ms"`` converts a TWT-ms grid into the preview cube's world
         coordinates using :meth:`set_survey_mapping` and ``_volume_spacing``,
         then applies the time-down mapping (see :func:`sample_to_z`) so the
@@ -2048,7 +2052,9 @@ class Renderer3D(QWidget):
 
     def set_isosurface(self, verts: np.ndarray, faces: np.ndarray,
                        color=(0.9, 0.5, 0.1, 0.8)):
-        """Render an isosurface mesh (voxel-index coords), replacing any previous one."""
+        """Render an isosurface mesh (voxel-index coords), replacing any
+        previous one. Volume-coupled single slot — for host-owned geological
+        overlays use :meth:`add_object`."""
         self.clear_isosurface()
         if verts is None or faces is None or len(verts) == 0 or len(faces) == 0:
             return
@@ -2136,12 +2142,17 @@ class Renderer3D(QWidget):
             logger.debug("pick_object failed", exc_info=True)
             return None
 
-    def fit_to_objects(self, kinds=None, visible_only: bool = True) -> bool:
+    def fit_to_objects(self, kinds=None, visible_only: bool = True, names=None) -> bool:
         """Fit the camera to the (filtered) scene-object bounds union.
 
-        Returns False (and leaves the camera alone) when no objects match.
+        ``names`` — explicit object names (e.g. a single selected object);
+        takes precedence over ``kinds``. Returns False (and leaves the
+        camera alone) when no objects match.
         """
-        b = self._scene_objects.bounds(kinds=kinds, visible_only=visible_only)
+        if names:
+            b = self._scene_objects.bounds_of_names(names)
+        else:
+            b = self._scene_objects.bounds(kinds=kinds, visible_only=visible_only)
         if b is None:
             return False
         center = b.mean(axis=0)

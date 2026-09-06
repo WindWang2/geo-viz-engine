@@ -665,10 +665,12 @@ class WellSeismicJointWidget(QWidget):
             return None
         return self._renderer.pick_object(px, py, kinds=kinds)
 
-    def fit_to_scene_objects(self, kinds=None, visible_only: bool = True) -> bool:
+    def fit_to_scene_objects(self, kinds=None, visible_only: bool = True, names=None) -> bool:
         if self._renderer is None:
             return False
-        return self._renderer.fit_to_objects(kinds=kinds, visible_only=visible_only)
+        return self._renderer.fit_to_objects(
+            kinds=kinds, visible_only=visible_only, names=names
+        )
 
     def camera_pose(self) -> dict:
         """Public read-back of the current camera pose (view presets).

@@ -369,3 +369,48 @@ def test_screen_point_to_ray_math():
     origin, direction = ray
     assert origin == pytest.approx([0, 0, -1], abs=1e-9)
     assert direction == pytest.approx([0, 0, 1], abs=1e-9)
+
+
+def test_line_picking_with_radius(rig):
+    mgr, _ = rig
+    path = np.array([[0, 0, 0], [0, 0, -20]], dtype=np.float32)
+    mgr.add_object(
+        "well:line",
+        verts=path,
+        mode="lines",
+        line_mode="line_strip",
+        kind="well",
+        pickable=True,
+        pick_radius=1.5,
+    )
+    # ray passing 1 unit away from the line hits within the radius
+    hit = mgr.pick([1.0, 0.0, -10.0], [-1.0, 0.0, 0.0])
+    assert hit is not None and hit.name == "well:line"
+    assert hit.point[2] == pytest.approx(-10.0, abs=1e-5)
+    # lateral offset 1.0 (within radius 1.5) -> hit; 3.0 -> miss
+    hit1 = mgr.pick([5.0, 1.0, -10.0], [-1.0, 0.0, 0.0])
+    assert hit1 is not None
+    assert mgr.pick([5.0, 3.0, -10.0], [-1.0, 0.0, 0.0]) is None
+    # zero radius disables line picking
+    mgr.add_object(
+        "well:noline",
+        verts=path,
+        mode="lines",
+        kind="well",
+        pickable=True,
+        pick_radius=0.0,
+    )
+    assert mgr.pick([1.0, 0.0, -10.0], [-1.0, 0.0, 0.0], kinds=["well"]) is not None
+
+
+def test_bounds_of_names(rig):
+    mgr, _ = rig
+    mgr.add_object("a", verts=TRI_VERTS, faces=TRI_FACES)
+    mgr.add_object(
+        "b", verts=TRI_VERTS + np.array([5, 5, 5], dtype=np.float32), faces=TRI_FACES
+    )
+    b = mgr.bounds_of_names(["a"])
+    assert b[1] == pytest.approx([10, 10, 0], abs=1e-6)
+    ab = mgr.bounds_of_names(["a", "b"])
+    assert ab[1] == pytest.approx([15, 15, 5], abs=1e-6)
+    assert mgr.bounds_of_names(["missing"]) is None
