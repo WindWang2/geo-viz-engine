@@ -53,6 +53,11 @@ class ProfileWiggle(QWidget):
         self._data: np.ndarray | None = None
         self._trace_step: int = 1
         self._cached_pixmap: QPixmap | None = None
+        # Display controls (L5): deflection gain (default 2.0 = the historical
+        # fixed overlap factor) and SEG polarity flip — both display-only;
+        # the stored data keeps the survey sign convention.
+        self._gain: float = 2.0
+        self._polarity: int = 1
 
     # ------------------------------------------------------------------
     # Public API
@@ -90,6 +95,36 @@ class ProfileWiggle(QWidget):
         self._trace_step = step
         if self._data is not None:
             self.render(self._data, trace_step=step)
+
+    def set_gain(self, gain: float) -> None:
+        """Set the wiggle deflection gain multiplier (display-only).
+
+        ``1.0`` = one trace slot of deflection; the historical default 2.0
+        lets adjacent traces overlap. Invalidates the cached pixmap.
+        """
+        gain = float(gain)
+        if not np.isfinite(gain) or gain <= 0.0:
+            raise ValueError(f"wiggle gain must be a positive finite number, got {gain!r}")
+        self._gain = gain
+        self._cached_pixmap = None
+        self.update()
+
+    def gain(self) -> float:
+        """Current deflection gain multiplier."""
+        return self._gain
+
+    def set_polarity(self, normal: bool = True) -> None:
+        """Flip the displayed amplitude sign (SEG normal ↔ reversed)."""
+        polarity = 1 if normal else -1
+        if polarity == self._polarity:
+            return
+        self._polarity = polarity
+        self._cached_pixmap = None
+        self.update()
+
+    def polarity_normal(self) -> bool:
+        """True when the display uses the survey's native sign convention."""
+        return self._polarity > 0
 
     # ------------------------------------------------------------------
     # QPainter rendering pipeline
@@ -132,8 +167,9 @@ class ProfileWiggle(QWidget):
         )
         n_draw = int(sample_idx.size)
 
-        # Dynamic Gain: allow wiggles to occupy 2.0x their reserved space to naturally overlap
-        wiggle_gain = x_scale * trace_step * 2.0
+        # Dynamic Gain: user-controlled multiplier on the reserved trace slot
+        # so wiggles can overlap naturally (default 2.0).
+        wiggle_gain = x_scale * trace_step * self._gain
 
         # Pens / Brushes for professional appearance
         baseline_pen = QPen(QColor(230, 230, 230))
@@ -154,7 +190,8 @@ class ProfileWiggle(QWidget):
             # Vectorized per-trace geometry (no per-sample Python loop).
             # ``v`` is upcast to float64 so the arithmetic below reproduces
             # the values the old Python loop produced with plain floats.
-            v = (self._data[sample_idx, t] / amax).astype(np.float64)
+            # Polarity flip is display-only: the stored data is untouched.
+            v = (self._polarity * self._data[sample_idx, t] / amax).astype(np.float64)
             xs = centre_x + v * wiggle_gain
             pos = v >= 0.0
 

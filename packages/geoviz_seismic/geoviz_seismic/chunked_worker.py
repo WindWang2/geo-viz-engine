@@ -191,3 +191,86 @@ class ChunkedSliceWorker(QThread):
             except Exception:
                 continue
             self.slice_ready.emit(slice_type, int(pos), data, int(gen))
+
+
+class ArbitraryLineWorker(QThread):
+    """One-shot full-resolution arbitrary-line gathers (L5).
+
+    The 3-D curtain samples the downsampled PREVIEW volume; the arbitrary
+    profile deserves full resolution. This worker reads
+    ``ChunkedVolumeReader.read_arbitrary_line`` (one bounding-box window
+    read + bilinear blend, #1080) on its own reader handle and emits the
+    gather for the profile panel. Latest-request-wins: a new polyline
+    replaces the pending read; cooperative stop on teardown.
+    """
+
+    arbitrary_ready = Signal(object, int)  # ndarray (n_points, n_samples), generation
+    read_error = Signal(int)  # generation whose gather failed
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._mutex = QMutex()
+        self._cond = QWaitCondition()
+        self._points: list[tuple[float, float]] | None = None
+        self._store_path: str | None = None
+        self._geometry = None
+        self._generation = -1
+        self._stop = False
+
+    def set_store(self, store_path: str, generation: int, geometry=None) -> None:
+        with QMutexLocker(self._mutex):
+            self._store_path = str(store_path)
+            self._geometry = geometry
+            self._generation = int(generation)
+            self._points = None
+            self._cond.wakeAll()
+
+    def request_line(self, points: list[tuple[float, float]]) -> None:
+        """Request a gather along survey-space (inline, crossline) points."""
+        with QMutexLocker(self._mutex):
+            self._points = [(float(a), float(b)) for a, b in points]
+            self._cond.wakeAll()
+
+    def stop(self) -> None:
+        """Cooperative stop: interrupt + wake + bounded wait (teardown safe).
+
+        Mirrors :meth:`ChunkedSliceWorker.stop` — without the wait the thread
+        can outlive the QThread wrapper and abort the process at destruction
+        ("QThread: Destroyed while thread is still running").
+        """
+        self.requestInterruption()
+        with QMutexLocker(self._mutex):
+            self._stop = True
+            self._cond.wakeAll()
+        self.wait(1500)
+
+    def run(self) -> None:  # noqa: D102 - QThread entry point
+        while True:
+            with QMutexLocker(self._mutex):
+                # TIMED wait + interruption check: an untimed cond wait can
+                # never observe requestInterruption, hanging teardown.
+                while (
+                    not self._stop
+                    and not self.isInterruptionRequested()
+                    and (self._points is None or self._store_path is None)
+                ):
+                    self._cond.wait(self._mutex, 50)
+                if self._stop or self.isInterruptionRequested():
+                    return
+                points = self._points
+                self._points = None
+                store_path = self._store_path
+                generation = self._generation
+            try:
+                from geoviz_seismic.chunked import open_volume
+
+                reader = open_volume(store_path)
+                data = reader.read_arbitrary_line(points, lod=0, interpolate=True)
+            except Exception:
+                # A failed gather must not die silently: the profile panel
+                # holds the previous (stale) image otherwise. Emit the failed
+                # generation so the consumer can drop/mark it.
+                self.read_error.emit(int(generation))
+                continue
+            if data is not None and data.size:
+                self.arbitrary_ready.emit(data, int(generation))
