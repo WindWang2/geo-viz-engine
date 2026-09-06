@@ -153,11 +153,13 @@ def _run_grid(
             kriging_kwargs["range_"] = float(variogram_range)
         if variogram_nugget is not None:
             kriging_kwargs["nugget"] = float(variogram_nugget)
-        if azimuth_deg not in (None, 0.0) and semi_major and semi_minor:
+        anisotropy_applied = False
+        if anisotropy_requested(azimuth_deg, semi_major, semi_minor):
             ratio = float(semi_major) / float(semi_minor)
             if ratio > 1.0 + 1e-9:
-                kriging_kwargs["azimuth_deg"] = float(azimuth_deg)
+                kriging_kwargs["azimuth_deg"] = float(azimuth_deg or 0.0)
                 kriging_kwargs["anisotropy_ratio"] = ratio
+                anisotropy_applied = True
         kriging_diag: dict[str, Any] = {}
         kriging_kwargs["diagnostics"] = kriging_diag
         grid_z, grid_var = kriging_grid(x, y, z, grid_x, grid_y, **kriging_kwargs)
@@ -298,6 +300,26 @@ def _leave_one_out_r2(
     return _r_squared(observed, preds)
 
 
+def anisotropy_requested(
+    azimuth_deg: float | None, semi_major: float | None, semi_minor: float | None
+) -> bool:
+    """Whether the caller actually CONFIGURED anisotropy (review R3-P1).
+
+    Default axes (1.0/0.4) with azimuth 0 mean "unset"; a non-zero azimuth
+    OR axes different from the defaults is intent (azimuth 0° = due north is
+    expressible via explicit non-default axes).
+    """
+    if azimuth_deg not in (None, 0.0):
+        return True
+    try:
+        return (float(semi_major), float(semi_minor)) != (
+            float(DEFAULT_SEMI_MAJOR),
+            float(DEFAULT_SEMI_MINOR),
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def interpolate_factor_grid(
     sample_points: list[dict[str, Any]] | None,
     *,
@@ -375,13 +397,19 @@ def interpolate_factor_grid(
     # are REPORTED, never silently dropped. The old code zeroed
     # n_break_lines for non-IDW backends while the caller still showed the
     # user's faults on the map — the surface looked constrained.
+    # Review R1-P1/R3-P1: only report anisotropy as ignored when it was
+    # actually REQUESTED (default axes are "unset", not intent) and the
+    # backend did not consume it (kriging applies it above).
     ignored_constraints: list[str] = []
     if fault_polylines and backend != "idw":
         ignored_constraints.append(
             f"barrier:{len(fault_polylines)} break line(s) not consumed by {backend}"
         )
-    if (azimuth_deg or semi_major or semi_minor) and backend not in ("directional",):
-        ignored_constraints.append(f"anisotropy:ignored by {backend}")
+    if (
+        anisotropy_requested(azimuth_deg, semi_major, semi_minor)
+        and backend == "idw"
+    ):
+        ignored_constraints.append("anisotropy:ignored by idw")
     out: dict[str, Any] = {
         "grid_x": grid_x_arr,
         "grid_y": grid_y_arr,

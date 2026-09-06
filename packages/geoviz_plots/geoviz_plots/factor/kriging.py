@@ -427,12 +427,10 @@ def ordinary_kriging(
 
     fit_source = "explicit"
     if any(p is None for p in (range_, sill, nugget)):
-        fitted = fit_variogram(
-            x, y, z,
-            model=variogram_model,
-            azimuth_deg=float(azimuth_deg) if use_anisotropy else None,
-            anisotropy_ratio=float(anisotropy_ratio) if use_anisotropy else None,
-        )
+        # NOTE: coordinates are ALREADY in the anisotropy-transformed frame
+        # above — fit isotropically here. Passing the transform again would
+        # double-transform (ratio² frame) and distort the fit (review R1-P0).
+        fitted = fit_variogram(x, y, z, model=variogram_model)
         defaulted = fitted == _default_params(x, y, z)
         if range_ is None:
             range_ = fitted["range"]
@@ -639,6 +637,7 @@ def kriging_grid(
 
 __all__ = [
     "SUPPORTED_MODELS",
+    "apply_anisotropy_transform",
     "empirical_variogram",
     "fit_variogram",
     "kriging_grid",
