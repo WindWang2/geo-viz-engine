@@ -117,6 +117,16 @@ def survey_from_corners(
     # length spans (count-1) bins regardless of the line-number step.
     xl_len = float(np_hypot(x1 - x0, y1 - y0))
     il_len = float(np_hypot(x2 - x1, y2 - y1))
+    # V6 §9 (P0): all-zero/degenerate SourceX/Y must not become a
+    # valid-looking survey. Fabricating 1 m bins at the origin made the
+    # footprint look trustworthy when the source geometry was actually
+    # absent — refuse instead.
+    if xl_len <= 1e-6 or il_len <= 1e-6:
+        raise ValueError(
+            "survey corners carry no coordinate extent "
+            f"(XL edge {xl_len:g} m, IL edge {il_len:g} m; SourceX/Y all zero "
+            "or missing) — refusing to fabricate survey geometry"
+        )
     xl_spacing = xl_len / (n_xl - 1) if n_xl > 1 else 1.0
     il_spacing = il_len / (n_il - 1) if n_il > 1 else 1.0
 
