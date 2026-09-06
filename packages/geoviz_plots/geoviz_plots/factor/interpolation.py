@@ -137,13 +137,32 @@ def _run_grid(
     cancellation_token=None,
     want_variance: bool = False,
     interp_status: dict[str, Any] | None = None,
+    variogram_model: str = "spherical",
+    variogram_range: float | None = None,
+    variogram_nugget: float | None = None,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
     if backend == "kriging":
         from geoviz_plots.factor.kriging import kriging_grid
 
-        grid_z, grid_var = kriging_grid(x, y, z, grid_x, grid_y)
+        # V6 §11: explicit variogram controls + geometric anisotropy (the
+        # direction-line azimuth/ratio the directional backend already uses).
+        kriging_kwargs: dict[str, Any] = {"variogram_model": variogram_model}
+        if variogram_range is not None:
+            kriging_kwargs["range_"] = float(variogram_range)
+        if variogram_nugget is not None:
+            kriging_kwargs["nugget"] = float(variogram_nugget)
+        if azimuth_deg not in (None, 0.0) and semi_major and semi_minor:
+            ratio = float(semi_major) / float(semi_minor)
+            if ratio > 1.0 + 1e-9:
+                kriging_kwargs["azimuth_deg"] = float(azimuth_deg)
+                kriging_kwargs["anisotropy_ratio"] = ratio
+        kriging_diag: dict[str, Any] = {}
+        kriging_kwargs["diagnostics"] = kriging_diag
+        grid_z, grid_var = kriging_grid(x, y, z, grid_x, grid_y, **kriging_kwargs)
+        if interp_status is not None:
+            interp_status["kriging_diagnostics"] = kriging_diag
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
         if want_variance:
@@ -290,6 +309,9 @@ def interpolate_factor_grid(
     semi_major: float = DEFAULT_SEMI_MAJOR,
     semi_minor: float = DEFAULT_SEMI_MINOR,
     cancellation_token=None,
+    variogram_model: str = "spherical",
+    variogram_range: float | None = None,
+    variogram_nugget: float | None = None,
 ) -> dict[str, Any]:
     """Interpolate scattered sample_points onto a regular grid.
 
@@ -319,6 +341,9 @@ def interpolate_factor_grid(
         q=q, b_i=b_i, cancellation_token=cancellation_token,
         want_variance=want_variance,
         interp_status=interp_status,
+        variogram_model=variogram_model,
+        variogram_range=variogram_range,
+        variogram_nugget=variogram_nugget,
     )
     grid_z, grid_var = grid_out if want_variance else (grid_out, None)
     # #941-1/2: keep ndarray for the hot numerical payload — converting to a
@@ -387,6 +412,8 @@ def interpolate_factor_grid(
     note = mvp_note_for(backend)
     if note:
         out["mvp_note"] = note
+    if interp_status.get("kriging_diagnostics"):
+        out["kriging_diagnostics"] = interp_status["kriging_diagnostics"]
     if interp_status.get("fallback"):
         out["degraded"] = True
         out["fallback"] = interp_status["fallback"]
