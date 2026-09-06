@@ -113,6 +113,38 @@ def _pairwise_h(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return np.sqrt(dx * dx + dy * dy)
 
 
+def apply_anisotropy_transform(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    azimuth_deg: float,
+    ratio: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Geometric anisotropy: map coordinates into the isotropic frame.
+
+    Rotates so the major axis (``azimuth_deg`` clockwise from +Y/north)
+    aligns with +X, then EXPANDS the minor-axis coordinate by ``ratio``
+    (= major/minor ≥ 1): a field that correlates over ``range`` along the
+    major axis and ``range/ratio`` along the minor axis becomes isotropic
+    with range ``range``. In the transformed frame an ISOTROPIC variogram
+    with range = major range is exactly the anisotropic model (V6 §11).
+    ``ratio`` must be ≥ 1.
+    """
+    import math as _math
+
+    ratio = float(ratio)
+    if not (np.isfinite(ratio) and ratio >= 1.0):
+        raise ValueError(f"anisotropy ratio must be >= 1.0 (major/minor), got {ratio}")
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    theta = _math.radians(90.0 - float(azimuth_deg))  # azimuth from north → math angle
+    cos_t, sin_t = _math.cos(theta), _math.sin(theta)
+    # Rotate the major direction onto +X, then scale the minor axis UP.
+    u = cos_t * x + sin_t * y
+    v = (-sin_t * x + cos_t * y) * ratio
+    return u, v
+
+
 def _default_params(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> dict[str, float]:
     """Sane fallback variogram parameters when a fit is not possible."""
     n = len(z)
@@ -227,19 +259,38 @@ def fit_variogram(
     model: str = "spherical",
     n_lags: int = 10,
     max_dist: float | None = None,
+    azimuth_deg: float | None = None,
+    anisotropy_ratio: float | None = None,
 ) -> dict[str, float]:
     """Weighted least-squares fit of ``(range, sill, nugget)``.
 
     Bins are weighted by their pair count. Falls back to sane defaults
     (range = max pairwise distance, sill = sample variance, nugget = 0) when
     fewer than two valid bins are available or the fit is degenerate.
+
+    With ``azimuth_deg``/``anisotropy_ratio`` the fit runs in the
+    anisotropy-transformed frame, so ``range`` is the MAJOR-axis range
+    (V6 §11).
     """
     if model not in SUPPORTED_MODELS:
         raise ValueError(f"unknown variogram model {model!r}; choose from {SUPPORTED_MODELS}")
     x, y, z = _dedupe_points(x, y, z)
+    if azimuth_deg is not None and anisotropy_ratio is not None:
+        x, y = apply_anisotropy_transform(
+            x, y, azimuth_deg=float(azimuth_deg), ratio=float(anisotropy_ratio)
+        )
     n = len(z)
     if n < _MIN_SAMPLES:
         raise ValueError("fit_variogram needs at least 2 distinct sample points")
+    if max_dist is None:
+        # V6 §11: default lag extent = HALF the smaller axis extent. The
+        # max-pairwise diagonal (or the anisotropic frame's expanded axis)
+        # makes bins too coarse to resolve the correlation structure —
+        # first-bin mixing hid it entirely and the fit collapsed to a nugget.
+        ex = float(np.ptp(x)) if n > 1 else 0.0
+        ey = float(np.ptp(y)) if n > 1 else 0.0
+        axis_extent = min(ex, ey) if (ex > 0.0 and ey > 0.0) else max(ex, ey)
+        max_dist = 0.5 * axis_extent if axis_extent > 0.0 else None
     emp = empirical_variogram(x, y, z, n_lags=n_lags, max_dist=max_dist)
     valid = np.isfinite(emp["gamma"])
     if int(valid.sum()) < 2:
@@ -320,6 +371,9 @@ def ordinary_kriging(
     sill: float | None = None,
     nugget: float | None = None,
     ridge: float = _DEFAULT_RIDGE,
+    azimuth_deg: float | None = None,
+    anisotropy_ratio: float | None = None,
+    diagnostics: dict | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Ordinary kriging prediction and kriging variance per target point.
 
@@ -359,18 +413,38 @@ def ordinary_kriging(
         raise ValueError("target_x and target_y must have the same length")
     m = len(tx)
 
+    use_anisotropy = azimuth_deg is not None and anisotropy_ratio is not None
+    if use_anisotropy:
+        # V6 §11: geometric anisotropy — samples AND targets move into the
+        # isotropic frame; the isotropic solve is then exactly the
+        # anisotropic model with range = major-axis range.
+        x, y = apply_anisotropy_transform(
+            x, y, azimuth_deg=float(azimuth_deg), ratio=float(anisotropy_ratio)
+        )
+        tx, ty = apply_anisotropy_transform(
+            tx, ty, azimuth_deg=float(azimuth_deg), ratio=float(anisotropy_ratio)
+        )
+
+    fit_source = "explicit"
     if any(p is None for p in (range_, sill, nugget)):
+        # NOTE: coordinates are ALREADY in the anisotropy-transformed frame
+        # above — fit isotropically here. Passing the transform again would
+        # double-transform (ratio² frame) and distort the fit (review R1-P0).
         fitted = fit_variogram(x, y, z, model=variogram_model)
+        defaulted = fitted == _default_params(x, y, z)
         if range_ is None:
             range_ = fitted["range"]
         if sill is None:
             sill = fitted["sill"]
         if nugget is None:
             nugget = fitted["nugget"]
+        fit_source = "defaulted" if defaulted else "fitted"
     if range_ is None:
         range_ = _default_params(x, y, z)["range"]
+        fit_source = "defaulted"
     if sill is None:
         sill = _default_params(x, y, z)["sill"]
+        fit_source = "defaulted"
     if nugget is None:
         nugget = 0.0
     range_ = float(range_)
@@ -440,6 +514,22 @@ def ordinary_kriging(
             "overflowing covariance system); check the sample data scale"
         )
     variance = np.where(variance >= 0.0, variance, 0.0)
+    if diagnostics is not None:
+        # V6 §11: which variogram produced this surface, and HOW its
+        # parameters were chosen — silent auto-fit is over.
+        diagnostics["variogram"] = {
+            "model": variogram_model,
+            "range": float(range_),
+            "sill": float(sill),
+            "nugget": float(nugget),
+            "n_samples": int(n),
+        }
+        diagnostics["variogram_fit"] = fit_source
+        if use_anisotropy:
+            diagnostics["anisotropy"] = {
+                "azimuth_deg": float(azimuth_deg),
+                "ratio": float(anisotropy_ratio),
+            }
     return pred, variance
 
 
@@ -547,6 +637,7 @@ def kriging_grid(
 
 __all__ = [
     "SUPPORTED_MODELS",
+    "apply_anisotropy_transform",
     "empirical_variogram",
     "fit_variogram",
     "kriging_grid",

@@ -137,13 +137,34 @@ def _run_grid(
     cancellation_token=None,
     want_variance: bool = False,
     interp_status: dict[str, Any] | None = None,
+    variogram_model: str = "spherical",
+    variogram_range: float | None = None,
+    variogram_nugget: float | None = None,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
     if backend == "kriging":
         from geoviz_plots.factor.kriging import kriging_grid
 
-        grid_z, grid_var = kriging_grid(x, y, z, grid_x, grid_y)
+        # V6 §11: explicit variogram controls + geometric anisotropy (the
+        # direction-line azimuth/ratio the directional backend already uses).
+        kriging_kwargs: dict[str, Any] = {"variogram_model": variogram_model}
+        if variogram_range is not None:
+            kriging_kwargs["range_"] = float(variogram_range)
+        if variogram_nugget is not None:
+            kriging_kwargs["nugget"] = float(variogram_nugget)
+        anisotropy_applied = False
+        if anisotropy_requested(azimuth_deg, semi_major, semi_minor):
+            ratio = float(semi_major) / float(semi_minor)
+            if ratio > 1.0 + 1e-9:
+                kriging_kwargs["azimuth_deg"] = float(azimuth_deg or 0.0)
+                kriging_kwargs["anisotropy_ratio"] = ratio
+                anisotropy_applied = True
+        kriging_diag: dict[str, Any] = {}
+        kriging_kwargs["diagnostics"] = kriging_diag
+        grid_z, grid_var = kriging_grid(x, y, z, grid_x, grid_y, **kriging_kwargs)
+        if interp_status is not None:
+            interp_status["kriging_diagnostics"] = kriging_diag
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
         if want_variance:
@@ -279,6 +300,26 @@ def _leave_one_out_r2(
     return _r_squared(observed, preds)
 
 
+def anisotropy_requested(
+    azimuth_deg: float | None, semi_major: float | None, semi_minor: float | None
+) -> bool:
+    """Whether the caller actually CONFIGURED anisotropy (review R3-P1).
+
+    Default axes (1.0/0.4) with azimuth 0 mean "unset"; a non-zero azimuth
+    OR axes different from the defaults is intent (azimuth 0° = due north is
+    expressible via explicit non-default axes).
+    """
+    if azimuth_deg not in (None, 0.0):
+        return True
+    try:
+        return (float(semi_major), float(semi_minor)) != (
+            float(DEFAULT_SEMI_MAJOR),
+            float(DEFAULT_SEMI_MINOR),
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def interpolate_factor_grid(
     sample_points: list[dict[str, Any]] | None,
     *,
@@ -290,6 +331,9 @@ def interpolate_factor_grid(
     semi_major: float = DEFAULT_SEMI_MAJOR,
     semi_minor: float = DEFAULT_SEMI_MINOR,
     cancellation_token=None,
+    variogram_model: str = "spherical",
+    variogram_range: float | None = None,
+    variogram_nugget: float | None = None,
 ) -> dict[str, Any]:
     """Interpolate scattered sample_points onto a regular grid.
 
@@ -319,6 +363,9 @@ def interpolate_factor_grid(
         q=q, b_i=b_i, cancellation_token=cancellation_token,
         want_variance=want_variance,
         interp_status=interp_status,
+        variogram_model=variogram_model,
+        variogram_range=variogram_range,
+        variogram_nugget=variogram_nugget,
     )
     grid_z, grid_var = grid_out if want_variance else (grid_out, None)
     # #941-1/2: keep ndarray for the hot numerical payload — converting to a
@@ -346,6 +393,23 @@ def interpolate_factor_grid(
         azimuth_deg=azimuth_deg, semi_major=semi_major, semi_minor=semi_minor,
         q=q, b_i=b_i, cancellation_token=cancellation_token,
     )
+    # Scientific V6 §10: constraints passed to a backend that ignores them
+    # are REPORTED, never silently dropped. The old code zeroed
+    # n_break_lines for non-IDW backends while the caller still showed the
+    # user's faults on the map — the surface looked constrained.
+    # Review R1-P1/R3-P1: only report anisotropy as ignored when it was
+    # actually REQUESTED (default axes are "unset", not intent) and the
+    # backend did not consume it (kriging applies it above).
+    ignored_constraints: list[str] = []
+    if fault_polylines and backend != "idw":
+        ignored_constraints.append(
+            f"barrier:{len(fault_polylines)} break line(s) not consumed by {backend}"
+        )
+    if (
+        anisotropy_requested(azimuth_deg, semi_major, semi_minor)
+        and backend == "idw"
+    ):
+        ignored_constraints.append("anisotropy:ignored by idw")
     out: dict[str, Any] = {
         "grid_x": grid_x_arr,
         "grid_y": grid_y_arr,
@@ -355,6 +419,11 @@ def interpolate_factor_grid(
         "grid_n": int(grid_n),
         "n_points": int(len(z)),
         "n_break_lines": int(len(fault_polylines or [])) if backend == "idw" else 0,
+        "ignored_constraints": ignored_constraints,
+        "constraint_warnings": [
+            f"constraint {entry} — the interpolated surface does NOT reflect it"
+            for entry in ignored_constraints
+        ],
         "azimuth_deg": float(azimuth_deg) if backend == "directional" else None,
         "semi_major": float(semi_major) if backend == "directional" else None,
         "semi_minor": float(semi_minor) if backend == "directional" else None,
@@ -371,6 +440,8 @@ def interpolate_factor_grid(
     note = mvp_note_for(backend)
     if note:
         out["mvp_note"] = note
+    if interp_status.get("kriging_diagnostics"):
+        out["kriging_diagnostics"] = interp_status["kriging_diagnostics"]
     if interp_status.get("fallback"):
         out["degraded"] = True
         out["fallback"] = interp_status["fallback"]
