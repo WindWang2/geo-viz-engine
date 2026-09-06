@@ -346,6 +346,17 @@ def interpolate_factor_grid(
         azimuth_deg=azimuth_deg, semi_major=semi_major, semi_minor=semi_minor,
         q=q, b_i=b_i, cancellation_token=cancellation_token,
     )
+    # Scientific V6 §10: constraints passed to a backend that ignores them
+    # are REPORTED, never silently dropped. The old code zeroed
+    # n_break_lines for non-IDW backends while the caller still showed the
+    # user's faults on the map — the surface looked constrained.
+    ignored_constraints: list[str] = []
+    if fault_polylines and backend != "idw":
+        ignored_constraints.append(
+            f"barrier:{len(fault_polylines)} break line(s) not consumed by {backend}"
+        )
+    if (azimuth_deg or semi_major or semi_minor) and backend not in ("directional",):
+        ignored_constraints.append(f"anisotropy:ignored by {backend}")
     out: dict[str, Any] = {
         "grid_x": grid_x_arr,
         "grid_y": grid_y_arr,
@@ -355,6 +366,11 @@ def interpolate_factor_grid(
         "grid_n": int(grid_n),
         "n_points": int(len(z)),
         "n_break_lines": int(len(fault_polylines or [])) if backend == "idw" else 0,
+        "ignored_constraints": ignored_constraints,
+        "constraint_warnings": [
+            f"constraint {entry} — the interpolated surface does NOT reflect it"
+            for entry in ignored_constraints
+        ],
         "azimuth_deg": float(azimuth_deg) if backend == "directional" else None,
         "semi_major": float(semi_major) if backend == "directional" else None,
         "semi_minor": float(semi_minor) if backend == "directional" else None,
