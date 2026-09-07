@@ -61,9 +61,21 @@ def _measured_inline_spacing(
 
 
 def _inline_spacing_from_segy(segy_path: Path) -> float | None:
-    """Measure inline spacing from consecutive inline SourceY values."""
+    """Measure inline spacing (metres) from consecutive inline SourceY values.
+
+    V6 §9: coordinate values are converted with each trace's own
+    SourceGroupScalar before differencing — a raw-int delta carries the
+    scalar and misreports "spacing in metres" by that factor.
+    """
     try:
         import segyio
+    except Exception:
+        return None
+    try:
+        from geoviz_seismic.loader import (
+            apply_source_group_scalar,
+            scalar_from_header,
+        )
     except Exception:
         return None
     try:
@@ -76,9 +88,10 @@ def _inline_spacing_from_segy(segy_path: Path) -> float | None:
             # (first crossline column). Fall back to CDP_Y if SourceY is zero.
             def _inline_y(trace_idx: int) -> float | None:
                 h = f.header[trace_idx]
-                y = float(h[TF.SourceY] or 0)
+                scalar = scalar_from_header(h)
+                y = apply_source_group_scalar(float(h[TF.SourceY] or 0), scalar)
                 if y == 0:
-                    y = float(h[TF.CDP_Y] or 0)
+                    y = apply_source_group_scalar(float(h[TF.CDP_Y] or 0), scalar)
                 return y if y != 0 else None
 
             # Scan for the first inline step
@@ -349,6 +362,19 @@ def _corners_from_trace_scan(f, n_samples: int, dt_ms: float, t0_ms: float, load
             il_field, xl_field = TF.FieldRecord, TF.CDP
     h0 = f.header[0]
     h1 = f.header[n - 1]
+    # SourceGroupScalar MUST be applied to every coordinate read (V6 §9):
+    # the raw ints are scaled per-trace; reading them raw made footprints
+    # wrong by the scalar factor on every ±10/±100/±1000/±10000 file.
+    from geoviz_seismic.loader import apply_source_group_scalar, scalar_from_header
+
+    def _scaled_xy(h) -> tuple[float, float]:
+        scalar = scalar_from_header(h)
+        return (
+            apply_source_group_scalar(float(h[TF.SourceX] or 0), scalar),
+            apply_source_group_scalar(float(h[TF.SourceY] or 0), scalar),
+        )
+
+    scalars_seen: set[int] = set()
     # Prefer loader starts when available (same axis order the loader uses)
     if loader_meta.get("loader_iline_start") is not None:
         il0 = float(loader_meta["loader_iline_start"])
@@ -356,12 +382,12 @@ def _corners_from_trace_scan(f, n_samples: int, dt_ms: float, t0_ms: float, load
     else:
         il0 = float(h0[il_field] or 0)
         xl0 = float(h0[xl_field] or 0)
-    x0 = float(h0[TF.SourceX] or 0)
-    y0 = float(h0[TF.SourceY] or 0)
+    x0, y0 = _scaled_xy(h0)
+    scalars_seen.add(scalar_from_header(h0))
     il1 = float(h1[il_field] or il0)
     xl1 = float(h1[xl_field] or xl0)
-    x1 = float(h1[TF.SourceX] or x0)
-    y1 = float(h1[TF.SourceY] or y0)
+    x1, y1 = _scaled_xy(h1)
+    scalars_seen.add(scalar_from_header(h1))
 
     first_il = int(il0)
     last_xl = int(xl1)
@@ -403,11 +429,13 @@ def _corners_from_trace_scan(f, n_samples: int, dt_ms: float, t0_ms: float, load
 
     def _header_at(i):
         h = f.header[i]
+        scalar = scalar_from_header(h)
+        scalars_seen.add(scalar)
         return (
             int(h[il_field] or 0),
             int(h[xl_field] or 0),
-            float(h[TF.SourceX] or 0),
-            float(h[TF.SourceY] or 0),
+            apply_source_group_scalar(float(h[TF.SourceX] or 0), scalar),
+            apply_source_group_scalar(float(h[TF.SourceY] or 0), scalar),
         )
 
     if n_xl and not crossline_sorted:
@@ -449,11 +477,21 @@ def _corners_from_trace_scan(f, n_samples: int, dt_ms: float, t0_ms: float, load
     p1 = (float(first_il), float(xl0), x0, y0)
     p2 = (float(first_il), float(last_xl), x_at_p2, y_at_p2)
     p3 = (float(last_il), float(last_xl), x_at_p3, y_at_p3)
+    scalar_inconsistent = len(scalars_seen) > 1
+    if scalar_inconsistent:
+        logger.warning(
+            "SEGY %s: traces carry inconsistent SourceGroupScalar values %s; "
+            "each coordinate was converted with its own trace scalar, but the "
+            "survey geometry should be verified against an authoritative source",
+            getattr(f, "path", "?"),
+            sorted(scalars_seen),
+        )
     meta = {
         "n_samples": loader_meta.get("n_samples", n_samples),
         "dt_ms": loader_meta.get("dt_ms", dt_ms),
         "t0_ms": loader_meta.get("t0_ms", t0_ms),
         "source": "trace_scan",
+        "scalar_inconsistent": scalar_inconsistent,
         **{k: v for k, v in loader_meta.items() if k.startswith("loader_")},
     }
     return p1, p2, p3, meta

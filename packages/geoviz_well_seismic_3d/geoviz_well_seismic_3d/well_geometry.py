@@ -99,8 +99,22 @@ def _project_time(
 
     xs, ys, md = _linspace_path(well, n_samples)
     twt = np.asarray(td.md_to_time_ms(md), dtype=np.float64)
+    # V6 §8: samples beyond the calibrated TD range are dropped (NaN), never
+    # clamped — a fabricated constant-TWT tail misrepresented the well.
+    warning = None
+    if not np.isfinite(twt).all():
+        keep = np.isfinite(twt)
+        xs, ys, twt = xs[keep], ys[keep], twt[keep]
+        lo, hi = td.md_range
+        warning = (
+            f"Well {well.name}: trajectory truncated to the TD table range "
+            f"[{lo:.1f}, {hi:.1f}] m; deeper extent is not calibrated"
+        )
+    if twt.size == 0:
+        pts = np.array([[well.x, well.y, 0.0]], dtype=np.float64)
+        return WellTrajectory3D(name=well.name, points=pts, has_td=False, warning=warning)
     pts = np.column_stack([xs, ys, twt])
-    return WellTrajectory3D(name=well.name, points=pts, has_td=True, warning=None)
+    return WellTrajectory3D(name=well.name, points=pts, has_td=True, warning=warning)
 
 
 def _project_depth(
@@ -124,8 +138,21 @@ def _project_depth(
     xs, ys, md = _linspace_path(well, n_samples)
     twt = np.asarray(td.md_to_time_ms(md), dtype=np.float64)
     z = np.asarray(depth_transform.time_ms_to_depth_m(twt), dtype=np.float64)
+    # V6 §8: uncalibrated extent is dropped, not clamped.
+    warning = None
+    if not np.isfinite(z).all():
+        keep = np.isfinite(z)
+        xs, ys, z = xs[keep], ys[keep], z[keep]
+        lo, hi = td.md_range
+        warning = (
+            f"Well {well.name}: trajectory truncated to the TD table range "
+            f"[{lo:.1f}, {hi:.1f}] m; deeper extent is not calibrated"
+        )
+    if z.size == 0:
+        pts = np.array([[well.x, well.y, 0.0]], dtype=np.float64)
+        return WellTrajectory3D(name=well.name, points=pts, has_td=False, warning=warning)
     pts = np.column_stack([xs, ys, z])
-    return WellTrajectory3D(name=well.name, points=pts, has_td=True, warning=None)
+    return WellTrajectory3D(name=well.name, points=pts, has_td=True, warning=warning)
 
 
 def offset_curve_along_trajectory(

@@ -95,14 +95,36 @@ def _header_int(header, field) -> int:
         return 0
 
 
+def apply_source_group_scalar(value: float, scalar: int) -> float:
+    """THE canonical SourceGroupScalar application (SEG-Y bytes 71–72).
+
+    scalar > 0 → multiply; scalar < 0 → divide by −scalar; scalar == 0 →
+    identity (per rev2 the field is undefined at 0; treating it as
+    "coordinates already in metres" is the common writer convention and this
+    repo's documented choice). Every consumer of SourceX/SourceY/GroupX/
+    GroupY/CDP_X/CDP_Y must convert through this one helper — a survey
+    footprint silently wrong by the scalar factor is the alternative
+    (scientific V6 §9).
+    """
+    if scalar > 0:
+        return value * scalar
+    if scalar < 0:
+        return value / float(-scalar)
+    return value
+
+
+def scalar_from_header(header) -> int:
+    """The trace's own SourceGroupScalar (0 when unreadable/absent)."""
+    return _header_int(header, segyio.TraceField.SourceGroupScalar)
+
+
 def _apply_coord_scalar(x: float, y: float, header) -> tuple[float, float]:
     """SEGY SourceGroupScalar: >0 multiply, <0 divide, 0 means metres."""
-    scalar = _header_int(header, segyio.TraceField.SourceGroupScalar)
-    if scalar > 0:
-        return x * scalar, y * scalar
-    if scalar < 0:
-        return x / float(-scalar), y / float(-scalar)
-    return x, y
+    scalar = scalar_from_header(header)
+    return (
+        apply_source_group_scalar(x, scalar),
+        apply_source_group_scalar(y, scalar),
+    )
 
 
 def _corner_xy(headers: list) -> list[tuple[float, float]] | None:

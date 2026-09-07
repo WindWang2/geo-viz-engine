@@ -113,13 +113,32 @@ class TimeDepthTable:
                 f"TimeDepthTable[{self.well_name}]: time_ms must be strictly increasing"
             )
 
+    @property
+    def md_range(self) -> tuple[float, float]:
+        """Calibrated MD extent (interpolation is valid ONLY inside it)."""
+        return (float(self.md_m[0]), float(self.md_m[-1]))
+
     def md_to_time_ms(self, md: float | np.ndarray) -> float | np.ndarray:
-        """Interpolate MD → TWT (ms). Extrapolates with edge values."""
-        return np.interp(md, self.md_m, self.time_ms)
+        """Interpolate MD → TWT (ms). NaN outside the calibrated range.
+
+        Scientific V6 §8: the old edge-value clamp fabricated a constant-TWT
+        tail for wells deeper than their TD table — contradicting the
+        fail-closed workbench calibration. Callers must treat NaN as
+        "not calibrated here" (truncate/skip), never as a number.
+        """
+        md_arr = np.asarray(md, dtype=np.float64)
+        out = np.interp(md_arr, self.md_m, self.time_ms)
+        outside = (md_arr < self.md_m[0]) | (md_arr > self.md_m[-1])
+        out = np.where(outside, np.nan, out)
+        return out if np.ndim(md) else float(out)
 
     def time_ms_to_md(self, twt: float | np.ndarray) -> float | np.ndarray:
-        """Interpolate TWT (ms) → MD. Extrapolates with edge values."""
-        return np.interp(twt, self.time_ms, self.md_m)
+        """Interpolate TWT (ms) → MD. NaN outside the calibrated range."""
+        twt_arr = np.asarray(twt, dtype=np.float64)
+        out = np.interp(twt_arr, self.time_ms, self.md_m)
+        outside = (twt_arr < self.time_ms[0]) | (twt_arr > self.time_ms[-1])
+        out = np.where(outside, np.nan, out)
+        return out if np.ndim(twt) else float(out)
 
 
 @dataclass(frozen=True)

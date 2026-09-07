@@ -693,6 +693,16 @@ class WellSeismicScene:
                         self._depth_transform.time_ms_to_depth_m(twt),
                         dtype=np.float64,
                     )
+                # V6 §8: md_to_time_ms is NaN outside the calibrated TD
+                # range — drop those samples instead of clamping a fake tail.
+                calibrated = np.isfinite(z)
+                if not calibrated.all():
+                    x, y, z, values = (
+                        x[calibrated],
+                        y[calibrated],
+                        z[calibrated],
+                        values[calibrated],
+                    )
                 points = np.column_stack([x, y, z])
             tracks[presentation.id] = WellGrTrajectory(
                 id=presentation.id,
@@ -1141,6 +1151,11 @@ class WellSeismicScene:
                             self._depth_transform.time_ms_to_depth_m(twt),
                             dtype=np.float64,
                         )
+                        # V6 §8: keep only the calibrated subset (NaN out of
+                        # TD range drops the curve sample, never clamps it).
+                        ok = np.isfinite(curve_z)
+                        if not ok.all():
+                            cmd, cval, curve_z = cmd[ok], cval[ok], curve_z[ok]
                 else:
                     td = self._td_tables.get(
                         str(presentation.id),
@@ -1150,6 +1165,9 @@ class WellSeismicScene:
                         curve_z = np.asarray(
                             td.md_to_time_ms(cmd), dtype=np.float64
                         )
+                        ok = np.isfinite(curve_z)
+                        if not ok.all():
+                            cmd, cval, curve_z = cmd[ok], cval[ok], curve_z[ok]
             hits.append(
                 ProfileWellHit(
                     id=presentation.id,
