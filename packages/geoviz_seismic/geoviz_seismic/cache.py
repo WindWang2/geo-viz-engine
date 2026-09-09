@@ -35,7 +35,7 @@ def set_global_budget(max_bytes: int) -> int:
     budget evicts global-LRU entries immediately; growing it never allocates
     anything. Returns the previous budget.
     """
-    global _GLOBAL_MAX_BYTES
+    global _GLOBAL_MAX_BYTES, _GLOBAL_BYTES
     max_bytes = max(0, int(max_bytes))
     with _GLOBAL_LOCK:
         previous = _GLOBAL_MAX_BYTES
