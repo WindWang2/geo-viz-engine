@@ -796,10 +796,13 @@ class SeismicView(QWidget):
         export_pick_btn.setIcon(self._get_ui_icon("export.svg"))
         export_pick_btn.clicked.connect(self._on_export_picks)
 
-        self._annotation_btn = QPushButton(" 标注")
+        self._annotation_btn = QPushButton(" 标注", self)
         self._annotation_btn.setCheckable(True)
         self._annotation_btn.setIcon(self._get_ui_icon("plus.svg"))
         self._annotation_btn.toggled.connect(self._on_annotation_toggled)
+        # Menu-driven handle only (never layout-placed): keep hidden so the
+        # parented child does not overlay the view at (0,0).
+        self._annotation_btn.hide()
 
         self._well_tie_btn = QPushButton(" 井震标定")
         self._well_tie_btn.setCheckable(True)
@@ -822,9 +825,9 @@ class SeismicView(QWidget):
                     item.setToolTip(f"{spec.label}: 仅支持 3D 体数据，2D 切片不可用")
         self._attr_combo.currentIndexChanged.connect(self._on_attr_changed)
 
-        self._rgb_r_combo = QComboBox()
-        self._rgb_g_combo = QComboBox()
-        self._rgb_b_combo = QComboBox()
+        self._rgb_r_combo = QComboBox(self)
+        self._rgb_g_combo = QComboBox(self)
+        self._rgb_b_combo = QComboBox(self)
         _attr_names = ["包络", "瞬时频率", "RMS振幅", "甜点", "相对阻抗"]
         for combo in (self._rgb_r_combo, self._rgb_g_combo, self._rgb_b_combo):
             combo.addItems(_attr_names)
@@ -833,9 +836,9 @@ class SeismicView(QWidget):
         self._rgb_r_combo.setCurrentIndex(0)
         self._rgb_g_combo.setCurrentIndex(1)
         self._rgb_b_combo.setCurrentIndex(2)
-        self._rgb_r_label = QLabel(" R:")
-        self._rgb_g_label = QLabel(" G:")
-        self._rgb_b_label = QLabel(" B:")
+        self._rgb_r_label = QLabel(" R:", self)
+        self._rgb_g_label = QLabel(" G:", self)
+        self._rgb_b_label = QLabel(" B:", self)
         for lbl in (self._rgb_r_label, self._rgb_g_label, self._rgb_b_label):
             lbl.setVisible(False)
 
@@ -864,11 +867,14 @@ class SeismicView(QWidget):
         )
         self._overlay_opacity_slider.valueChanged.connect(self._on_overlay_opacity_changed)
 
-        self.btn_coord = QPushButton(" 📍 网格(IL/XL)")
+        self.btn_coord = QPushButton(" 📍 网格(IL/XL)", self)
         self.btn_coord.setCheckable(True)
         self.btn_coord.setStyleSheet("QPushButton:checked { background: #2563eb; color: #ffffff; font-weight: bold; }")
         self._coord_mode = "grid"
         self.btn_coord.clicked.connect(self._toggle_coord_mode)
+        # Menu-mirrored handle only (never layout-placed): hide so the
+        # parented child cannot paint over the view at (0,0).
+        self.btn_coord.hide()
 
         # --- Dropdown 1: 层位与拾取 (Horizon & Picking Popup Menu) ---
         self._horizon_menu_btn = QToolButton()
