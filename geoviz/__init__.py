@@ -114,9 +114,19 @@ _COMPATIBILITY_EXPORTS: dict[str, tuple[str, str]] = {
     "resolve_anisotropy_params": ("geoviz_plots", "resolve_anisotropy_params"),
     "snapshot_hash": ("geoviz_plots", "snapshot_hash"),
     "synthetic_sample_points": ("geoviz_plots", "synthetic_sample_points"),
-    "fit_variogram": ("geoviz_plots", "fit_variogram"),
-    "kriging_grid": ("geoviz_plots", "kriging_grid"),
-    "leave_one_out_predictions": ("geoviz_plots", "leave_one_out_predictions"),
+    # Ordinary-kriging authority lives in geoviz_plots.factor.kriging; the
+    # package root does not re-export these names.
+    "apply_anisotropy_transform": (
+        "geoviz_plots.factor.kriging",
+        "apply_anisotropy_transform",
+    ),
+    "empirical_variogram": ("geoviz_plots.factor.kriging", "empirical_variogram"),
+    "fit_variogram": ("geoviz_plots.factor.kriging", "fit_variogram"),
+    "kriging_grid": ("geoviz_plots.factor.kriging", "kriging_grid"),
+    "leave_one_out_predictions": (
+        "geoviz_plots.factor.kriging",
+        "leave_one_out_predictions",
+    ),
     # Map-edit geometry API + transactional feature editor (promoted from
     # paleo_workbench/mapping/map_edit_api.py + feature_editor.py).
     # The reference_layers.py adapter (MapReferenceLayer + GDAL) stays in
