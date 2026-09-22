@@ -59,24 +59,33 @@ class FormationTopsModel(QObject):
     def load_csv(self, path: str) -> None:
         self._tops.clear()
         self._color_map.clear()
-        with open(path, newline="", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if not row or row[0].startswith("#"):
-                    continue
-                if len(row) < 3:
-                    continue
-                # Skip header row if present
-                try:
-                    depth = float(row[2].strip())
-                except ValueError:
-                    continue
-                well = row[0].strip()
-                name = row[1].strip()
-                color = _assign_color(name, self._color_map)
-                self._color_map.setdefault(name, color)
-                top = FormationTop(well_name=well, formation_name=name, depth_m=depth, color=color)
-                self._tops.setdefault(well, []).append(top)
+        from pathlib import Path as _Path
+
+        raw = _Path(path).read_bytes()
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("gb18030")  # GBK well data (ISSUE-015)
+        import io as _io
+
+        f = _io.StringIO(text, newline="")
+        reader = csv.reader(f)
+        for row in reader:
+            if not row or row[0].startswith("#"):
+                continue
+            if len(row) < 3:
+                continue
+            # Skip header row if present
+            try:
+                depth = float(row[2].strip())
+            except ValueError:
+                continue
+            well = row[0].strip()
+            name = row[1].strip()
+            color = _assign_color(name, self._color_map)
+            self._color_map.setdefault(name, color)
+            top = FormationTop(well_name=well, formation_name=name, depth_m=depth, color=color)
+            self._tops.setdefault(well, []).append(top)
         for well in self._tops:
             self._tops[well].sort(key=lambda t: t.depth_m)
         self.tops_changed.emit()

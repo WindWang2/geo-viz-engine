@@ -47,30 +47,39 @@ class SeismicTie:
         by_well: dict[str, tuple[list[float], list[float]]] = {}
         has_well_col = False
 
-        with open(path, newline="", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if not row or row[0].startswith("#"):
+        from pathlib import Path as _Path
+
+        raw = _Path(path).read_bytes()
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("gb18030")  # GBK well data (ISSUE-015)
+        import io as _io
+
+        f = _io.StringIO(text, newline="")
+        reader = csv.reader(f)
+        for row in reader:
+            if not row or row[0].startswith("#"):
+                continue
+            cells = [cell.strip() for cell in row]
+            header = [cell.lower() for cell in cells]
+            if header[0] in ("depth_m", "depth", "md"):
+                has_well_col = any("well" in cell for cell in header)
+                continue
+            try:
+                if len(cells) < 2:
                     continue
-                cells = [cell.strip() for cell in row]
-                header = [cell.lower() for cell in cells]
-                if header[0] in ("depth_m", "depth", "md"):
-                    has_well_col = any("well" in cell for cell in header)
-                    continue
-                try:
-                    if len(cells) < 2:
-                        continue
-                    d = float(cells[0])
-                    t = float(cells[1])
-                    if has_well_col and len(cells) >= 3 and cells[2]:
-                        w = cells[2]
-                    else:
-                        w = well_name or "default"
-                except (ValueError, IndexError):
-                    continue
-                depths, twts = by_well.setdefault(w, ([], []))
-                depths.append(d)
-                twts.append(t)
+                d = float(cells[0])
+                t = float(cells[1])
+                if has_well_col and len(cells) >= 3 and cells[2]:
+                    w = cells[2]
+                else:
+                    w = well_name or "default"
+            except (ValueError, IndexError):
+                continue
+            depths, twts = by_well.setdefault(w, ([], []))
+            depths.append(d)
+            twts.append(t)
 
         for name, (depths, twts) in by_well.items():
             order = np.argsort(depths)

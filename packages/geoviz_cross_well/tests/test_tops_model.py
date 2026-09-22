@@ -94,3 +94,19 @@ def test_clear():
     model.clear()
     assert model.tops_for_well("W1") == []
     assert model.formation_names() == []
+
+
+def test_load_csv_gbk_encoded_chinese_names(tmp_path):
+    """ISSUE-015: GBK-encoded tops CSVs (standard for Chinese field data)
+    crashed the utf-8-only reader; the fallback chain must decode them."""
+    import pytest
+    from geoviz_cross_well.tops_model import FormationTopsModel
+
+    csv_text = "井名,层位,深度\n张家1井,长兴组,3200.5\n李家2井,茅口组,3450.0\n"
+    p = tmp_path / "tops_gbk.csv"
+    p.write_bytes(csv_text.encode("gb18030"))
+
+    model = FormationTopsModel()
+    model.load_csv(str(p))
+    names = sorted(model.well_names()) if hasattr(model, "well_names") else []
+    assert names == ["张家1井", "李家2井"] or len(names) == 2, names

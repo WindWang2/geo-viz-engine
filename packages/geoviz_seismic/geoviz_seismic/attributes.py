@@ -1,6 +1,7 @@
 """Seismic attribute calculations (envelope, phase, frequency, RMS, etc.)."""
 from __future__ import annotations
 
+import warnings
 import numpy as np
 
 
@@ -206,9 +207,24 @@ def compute_coherence_c3(
             traces = traces.reshape(cxl * n_t, n_traces, wt)
 
             if gpu_active:
-                traces_gpu = cp.asarray(traces)
-                coh = _power_iteration_c3(traces_gpu, n_power_iter)
-                coh = cp.asnumpy(coh).astype(np.float32)
+                try:
+                    traces_gpu = cp.asarray(traces)
+                    coh = _power_iteration_c3(traces_gpu, n_power_iter)
+                    coh = cp.asnumpy(coh).astype(np.float32)
+                except Exception as gpu_err:  # cuBLAS/cuDNN init, OOM, detach
+                    # A half-initialized cupy stack raises here (e.g. missing
+                    # cuBLAS); fall back to the identical CPU kernel instead
+                    # of crashing the attribute run (ISSUE-006).
+                    warnings.warn(
+                        f"C3 coherence GPU path failed ({gpu_err!r}); "
+                        "falling back to CPU",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    gpu_active = False
+                    coh = _power_iteration_c3(traces, n_power_iter).astype(
+                        np.float32
+                    )
             else:
                 coh = _power_iteration_c3(traces, n_power_iter)
                 coh = coh.astype(np.float32)
