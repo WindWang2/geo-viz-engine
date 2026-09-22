@@ -133,7 +133,7 @@ def extract_filled_contours(
     grid_x, grid_y, grid_z, levels,
     *,
     study_area_clip: list[tuple[float, float]] | None = None,
-    fill_type: Literal["OuterOffset", "Separate"] = "OuterOffset",
+    fill_type: Literal["OuterOffset"] = "OuterOffset",
     palette: str = "viridis",
     cancellation_token=None,
 ) -> list[BandedFill]:
@@ -146,7 +146,10 @@ def extract_filled_contours(
         study_area_clip: Optional polygon (list of (x, y)) to clip band rings
             to. When provided, bands are intersected with this polygon via
             shapely (falls back to no clip if shapely is unavailable).
-        fill_type: contourpy fill type (``"OuterOffset"`` or ``"Separate"``).
+        fill_type: contourpy fill type. Only ``"OuterOffset"`` is valid —
+            ``"Separate"`` was accepted by the signature but has never been
+            a contourpy FillType and crashed every call with ValueError
+            (ISSUE-013); the parser rejects anything else early.
         palette: Colormap name resolved against
             ``geoviz_plots.surface.colormaps.COLORMAPS`` to produce each
             band's representative ``color``.
@@ -169,6 +172,11 @@ def extract_filled_contours(
     # Mask NaNs & Infinities
     masked_z = np.ma.masked_invalid(grid_z)
 
+    if fill_type != "OuterOffset":
+        raise ValueError(
+            f"fill_type must be 'OuterOffset', got {fill_type!r} (ISSUE-013: "
+            "'Separate' has never been a valid contourpy FillType)"
+        )
     cg = contourpy.contour_generator(
         x=grid_x, y=grid_y, z=masked_z,
         name="serial", fill_type=fill_type,

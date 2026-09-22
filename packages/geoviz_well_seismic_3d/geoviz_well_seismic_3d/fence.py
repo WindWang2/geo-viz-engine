@@ -107,6 +107,12 @@ def extract_fence_strip(
     samples_xy = sample_fence_polyline(verts, n_along)
 
     amp = np.zeros((n_along, nt), dtype=np.float32)
+    if registration is None and xy_to_il_xl is None:
+        raise ValueError(
+            "extract_fence_strip needs either `registration` or `xy_to_il_xl` "
+            "to map fence samples to inline/crossline indices (ISSUE-026: "
+            "both default to None and the loop then crashed with TypeError)"
+        )
     sample_trace = getattr(volume, "sample_trace", None)
     for i, (x, y) in enumerate(samples_xy):
         if registration is not None:

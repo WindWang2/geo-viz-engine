@@ -179,3 +179,18 @@ def test_skipped_non_piercing_well_keeps_order():
         JointWellId("source:b1"),
         JointWellId("source:c1"),
     ]
+
+
+def test_extract_fence_strip_requires_coordinate_mapping():
+    """ISSUE-026: both mapping kwargs default to None; calling without
+    either crashed inside the sampling loop with a bare TypeError."""
+    import numpy as np
+    import pytest
+    from geoviz_well_seismic_3d.fence import FenceSection, extract_fence_strip
+
+    volume = np.zeros((4, 4, 8), dtype=np.float32)
+    fence = FenceSection(
+        name="f", vertices_xy=np.array([[0.0, 0.0], [3.0, 3.0]])
+    )
+    with pytest.raises(ValueError, match="xy_to_il_xl"):
+        extract_fence_strip(volume, fence=fence)

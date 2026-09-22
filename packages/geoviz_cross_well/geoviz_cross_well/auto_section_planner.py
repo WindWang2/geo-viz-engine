@@ -114,42 +114,57 @@ def plan_section_nearest_neighbor(wells: List[Any]) -> List[Any]:
     # First, run PCA to find the extreme endpoints
     pca_sorted = plan_section_pca(wells)
     
-    # Build lookup dictionary: name -> (lng, lat, original_well_object)
-    parsed = {}
+    # Lookup by INDEX, not name: duplicate well names (two laterals of one
+    # field, repeated CSV rows) collapsed the name-keyed dict and silently
+    # dropped every duplicate from the planned section (ISSUE-014).
+    entries: list[tuple[float, float, Any]] = []
     for w in wells:
-        name, lng, lat = _extract_coords(w)
-        parsed[name] = (lng, lat, w)
-        
-    # Start at one of the outer PCA endpoints
+        _, lng, lat = _extract_coords(w)
+        entries.append((lng, lat, w))
+
+    # Start at one of the outer PCA endpoints — locate it by identity, then
+    # by name (the PCA list may hold copies).
     start_well = pca_sorted[0]
-    start_name, _, _ = _extract_coords(start_well)
-    
-    path = [start_well]
-    visited = {start_name}
-    
-    current_name = start_name
-    while len(path) < len(wells):
-        curr_lng, curr_lat, _ = parsed[current_name]
-        
-        nearest_name = None
+    start_idx = next(
+        (i for i, (_, _, w) in enumerate(entries) if w is start_well), None
+    )
+    if start_idx is None:
+        start_name = _extract_coords(start_well)[0]
+        start_idx = next(
+            (
+                i
+                for i, (_, _, w) in enumerate(entries)
+                if _extract_coords(w)[0] == start_name
+            ),
+            0,
+        )
+
+    path = [entries[start_idx][2]]
+    visited = {start_idx}
+
+    current = start_idx
+    while len(path) < len(entries):
+        curr_lng, curr_lat, _ = entries[current]
+
+        nearest = None
         min_dist = float("inf")
-        
-        for name, (lng, lat, _) in parsed.items():
-            if name in visited:
+
+        for i, (lng, lat, _) in enumerate(entries):
+            if i in visited:
                 continue
             # Euclidean distance squared (sufficient for sorting)
             dist = (lng - curr_lng) ** 2 + (lat - curr_lat) ** 2
             if dist < min_dist:
                 min_dist = dist
-                nearest_name = name
-                
-        if nearest_name is None:
+                nearest = i
+
+        if nearest is None:
             break
-            
-        path.append(parsed[nearest_name][2])
-        visited.add(nearest_name)
-        current_name = nearest_name
-        
+
+        path.append(entries[nearest][2])
+        visited.add(nearest)
+        current = nearest
+
     return path
 
 

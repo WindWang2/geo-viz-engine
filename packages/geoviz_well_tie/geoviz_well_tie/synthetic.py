@@ -27,7 +27,12 @@ def compute_reflectivity(
     """
     sonic = np.asarray(sonic, dtype=np.float64)
     density = np.asarray(density, dtype=np.float64)
-    velocity = 1.0e6 / sonic  # µs/m → m/s
+    # Non-positive or non-finite sonic (tool glitches, -999 nulls) would
+    # produce ±inf/NaN velocity that poisons the whole reflectivity series
+    # via inf−inf (ISSUE-025): clamp to a safe floor before inverting.
+    sonic = np.where(np.isfinite(sonic) & (sonic > 1e-6), sonic, np.nan)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        velocity = 1.0e6 / sonic  # µs/m → m/s
     impedance = velocity * density
     z_upper = impedance[:-1]
     z_lower = impedance[1:]
