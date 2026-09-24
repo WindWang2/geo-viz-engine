@@ -121,6 +121,20 @@ class GEOVIZ_QWT_CORE_EXPORT WellTrackRenderer
 
     const WellTrackModel *mLastModel = nullptr;  // cache identity guard
     std::map<std::pair<TrackId, SeriesId>, CurveCacheEntry> mEnvelopeCache;
+
+    // Interval-optimizer cache (the optimizer measures up to ~1000 label
+    // widths per call — skip it when nothing relevant changed).
+    struct IntervalCacheKey
+    {
+      bool valid = false;
+      const WellTrackModel *model = nullptr;
+      quint64 generation = 0;
+      qint64 sizeKey = 0;
+      double quantTop = 0.0;
+      double quantSpan = 0.0;
+      DepthIntervals result;
+    };
+    IntervalCacheKey mIntervalCacheKey;
 };
 
 } // namespace geoviz::qgis_welltrack

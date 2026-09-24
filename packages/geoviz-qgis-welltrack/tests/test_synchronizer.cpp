@@ -1,8 +1,10 @@
 /***************************************************************************
  * SPDX-License-Identifier: MIT
  *
- * Multi-canvas depth sync: propagation exact, no ping-pong, removal and
- * mid-sync destruction safety.
+ * Multi-canvas depth sync: propagation exact (same-extent canvases), no
+ * ping-pong, removal and mid-sync destruction safety. Canvases with
+ * different extents clamp the shared window to their own extent — that is
+ * the documented sync semantic.
  ***************************************************************************/
 #include "canvas_helpers.h"
 #include "geoviz/qgis_welltrack/depth_synchronizer.h"
@@ -23,7 +25,7 @@ class TestSynchronizer : public QObject
 void TestSynchronizer::twoCanvasSync()
 {
   DemoData demoA = DemoData::make();
-  DemoData demoB = DemoData::make( 1500, 2000.0, 1.0 );
+  DemoData demoB = DemoData::make();  // same extent as A → exact propagation
 
   WellTrackCanvas a;
   WellTrackCanvas b;
@@ -62,7 +64,7 @@ void TestSynchronizer::noPingPong()
   sync.addCanvas( &a );
   sync.addCanvas( &b );
 
-  a.panContentsBy( 0.0, 50.0 );
+  a.zoomToDepth( 1100.0, 1200.0 );
   QTest::qWait( 10 );
   QCOMPARE( spyA.count(), 1 );  // A emitted once for the gesture…
   QCOMPARE( spyB.count(), 1 );  // …B applied it once and its echo was a no-op.
@@ -85,7 +87,7 @@ void TestSynchronizer::removeCanvasStopsSync()
 
   a.zoomToDepth( 1100.0, 1200.0 );
   QTest::qWait( 10 );
-  QVERIFY( std::abs( b.depthDomain().minDepth() - 1100.0 ) > 1e-9 );  // untouched
+  QCOMPARE( b.depthDomain().minDepth(), 1000.0 );  // untouched at fit extent
 }
 
 void TestSynchronizer::destroyCanvasMidSync()

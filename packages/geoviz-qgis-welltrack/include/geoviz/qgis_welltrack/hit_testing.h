@@ -33,6 +33,8 @@ struct HitResult
  * Nearest-sample hit test. Only samples inside a depth window of
  * ±tolerancePx (converted via the content height) are examined — O(log n)
  * to locate the window plus O(window) scan. NaN values are skipped.
+ * tolerancePx is internally capped (50 px) so interactive callers cannot
+ * degrade this into a full-array scan.
  */
 GEOVIZ_QWT_CORE_EXPORT HitResult hitTestNearestSample( const WellTrackModel &model,
                                                        const TrackLayoutResult &layout,

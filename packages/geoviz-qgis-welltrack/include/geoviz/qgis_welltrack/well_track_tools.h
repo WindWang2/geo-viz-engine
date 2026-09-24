@@ -21,6 +21,11 @@ namespace geoviz::qgis_welltrack
 
 class WellTrackCanvas;
 
+//! Lifetime note: QgsPlotTool dtor auto-unsets itself from the canvas, so
+//! tools may be stack-allocated in a scope that ends before the canvas dies
+//! — declare the canvas FIRST in that scope (destruction order then runs
+//! tools before canvas), as the upstream tools do.
+
 /**
  * \brief Marquee zoom restricted to the depth axis: the rubber band spans
  * the full content width, and click-zoom doubles / halves the depth span.

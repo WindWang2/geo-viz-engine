@@ -39,6 +39,26 @@ QString formatAxisValue( const QgsPlotAxis *axis, double value )
   return QString::number( value, 'g', 6 );
 }
 
+// Counted iteration over [start, max] with step: immune to v += step
+// floating-point stalls when step < ULP(start) (huge depth units, tiny
+// spans — e.g. ns-scale TWT domains).
+template <typename Fn>
+void forEachStep( double min, double max, double step, qsizetype cap, Fn &&fn )
+{
+  if ( !( step > 0.0 ) || !std::isfinite( step ) || !( max > min ) )
+    return;
+  const double start = std::ceil( min / step ) * step;
+  if ( !std::isfinite( start ) )
+    return;
+  for ( qsizetype i = 0; i < cap; ++i )
+  {
+    const double v = start + static_cast<double>( i ) * step;
+    if ( !std::isfinite( v ) || v > max )
+      break;
+    fn( v );
+  }
+}
+
 struct PolylineRun
 {
   QPolygonF points;
@@ -205,23 +225,55 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
   const bool depthOk = depth.isValid() && layout.contentArea.height() > 0;
 
   // ---- depth interval selection: QGIS reuse (calculateOptimisedIntervals) ----
+  // Guard 1: skip the optimizer when the plot is too small to matter.
+  // calculateOptimisedIntervals divides available mm (size − 4 mm default
+  // margins) by 30 and loops until labels fit; with available <= 0 it never
+  // terminates (qgsplot.cpp:1058+). ~4 mm at 96 dpi ≈ 16 px, so anything
+  // below that skips optimization entirely.
   mDepthIntervals = DepthIntervals();
-  if ( depthOk )
+  const bool optimizerSafe = depthOk && layout.contentArea.width() >= 16.0
+                             && layout.contentArea.height() >= 16.0;
+  if ( optimizerSafe )
   {
+    // Cached: recompute only when the inputs that can change the result
+    // change (quantized depth window + plot size + label format identity is
+    // stable within a style set; model generation covers axis config).
     const double pxPerMm = rc.scaleFactor() > 0 ? rc.scaleFactor() : ( 96.0 / 25.4 );
-    mIntervalHost.setSize( QSizeF( layout.contentArea.width() / pxPerMm,
-                                   layout.contentArea.height() / pxPerMm ) );
-    mIntervalHost.setXMinimum( 0.0 );
-    mIntervalHost.setXMaximum( std::max( 1.0, layout.contentArea.width() ) );
-    mIntervalHost.setYMinimum( depth.minDepth() );
-    mIntervalHost.setYMaximum( depth.maxDepth() );
-    mIntervalHost.yAxis().setTextFormat( mStyle.labelTextFormat );
-    mIntervalHost.yAxis().setLabelSuffix( QString() );
-    mIntervalHost.calculateOptimisedIntervals( rc, mPlotContext );
-    mDepthIntervals.label = mIntervalHost.yAxis().labelInterval();
-    mDepthIntervals.major = mIntervalHost.yAxis().gridIntervalMajor();
-    mDepthIntervals.minor = mIntervalHost.yAxis().gridIntervalMinor();
-    mDepthIntervals.valid = mDepthIntervals.label > 0 && mDepthIntervals.major > 0;
+    const double winQuantum = depth.span() / std::max( 1.0, layout.contentArea.height() );
+    const double quantTop = std::round( depth.minDepth() / winQuantum ) * winQuantum;
+    const double quantSpan = std::round( depth.span() / winQuantum ) * winQuantum;
+    const qint64 sizeKey = ( qint64( layout.contentArea.width() ) << 20 )
+                           + qint64( layout.contentArea.height() );
+    if ( mIntervalCacheKey.valid && mIntervalCacheKey.model == &model
+         && mIntervalCacheKey.generation == model.generation() && mIntervalCacheKey.sizeKey == sizeKey
+         && mIntervalCacheKey.quantTop == quantTop && mIntervalCacheKey.quantSpan == quantSpan )
+    {
+      mDepthIntervals = mIntervalCacheKey.result;
+    }
+    else
+    {
+      mIntervalHost.setSize( QSizeF( layout.contentArea.width() / pxPerMm,
+                                     layout.contentArea.height() / pxPerMm ) );
+      mIntervalHost.setXMinimum( 0.0 );
+      mIntervalHost.setXMaximum( std::max( 1.0, layout.contentArea.width() ) );
+      mIntervalHost.setYMinimum( depth.minDepth() );
+      mIntervalHost.setYMaximum( depth.maxDepth() );
+      mIntervalHost.yAxis().setTextFormat( mStyle.labelTextFormat );
+      mIntervalHost.yAxis().setLabelSuffix( QString() );
+      mIntervalHost.calculateOptimisedIntervals( rc, mPlotContext );
+      mDepthIntervals.label = mIntervalHost.yAxis().labelInterval();
+      mDepthIntervals.major = mIntervalHost.yAxis().gridIntervalMajor();
+      mDepthIntervals.minor = mIntervalHost.yAxis().gridIntervalMinor();
+      mDepthIntervals.valid = mDepthIntervals.label > 0 && mDepthIntervals.major > 0;
+
+      mIntervalCacheKey.valid = true;
+      mIntervalCacheKey.model = &model;
+      mIntervalCacheKey.generation = model.generation();
+      mIntervalCacheKey.sizeKey = sizeKey;
+      mIntervalCacheKey.quantTop = quantTop;
+      mIntervalCacheKey.quantSpan = quantSpan;
+      mIntervalCacheKey.result = mDepthIntervals;
+    }
   }
 
   // ---- prepare curves (slice + envelope, cached) ----
@@ -304,15 +356,13 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
       };
       if ( drawMinor && minorSymbol )
       {
-        for ( double v = std::ceil( dMin / mDepthIntervals.minor ) * mDepthIntervals.minor; v <= dMax;
-              v += mDepthIntervals.minor )
-          drawHLine( v, minorSymbol );
+        forEachStep( dMin, dMax, mDepthIntervals.minor, 20000,
+                     [ & ]( double v ) { drawHLine( v, minorSymbol ); } );
       }
       if ( drawMajor )
       {
-        for ( double v = std::ceil( dMin / mDepthIntervals.major ) * mDepthIntervals.major; v <= dMax;
-              v += mDepthIntervals.major )
-          drawHLine( v, majorSymbol );
+        forEachStep( dMin, dMax, mDepthIntervals.major, 20000,
+                     [ & ]( double v ) { drawHLine( v, majorSymbol ); } );
       }
     }
 
@@ -367,8 +417,7 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
         const double step = axisStyle->gridIntervalMajor();
         if ( ( vMax - vMin ) / step < 500 )
         {
-          for ( double v = std::ceil( vMin / step ) * step; v <= vMax; v += step )
-            drawVLine( v );
+          forEachStep( vMin, vMax, step, 500, [ & ]( double v ) { drawVLine( v ); } );
         }
       }
       else
@@ -598,18 +647,18 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
         painter->save();
         painter->setClipRect( r, Qt::IntersectClip );
         painter->setPen( QPen( QColor( 0, 0, 0, 130 ), 1 ) );
-        for ( double v = std::ceil( dMin / step ) * step; v <= dMax; v += step )
+        forEachStep( dMin, dMax, step, 5000, [ & ]( double v )
         {
           const double y = depth.yForDepth( v, r );
           if ( y < r.top() - 1 || y > r.bottom() + 1 )
-            continue;
+            return;
           painter->drawLine( QPointF( r.right() - 5, y ), QPointF( r.right(), y ) );
           const QString label = formatAxisValue( &hostAxis, v );
           QgsTextRenderer::drawText( QRectF( r.left() + 2, y - 7, r.width() - 8, 14 ), 0.0,
                                      Qgis::TextHorizontalAlignment::Right, { label }, rc,
                                      mStyle.labelTextFormat, true,
                                      Qgis::TextVerticalAlignment::VerticalCenter );
-        }
+        } );
         painter->restore();
       }
     }

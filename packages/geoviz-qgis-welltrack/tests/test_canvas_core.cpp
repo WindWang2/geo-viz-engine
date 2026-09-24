@@ -30,7 +30,8 @@ void TestCanvasCore::constructRenderGrab()
   QVERIFY( QTest::qWaitForWindowExposed( &canvas ) );
   const QImage grabbed = canvas.grab().toImage();
   QVERIFY( !grabbed.isNull() );
-  QCOMPARE( grabbed.width(), 400 );
+  // Physical pixels scale with the device DPR (offscreen default is 1).
+  QCOMPARE( grabbed.width(), qRound( 400 * canvas.devicePixelRatioF() ) );
 }
 
 void TestCanvasCore::setModelFitsDepth()

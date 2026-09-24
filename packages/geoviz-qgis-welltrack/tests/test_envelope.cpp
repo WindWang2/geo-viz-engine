@@ -111,16 +111,35 @@ void TestEnvelope::extremaPreservedRandomWalk()
 
 void TestEnvelope::indexOrderEmission()
 {
-  // min after max in sample order → max emitted first.
-  const std::vector<double> depths = { 0.0, 0.1, 0.2, 0.3 };
-  const std::vector<double> values = { 5.0, -1.0, 9.0, 4.0 };
-  const CurveSeriesView v = makeDoubleView( depths.data(), values.data(), 4 );
+  // Binned path (n > pass-through threshold): within a bin, min and max are
+  // emitted in ORIGINAL INDEX order — argmin before argmax here.
+  std::vector<double> depths;
+  std::vector<double> values;
+  for ( int i = 0; i < 100; ++i )
+  {
+    depths.push_back( double( i ) );
+    values.push_back( std::sin( double( i ) / 7.0 ) );
+  }
+  values[ 20 ] = -9.0;  // global min
+  values[ 80 ] = 9.0;   // global max (later index than min)
+  const CurveSeriesView v = makeDoubleView( depths.data(), values.data(), 100 );
   std::vector<EnvelopeSample> envelope;
-  buildEnvelope( v, VisibleSlice{ 0, 4 }, 1, envelope );
-  // Single bin holds all samples; min=-1 (idx1), max=9 (idx2) → min first.
+  buildEnvelope( v, VisibleSlice{ 0, 100 }, 1, envelope );
+  // Single bin holds all 100 samples; min (idx 20) precedes max (idx 80).
   QCOMPARE( envelope.size(), size_t( 2 ) );
-  QCOMPARE( envelope[ 0 ].value, -1.0 );
+  QCOMPARE( envelope[ 0 ].value, -9.0 );
   QCOMPARE( envelope[ 1 ].value, 9.0 );
+
+  // Reversed order: argmax earlier than argmin → max emitted first.
+  std::vector<double> valuesRev( values );
+  valuesRev[ 20 ] = 9.0;
+  valuesRev[ 80 ] = -9.0;
+  const CurveSeriesView vRev = makeDoubleView( depths.data(), valuesRev.data(), 100 );
+  std::vector<EnvelopeSample> envelopeRev;
+  buildEnvelope( vRev, VisibleSlice{ 0, 100 }, 1, envelopeRev );
+  QCOMPARE( envelopeRev.size(), size_t( 2 ) );
+  QCOMPARE( envelopeRev[ 0 ].value, 9.0 );
+  QCOMPARE( envelopeRev[ 1 ].value, -9.0 );
 }
 
 void TestEnvelope::nanBreakNoBridging()

@@ -95,7 +95,7 @@ void WellTrackCursorTool::plotMoveEvent( QgsPlotMouseEvent *event )
 {
   auto *canvas = qobject_cast<WellTrackCanvas *>( mCanvas );
   if ( canvas )
-    canvas->notifyCursor( event->localPos() );
+    canvas->notifyCursor( event->position() );
   event->accept();
 }
 
@@ -103,7 +103,7 @@ void WellTrackCursorTool::plotReleaseEvent( QgsPlotMouseEvent *event )
 {
   auto *canvas = qobject_cast<WellTrackCanvas *>( mCanvas );
   if ( canvas )
-    canvas->notifyCursor( event->localPos() );
+    canvas->notifyCursor( event->position() );
   event->accept();
 }
 

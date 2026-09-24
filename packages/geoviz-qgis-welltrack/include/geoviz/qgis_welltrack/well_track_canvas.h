@@ -80,9 +80,6 @@ class GEOVIZ_QWT_GUI_EXPORT WellTrackCanvas : public QgsPlotCanvas
     void wheelZoom( QWheelEvent *event ) override;
     void resizeEvent( QResizeEvent *event ) override;
 
-  private slots:
-    void scheduleRefresh();
-
   private:
     friend class WellTrackCursorTool;
 

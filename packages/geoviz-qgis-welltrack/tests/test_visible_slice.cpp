@@ -31,7 +31,7 @@ static bool sliceContains( const std::vector<double> &depths, const VisibleSlice
 {
   // Brute-force oracle: the slice must be exactly all samples within [from,to].
   qsizetype expectedBegin = depths.size();
-  qsizetype expectedEnd = 0;
+  qsizetype expectedEnd = depths.size();
   for ( qsizetype i = 0; i < qsizetype( depths.size() ); ++i )
   {
     if ( depths[ i ] >= from )
@@ -40,7 +40,7 @@ static bool sliceContains( const std::vector<double> &depths, const VisibleSlice
       break;
     }
   }
-  for ( qsizetype i = 0; i < qsizetype( depths.size() ); ++i )
+  for ( qsizetype i = expectedBegin; i < qsizetype( depths.size() ); ++i )
   {
     if ( depths[ i ] > to )
     {
@@ -48,8 +48,6 @@ static bool sliceContains( const std::vector<double> &depths, const VisibleSlice
       break;
     }
   }
-  if ( expectedEnd == 0 )
-    expectedEnd = depths.size();
   return slice.begin == expectedBegin && slice.end == expectedEnd;
 }
 

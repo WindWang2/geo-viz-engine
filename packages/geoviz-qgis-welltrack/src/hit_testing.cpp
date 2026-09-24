@@ -6,6 +6,7 @@
 #include "hit_testing.h"
 #include "curve_lod.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -16,6 +17,9 @@ HitResult hitTestNearestSample( const WellTrackModel &model, const TrackLayoutRe
                                 const DepthDomain &depth, QPointF pos, double tolerancePx )
 {
   HitResult result;
+  // Cap the tolerance: the depth window grows linearly with it and a huge
+  // value would scan whole curves per mouse move.
+  tolerancePx = std::clamp( tolerancePx, 1.0, 50.0 );
   if ( !depth.isValid() || layout.contentArea.height() <= 0 )
     return result;
 

@@ -75,15 +75,19 @@ void WellTrackCanvas::applyDepthDomain( const DepthDomain &candidate )
     return;
 
   // No-op guard (anti-cascade, mirrors geoviz_well_log 1e-9 rule).
-  if ( std::abs( domain.shallow - mDepthDomain.shallow ) < kDepthNoOpEpsilon &&
-       std::abs( domain.deep - mDepthDomain.deep ) < kDepthNoOpEpsilon &&
-       mDepthDomain.isValid() )
+  auto sameAsCurrent = [ & ]( const DepthDomain &d )
+  {
+    return mDepthDomain.isValid()
+           && std::abs( d.shallow - mDepthDomain.shallow ) < kDepthNoOpEpsilon
+           && std::abs( d.deep - mDepthDomain.deep ) < kDepthNoOpEpsilon;
+  };
+  if ( sameAsCurrent( domain ) )
     return;
 
   if ( mHasFullExtent )
     domain = domain.clampedTo( mFullExtentMin, mFullExtentMax );
-  if ( !domain.isValid() )
-    return;
+  if ( !domain.isValid() || sameAsCurrent( domain ) )
+    return;  // clamped back onto the current window (e.g. pan at full extent)
 
   mDepthDomain = domain;
   if ( mSceneItem )
@@ -293,6 +297,16 @@ void WellTrackCanvas::resizeEvent( QResizeEvent *event )
 
 void WellTrackCanvas::notifyCursor( const QPointF &canvasPos )
 {
+  // NaN outside the content area is part of the cursorDepthChanged contract
+  // (headers/ruler/margins are not depth space).
+  const TrackLayoutResult &layout = lastLayout();
+  if ( layout.tracks.empty() || canvasPos.y() < layout.contentArea.top()
+       || canvasPos.y() > layout.contentArea.bottom() )
+  {
+    clearCursor();
+    return;
+  }
+
   const double depth = depthAt( canvasPos );
   if ( std::isfinite( depth ) )
   {

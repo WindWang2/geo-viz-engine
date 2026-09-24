@@ -1,8 +1,9 @@
 /***************************************************************************
  * SPDX-License-Identifier: MIT
  *
- * Tool stack on the QGIS canvas: pan tool drag, depth zoom tool marquee
- * constraints, cursor tool readout, tool switching.
+ * Tool stack on the QGIS canvas, driven gesture-level through viewport
+ * events (protected constrain hooks are not directly callable; the marquee
+ * equivalence is asserted through the resulting depth domain).
  ***************************************************************************/
 #include "canvas_helpers.h"
 
@@ -14,88 +15,107 @@
 using namespace geoviz::qgis_welltrack;
 using geoviz::qgis_welltrack::test::DemoData;
 
+namespace
+{
+
+void sendMouse( QWidget *target, QEvent::Type type, const QPointF &pos,
+                Qt::MouseButton button = Qt::LeftButton, Qt::MouseButtons buttons = Qt::LeftButton,
+                Qt::KeyboardModifiers mods = Qt::NoModifier )
+{
+  QMouseEvent event( type, pos, pos, button, buttons, mods );
+  QCoreApplication::sendEvent( target, &event );
+}
+
+} // namespace
+
 class TestCanvasTools : public QObject
 {
     Q_OBJECT
   private slots:
     void panToolDrillsDepth();
-    void depthZoomConstraints();
+    void depthZoomMarqueeGesture();
     void depthZoomClick();
     void cursorToolSignals();
+    void cursorToolHeaderIsNaN();
+    void transientMidButtonPanSmoke();
     void toolSwitching();
+
+  private:
+    static void prepareCanvas( WellTrackCanvas &canvas, DemoData &demo );
 };
 
-void TestCanvasTools::panToolDrillsDepth()
+void TestCanvasTools::prepareCanvas( WellTrackCanvas &canvas, DemoData &demo )
 {
-  DemoData demo = DemoData::make();
-  WellTrackCanvas canvas;
+  demo = DemoData::make();
   canvas.setModel( demo.model );
   canvas.resize( 300, 400 );
   canvas.show();
-  QTest::qWaitForWindowExposed( &canvas );
+  QVERIFY( QTest::qWaitForWindowExposed( &canvas ) );
   canvas.fitDepth();
+  canvas.zoomToDepth( 1200.0, 1500.0 );  // sub-window: pan/zoom have room
+  QTRY_VERIFY( !canvas.lastLayout().tracks.empty() );
+}
+
+void TestCanvasTools::panToolDrillsDepth()
+{
+  DemoData demo;
+  WellTrackCanvas canvas;
+  prepareCanvas( canvas, demo );
 
   QgsPlotToolPan panTool( &canvas );
   canvas.setTool( &panTool );
 
   const DepthDomain before = canvas.depthDomain();
-
-  // Simulate the gesture the way QgsPlotToolPan sees it: press, move, release.
-  const QPoint start( 150, 100 );
-  const QPoint end( 150, 200 );  // drag down 100 px
-  QMouseEvent press( QEvent::MouseButtonPress, start, start, Qt::LeftButton, Qt::LeftButton,
-                     Qt::NoModifier );
-  QMouseEvent move( QEvent::MouseMove, end, end, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
-  QMouseEvent release( QEvent::MouseButtonRelease, end, end, Qt::LeftButton, Qt::NoButton,
-                       Qt::NoModifier );
-  QCoreApplication::sendEvent( canvas.viewport(), &press );
-  QCoreApplication::sendEvent( canvas.viewport(), &move );
-  QCoreApplication::sendEvent( canvas.viewport(), &release );
+  sendMouse( canvas.viewport(), QEvent::MouseButtonPress, QPointF( 150, 100 ) );
+  sendMouse( canvas.viewport(), QEvent::MouseMove, QPointF( 150, 200 ) );
+  sendMouse( canvas.viewport(), QEvent::MouseButtonRelease, QPointF( 150, 200 ) );
 
   const DepthDomain after = canvas.depthDomain();
-  QVERIFY( std::abs( after.minDepth() - before.minDepth() ) > 1.0 );  // panned upward meaningfully
-  QVERIFY( std::abs( after.span() - before.span() ) < 1e-9 );
+  QCOMPARE( after.span(), before.span() );                          // pan never zooms
+  QVERIFY( after.minDepth() < before.minDepth() - 1.0 );            // content moved down
 }
 
-void TestCanvasTools::depthZoomConstraints()
+void TestCanvasTools::depthZoomMarqueeGesture()
 {
-  DemoData demo = DemoData::make();
+  DemoData demo;
   WellTrackCanvas canvas;
-  canvas.setModel( demo.model );
-  canvas.resize( 300, 400 );
-  canvas.show();
-  QTest::qWaitForWindowExposed( &canvas );
-  canvas.fitDepth();
+  prepareCanvas( canvas, demo );
 
   WellTrackDepthZoomTool zoomTool( &canvas );
-  const QPointF start( 40, 80 );
-  const QPointF moved( 200, 240 );
-  const QPointF cs = zoomTool.constrainStartPoint( start );
-  const QPointF cm = zoomTool.constrainMovePoint( moved );
-  QCOMPARE( cs.x(), cm.x() );  // both pinned to the same x (center band)
+  canvas.setTool( &zoomTool );
 
-  const QRectF raw = QRectF( cs, cm ).normalized();
-  const QRectF bounds = zoomTool.constrainBounds( raw );
-  QCOMPARE( bounds.left(), canvas.lastLayout().contentArea.left() );
-  QCOMPARE( bounds.right(), canvas.lastLayout().contentArea.right() );
-  QVERIFY( bounds.height() >= 2.0 );
+  const double dTop = canvas.depthAt( QPointF( 150, 100.0 ) );
+  const double dBottom = canvas.depthAt( QPointF( 150, 300.0 ) );
+  QVERIFY( std::isfinite( dTop ) && std::isfinite( dBottom ) );
+
+  // Drag the marquee: the tool's constrained full-width band ends in
+  // zoomToRect on release; the resulting window must be exactly the depths
+  // spanned by the dragged y range.
+  sendMouse( canvas.viewport(), QEvent::MouseButtonPress, QPointF( 40, 100.0 ) );
+  sendMouse( canvas.viewport(), QEvent::MouseMove, QPointF( 220, 300.0 ) );
+  sendMouse( canvas.viewport(), QEvent::MouseButtonRelease, QPointF( 220, 300.0 ) );
+
+  const DepthDomain after = canvas.depthDomain();
+  QVERIFY( std::abs( after.minDepth() - dTop ) < 0.5 );
+  QVERIFY( std::abs( after.maxDepth() - dBottom ) < 0.5 );
 }
 
 void TestCanvasTools::depthZoomClick()
 {
-  DemoData demo = DemoData::make();
+  DemoData demo;
   WellTrackCanvas canvas;
-  canvas.setModel( demo.model );
-  canvas.resize( 300, 400 );
-  canvas.show();
-  QTest::qWaitForWindowExposed( &canvas );
-  canvas.fitDepth();
+  prepareCanvas( canvas, demo );
 
   WellTrackDepthZoomTool zoomTool( &canvas );
+  canvas.setTool( &zoomTool );
+
   const DepthDomain before = canvas.depthDomain();
   const double centerDepth = canvas.depthAt( QPointF( 150, 200 ) );
 
-  zoomTool.zoomInClickOn( QPointF( 150, 200 ) );
+  // Plain click (press + release at the same spot): zoom in ×2 around the click.
+  sendMouse( canvas.viewport(), QEvent::MouseButtonPress, QPointF( 150, 200 ) );
+  sendMouse( canvas.viewport(), QEvent::MouseButtonRelease, QPointF( 150, 200 ) );
+
   const DepthDomain after = canvas.depthDomain();
   QVERIFY( std::abs( after.span() - before.span() / 2 ) < 1e-6 );
   QVERIFY( std::abs( after.depthAtFraction( 0.5 ) - centerDepth ) < 1.0 );
@@ -103,24 +123,18 @@ void TestCanvasTools::depthZoomClick()
 
 void TestCanvasTools::cursorToolSignals()
 {
-  DemoData demo = DemoData::make();
+  DemoData demo;
   WellTrackCanvas canvas;
-  canvas.setModel( demo.model );
-  canvas.resize( 300, 400 );
-  canvas.show();
-  QTest::qWaitForWindowExposed( &canvas );
-  canvas.fitDepth();
+  prepareCanvas( canvas, demo );
 
   WellTrackCursorTool cursorTool( &canvas );
   canvas.setTool( &cursorTool );
 
-  qRegisterMetaType<HitResult>( "geoviz::qgis_welltrack::HitResult" );
   QSignalSpy depthSpy( &canvas, &WellTrackCanvas::cursorDepthChanged );
   QSignalSpy hoverSpy( &canvas, &WellTrackCanvas::sampleHovered );
 
-  QMouseEvent move( QEvent::MouseMove, QPointF( 150, 200 ), QPointF( 150, 200 ), Qt::NoButton,
-                    Qt::NoButton, Qt::NoModifier );
-  QCoreApplication::sendEvent( canvas.viewport(), &move );
+  // Inside the content area (below the 40px header).
+  sendMouse( canvas.viewport(), QEvent::MouseMove, QPointF( 150, 200 ), Qt::NoButton, Qt::NoButton );
   QVERIFY( depthSpy.count() >= 1 );
   QVERIFY( hoverSpy.count() >= 1 );
   QVERIFY( std::isfinite( depthSpy.last().at( 0 ).toDouble() ) );
@@ -129,9 +143,43 @@ void TestCanvasTools::cursorToolSignals()
   QVERIFY( std::isnan( depthSpy.last().at( 0 ).toDouble() ) );
 }
 
+void TestCanvasTools::cursorToolHeaderIsNaN()
+{
+  DemoData demo;
+  WellTrackCanvas canvas;
+  prepareCanvas( canvas, demo );
+
+  WellTrackCursorTool cursorTool( &canvas );
+  canvas.setTool( &cursorTool );
+
+  QSignalSpy depthSpy( &canvas, &WellTrackCanvas::cursorDepthChanged );
+  // y=20 is inside the header band, outside depth space.
+  sendMouse( canvas.viewport(), QEvent::MouseMove, QPointF( 150, 20 ), Qt::NoButton, Qt::NoButton );
+  QVERIFY( depthSpy.count() >= 1 );
+  QVERIFY( std::isnan( depthSpy.last().at( 0 ).toDouble() ) );
+}
+
+void TestCanvasTools::transientMidButtonPanSmoke()
+{
+  DemoData demo;
+  WellTrackCanvas canvas;
+  prepareCanvas( canvas, demo );
+
+  // Middle-button drag activates QgsPlotCanvas's transient pan tool without
+  // any tool set; must not crash and must pan.
+  const DepthDomain before = canvas.depthDomain();
+  sendMouse( canvas.viewport(), QEvent::MouseButtonPress, QPointF( 150, 100 ), Qt::MiddleButton,
+             Qt::MiddleButton );
+  sendMouse( canvas.viewport(), QEvent::MouseMove, QPointF( 150, 180 ), Qt::MiddleButton,
+             Qt::MiddleButton );
+  sendMouse( canvas.viewport(), QEvent::MouseButtonRelease, QPointF( 150, 180 ), Qt::MiddleButton );
+  const DepthDomain after = canvas.depthDomain();
+  QVERIFY( after.minDepth() != before.minDepth() );
+}
+
 void TestCanvasTools::toolSwitching()
 {
-  DemoData demo = DemoData::make();
+  DemoData demo;
   WellTrackCanvas canvas;
   canvas.setModel( demo.model );
 

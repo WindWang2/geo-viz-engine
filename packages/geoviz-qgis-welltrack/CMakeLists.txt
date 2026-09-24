@@ -67,9 +67,10 @@ target_compile_definitions(geoviz_qgis_welltrack_gui PRIVATE GEOVIZ_QWT_GUI_LIBR
 target_include_directories(geoviz_qgis_welltrack_gui
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+# The SDK interface is PUBLIC: the public well_track_canvas.h includes
+# qgsplotcanvas.h, so every consumer needs the QGIS gui include closure.
 target_link_libraries(geoviz_qgis_welltrack_gui
-  PUBLIC GeoViz::QgisWellTrackCore Qt6::Widgets
-  PRIVATE ${GEOVIZ_QGIS_SDK_INTERFACE})
+  PUBLIC GeoViz::QgisWellTrackCore Qt6::Widgets ${GEOVIZ_QGIS_SDK_INTERFACE})
 set_target_properties(geoviz_qgis_welltrack_gui PROPERTIES
   OUTPUT_NAME geoviz_qgis_welltrack
   POSITION_INDEPENDENT_CODE ON
@@ -103,7 +104,7 @@ if(GEOVIZ_QWT_BUILD_TESTS)
   set(GEOVIZ_QWT_APP_TESTS test_renderer)
   foreach(test_name IN LISTS GEOVIZ_QWT_APP_TESTS)
     add_executable(${test_name} tests/${test_name}.cpp tests/qgis_app_fixture.h)
-    target_link_libraries(${test_name} PRIVATE GeoViz::QgisWellTrackCore Qt6::Test)
+    target_link_libraries(${test_name} PRIVATE GeoViz::QgisWellTrackCore Qt6::Test Qt6::Svg)
     target_include_directories(${test_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME ${test_name} COMMAND ${test_name})
     set_tests_properties(${test_name} PROPERTIES ENVIRONMENT

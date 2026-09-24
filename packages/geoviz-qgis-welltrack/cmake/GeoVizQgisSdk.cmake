@@ -70,7 +70,7 @@ foreach(_lib qgis_core qgis_gui)
   endif()
 endforeach()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Xml Svg PrintSupport)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Xml Svg PrintSupport Test)
 
 foreach(_comp Core Gui)
   string(TOLOWER "${_comp}" _lower)

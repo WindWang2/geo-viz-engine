@@ -1,5 +1,8 @@
 /***************************************************************************
  * SPDX-License-Identifier: MIT
+ *
+ * Hit probes compute their x through the same axis mapping the renderer
+ * uses, so tolerance math — not layout guesses — decides the verdict.
  ***************************************************************************/
 #include "geoviz/qgis_welltrack/hit_testing.h"
 
@@ -64,10 +67,11 @@ void TestHitTesting::exactHitOnSample()
   const TrackLayoutResult layout = computeTrackLayout( *model, QRectF( 0, 0, 400, 500 ) );
   const DepthDomain domain = makeDomain( 1000.0, 1100.0 );
 
-  // Sample index 50 sits at depth 1050, value 20 (mid height).
-  const QPointF samplePos( layout.tracks[ 0 ].contentRect.center().x(),
-                           domain.yForDepth( 1050.0, layout.tracks[ 0 ].contentRect ) );
-  const HitResult hit = hitTestNearestSample( *model, layout, domain, samplePos, 10.0 );
+  // Sample 50: depth 1050, value +20 (even index).
+  const TrackGeometry &left = layout.tracks[ 0 ];
+  const double y = domain.yForDepth( 1050.0, left.contentRect );
+  const double x = model->track( left.trackId )->axis.xForValue( 20.0, left.contentRect );
+  const HitResult hit = hitTestNearestSample( *model, layout, domain, QPointF( x, y ), 10.0 );
   QVERIFY( hit.hit );
   QCOMPARE( hit.sampleIndex, qsizetype( 50 ) );
   QCOMPARE( hit.curveId, SeriesId( 11 ) );
@@ -80,10 +84,12 @@ void TestHitTesting::nearestWithinTolerance()
   auto model = twoTrackModel( depths, values );
   const TrackLayoutResult layout = computeTrackLayout( *model, QRectF( 0, 0, 400, 500 ) );
   const DepthDomain domain = makeDomain( 1000.0, 1100.0 );
-  const double y = domain.yForDepth( 1050.0, layout.contentArea );
+  const TrackGeometry &left = layout.tracks[ 0 ];
+  const double y = domain.yForDepth( 1050.0, left.contentRect );
+  const double x = model->track( left.trackId )->axis.xForValue( 20.0, left.contentRect );
+
   // 5 px below the sample — inside 10 px tolerance.
-  const HitResult hit =
-    hitTestNearestSample( *model, layout, domain, QPointF( layout.tracks[ 0 ].contentRect.center().x(), y + 5.0 ), 10.0 );
+  const HitResult hit = hitTestNearestSample( *model, layout, domain, QPointF( x, y + 5.0 ), 10.0 );
   QVERIFY( hit.hit );
   QCOMPARE( hit.sampleIndex, qsizetype( 50 ) );
 }
@@ -94,10 +100,8 @@ void TestHitTesting::missBeyondTolerance()
   auto model = twoTrackModel( depths, values );
   const TrackLayoutResult layout = computeTrackLayout( *model, QRectF( 0, 0, 400, 500 ) );
   const DepthDomain domain = makeDomain( 1000.0, 1100.0 );
-  // 200 px away vertically (~40 depth units) — far outside tolerance.
-  const QPointF far( layout.tracks[ 0 ].contentRect.center().x(),
-                     domain.yForDepth( 1050.0, layout.contentArea ) + 200.0 );
-  const HitResult miss = hitTestNearestSample( *model, layout, domain, far, 10.0 );
+  const HitResult miss =
+    hitTestNearestSample( *model, layout, domain, QPointF( -500.0, 250.0 ), 10.0 );
   QVERIFY( !miss.hit );
 }
 
@@ -108,10 +112,10 @@ void TestHitTesting::multiTrackDisambiguation()
   const TrackLayoutResult layout = computeTrackLayout( *model, QRectF( 0, 0, 400, 500 ) );
   const DepthDomain domain = makeDomain( 1000.0, 1100.0 );
 
-  // x inside the right track's column → curve 22 wins.
-  const QPointF rightPos( layout.tracks[ 1 ].contentRect.center().x(),
-                          domain.yForDepth( 1050.0, layout.contentArea ) );
-  const HitResult hit = hitTestNearestSample( *model, layout, domain, rightPos, 10.0 );
+  const TrackGeometry &right = layout.tracks[ 1 ];
+  const double y = domain.yForDepth( 1050.0, right.contentRect );
+  const double x = model->track( right.trackId )->axis.xForValue( 20.0, right.contentRect );
+  const HitResult hit = hitTestNearestSample( *model, layout, domain, QPointF( x, y ), 10.0 );
   QVERIFY( hit.hit );
   QCOMPARE( hit.curveId, SeriesId( 22 ) );
 }
@@ -132,10 +136,12 @@ void TestHitTesting::nanSamplesSkipped()
 
   const TrackLayoutResult layout = computeTrackLayout( *model, QRectF( 0, 0, 300, 400 ) );
   const DepthDomain domain = makeDomain( 1000.0, 1002.0 );
-  const QPointF pos( layout.tracks[ 0 ].contentRect.center().x(),
-                     domain.yForDepth( 1001.0, layout.contentArea ) );
-  const HitResult hit = hitTestNearestSample( *model, layout, domain, pos, 6.0 );
-  QVERIFY( hit.hit );  // found the only finite sample (1002) within tolerance
+  const TrackGeometry &g = layout.tracks[ 0 ];
+  // Probe exactly at the finite sample (1002, 15) — NaN neighbors are skipped.
+  const double y = domain.yForDepth( 1002.0, g.contentRect );
+  const double x = track->axis.xForValue( 15.0, g.contentRect );
+  const HitResult hit = hitTestNearestSample( *model, layout, domain, QPointF( x, y ), 6.0 );
+  QVERIFY( hit.hit );
   QCOMPARE( hit.sampleIndex, qsizetype( 2 ) );
 }
 
