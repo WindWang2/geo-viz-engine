@@ -14,6 +14,7 @@
 
 #include <QRectF>
 
+#include <cmath>
 #include <limits>
 
 namespace geoviz::qgis_welltrack

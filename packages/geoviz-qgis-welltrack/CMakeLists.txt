@@ -45,7 +45,7 @@ target_compile_definitions(geoviz_qgis_welltrack_core PRIVATE GEOVIZ_QWT_CORE_LI
 target_include_directories(geoviz_qgis_welltrack_core
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_link_libraries(geoviz_qgis_welltrack_core
-  PUBLIC ${GEOVIZ_QGIS_SDK_INTERFACE} Qt6::Core Qt6::Gui)
+  PUBLIC ${GEOVIZ_QGIS_SDK_CORE_INTERFACE} Qt6::Core Qt6::Gui)
 set_target_properties(geoviz_qgis_welltrack_core PROPERTIES
   OUTPUT_NAME geoviz_qgis_welltrack_core
   POSITION_INDEPENDENT_CODE ON

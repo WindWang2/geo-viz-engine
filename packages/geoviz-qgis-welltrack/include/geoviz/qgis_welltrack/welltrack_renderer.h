@@ -101,7 +101,9 @@ class GEOVIZ_QWT_CORE_EXPORT WellTrackRenderer
       std::vector<EnvelopeSample> envelope;
     };
 
-    const std::vector<EnvelopeSample> &envelopeFor( const WellTrackModel &model,
+    // Series ids must be unique per track; the cache key is
+    // (trackId, seriesId) plus generation + quantized window.
+    const std::vector<EnvelopeSample> &envelopeFor( const WellTrackModel &model, TrackId trackId,
                                                     const CurveSpec &curve, int bins,
                                                     const DepthDomain &depth,
                                                     qsizetype &rawSampleCount );
@@ -117,8 +119,8 @@ class GEOVIZ_QWT_CORE_EXPORT WellTrackRenderer
     Qgs2DXyPlot mIntervalHost;
     QgsPlotRenderContext mPlotContext;
 
-    std::map<SeriesId, CurveCacheEntry> mEnvelopeCache;
-    std::vector<EnvelopeSample> mScratchEnvelope;
+    const WellTrackModel *mLastModel = nullptr;  // cache identity guard
+    std::map<std::pair<TrackId, SeriesId>, CurveCacheEntry> mEnvelopeCache;
 };
 
 } // namespace geoviz::qgis_welltrack

@@ -9,6 +9,9 @@
 #include <QPainter>
 #include <QWidget>
 
+#include <algorithm>
+#include <cmath>
+
 namespace geoviz::qgis_welltrack
 {
 

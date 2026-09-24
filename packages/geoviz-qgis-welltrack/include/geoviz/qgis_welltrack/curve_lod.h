@@ -52,13 +52,16 @@ struct EnvelopeSample
  * Contract (pinned by tests, mirrors geoviz_well_log):
  *  - each bin emits its minimum and maximum sample, in original index order
  *    (if argmin < argmax, min first; else max first);
- *  - a bin whose samples include non-finite values additionally emits the
- *    first non-finite sample *in index order* and sets breakAfter on the
- *    bin's last emitted point so polylines never bridge the gap;
+ *  - output contains only finite values; gaps are expressed through
+ *    `breakAfter` flags: a bin that contains non-finite samples sets
+ *    breakAfter on its last emitted point, and a bin with *only* non-finite
+ *    samples forces a break on the last emitted finite point of the
+ *    previous bin — polylines never bridge a gap;
  *  - empty bins are skipped;
  *  - the visible window's global min/max are always present in the output.
  *
- * Small-slice fast path: sliceSize <= max(2*bins, 64) → raw pass-through.
+ * Small-slice fast path: sliceSize <= max(2*bins, 64) → raw pass-through
+ * (breaks then sit exactly on the finite sample before each NaN).
  * O(slice). `out` is reused (cleared then filled) for steady-state zero
  * allocation after warmup.
  */

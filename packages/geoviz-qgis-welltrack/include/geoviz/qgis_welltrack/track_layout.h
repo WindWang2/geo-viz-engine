@@ -35,14 +35,14 @@ struct TrackGeometry
   QRectF contentRect;
 };
 
-struct TrackLayoutResult
+struct GEOVIZ_QWT_CORE_EXPORT TrackLayoutResult
 {
   std::vector<TrackGeometry> tracks;   //!< visible tracks, x ascending
   QRectF contentArea;                  //!< union of content rects
   double separatorWidth = 1.0;
 
-  //! Index into `tracks` of the track containing x (separators belong to the
-  //  track on their right); -1 when x is outside all columns.
+  //! Index into `tracks` of the track containing x; separator strips and
+  //  outer margins belong to no track (-1).
   int trackAtX( double x ) const;
 
   const TrackGeometry *geometryForTrackId( TrackId id ) const;

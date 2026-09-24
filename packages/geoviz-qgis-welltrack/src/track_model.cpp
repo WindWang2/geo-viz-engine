@@ -41,6 +41,8 @@ bool WellTrackModel::adoptTrack( std::shared_ptr<TrackSpec> track )
     if ( existing->id == track->id )
       return false;
   }
+  // Keep appendTrack() from minting ids that collide with the adopted track.
+  mNextTrackId = std::max( mNextTrackId, track->id + 1 );
   mTracks.push_back( std::move( track ) );
   touch();
   return true;

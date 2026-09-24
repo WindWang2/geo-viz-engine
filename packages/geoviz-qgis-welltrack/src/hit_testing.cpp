@@ -81,7 +81,7 @@ HitResult hitTestNearestSample( const WellTrackModel &model, const TrackLayoutRe
   {
     result.screenDistPx = std::sqrt( bestDist2 );
     if ( result.screenDistPx > tolerancePx )
-      result.hit = false;  // closest candidate is still outside tolerance
+      result = HitResult();  // closest candidate is still outside tolerance
   }
   return result;
 }

@@ -123,6 +123,7 @@ WellTrackRenderer::WellTrackRenderer()
 }
 
 const std::vector<EnvelopeSample> &WellTrackRenderer::envelopeFor( const WellTrackModel &model,
+                                                                   TrackId trackId,
                                                                    const CurveSpec &curve, int bins,
                                                                    const DepthDomain &depth,
                                                                    qsizetype &rawSampleCount )
@@ -141,7 +142,7 @@ const std::vector<EnvelopeSample> &WellTrackRenderer::envelopeFor( const WellTra
     quantSpan = std::round( span / quantum ) * quantum;
   }
 
-  CurveCacheEntry &entry = mEnvelopeCache[ curve.id ];
+  CurveCacheEntry &entry = mEnvelopeCache[ { trackId, curve.id } ];
   const VisibleSlice slice = visibleSlice( curve.data, depth.minDepth(), depth.maxDepth() );
   rawSampleCount = slice.size();
   if ( entry.modelGeneration != generation || entry.bins != bins ||
@@ -178,6 +179,16 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
 
   QgsRenderContext rc = QgsRenderContext::fromQPainter( painter );
   rc.setFlag( Qgis::RenderContextFlag::Antialiasing, true );
+  if ( painter->device() )
+    rc.setDevicePixelRatio( painter->device()->devicePixelRatioF() );  // upstream elevation pattern
+
+  // Cache identity: a different model object invalidates everything (two
+  // models can share generation numbers and series ids).
+  if ( mLastModel != &model )
+  {
+    mEnvelopeCache.clear();
+    mLastModel = &model;
+  }
 
   // Drop cache entries from older generations / removed series.
   if ( !mEnvelopeCache.empty() )
@@ -238,7 +249,8 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
       if ( curve.data.isEmpty() )
         continue;
       qsizetype rawCount = 0;
-      const std::vector<EnvelopeSample> &envelope = envelopeFor( model, curve, bins, depth, rawCount );
+      const std::vector<EnvelopeSample> &envelope =
+        envelopeFor( model, g.trackId, curve, bins, depth, rawCount );
       pt.curves.push_back( &curve );
       pt.envelopes.push_back( &envelope );
       if ( stats )
@@ -416,12 +428,15 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
         else // BetweenSeries
         {
           const CurveSpec *partner = nullptr;
-          for ( const CurveSpec &candidate : pt.spec->curves )
+          if ( curve.partnerId != 0 && curve.partnerId != curve.id )
           {
-            if ( candidate.id == curve.partnerId )
+            for ( const CurveSpec &candidate : pt.spec->curves )
             {
-              partner = &candidate;
-              break;
+              if ( candidate.id == curve.partnerId && candidate.id != curve.id )
+              {
+                partner = &candidate;
+                break;
+              }
             }
           }
           if ( partner && !partner->data.isEmpty() )
@@ -577,10 +592,12 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
       const double dMin = depth.minDepth();
       const double dMax = depth.maxDepth();
       const double step = mDepthIntervals.label;
-      painter->setPen( QPen( QColor( 0, 0, 0, 130 ), 1 ) );
       const QgsPlotAxis &hostAxis = mIntervalHost.yAxis();
       if ( ( dMax - dMin ) / step < 5000 )
       {
+        painter->save();
+        painter->setClipRect( r, Qt::IntersectClip );
+        painter->setPen( QPen( QColor( 0, 0, 0, 130 ), 1 ) );
         for ( double v = std::ceil( dMin / step ) * step; v <= dMax; v += step )
         {
           const double y = depth.yForDepth( v, r );
@@ -593,6 +610,7 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
                                      mStyle.labelTextFormat, true,
                                      Qgis::TextVerticalAlignment::VerticalCenter );
         }
+        painter->restore();
       }
     }
   }

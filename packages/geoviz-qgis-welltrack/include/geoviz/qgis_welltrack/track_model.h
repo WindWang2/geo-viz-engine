@@ -73,6 +73,8 @@ struct TextAnchor
 
 struct CurveSpec
 {
+  //! Must be unique within its track (the LOD cache is keyed on
+  //! trackId+seriesId; collisions silently share envelopes).
   SeriesId id = 0;
   QString label;
   CurveSeriesView data;      //!< borrowed memory, never copied by the kernel

@@ -8,7 +8,7 @@
 
 #include <qgsplotmouseevent.h>
 
-#include <QCursor>
+#include <cmath>
 
 namespace geoviz::qgis_welltrack
 {
@@ -18,7 +18,6 @@ namespace geoviz::qgis_welltrack
 WellTrackDepthZoomTool::WellTrackDepthZoomTool( WellTrackCanvas *canvas )
   : QgsPlotToolZoom( canvas )
 {
-  setToolName( QStringLiteral( "WellTrackDepthZoom" ) );
 }
 
 QRectF WellTrackDepthZoomTool::plotArea() const
@@ -81,15 +80,15 @@ void WellTrackDepthZoomTool::zoomInClickOn( QPointF scenePoint )
   const double span = canvas->depthDomain().span();
   if ( !std::isfinite( clicked ) || !( span > 0 ) )
     return;
-  canvas->zoomToDepth( clicked - span / 2.0, clicked + span / 2.0 );
+  canvas->zoomToDepth( clicked - span / 4.0, clicked + span / 4.0 );
 }
 
 // ---------------------------------------------------------------- cursor
 
 WellTrackCursorTool::WellTrackCursorTool( WellTrackCanvas *canvas )
-  : QgsPlotTool( canvas, QCursor( Qt::CrossCursor ) )
+  : QgsPlotTool( canvas, QStringLiteral( "WellTrackCursor" ) )
 {
-  setToolName( QStringLiteral( "WellTrackCursor" ) );
+  setCursor( QCursor( Qt::CrossCursor ) );
 }
 
 void WellTrackCursorTool::plotMoveEvent( QgsPlotMouseEvent *event )

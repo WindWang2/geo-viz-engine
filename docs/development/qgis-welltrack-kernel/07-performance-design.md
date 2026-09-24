@@ -47,9 +47,16 @@ Small-n fast path: `sliceCount <= max(2*bins, 64)` → pass-through raw samples
 | Cache | Key | Invalidated by |
 |---|---|---|
 | layout | (size, visibility/width set, model generation) | any of key inputs |
-| envelope (per curve) | (model generation, curve id, bins, quantized depth window with quantum = span/bins) | key change; single-slot per curve (current viewport only — **no history, no unbounded growth**) |
+| envelope (per curve) | (model identity, model generation, track id, series id, bins, quantized depth window with quantum = span/bins) | key change; single-slot per curve (current viewport only — **no history, no unbounded growth**) |
 | axis label layout | (axis config generation, width) | key change |
 | scene item pixmap | (model gen, depth window, size, dpr, style) | `refresh()`/any input change |
+
+v1 implementation note (honest degradation, reviewed in round 1/2): the
+envelope cache and scene-item pixmap are implemented as specified; layout
+and axis-label layout are recomputed each frame (measured cheap relative to
+envelope building; the perf table in 13 quantifies it). Buffer-content
+changes without a `touch()` produce stale envelopes by contract — the host
+must bump the model (documented in track_model.h).
 
 Depth-window quantization (quantum = span/bins) means pan within a bin
 re-renders from the same envelope — the reference trick that makes dragging

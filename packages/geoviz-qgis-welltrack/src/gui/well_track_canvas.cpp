@@ -35,6 +35,7 @@ constexpr double kWheelZoomFineFactor = 1.05;
 WellTrackCanvas::WellTrackCanvas( QWidget *parent )
   : QgsPlotCanvas( parent )
 {
+  qRegisterMetaType<HitResult>( "geoviz::qgis_welltrack::HitResult" );
   mSceneItem = new WellTrackSceneItem( this );
   mCrosshairItem = new WellTrackCrosshairItem( this );
   mSceneItem->updateRect();
@@ -141,7 +142,10 @@ void WellTrackCanvas::panContentsBy( double dx, double dy )
   Q_UNUSED( dx )  // v1 has no horizontal pan; tracks own their x domain
   if ( !mDepthDomain.isValid() )
     return;
-  const double h = height();
+  // Pan speed follows the *content* height (headers excluded), per contract.
+  const double h = ( mSceneItem && !mSceneItem->layout().tracks.empty() )
+                     ? mSceneItem->layout().contentArea.height()
+                     : static_cast<double>( height() );
   if ( h <= 0 )
     return;
 
@@ -283,11 +287,6 @@ void WellTrackCanvas::resizeEvent( QResizeEvent *event )
   QgsPlotCanvas::resizeEvent( event );
   if ( mSceneItem )
     mSceneItem->updateRect();
-}
-
-void WellTrackCanvas::scheduleRefresh()
-{
-  refresh();
 }
 
 // ---------------------------------------------------------------- cursor plumbing

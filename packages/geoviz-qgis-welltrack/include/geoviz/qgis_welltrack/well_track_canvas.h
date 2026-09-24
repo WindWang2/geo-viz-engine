@@ -20,8 +20,6 @@
 
 #include <qgsplotcanvas.h>
 
-#include <QPointer>
-
 #include <memory>
 
 class QgsPlotTool;
@@ -101,8 +99,10 @@ class GEOVIZ_QWT_GUI_EXPORT WellTrackCanvas : public QgsPlotCanvas
     double mFullExtentMin = 0.0;
     double mFullExtentMax = 1.0;
 
-    QPointer<WellTrackSceneItem> mSceneItem;
-    QPointer<WellTrackCrosshairItem> mCrosshairItem;
+    // Raw pointers by upstream convention (QGraphicsScene owns the items and
+    // is parented to the canvas; see QgsElevationProfileCanvas::mPlotItem).
+    WellTrackSceneItem *mSceneItem = nullptr;
+    WellTrackCrosshairItem *mCrosshairItem = nullptr;
 };
 
 } // namespace geoviz::qgis_welltrack

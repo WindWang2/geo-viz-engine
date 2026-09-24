@@ -63,24 +63,11 @@ DepthDomain DepthDomain::clampedTo( double fullMin, double fullMax ) const
     lo = hi - s;
   if ( lo < fullMin )
     lo = fullMin;
+  double newHi = std::min( lo + s, fullMax );
 
-  DepthDomain out;
-  out.orientation = orientation;
-  if ( orientation == DepthOrientation::IncreasingDown )
-  {
-    out.shallow = lo;
-    out.deep = lo + s;
-    if ( out.deep > fullMax )
-      out.deep = fullMax;
-  }
-  else
-  {
-    out.shallow = lo + s;
-    if ( out.shallow > fullMax )
-      out.shallow = fullMax;
-    out.deep = lo;
-  }
-  return out;
+  // Preserve orientation; makeDomain normalizes the edge pair so the
+  // invariant shallow <= deep (for Down) always holds.
+  return makeDomain( lo, newHi, orientation );
 }
 
 DepthDomain makeDomain( double edgeA, double edgeB, DepthOrientation orientation )

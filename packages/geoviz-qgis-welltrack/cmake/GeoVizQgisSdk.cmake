@@ -34,8 +34,10 @@ endfunction()
 if(TARGET PwbQgis::Sdk)
   # Host already imported the SDK (paleo-workbench build). The host's own
   # pwb_sdk_path() has defined the PALEO_* cache vars, so runtime locations
-  # still resolve; QGIS GUI symbols resolve through the host's Qt find.
+  # still resolve; the host's Sdk interface closure covers core+gui headers
+  # and symbols, satisfying both the core and gui libraries here.
   set(GEOVIZ_QGIS_SDK_INTERFACE "PwbQgis::Sdk" CACHE INTERNAL "QGIS SDK interface target")
+  set(GEOVIZ_QGIS_SDK_CORE_INTERFACE "PwbQgis::Sdk" CACHE INTERNAL "QGIS core SDK interface target")
   geoviz_qgis_sdk_path(PALEO_QGIS_SDK_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/../native/qgis_render_bridge/build/qgis-vendor/output")
   set(GEOVIZ_QGIS_RUNTIME "${PALEO_QGIS_SDK_DIR}/lib" CACHE INTERNAL "QGIS runtime SO dir")
@@ -104,6 +106,22 @@ _geoviz_qwt_header_dirs(_geoviz_qwt_core_dirs ${_geoviz_qwt_core_headers})
 _geoviz_qwt_header_dirs(_geoviz_qwt_gui_dirs ${_geoviz_qwt_gui_headers})
 
 file(GLOB _geoviz_qwt_qwt_dir "${PALEO_QGIS_SOURCE_DIR}/external/qwt-*")
+
+# Core-only closure: QGIS core headers + core lib + Qt Core/Gui. Consumers
+# that must not see QGIS gui / QtWidgets (geoviz_qgis_welltrack_core) link
+# this; the full Sdk below adds gui + widgets.
+add_library(GeoVizQgis::SdkCore INTERFACE IMPORTED GLOBAL)
+target_include_directories(GeoVizQgis::SdkCore INTERFACE
+  "${PALEO_QGIS_SOURCE_DIR}/src/core"
+  "${PALEO_QGIS_SOURCE_DIR}/src/analysis"
+  ${_geoviz_qwt_core_dirs}
+  "${PALEO_QGIS_SOURCE_DIR}/external/nlohmann"
+  "${PALEO_QGIS_SOURCE_DIR}/external/spatialindex/include"
+  "${PALEO_QGIS_BUILD_DIR}"
+  "${PALEO_QGIS_BUILD_DIR}/src/core"
+  "${PWB_QGIS_DEPS_PREFIX}/include")
+target_link_libraries(GeoVizQgis::SdkCore INTERFACE GeoVizQgis::Core Qt6::Core Qt6::Gui)
+set(GEOVIZ_QGIS_SDK_CORE_INTERFACE "GeoVizQgis::SdkCore" CACHE INTERNAL "QGIS core-only SDK interface target")
 
 add_library(GeoVizQgis::Sdk INTERFACE IMPORTED GLOBAL)
 target_include_directories(GeoVizQgis::Sdk INTERFACE
