@@ -6,7 +6,15 @@
 namespace geoviz::well_track {
 
 void IntervalColumn::finalize() {
-    sorted_ = items;
+    // Drop non-finite bounds first: a NaN top breaks strict weak ordering in
+    // the sort below, a NaN bottom poisons maxLength_ for the whole column.
+    sorted_.clear();
+    sorted_.reserve(items.size());
+    for (const auto& it : items) {
+        if (std::isfinite(it.top) && std::isfinite(it.bottom) && it.bottom > it.top) {
+            sorted_.push_back(it);
+        }
+    }
     std::stable_sort(sorted_.begin(), sorted_.end(),
                      [](const IntervalItem& a, const IntervalItem& b) { return a.top < b.top; });
     maxLength_ = 0.0;

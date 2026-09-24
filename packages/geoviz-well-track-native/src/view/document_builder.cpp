@@ -14,6 +14,11 @@ namespace geoviz::well_track::docbuild {
 
 namespace {
 
+// Python math.isclose defaults (rel_tol 1e-9).
+bool isClose(double a, double b) {
+    return std::abs(a - b) <= 1e-9 * std::max(std::abs(a), std::abs(b));
+}
+
 std::string formatDepth(double v, double step) {
     char buf[64];
     const int decimals = step >= 1.0 ? 0 : (step >= 0.1 ? 1 : 2);
@@ -38,7 +43,9 @@ CurveStyle defaultCurveStyle(const CurveMetadata& meta) {
 QString patternAssetPath(const QString& dir, const std::string& patternKey) {
     // pattern_engine.py naming: hyphen -> underscore; facies/ subdir first.
     // Results are memoized: row assembly must not stat the filesystem per
-    // interval (docs 09).
+    // interval (docs 09). NOTE: the cache is keyed by patternKey only — this
+    // is sound because defaultPatternAssetDir() is itself resolved once per
+    // process; revisit if multiple directories ever come into play.
     if (dir.isEmpty() || patternKey.empty()) return QString();
     static std::unordered_map<std::string, QString> cache;  // GUI-thread only
     const auto it = cache.find(patternKey);
@@ -67,15 +74,9 @@ std::vector<SurfaceIntervalRow> intervalRows(const IntervalColumn& column, Track
         r.bottom = it.bottom;
         r.label = it.category;
         switch (kind) {
-            case TrackKind::Lithology: {
-                r.fillRgba = catalog.fallbackColorFor(it.category);
-                if (auto key = catalog.patternKeyFor(it.category)) {
-                    const QString path = patternAssetPath(patternDir, *key);
-                    if (!path.isEmpty()) r.patternAssetPath = path.toStdString();
-                }
-                break;
-            }
+            case TrackKind::Lithology:
             case TrackKind::Facies: {
+                // Same resolution for both: fallback colour + optional pattern.
                 r.fillRgba = catalog.fallbackColorFor(it.category);
                 if (auto key = catalog.patternKeyFor(it.category)) {
                     const QString path = patternAssetPath(patternDir, *key);
@@ -83,10 +84,12 @@ std::vector<SurfaceIntervalRow> intervalRows(const IntervalColumn& column, Track
                 }
                 break;
             }
-            case TrackKind::SystemsTract:
-                r.fillRgba = systemsTractStyle(it.category, i).rgba;
-                r.shape = systemsTractStyle(it.category, i).shape;
+            case TrackKind::SystemsTract: {
+                const IntervalStyle st = systemsTractStyle(it.category, i);
+                r.fillRgba = st.rgba;
+                r.shape = st.shape;
                 break;
+            }
             default:
                 r.fillRgba = intervalStyleFor(it, i).rgba;
                 break;
@@ -253,13 +256,16 @@ WellTrackViewConfig buildDefaultDocument(const WellDataSnapshot& snapshot) {
 }
 
 // Public API (curve_style.h): manual ranges are kept when sane, robust
-// range otherwise. Sanity parity (curve_track.py:96-108).
+// range otherwise. Sanity parity (curve_track.py:96-108), including the
+// near-equal rejection (math.isclose). C++ additionally rejects inverted
+// manual ranges — a deliberate safety divergence from Python, which kept
+// them and relied on downstream clamping.
 std::pair<std::pair<double, double>, bool> resolveXRange(const XRange& range,
                                                          const CurveBuffer& buffer,
                                                          const std::string& curveName) {
     if (range.manual) {
         const auto [lo, hi] = *range.manual;
-        const bool sane = lo < hi && lo > -100.0 && hi <= 1e5;
+        const bool sane = lo < hi && lo > -100.0 && hi <= 1e5 && !isClose(lo, hi);
         if (sane) return {*range.manual, false};
     }
     if (buffer.empty()) return {{0.0, 100.0}, true};
@@ -312,7 +318,8 @@ std::optional<SurfaceTrackColumn> assembleColumn(const TrackConfigEntry& entry,
                 layer.lineWidth = a.style.lineWidth;
                 layer.lineStyle = a.style.lineStyle;
                 XRange effective = entry.xRange;
-                const auto [vals, usedRobust] = effectiveRange(entry.xRange, buf, curveName);
+                [[maybe_unused]] const auto [vals, usedRobust] =
+                    effectiveRange(entry.xRange, buf, curveName);
                 effective.manual = vals;  // resolved concrete range for the kernel
                 layer.xRange = effective;
                 col.curves.push_back(std::move(layer));

@@ -1,6 +1,7 @@
 #include "geoviz/well_track/domain/depth.h"
 
 #include <cmath>
+#include <cstdint>
 
 namespace geoviz::well_track {
 
@@ -34,11 +35,11 @@ std::vector<double> depthTicks(double top, double bottom, double rectHeight, dou
     if (!(bottom > top) || rectHeight <= 0.0) return ticks;
     const double step = niceDepthInterval(bottom - top, rectHeight, minPx);
     if (!(step > 0.0)) return ticks;
-    // First multiple of step at or above top.
-    double d = std::ceil(top / step) * step;
-    // Guard float drift at the boundary.
-    if (d < top) d += step;
-    for (; d <= bottom; d += step) ticks.push_back(d);
+    // First multiple of step at or above top, then k*step accumulation to
+    // avoid float drift on long spans.
+    std::int64_t k = static_cast<std::int64_t>(std::ceil(top / step));
+    if (k * step < top) ++k;
+    for (; k * step <= bottom; ++k) ticks.push_back(k * step);
     return ticks;
 }
 

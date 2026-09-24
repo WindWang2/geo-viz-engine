@@ -92,8 +92,12 @@ QJsonObject curveStyleToJson(const CurveStyle& s) {
 
 std::optional<CurveStyle> curveStyleFrom(const QJsonObject& o) {
     CurveStyle s;
-    s.rgba = static_cast<std::uint32_t>(o["rgba"].toDouble(0xFF63B3ED));
+    // Clamp before the uint32 cast: out-of-range doubles cast as UB.
+    double rgba = o["rgba"].toDouble(0xFF63B3ED);
+    rgba = std::clamp(rgba, 0.0, 4294967295.0);
+    s.rgba = static_cast<std::uint32_t>(rgba);
     s.lineWidth = o["lineWidth"].toDouble(1.5);
+    if (!(s.lineWidth > 0.0) || s.lineWidth > 100.0) s.lineWidth = 1.5;  // sane pens only
     if (o.contains("lineStyle")) {
         const auto ls = lineStyleFrom(o["lineStyle"].toInt(0));
         if (!ls) return std::nullopt;

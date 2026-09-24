@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include <QPointer>
 #include <QWidget>
 
 #include "geoviz/well_track/view/inspection.h"
@@ -51,7 +52,7 @@ private:
     void setStatusFromInspection(const InspectionResult& result);
     void refreshEmptyState();
 
-    IWellTrackSurface* surface_ = nullptr;  // child-owned
+    QPointer<IWellTrackSurface> surface_;  // child-owned (QObject child of this)
     std::unique_ptr<WellTrackController> controller_;
     CrosshairOverlay* crosshair_ = nullptr;  // child widget
     SplitterOverlay* splitter_ = nullptr;    // child widget (paint-only)

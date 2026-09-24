@@ -14,7 +14,8 @@ namespace geoviz::well_track {
 
 WellTrackWidget::WellTrackWidget(IWellTrackSurface* surface,
                                  std::shared_ptr<IWellTrackDataSource> source, QWidget* parent)
-    : QWidget(parent), surface_(surface) {
+    : QWidget(parent), surface_(surface) {  // QPointer: null-safe if a host
+                                             // destroys the surface early
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);

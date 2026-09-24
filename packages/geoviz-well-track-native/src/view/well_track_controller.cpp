@@ -184,10 +184,13 @@ bool WellTrackController::replaceSnapshot(SnapshotPtr snapshot) {
 bool WellTrackController::setDepthRange(double top, double bottom) {
     if (!applyDepthRange(top, bottom)) return false;
     // Propagate to sync peers: the origin fans out once; each peer applies
-    // without re-propagating (QPainterSyncManager echo semantics, N7).
+    // without re-propagating (QPainterSyncManager echo semantics, N7). We
+    // iterate a copy: a depthRangeChanged slot may rewire the peer list
+    // (syncWith/unsyncAll) and invalidate the range-for.
     if (!syncing_) {
         pruneSyncPeers();
-        for (auto& peer : syncPeers_) {
+        const std::vector<QPointer<WellTrackController>> peers = syncPeers_;
+        for (auto& peer : peers) {
             if (peer) peer->handlePeerDepthChange(viewRange_.top, viewRange_.bottom);
         }
     }
@@ -407,6 +410,8 @@ bool WellTrackController::splitCurveFromTrack(const TrackId& trackId, const Curv
     CurveAssignment a = std::move(*it);
     e->curves.erase(it);
 
+    // The split-off track is always visible — an explicit user action
+    // (diverging from merge, which preserves the source track's state).
     TrackConfigEntry single;
     single.id = TrackId("curve:split:" + curveId.value + ":" +
                         std::to_string(++userTrackCounter_));

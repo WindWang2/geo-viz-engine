@@ -52,7 +52,7 @@ private slots:
         // Anchor depth keeps its screen ratio: ratio*(newSpan) from newTop.
         const DepthRange r = c.depthRange();
         const double ratio = (anchor - r.top) / r.span();
-        QCOMPARE(ratio, (anchor - 1000.0) / 1000.0);
+        QVERIFY(qFuzzyCompare(ratio, (anchor - 1000.0) / 1000.0));
         // span shrunk by 20% *if* not clamped by full range
         QVERIFY(r.span() <= 1000.0);
     }
@@ -271,7 +271,7 @@ private slots:
         for (const auto& m : r.markers) sawTop = (m.name == "F2-top");
         QVERIFY(sawFormation);
         QVERIFY(sawLitho);
-        QVERIFY(sawTop);  // 10px screen tolerance at 400px/1000m ≈ 25 m
+        QVERIFY(sawTop);  // exact-hit depth; 10px screen tolerance ≈ 29 m at 344 px/1000 m
     }
     void gapDepthYieldsNaNReadings() {
         WellTrackController c(surface_);
@@ -288,13 +288,14 @@ private slots:
     void snapToExtreme() {
         WellTrackController c(surface_);
         c.loadSource(std::make_shared<StaticSource>(representativeSnapshot()));
-        // GR = 80 + 40*sin(0.05 i): local max near i=10..11 (d≈1010-1011).
+        // GR = 80 + 40*sin(0.05 i), depth = 1000 + i, rising over the window
+        // [1008.5, 1011.5] -> samples i = 9..11: max at i=11, min at i=9.
         const auto mx = c.snapToExtreme(CurveId("GR"), 1010.0, 1.5, SnapMode::Maximum);
         QVERIFY(mx.has_value());
-        QVERIFY(std::abs(*mx - 1010.5) <= 1.5);
+        QCOMPARE(*mx, 1011.0);
         const auto mn = c.snapToExtreme(CurveId("GR"), 1010.0, 1.5, SnapMode::Minimum);
         QVERIFY(mn.has_value());
-        QVERIFY(*mn != *mx);
+        QCOMPARE(*mn, 1009.0);
     }
     void hiddenTracksExcluded() {
         WellTrackController c(surface_);

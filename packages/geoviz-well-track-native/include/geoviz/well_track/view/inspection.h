@@ -3,6 +3,7 @@
 // interval and marker hits at the cursor depth.
 #pragma once
 
+#include <cmath>
 #include <optional>
 #include <string>
 #include <vector>
@@ -41,7 +42,7 @@ struct InspectionResult {
     std::vector<IntervalHit> intervals;
     std::vector<MarkerHit> markers;
 
-    bool isValid() const { return !depthUnit.empty(); }
+    bool isValid() const { return std::isfinite(depth); }
 };
 
 }  // namespace geoviz::well_track

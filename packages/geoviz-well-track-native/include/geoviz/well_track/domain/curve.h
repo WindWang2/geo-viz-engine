@@ -38,8 +38,9 @@ public:
     std::uint64_t revision() const { return revision_; }
 
     // Linear interpolation at *depth* (bisect). Returns NaN when the depth is
-    // outside [first, last] (no extrapolation) or when a bracketing sample is
-    // a gap. Parity: CrosshairOverlay._collect_values readout semantics.
+    // outside [first, last] (no extrapolation; single-sample curves read
+    // flat instead) or when a bracketing sample is a gap. Parity:
+    // CrosshairOverlay._collect_values readout semantics.
     double valueAt(double depth) const;
 
 private:

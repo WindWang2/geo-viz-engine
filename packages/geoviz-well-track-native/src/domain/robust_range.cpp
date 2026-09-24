@@ -76,7 +76,8 @@ std::pair<double, double> computeRobustDisplayRange(const double* values, std::s
     for (std::size_t i = 0; i < count; ++i) {
         const double v = values[i];
         if (!std::isfinite(v)) continue;
-        if (maskNull && std::abs(v - nullValue) <= 1e-3) continue;  // np.isclose atol
+        // np.isclose defaults: atol=1e-3 *plus* rtol=1e-5 * |null|.
+        if (maskNull && std::abs(v - nullValue) <= 1e-3 + 1e-5 * std::abs(nullValue)) continue;
         valid.push_back(v);
     }
     if (valid.empty()) return {0.0, 100.0};

@@ -105,9 +105,10 @@ private slots:
         vector<double> v;
         for (int i = 0; i < 1000; ++i) v.push_back(i);  // 0..999
         const auto [lo, hi] = computeRobustDisplayRange(v.data(), v.size(), "CAL");
-        // P2=19.98, P98=979.02, +/-5% then rounded
-        QVERIFY(lo < 25.0 && lo > 10.0);
-        QVERIFY(hi > 970.0 && hi < 1000.0);
+        // numpy-linear P2=19.98, P98=979.02; +/-5% span then floor/ceil to 0.1
+        // (verified against the Python reference on the same data).
+        QCOMPARE(lo, -28.0);
+        QCOMPARE(hi, 1027.0);
     }
     void emptyFallsBack() {
         const auto [lo, hi] = computeRobustDisplayRange(nullptr, 0, "GR");

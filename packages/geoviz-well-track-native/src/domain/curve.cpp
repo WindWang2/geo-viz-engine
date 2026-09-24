@@ -31,18 +31,19 @@ CurveBuffer::CurveBuffer(std::vector<double> depths, std::vector<double> values,
 }
 
 double CurveBuffer::valueAt(double depth) const {
-    if (depths_.size() < 2) {
-        if (depths_.size() == 1 && depth == depths_.front()) return values_.front();
-        return std::numeric_limits<double>::quiet_NaN();
+    if (depths_.empty()) return std::numeric_limits<double>::quiet_NaN();
+    if (depths_.size() == 1) {
+        // Single-sample curves read flat (np.interp semantics).
+        return values_.front();
     }
     if (depth < depths_.front() || depth > depths_.back()) {
         return std::numeric_limits<double>::quiet_NaN();  // no extrapolation
     }
     const auto it = std::upper_bound(depths_.begin(), depths_.end(), depth);
     const std::size_t hi = static_cast<std::size_t>(it - depths_.begin());
+    if (hi == 0) return values_.front();  // depth == first sample
     const std::size_t lo = hi - 1;
     if (depth == depths_[lo]) return values_[lo];
-    if (depth == depths_[hi]) return values_[hi];
     const double vLo = values_[lo];
     const double vHi = values_[hi];
     if (!std::isfinite(vLo) || !std::isfinite(vHi)) {

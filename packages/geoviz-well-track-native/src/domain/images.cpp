@@ -1,12 +1,17 @@
 #include "geoviz/well_track/domain/images.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace geoviz::well_track {
 
 void ImageSetData::finalize() {
     segments.erase(std::remove_if(segments.begin(), segments.end(),
-                                  [](const ImageSegment& s) { return !(s.depthBottom > s.depthTop); }),
+                                  [](const ImageSegment& s) {
+                                      return !std::isfinite(s.depthTop) ||
+                                             !std::isfinite(s.depthBottom) ||
+                                             !(s.depthBottom > s.depthTop);
+                                  }),
                    segments.end());
     std::stable_sort(segments.begin(), segments.end(),
                      [](const ImageSegment& a, const ImageSegment& b) { return a.depthTop < b.depthTop; });
