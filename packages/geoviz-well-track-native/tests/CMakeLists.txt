@@ -16,3 +16,13 @@ endfunction()
 wt_add_test(wt_domain_tests domain/t_domain.cpp)
 wt_add_test(wt_config_tests config/t_config_builder.cpp)
 wt_add_test(wt_view_tests view/t_view.cpp)
+
+# With the QGIS kernel adapter enabled, the library links QGIS — tests need
+# the SDK runtime (paths come from A's GeoVizQgisSdk.cmake cache vars).
+if(TARGET GeoViz::QgisWellTrack AND DEFINED GEOVIZ_QGIS_RUNTIME)
+  set_tests_properties(
+    wt_domain_tests wt_config_tests wt_view_tests
+    PROPERTIES ENVIRONMENT
+               "QT_QPA_PLATFORM=offscreen;QT_QGIS_PREFIX_DIR=${PALEO_QGIS_SDK_DIR};LD_LIBRARY_PATH=${GEOVIZ_QGIS_RUNTIME}:$ENV{LD_LIBRARY_PATH}"
+  )
+endif()

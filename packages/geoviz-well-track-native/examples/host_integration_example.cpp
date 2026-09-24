@@ -13,6 +13,10 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#ifdef GEOVIZ_WELL_TRACK_WITH_QGIS_KERNEL
+#include <qgsapplication.h>
+#endif
+
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -85,12 +89,16 @@ SnapshotPtr makeRepresentativeWell() {
 
 }  // namespace
 
-int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+int run(int argc, char** argv) {
+    // main() may already have created a QgsApplication (QApplication
+    // subclass) when the QGIS kernel is enabled — never construct a second
+    // application object.
+    QApplication* app = static_cast<QApplication*>(QApplication::instance());
+    if (!app) app = new QApplication(argc, argv);
     QCommandLineParser parser;
     QCommandLineOption smokeOption("smoke", "run scripted smoke then exit");
     parser.addOption(smokeOption);
-    parser.process(app);
+    parser.process(*app);
 
     WellTrackViewFactory factory;
     auto source = std::make_shared<ExampleSource>(makeRepresentativeWell());
@@ -121,5 +129,21 @@ int main(int argc, char** argv) {
             window->close();
         });
     }
-    return app.exec();
+    return app->exec();
+}
+
+int main(int argc, char** argv) {
+#ifdef GEOVIZ_WELL_TRACK_WITH_QGIS_KERNEL
+    // QGIS-backed kernel: symbol/text registries need QgsApplication (A's
+    // documented bootstrap; see A's examples/welltrack_demo).
+    QgsApplication app(argc, argv, true);
+    QgsApplication::setPrefixPath(QString::fromLocal8Bit(qgetenv("QT_QGIS_PREFIX_DIR")), true);
+    QgsApplication::init();
+    QgsApplication::initQgis();
+    const int rc = run(argc, argv);
+    QgsApplication::exitQgis();
+    return rc;
+#else
+    return run(argc, argv);
+#endif
 }

@@ -8,15 +8,31 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets)
 
-# Prompt A integration (docs 04): resolve GeoViz::QgisWellTrack either from
-# an install prefix (-DGeoVizQgisWellTrack_DIR=...) or a sibling worktree
-# export. Without it the package still builds domain/config/data/view layers
-# and the widget reports a "no render kernel" state — there is deliberately
-# NO fallback rendering engine in this package.
+# Prompt A integration (docs 04): two resolution paths for
+# GeoViz::QgisWellTrack —
+#   1. a future install config (find_package, once A exports one);
+#   2. A's documented consumption mode: add_subdirectory on its package
+#      source (-DGEOVIZ_QGIS_WELLTRACK_DIR=<A worktree>/packages/geoviz-qgis-welltrack).
+# A's GeoVizQgisSdk.cmake reads PALEO_QGIS_SOURCE_DIR / PALEO_QGIS_SDK_DIR /
+# PALEO_QGIS_BUILD_DIR / PWB_QGIS_DEPS_PREFIX from the environment.
+# Without A the package still builds domain/config/data/view layers and the
+# widget reports a "no render kernel" state — there is deliberately NO
+# fallback rendering engine in this package.
 find_package(GeoVizQgisWellTrack QUIET CONFIG)
+set(GEOVIZ_QGIS_WELLTRACK_DIR "" CACHE PATH
+    "Prompt A package source (packages/geoviz-qgis-welltrack) for add_subdirectory integration")
+if(NOT TARGET GeoViz::QgisWellTrack AND GEOVIZ_QGIS_WELLTRACK_DIR
+   AND EXISTS "${GEOVIZ_QGIS_WELLTRACK_DIR}/CMakeLists.txt")
+  add_subdirectory("${GEOVIZ_QGIS_WELLTRACK_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/qgis-welltrack-build")
+endif()
+if(TARGET GeoViz::QgisWellTrack)
+  set(GEOVIZ_WELL_TRACK_QWT_DEFAULT ON)
+else()
+  set(GEOVIZ_WELL_TRACK_QWT_DEFAULT OFF)
+endif()
 option(GEOVIZ_WELL_TRACK_WITH_QGIS_KERNEL
        "Build the QgisSurface adapter against GeoViz::QgisWellTrack (Prompt A)"
-       ${GeoVizQgisWellTrack_FOUND})
+       ${GEOVIZ_WELL_TRACK_QWT_DEFAULT})
 option(GEOVIZ_WELL_TRACK_BUILD_TESTS "Build tests" ON)
 option(GEOVIZ_WELL_TRACK_BUILD_EXAMPLES "Build examples" ON)
 
@@ -61,15 +77,17 @@ if(GEOVIZ_WELL_TRACK_WITH_QGIS_KERNEL)
     message(FATAL_ERROR "GEOVIZ_WELL_TRACK_WITH_QGIS_KERNEL=ON but target "
                         "GeoViz::QgisWellTrack is not available (Prompt A).")
   endif()
+  find_package(Qt6 6.6 REQUIRED COMPONENTS Svg)  # pattern brush materialization
   target_sources(geoviz_well_track_native PRIVATE src/view/qgis_surface.cpp)
-  target_link_libraries(geoviz_well_track_native PUBLIC GeoViz::QgisWellTrack)
+  target_link_libraries(geoviz_well_track_native PUBLIC GeoViz::QgisWellTrack PRIVATE Qt6::Svg)
+  target_compile_definitions(geoviz_well_track_native PUBLIC GEOVIZ_WELL_TRACK_WITH_QGIS_KERNEL)
   message(STATUS "geoviz-well-track-native: QgisSurface adapter ENABLED (Prompt A kernel)")
 else()
   message(
     STATUS
-      "geoviz-well-track-native: QgisSurface adapter DISABLED - set "
-      "-DGeoVizQgisWellTrack_DIR=<prefix>/lib/cmake/GeoVizQgisWellTrack to "
-      "integrate the Prompt A kernel. No fallback renderer is provided.")
+      "geoviz-well-track-native: QgisSurface adapter DISABLED - integrate the "
+      "Prompt A kernel via -DGEOVIZ_QGIS_WELLTRACK_DIR=<A>/packages/geoviz-qgis-welltrack "
+      "(or an install prefix once A exports one). No fallback renderer is provided.")
 endif()
 
 include(GNUInstallDirs)
