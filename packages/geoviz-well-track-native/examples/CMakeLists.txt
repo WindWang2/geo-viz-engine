@@ -1,0 +1,4 @@
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets)
+
+add_executable(host_integration_example host_integration_example.cpp)
+target_link_libraries(host_integration_example PRIVATE geoviz_well_track_native)
