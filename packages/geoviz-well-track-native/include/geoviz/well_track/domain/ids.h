@@ -24,6 +24,7 @@ struct StrongId {
 
     explicit operator bool() const { return !value.empty(); }
     bool empty() const { return value.empty(); }
+    void reset() { value.clear(); }
 };
 
 struct TrackIdTag {

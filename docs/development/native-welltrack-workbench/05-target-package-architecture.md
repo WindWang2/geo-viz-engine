@@ -48,7 +48,7 @@ packages/geoviz-well-track-native/
 │   └── mock_surface.h              # 记录式 test double
 ├── examples/
 │   ├── CMakeLists.txt
-│   └── host_integration_example.cpp  # representative well smoke（需 A；否则跳过 target）
+│   └── host_integration_example.cpp  # 恒构建；无 A 时跑 error-state 冒烟，有 A 时走真实渲染
 └── docs/ → 仓库 docs/development/native-welltrack-workbench/
 ```
 

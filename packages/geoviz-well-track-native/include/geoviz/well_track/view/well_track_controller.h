@@ -119,7 +119,6 @@ private:
     std::uint64_t lastRevision_ = 0;
     std::uint64_t userTrackCounter_ = 0;
     SelectionState selection_;
-    IDepthTransformService* depthTransform_ = nullptr;  // host-owned, not stored
     std::vector<QPointer<WellTrackController>> syncPeers_;
     bool syncing_ = false;
 };

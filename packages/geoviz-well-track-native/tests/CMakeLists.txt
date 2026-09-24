@@ -3,7 +3,8 @@ find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets Test)
 function(wt_add_test name src)
   add_executable(${name} ${src})
   target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                                              ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+                                              ${CMAKE_CURRENT_SOURCE_DIR}/../src
+                                              ${CMAKE_CURRENT_SOURCE_DIR}/../src/view)
   target_link_libraries(${name} PRIVATE geoviz_well_track_native Qt6::Test)
   add_test(
     NAME ${name}

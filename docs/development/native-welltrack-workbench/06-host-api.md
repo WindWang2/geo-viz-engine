@@ -84,10 +84,10 @@ view->controller()->applyViewConfig(WellTrackViewConfig::fromJson(json));
 ## 线程与生命周期合同
 
 - 本包全部 API **GUI 线程调用**；host 后台加载完成后经 queued signal 把 snapshot 交给 GUI 线程再 `replaceSnapshot`。
-- widget 销毁 → controller（widget 子对象）连带销毁 → surface（widget 子对象）销毁；host 只需 Qt 父子 ownership，无 delete 责任。
-- `IWellTrackDataSource` 由 controller `QPointer` 式弱持有语义（host 可先于 view 释放数据源；controller 不在析构后回调）。
+- widget 销毁 → controller（widget 的 `unique_ptr` 成员，先于 surface 析构）→ surface（widget 的 QObject 子对象）销毁；host 只需 Qt 父子 ownership，无 delete 责任。
+- `IWellTrackDataSource` 由 controller **`std::shared_ptr` 强持有**（controller 是最后一个消费者之一，host 可在 view 销毁后安全复用同一 source 重建 view）。`IDepthTransformService` 为 host 裸指针：host 须先 `setDepthTransform(nullptr)` 再释放服务对象（`data_source.h` 已注明）。
 - revision 门控：`replaceSnapshot` 带递增 revision；旧 revision 迟到结果被拒（对照 app 现坑 L3）。
-- 无包级单例持有 host 项目状态（PatternLibrary 为进程级**只读**资产缓存，无 host 数据）。
+- 无包级单例持有 host 项目状态（SurfaceRegistry 只存 factory 回调；pattern 目录解析为进程级只读缓存，无 host 数据）。
 
 ## 包不拥有（host 职责）
 

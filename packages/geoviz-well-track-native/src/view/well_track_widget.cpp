@@ -68,6 +68,9 @@ WellTrackWidget::WellTrackWidget(IWellTrackSurface* surface,
                     }
                 });
     } else {
+        // Surface without a viewport widget: still take ownership so the
+        // QObject is cleaned up with this widget.
+        if (surface_) surface_->setParent(this);
         emptyLabel_->setText(QStringLiteral(
             "未找到渲染内核（GeoViz::QgisWellTrack 不可用）。\n"
             "请链接 Prompt A 的 kernel 包后重试。"));
@@ -77,7 +80,9 @@ WellTrackWidget::WellTrackWidget(IWellTrackSurface* surface,
     layout->addWidget(statusLabel_);
     statusLabel_->setText(QStringLiteral("就绪"));
 
-    controller_ = std::make_unique<WellTrackController>(surface_, this);
+    // Owned solely by the unique_ptr member (destroyed before the surface
+    // child) — deliberately not QObject-parented to avoid double ownership.
+    controller_ = std::make_unique<WellTrackController>(surface_);
     connect(controller_.get(), &WellTrackController::depthRangeChanged, this,
             [this](double, double) { updateOverlaysGeometry(); });
     connect(controller_.get(), &WellTrackController::viewConfigChanged, this,
@@ -119,12 +124,12 @@ void WellTrackWidget::updateOverlaysGeometry() {
         crosshair_->raise();
     }
     if (splitter_) splitter_->raise();
-    if (splitter_) {
+    if (splitter_ && controller_) {
         splitter_->setGeometry(content);
-        // One boundary per adjacent visible-column pair.
+        // One boundary per adjacent visible-column pair. The track list is
+        // referenced, never copied (config entries hold strings/vectors).
         std::vector<QPair<TrackId, QRectF>> boundaries;
-        const auto& tracks = controller_ ? controller_->tracks()
-                                         : std::vector<TrackConfigEntry>{};
+        const std::vector<TrackConfigEntry>& tracks = controller_->tracks();
         const TrackConfigEntry* prev = nullptr;
         QRectF prevRect;
         for (const auto& t : tracks) {

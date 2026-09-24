@@ -36,23 +36,25 @@ std::vector<QString> SurfaceRegistry::registeredNames() const {
 }
 
 QString defaultPatternAssetDir() {
-    // Explicit override first.
-    const QByteArray env = qgetenv("GEOVIZ_WELL_TRACK_PATTERN_DIR");
-    if (!env.isEmpty() && QFileInfo::exists(QString::fromUtf8(env))) {
-        return QString::fromUtf8(env);
-    }
-    // Install-prefix layout: <prefix>/share/geoviz/well-track/patterns
-    QDir appDir(QCoreApplication::applicationDirPath());
-    const QStringList candidates = {
-        appDir.filePath(QStringLiteral("../share/geoviz/well-track/patterns")),
-        appDir.filePath(QStringLiteral("share/geoviz/well-track/patterns")),
-        appDir.filePath(QStringLiteral("../../packages/geoviz-well-track-native/assets/patterns")),
-    };
-    for (const QString& c : candidates) {
-        if (QFileInfo::exists(c)) return QDir(c).canonicalPath();
-    }
-    (void)QStandardPaths::AppDataLocation;  // kept for future host-managed assets
-    return QString();
+    // Resolved once per process (column assembly calls this per rebuild).
+    static const QString cached = []() -> QString {
+        const QByteArray env = qgetenv("GEOVIZ_WELL_TRACK_PATTERN_DIR");
+        if (!env.isEmpty() && QFileInfo::exists(QString::fromUtf8(env))) {
+            return QString::fromUtf8(env);
+        }
+        QDir appDir(QCoreApplication::applicationDirPath());
+        const QStringList candidates = {
+            appDir.filePath(QStringLiteral("../share/geoviz/well-track/patterns")),
+            appDir.filePath(QStringLiteral("share/geoviz/well-track/patterns")),
+            appDir.filePath(
+                QStringLiteral("../../packages/geoviz-well-track-native/assets/patterns")),
+        };
+        for (const QString& c : candidates) {
+            if (QFileInfo::exists(c)) return QDir(c).canonicalPath();
+        }
+        return QString();
+    }();
+    return cached;
 }
 
 }  // namespace geoviz::well_track

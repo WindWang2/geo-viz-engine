@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 namespace geoviz::well_track {
@@ -97,8 +98,8 @@ std::pair<double, double> computeRobustDisplayRange(const double* values, std::s
     if (nameContainsAny(upper, {"GR", "\xe4\xbc\xbd\xe9\xa9\xac"})) {  // GR / 伽马
         const double p1 = percentile(s, n, 1.0);
         const double p99 = percentile(s, n, 99.0);
-        preset = std::make_pair(std::max(0.0, std::min(p1, 0.0)),
-                                std::max(150.0, roundTo(p99 + 10.0, 1)));
+        // Python writes max(0.0, min(p1, 0.0)) which is identically 0.0.
+        preset = std::make_pair(0.0, std::max(150.0, roundTo(p99 + 10.0, 1)));
     } else if (nameContainsAny(upper, {"RHOB", "DEN", "\xe5\xaf\x86\xe5\xba\xa6"})) {  // 密度
         const double p1 = percentile(s, n, 1.0);
         const double p99 = percentile(s, n, 99.0);

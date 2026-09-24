@@ -37,42 +37,29 @@ CurveStyle defaultCurveStyle(const CurveMetadata& meta) {
 
 QString patternAssetPath(const QString& dir, const std::string& patternKey) {
     // pattern_engine.py naming: hyphen -> underscore; facies/ subdir first.
+    // Results are memoized: row assembly must not stat the filesystem per
+    // interval (docs 09).
     if (dir.isEmpty() || patternKey.empty()) return QString();
+    static std::unordered_map<std::string, QString> cache;  // GUI-thread only
+    const auto it = cache.find(patternKey);
+    if (it != cache.end()) return it->second;
     std::string file = patternKey;
     std::replace(file.begin(), file.end(), '-', '_');
     const QString name = QString::fromStdString(file) + QStringLiteral(".svg");
-    const QString facies = dir + QStringLiteral("/facies/") + name;
-    if (QFileInfo::exists(facies)) return facies;
-    const QString root = dir + QStringLiteral("/") + name;
-    if (QFileInfo::exists(root)) return root;
-    return QString();
+    QString resolved;
+    if (QFileInfo::exists(dir + QStringLiteral("/facies/") + name)) {
+        resolved = dir + QStringLiteral("/facies/") + name;
+    } else if (QFileInfo::exists(dir + QStringLiteral("/") + name)) {
+        resolved = dir + QStringLiteral("/") + name;
+    }
+    cache[patternKey] = resolved;
+    return resolved;
 }
 
 std::vector<SurfaceIntervalRow> intervalRows(const IntervalColumn& column, TrackKind kind,
-                                             const QString& patternDir, bool nested) {
-    static const char* kNestedKeys[3] = {"phase", "sub_phase", "micro_phase"};
+                                             const QString& patternDir) {
     std::vector<SurfaceIntervalRow> rows;
     const auto& catalog = PatternCatalog::builtin();
-    if (nested) {
-        for (int sub = 0; sub < 3; ++sub) {
-            for (std::size_t i = 0; i < column.items.size(); ++i) {
-                const auto& it = column.items[i];
-                SurfaceIntervalRow r;
-                r.top = it.top;
-                r.bottom = it.bottom;
-                r.label = it.category;
-                r.fillRgba = catalog.fallbackColorFor(it.category);
-                if (auto key = catalog.patternKeyFor(it.category)) {
-                    const QString path = patternAssetPath(patternDir, *key);
-                    if (!path.isEmpty()) r.patternAssetPath = path.toStdString();
-                }
-                r.subColumn = sub;
-                r.subColumnCount = 3;
-                rows.push_back(std::move(r));
-            }
-        }
-        return rows;
-    }
     for (std::size_t i = 0; i < column.items.size(); ++i) {
         const auto& it = column.items[i];
         SurfaceIntervalRow r;
@@ -158,17 +145,24 @@ WellTrackViewConfig buildDefaultDocument(const WellDataSnapshot& snapshot) {
         }
     }
 
-    // 4. Facies: nested when the adapter supplied the 3-level columns.
-    if (const IntervalSetData* set = snapshot.intervalSet(IntervalSetId(kFaciesSetId))) {
-        (void)set;
-        const IntervalSetData* facies = set;
-        const bool hasAny = std::any_of(facies->columns.begin(), facies->columns.end(),
-                                        [](const IntervalColumn& c) { return !c.items.empty(); });
+    // 4. Facies: nested when the adapter supplied the phase/sub/micro columns.
+    if (const IntervalSetData* facies = snapshot.intervalSet(IntervalSetId(kFaciesSetId))) {
+        const bool hasPhase = facies->column("phase") && !facies->column("phase")->items.empty();
+        const bool hasSub =
+            facies->column("sub_phase") && !facies->column("sub_phase")->items.empty();
+        const bool hasMicro =
+            facies->column("micro_phase") && !facies->column("micro_phase")->items.empty();
+        const bool hasAny = hasPhase || hasSub || hasMicro;
         if (hasAny) {
             TrackConfigEntry e = makeEntry(TrackId("facies"), "沉积相", TrackKind::Facies);
             e.intervals.setId = IntervalSetId(kFaciesSetId);
-            e.intervals.nested = facies->columns.size() >= 2;
-            if (!e.intervals.nested) e.intervals.columnKey = facies->columns.front().key;
+            e.intervals.nested = hasPhase && (hasSub || hasMicro);
+            if (!e.intervals.nested) {
+                // Single-level facies: use whichever column carries data.
+                e.intervals.columnKey = hasPhase    ? "phase"
+                                        : hasSub    ? "sub_phase"
+                                                    : "micro_phase";
+            }
             cfg.tracks.push_back(std::move(e));
         }
     }
@@ -258,18 +252,25 @@ WellTrackViewConfig buildDefaultDocument(const WellDataSnapshot& snapshot) {
     return cfg;
 }
 
-std::pair<std::pair<double, double>, bool> effectiveRange(const XRange& range,
-                                                          const CurveBuffer* buffer,
-                                                          const std::string& curveName) {
+// Public API (curve_style.h): manual ranges are kept when sane, robust
+// range otherwise. Sanity parity (curve_track.py:96-108).
+std::pair<std::pair<double, double>, bool> resolveXRange(const XRange& range,
+                                                         const CurveBuffer& buffer,
+                                                         const std::string& curveName) {
     if (range.manual) {
         const auto [lo, hi] = *range.manual;
-        // Sanity parity (curve_track.py:96-108): reject lo > hi, lo <= -100,
-        // hi > 1e5, lo == hi.
         const bool sane = lo < hi && lo > -100.0 && hi <= 1e5;
         if (sane) return {*range.manual, false};
     }
-    if (!buffer || buffer->empty()) return {{0.0, 100.0}, true};
-    return {computeRobustDisplayRange(buffer->values().data(), buffer->size(), curveName), true};
+    if (buffer.empty()) return {{0.0, 100.0}, true};
+    return {computeRobustDisplayRange(buffer.values().data(), buffer.size(), curveName), true};
+}
+
+std::pair<std::pair<double, double>, bool> effectiveRange(const XRange& range,
+                                                          const CurveBuffer* buffer,
+                                                          const std::string& curveName) {
+    if (!buffer) return {{0.0, 100.0}, true};
+    return resolveXRange(range, *buffer, curveName);
 }
 
 std::optional<SurfaceTrackColumn> assembleColumn(const TrackConfigEntry& entry,
@@ -338,7 +339,7 @@ std::optional<SurfaceTrackColumn> assembleColumn(const TrackConfigEntry& entry,
                 static const char* kNested[3] = {"phase", "sub_phase", "micro_phase"};
                 for (int sub = 0; sub < 3; ++sub) {
                     if (const IntervalColumn* c = set->column(kNested[sub])) {
-                        auto rows = intervalRows(*c, entry.kind, patternAssetDir, false);
+                        auto rows = intervalRows(*c, entry.kind, patternAssetDir);
                         for (auto& r : rows) {
                             r.subColumn = sub;
                             r.subColumnCount = 3;
@@ -347,7 +348,7 @@ std::optional<SurfaceTrackColumn> assembleColumn(const TrackConfigEntry& entry,
                     }
                 }
             } else if (const IntervalColumn* c = set->column(entry.intervals.columnKey)) {
-                col.intervals = intervalRows(*c, entry.kind, patternAssetDir, false);
+                col.intervals = intervalRows(*c, entry.kind, patternAssetDir);
             }
             if (!entry.title.empty()) {
                 SurfaceHeaderEntry hdr;

@@ -24,6 +24,10 @@ public:
 // Depth<->time transform for the secondary TWT axis. Product implementations
 // live on the host side (parity: CheckshotTable / WellTieCalibration); this
 // package consumes the interface only and never re-implements interpolation.
+//
+// Lifetime contract: instances are host-owned raw pointers. The host must
+// clear them via setDepthTransform(nullptr) (or destroy the view) before the
+// service object goes away.
 class IDepthTransformService {
 public:
     virtual ~IDepthTransformService() = default;

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -23,7 +24,9 @@ class CurveBuffer {
 public:
     CurveBuffer() = default;
 
-    // depths.size() must equal values.size().
+    // depths.size() must equal values.size(); throws std::invalid_argument
+    // on mismatch (the domain's single throwing path — document-level errors
+    // elsewhere use optionals).
     CurveBuffer(std::vector<double> depths, std::vector<double> values,
                 CurveMetadata meta, std::uint64_t revision = 0);
 

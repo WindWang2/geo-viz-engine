@@ -13,7 +13,6 @@
 // curve payloads share immutable CurveBufferPtr (zero-copy handoff).
 #pragma once
 
-#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -23,8 +22,6 @@
 #include <QPointF>
 #include <QRectF>
 #include <QString>
-
-class QWidget;
 
 #include "geoviz/well_track/domain/curve.h"
 #include "geoviz/well_track/domain/curve_style.h"
@@ -87,7 +84,7 @@ struct SurfaceTrackColumn {
     SurfaceColumnKind kind = SurfaceColumnKind::Curve;
     std::string title;
     int width = 60;
-    std::vector<SurfaceHeaderEntry> headerEntries;  // one per curve / single title
+    SurfaceHeaderEntry header;
 
     std::vector<SurfaceCurveLayer> curves;
     std::vector<SurfaceIntervalRow> intervals;

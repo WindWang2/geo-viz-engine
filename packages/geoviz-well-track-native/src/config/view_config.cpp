@@ -144,6 +144,11 @@ std::optional<TrackConfigEntry> TrackConfigEntry::fromJson(const QJsonObject& o)
     if (!kind) return std::nullopt;
     e.kind = *kind;
     e.width = o["width"].toInt(defaultTrackWidth(e.kind));
+    if (e.kind != TrackKind::Marker) {
+        // Historical configs with out-of-clamp widths load clamped instead
+        // of being rejected wholesale.
+        e.width = std::clamp(e.width, kMinTrackWidth, kMaxTrackWidth);
+    }
     e.visible = o["visible"].toBool(true);
     if (o.contains("xRange")) {
         const auto r = xRangeFrom(o["xRange"].toObject());

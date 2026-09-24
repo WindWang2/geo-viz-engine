@@ -103,14 +103,19 @@ bool WellTrackController::replaceSnapshot(SnapshotPtr snapshot) {
         snapshot->imageSets.size() != snapshot_->imageSets.size()) {
         structural = true;
     } else {
+        // find() (not at()): same size with a different key set must not
+        // throw on the GUI thread.
         for (const auto& [id, set] : snapshot->intervalSets) {
-            if (snapshot_->intervalSets.at(id) != set) structural = true;
+            const auto it = snapshot_->intervalSets.find(id);
+            if (it == snapshot_->intervalSets.end() || it->second != set) structural = true;
         }
         for (const auto& [id, set] : snapshot->markerSets) {
-            if (snapshot_->markerSets.at(id) != set) structural = true;
+            const auto it = snapshot_->markerSets.find(id);
+            if (it == snapshot_->markerSets.end() || it->second != set) structural = true;
         }
         for (const auto& [id, set] : snapshot->imageSets) {
-            if (snapshot_->imageSets.at(id) != set) structural = true;
+            const auto it = snapshot_->imageSets.find(id);
+            if (it == snapshot_->imageSets.end() || it->second != set) structural = true;
         }
     }
 
@@ -240,6 +245,8 @@ void WellTrackController::panDepth(double delta) {
 void WellTrackController::fitDepth() { setDepthRange(fullRange_.top, fullRange_.bottom); }
 
 void WellTrackController::setDepthTransform(IDepthTransformService* transform) {
+    // The transform stays host-owned; it must outlive this controller (see
+    // data_source.h lifetime contract) — we never store or free it.
     if (surface_) surface_->setSecondaryAxis(transform);
 }
 
@@ -598,7 +605,7 @@ void WellTrackController::rebuildAllColumns() {
     const int contentHeight = surface_->contentHeight();
     const QString patternDir = defaultPatternAssetDir();
     for (const auto& entry : config_.tracks) {
-        if (!entry.visible && entry.kind != TrackKind::Marker) continue;
+        if (!entry.visible) continue;  // hidden tracks (incl. marker overlay)
         if (auto col = docbuild::assembleColumn(entry, snapshot_.get(), viewRange_, contentHeight,
                                                 patternDir, imagesSupported)) {
             columns.push_back(std::move(*col));

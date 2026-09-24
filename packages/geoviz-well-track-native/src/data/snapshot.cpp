@@ -28,6 +28,13 @@ DepthRange computeFullRange(const WellDataSnapshot& snapshot) {
             bottom = std::max(bottom, t.depth);
         }
     }
+    for (const auto& [id, set] : snapshot.imageSets) {
+        if (!set) continue;
+        for (const auto& seg : set->segments) {
+            top = std::min(top, seg.depthTop);
+            bottom = std::max(bottom, seg.depthBottom);
+        }
+    }
     DepthRange r{top, bottom};
     if (!r.isValid()) r = DepthRange{0.0, 1.0};
     r.normalize();
