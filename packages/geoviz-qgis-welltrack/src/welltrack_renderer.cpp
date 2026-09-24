@@ -10,7 +10,7 @@
  * drawn with QPainter pens through the same render context (documented
  * decision — see docs 03-reuse-matrix.md).
  ***************************************************************************/
-#include "welltrack_renderer.h"
+#include "geoviz/qgis_welltrack/welltrack_renderer.h"
 
 #include <qgslinesymbol.h>
 #include <qgsnumericformat.h>
@@ -314,7 +314,7 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
     prepared.push_back( std::move( pt ) );
   }
 
-  const qint64 prepUsec = prepTimer.nsecElapsed() / 1000;
+  const qint64 prepUsec = prepTimer.nsecsElapsed() / 1000;
 
   // ============================ paint ============================
   QElapsedTimer paintTimer;
@@ -386,7 +386,7 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
     // ---- value grid (vertical lines) ----
     if ( mStyle.drawValueGrid && axis.isValid() && content.width() > 0 )
     {
-      QgsPlotAxis *axisStyle = axis.style();
+      const QgsPlotAxis *axisStyle = axis.style();
       const double vMin = axis.minimum;
       const double vMax = axis.maximum;
       auto drawVLine = [ & ]( double value )
@@ -679,7 +679,7 @@ void WellTrackRenderer::render( QPainter *painter, const QRectF &targetRect,
   if ( stats )
   {
     stats->prepUsec = prepUsec;
-    stats->paintUsec = paintTimer.nsecElapsed() / 1000;
+    stats->paintUsec = paintTimer.nsecsElapsed() / 1000;
   }
 }
 

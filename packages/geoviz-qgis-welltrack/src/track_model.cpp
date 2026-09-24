@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  ***************************************************************************/
-#include "track_model.h"
+#include "geoviz/qgis_welltrack/track_model.h"
 
 #include <algorithm>
 #include <cmath>

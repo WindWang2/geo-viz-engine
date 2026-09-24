@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  ***************************************************************************/
-#include "curve_lod.h"
+#include "geoviz/qgis_welltrack/curve_lod.h"
 
 #include <QtGlobal>
 

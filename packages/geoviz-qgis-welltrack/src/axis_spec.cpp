@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  ***************************************************************************/
-#include "axis_spec.h"
+#include "geoviz/qgis_welltrack/axis_spec.h"
 
 namespace geoviz::qgis_welltrack
 {

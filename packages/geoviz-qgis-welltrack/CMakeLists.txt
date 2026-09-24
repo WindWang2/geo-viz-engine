@@ -23,7 +23,7 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   set(GEOVIZ_QWT_BUILD_EXAMPLES ON)
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
@@ -67,6 +67,12 @@ target_compile_definitions(geoviz_qgis_welltrack_gui PRIVATE GEOVIZ_QWT_GUI_LIBR
 target_include_directories(geoviz_qgis_welltrack_gui
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+# Public headers with Q_OBJECT must be target sources for AUTOMOC to moc
+# them (headers outside the source dir are otherwise never scanned).
+target_sources(geoviz_qgis_welltrack_gui PRIVATE
+  include/geoviz/qgis_welltrack/well_track_canvas.h
+  include/geoviz/qgis_welltrack/well_track_tools.h
+  include/geoviz/qgis_welltrack/depth_synchronizer.h)
 # The SDK interface is PUBLIC: the public well_track_canvas.h includes
 # qgsplotcanvas.h, so every consumer needs the QGIS gui include closure.
 target_link_libraries(geoviz_qgis_welltrack_gui
@@ -104,7 +110,8 @@ if(GEOVIZ_QWT_BUILD_TESTS)
   set(GEOVIZ_QWT_APP_TESTS test_renderer)
   foreach(test_name IN LISTS GEOVIZ_QWT_APP_TESTS)
     add_executable(${test_name} tests/${test_name}.cpp tests/qgis_app_fixture.h)
-    target_link_libraries(${test_name} PRIVATE GeoViz::QgisWellTrackCore Qt6::Test Qt6::Svg)
+    target_link_libraries(${test_name} PRIVATE GeoViz::QgisWellTrackCore Qt6::Test Qt6::Svg
+      ${GEOVIZ_QGIS_SDK_INTERFACE})
     target_include_directories(${test_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME ${test_name} COMMAND ${test_name})
     set_tests_properties(${test_name} PROPERTIES ENVIRONMENT

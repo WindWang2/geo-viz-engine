@@ -120,7 +120,10 @@ target_include_directories(GeoVizQgis::SdkCore INTERFACE
   "${PALEO_QGIS_BUILD_DIR}"
   "${PALEO_QGIS_BUILD_DIR}/src/core"
   "${PWB_QGIS_DEPS_PREFIX}/include")
-target_link_libraries(GeoVizQgis::SdkCore INTERFACE GeoVizQgis::Core Qt6::Core Qt6::Gui)
+# Qt closure mirrors what QGIS *core* headers include: Xml (QDomDocument via
+# qgsrectangle.h and friends), Svg (QSvgGenerator in some io headers) —
+# Widgets/PrintSupport stay out of the core-only closure on purpose.
+target_link_libraries(GeoVizQgis::SdkCore INTERFACE GeoVizQgis::Core Qt6::Core Qt6::Gui Qt6::Xml Qt6::Svg)
 set(GEOVIZ_QGIS_SDK_CORE_INTERFACE "GeoVizQgis::SdkCore" CACHE INTERNAL "QGIS core-only SDK interface target")
 
 add_library(GeoVizQgis::Sdk INTERFACE IMPORTED GLOBAL)

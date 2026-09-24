@@ -142,7 +142,9 @@ void TestCanvasNavigation::wheelZoomAnchorsCursor()
   // 240 delta = 2 steps × 1.2 → span /= 1.44.
   QWheelEvent event( cursor, cursor, QPoint( 0, 0 ), QPoint( 0, 240 ), Qt::NoButton, Qt::NoModifier,
                      Qt::NoScrollPhase, false );
-  QCoreApplication::sendEvent( &canvas, &event );
+  // Real wheel events are delivered to the viewport; QAbstractScrollArea
+  // forwards them to the view's wheelEvent (same path as mouse events).
+  QCoreApplication::sendEvent( canvas.viewport(), &event );
 
   QVERIFY( canvas.depthDomain().span() < spanBefore / 1.4 );
   const double anchorAfter = canvas.depthAt( cursor );
@@ -159,7 +161,7 @@ void TestCanvasNavigation::wheelZoomCtrlFine()
   const double spanBefore = canvas.depthDomain().span();
   QWheelEvent event( QPointF( 150, 200 ), QPointF( 150, 200 ), QPoint( 0, 0 ), QPoint( 0, 120 ),
                      Qt::NoButton, Qt::ControlModifier, Qt::NoScrollPhase, false );
-  QCoreApplication::sendEvent( &canvas, &event );
+  QCoreApplication::sendEvent( canvas.viewport(), &event );
   const double spanAfter = canvas.depthDomain().span();
   // Fine factor 1.05 — much less shrink than the normal 1.2.
   QVERIFY( spanAfter > spanBefore / 1.1 );

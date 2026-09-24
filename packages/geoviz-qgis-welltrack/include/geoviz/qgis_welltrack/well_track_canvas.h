@@ -18,6 +18,7 @@
 #include "geoviz/qgis_welltrack/hit_testing.h"
 #include "geoviz/qgis_welltrack/track_model.h"
 
+#include <qgscoordinatereferencesystem.h>
 #include <qgsplotcanvas.h>
 
 #include <memory>
@@ -92,6 +93,7 @@ class GEOVIZ_QWT_GUI_EXPORT WellTrackCanvas : public QgsPlotCanvas
 
     std::shared_ptr<WellTrackModel> mModel;
     DepthDomain mDepthDomain;
+    bool mDomainExplicitlySet = false;  // false until the first applyDepthDomain
     bool mHasFullExtent = false;
     double mFullExtentMin = 0.0;
     double mFullExtentMax = 1.0;

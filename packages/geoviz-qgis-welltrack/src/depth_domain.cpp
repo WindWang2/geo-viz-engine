@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  ***************************************************************************/
-#include "depth_domain.h"
+#include "geoviz/qgis_welltrack/depth_domain.h"
 
 namespace geoviz::qgis_welltrack
 {

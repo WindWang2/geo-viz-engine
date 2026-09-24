@@ -3,8 +3,8 @@
  *
  * SPDX-License-Identifier: MIT
  ***************************************************************************/
-#include "well_track_tools.h"
-#include "well_track_canvas.h"
+#include "geoviz/qgis_welltrack/well_track_tools.h"
+#include "geoviz/qgis_welltrack/well_track_canvas.h"
 
 #include <qgsplotmouseevent.h>
 

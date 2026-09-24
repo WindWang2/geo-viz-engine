@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  ***************************************************************************/
-#include "curve_data.h"
+#include "geoviz/qgis_welltrack/curve_data.h"
 
 #include <cmath>
 

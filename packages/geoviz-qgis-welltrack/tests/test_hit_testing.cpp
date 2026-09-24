@@ -88,10 +88,12 @@ void TestHitTesting::nearestWithinTolerance()
   const double y = domain.yForDepth( 1050.0, left.contentRect );
   const double x = model->track( left.trackId )->axis.xForValue( 20.0, left.contentRect );
 
-  // 5 px below the sample — inside 10 px tolerance.
-  const HitResult hit = hitTestNearestSample( *model, layout, domain, QPointF( x, y + 5.0 ), 10.0 );
+  // 3 px below sample 50: neighbors sit 8 px away, so 50 stays nearest;
+  // the probe is inside the 10 px tolerance.
+  const HitResult hit = hitTestNearestSample( *model, layout, domain, QPointF( x, y + 3.0 ), 10.0 );
   QVERIFY( hit.hit );
   QCOMPARE( hit.sampleIndex, qsizetype( 50 ) );
+  QVERIFY( hit.screenDistPx <= 10.0 );
 }
 
 void TestHitTesting::missBeyondTolerance()

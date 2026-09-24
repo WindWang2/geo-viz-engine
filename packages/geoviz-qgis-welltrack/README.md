@@ -1,6 +1,6 @@
 # geoviz-qgis-welltrack — QGIS-native well-track plotting kernel
 
-A standalone C++17 package providing a high-performance well-track / log-curve
+A standalone C++20 package providing a high-performance well-track / log-curve
 plotting substrate on top of the **QGIS 4.2 SDK** (the same vendored SDK
 paleo-workbench consumes). It is the A-line deliverable of the QGIS plot
 kernel initiative: see `docs/development/qgis-welltrack-kernel/` in the

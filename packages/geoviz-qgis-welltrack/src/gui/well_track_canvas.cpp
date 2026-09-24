@@ -8,7 +8,7 @@
  * maps gestures to the shared depth domain through the single mutation
  * path applyDepthDomain().
  ***************************************************************************/
-#include "well_track_canvas.h"
+#include "geoviz/qgis_welltrack/well_track_canvas.h"
 #include "well_track_scene_item.h"
 
 #include <qgscoordinatereferencesystem.h>
@@ -49,7 +49,9 @@ void WellTrackCanvas::setModel( std::shared_ptr<WellTrackModel> model )
   if ( mModel )
   {
     mHasFullExtent = mModel->depthExtent( mFullExtentMin, mFullExtentMax );
-    if ( !mDepthDomain.isValid() && mHasFullExtent )
+    // Auto-fit only until the host sets an explicit domain: the default
+    // 0..1 domain is "valid" but meaningless — it must not pin the view.
+    if ( !mDomainExplicitlySet && mHasFullExtent )
       mDepthDomain = makeDomain( mFullExtentMin, mFullExtentMax );
   }
   else
@@ -75,9 +77,10 @@ void WellTrackCanvas::applyDepthDomain( const DepthDomain &candidate )
     return;
 
   // No-op guard (anti-cascade, mirrors geoviz_well_log 1e-9 rule).
+  // Orientation participates: flipping the axis is a real change.
   auto sameAsCurrent = [ & ]( const DepthDomain &d )
   {
-    return mDepthDomain.isValid()
+    return mDepthDomain.isValid() && d.orientation == mDepthDomain.orientation
            && std::abs( d.shallow - mDepthDomain.shallow ) < kDepthNoOpEpsilon
            && std::abs( d.deep - mDepthDomain.deep ) < kDepthNoOpEpsilon;
   };
@@ -90,6 +93,7 @@ void WellTrackCanvas::applyDepthDomain( const DepthDomain &candidate )
     return;  // clamped back onto the current window (e.g. pan at full extent)
 
   mDepthDomain = domain;
+  mDomainExplicitlySet = true;
   if ( mSceneItem )
     mSceneItem->invalidate();
   emit depthRangeChanged( mDepthDomain.shallow, mDepthDomain.deep );

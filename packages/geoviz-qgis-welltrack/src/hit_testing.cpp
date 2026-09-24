@@ -3,8 +3,8 @@
  *
  * SPDX-License-Identifier: MIT
  ***************************************************************************/
-#include "hit_testing.h"
-#include "curve_lod.h"
+#include "geoviz/qgis_welltrack/hit_testing.h"
+#include "geoviz/qgis_welltrack/curve_lod.h"
 
 #include <algorithm>
 #include <cmath>
