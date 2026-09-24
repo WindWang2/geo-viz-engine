@@ -2,8 +2,10 @@
 
 ## 总则
 
-- 输入事件（wheel/mouse）由 surface（A）持有 → 以**视口意图信号**上报 → controller 应用产品规则 → 回写 surface。B 无事件过滤器网络（对照 Python `_TrackMouseFilter`+WellLogView 转发的双路径债）。
-- 一次用户操作 = 一条**单向链**，禁止 signal 环：唯一允许的环点（多 view 深度同步）用 `setDepthRange` 的 1e-9 no-op 短路 + syncing 守卫（N2/N7）。
+- 输入事件（wheel/mouse）由 surface（A）持有 → 以**视口意图信号**上报 → controller 应用产品规则 → 回写 surface。B 无事件过滤器网络（对照 Python `_TrackMouseFilter`+WellLogView 转发的双路径债）。唯一例外：产品列宽拖拽——`WellTrackWidget` 在 kernel viewport 上装 eventFilter，仅拦截列边界 6px 内的左键按下（overlay 只画不收事件，防吞 kernel 输入；Round 2 修复）。
+- 巡检单路径：surface `cursorMoved` → controller `handleCursorMoved` → `inspectionChanged(InspectionResult)` → widget 渲染（crosshair/状态栏/转发 host）。
+- 深度规则分层：`setDepthRange`（编程入口）只做 swap/防零 span/no-op/全范围钳制（Python canvas parity，允许小视窗）；最小 span 1.0 只在交互路径（wheel/zoomAt/panDepth/kernel 请求）强制（ZoomPanHandler parity）。
+- 一次用户操作 = 一条**单向链**，禁止 signal 环：唯一允许的环点（多 view 深度同步）用 `setDepthRange` 的 1e-9 no-op 短路 + 单跳扇出（origin 广播一次，peer 应用不再转发；N7）。
 
 ## 用户路径走查（Round 2 的脚本）
 
@@ -35,8 +37,8 @@ surface `cursorDepthChanged(depth, trackId)` → widget 刷新 crosshair overlay
 - 输出 `InspectionResult` → 状态栏读出 + `inspectionChanged` 信号（host 可接管面板）。
 
 ### 6. change track（width/visibility/style）
-- width：B 的 splitter overlay（列边界 6px 命中区，B 拥有布局）拖拽 → `setTrackWidth` 钳 40..300，左右轨此消彼长由 layout 重分配（语义同 canvas.py:249-276）→ `updateTrack`。
-- visibility：`setTrackVisible` → `updateTrack`（列隐藏但不删数据）。
+- width：`WellTrackWidget::eventFilter`（kernel viewport 上，列边界 6px 命中区）拖拽 → `setTrackWidth` 钳 40..300，左右轨此消彼长由 layout 重分配（语义同 canvas.py:249-276）→ `updateTrack`（upsert 契约）。
+- visibility：`setTrackVisible(false)` → `removeTrack`（列下线但不删数据）；`(true)` → `rebuildColumn`。隐藏轨对后续 style/width/同井刷新一律跳过 surface 写（不复活；Round 2 修复）。
 - style：`setCurveStyle` → StyleOnly 粒度 → `updateTrack` 单列。
 
 ### 7. switch well

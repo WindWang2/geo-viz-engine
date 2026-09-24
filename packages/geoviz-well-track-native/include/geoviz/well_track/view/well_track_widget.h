@@ -41,8 +41,12 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+    bool handleSplitterPress(const QPointF& pos);
+    void handleSplitterDrag(const QPointF& pos);
+    void handleSplitterRelease();
     void updateOverlaysGeometry();
     void setStatusFromInspection(const InspectionResult& result);
     void refreshEmptyState();
@@ -50,10 +54,13 @@ private:
     IWellTrackSurface* surface_ = nullptr;  // child-owned
     std::unique_ptr<WellTrackController> controller_;
     CrosshairOverlay* crosshair_ = nullptr;  // child widget
-    SplitterOverlay* splitter_ = nullptr;    // child widget
+    SplitterOverlay* splitter_ = nullptr;    // child widget (paint-only)
     QLabel* statusLabel_ = nullptr;
     QLabel* emptyLabel_ = nullptr;
     InspectionResult lastInspection_;
+    TrackId splitterDragTrack_;  // active boundary owner while dragging
+    int splitterLastX_ = 0;
+    bool splitterDragging_ = false;
 };
 
 }  // namespace geoviz::well_track

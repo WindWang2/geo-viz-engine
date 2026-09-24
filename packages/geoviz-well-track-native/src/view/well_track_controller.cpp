@@ -32,6 +32,10 @@ WellTrackController::WellTrackController(IWellTrackSurface* surface, QObject* pa
                     sel.track = TrackId(id.toStdString());
                     setSelection(sel);
                 });
+        // Single inspection path: cursor movement becomes a structured
+        // InspectionResult here; widgets only render it (Round 2).
+        connect(surface_, &IWellTrackSurface::cursorMoved, this,
+                &WellTrackController::handleCursorMoved);
     }
 }
 
@@ -57,6 +61,10 @@ void WellTrackController::resetDocumentFromSnapshot() {
     } else {
         fullRange_ = DepthRange{0.0, 1.0};
         config_ = WellTrackViewConfig{};
+    }
+    if (!selection_.isEmpty()) {
+        selection_ = SelectionState{};  // ids from the previous well are void
+        emit selectionChanged(selection_);
     }
     viewRange_ = fullRange_;
     rebuildAllColumns();
@@ -291,6 +299,7 @@ bool WellTrackController::moveTrack(const TrackId& id, std::size_t newIndex) {
     const auto it = std::find_if(config_.tracks.begin(), config_.tracks.end(),
                                  [&](const TrackConfigEntry& e) { return e.id == id; });
     if (it == config_.tracks.end()) return false;
+    if (static_cast<std::size_t>(it - config_.tracks.begin()) == newIndex) return false;
     TrackConfigEntry e = std::move(*it);
     config_.tracks.erase(it);
     config_.tracks.insert(config_.tracks.begin() + static_cast<std::ptrdiff_t>(newIndex),
@@ -360,8 +369,11 @@ TrackId WellTrackController::mergeCurvesIntoTrack(const std::vector<CurveId>& cu
             continue;
         }
         if (!placed) {
-            // Replace the first member's track in place for visual continuity.
+            // Replace the first member's track in place for visual continuity
+            // (and keep its hidden/visible state — merging must not resurrect
+            // a hidden track).
             if (surface_) surface_->removeTrack(it->id);
+            merged.visible = it->visible;
             *it = merged;  // copy; merged reused for member extraction below
             placed = true;
             ++it;
@@ -618,6 +630,8 @@ void WellTrackController::rebuildColumn(const TrackId& id) {
     if (!surface_) return;
     const TrackConfigEntry* e = findTrack(id);
     if (!e) return;
+    if (!e->visible) return;  // hidden tracks stay off the surface (Round 2:
+                              // same-well refresh used to resurrect them)
     if (auto col = docbuild::assembleColumn(*e, snapshot_.get(), viewRange_,
                                             surface_->contentHeight(), defaultPatternAssetDir(),
                                             surface_->supportsImageTracks())) {

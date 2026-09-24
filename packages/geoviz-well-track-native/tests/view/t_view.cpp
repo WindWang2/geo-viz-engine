@@ -147,6 +147,10 @@ private slots:
         QVERIFY(!c.addCurveTrack({CurveId("NOPE")}));
         const TrackId id = c.addCurveTrack({CurveId("GR")});
         QVERIFY(id);
+        // Seam upsert contract: the new column is actually on the surface.
+        bool present = false;
+        for (const auto& col : surface_->columns()) present = present || (col.trackId == id);
+        QVERIFY(present);
     }
     void styleOnlyUpdateTouchesOneColumn() {
         WellTrackController c(surface_);
@@ -193,6 +197,29 @@ private slots:
         QVERIFY(hasCall(*surface_, MockSurfaceCall::UpdateTrack, "curve:merge:AC/GR"));
         QCOMPARE(countCalls(*surface_, MockSurfaceCall::SetTracks), 0);
     }
+    void hiddenCurveTrackStaysHiddenOnRefresh() {
+        WellTrackController c(surface_);
+        auto src = std::make_shared<StaticSource>(representativeSnapshot(1));
+        c.loadSource(src);
+        const TrackId acGr("curve:merge:AC/GR");
+        QVERIFY(c.setTrackVisible(acGr, false));
+        bool onSurface = false;
+        for (const auto& col : surface_->columns()) onSurface = onSurface || (col.trackId == acGr);
+        QVERIFY(!onSurface);
+
+        // Same-well refresh that changes GR must not resurrect the hidden
+        // column (Round 2 P1).
+        auto next = std::make_shared<WellDataSnapshot>(*src->snapshot());
+        next->revision = 2;
+        next->curves[CurveId("GR")] =
+            makeCurve("GR", "API", {1000.0, 1500.0, 2000.0}, {10.0, 90.0, 30.0}, 2);
+        QVERIFY(c.replaceSnapshot(next));
+        for (const auto& col : surface_->columns()) {
+            QVERIFY(col.trackId != acGr);  // still hidden
+        }
+        QVERIFY(!hasCall(*surface_, MockSurfaceCall::UpdateTrack, "curve:merge:AC/GR"));
+    }
+
     void zeroCopyHandoff() {
         WellTrackController c(surface_);
         auto src = std::make_shared<StaticSource>(representativeSnapshot(1));

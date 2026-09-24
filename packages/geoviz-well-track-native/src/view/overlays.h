@@ -31,8 +31,11 @@ private:
     InspectionResult result_;
 };
 
-// Transparent overlay with 6px hit zones at column boundaries (parity of
-// the canvas splitter: drag boundary, widths trade off, clamp [40,300]).
+// Transparent overlay that *paints* the column-boundary handles. Input is
+// fully transparent: the actual drag handling lives in WellTrackWidget's
+// eventFilter on the kernel viewport (an overlay widget sitting above the
+// viewport would otherwise swallow wheel/mouse events before the kernel
+// tools ever see them — Round 2 finding).
 class SplitterOverlay : public QWidget {
     Q_OBJECT
 public:
@@ -40,22 +43,14 @@ public:
 
     // Boundary list in this-overlay coordinates.
     void setBoundaries(const std::vector<QPair<TrackId, QRectF>>& boundaries);
-
-signals:
-    void widthDeltaRequested(const geoviz::well_track::TrackId& trackId, int deltaPx);
+    const std::vector<QPair<TrackId, QRectF>>& boundaries() const { return boundaries_; }
+    static constexpr int kHitZonePx = 6;
 
 protected:
     void paintEvent(QPaintEvent* event) override;
-    void mousePressEvent(QMouseEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
-    void mouseReleaseEvent(QMouseEvent* event) override;
 
 private:
-    static constexpr int kHitZonePx = 6;
-
     std::vector<QPair<TrackId, QRectF>> boundaries_;
-    int activeIndex_ = -1;
-    int lastX_ = 0;
 };
 
 }  // namespace geoviz::well_track

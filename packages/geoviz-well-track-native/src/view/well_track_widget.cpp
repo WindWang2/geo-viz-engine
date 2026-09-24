@@ -1,6 +1,8 @@
 #include "geoviz/well_track/view/well_track_widget.h"
 
+#include <QEvent>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QResizeEvent>
 #include <QVBoxLayout>
 
@@ -33,39 +35,18 @@ WellTrackWidget::WellTrackWidget(IWellTrackSurface* surface,
         layout->addWidget(surface_->widget(), 1);
 
         crosshair_ = new CrosshairOverlay(this);
-        splitter_ = new SplitterOverlay(this);
+        splitter_ = new SplitterOverlay(this);  // paint-only; input via filter
 
-        connect(surface_, &IWellTrackSurface::cursorMoved, this,
-                [this](double depth, const QString& trackId) {
-                    Q_UNUSED(trackId);
-                    lastInspection_ = controller_ ? controller_->inspectAt(depth)
-                                                  : InspectionResult{};
-                    if (crosshair_) {
-                        const int y = surface_->yPosForDepth(depth);
-                        if (y >= 0 && lastInspection_.isValid()) {
-                            crosshair_->setInspection(lastInspection_, y);
-                        } else {
-                            crosshair_->clearInspection();
-                        }
-                    }
-                    setStatusFromInspection(lastInspection_);
-                    emit inspectionChanged(lastInspection_);
-                });
+        // Product splitter drags: the kernel viewport stays the single input
+        // surface; we intercept only presses inside the 6px boundary zones
+        // (Round 2: an input-hungry overlay killed zoom/inspect in real
+        // kernel integration).
+        surface_->widget()->installEventFilter(this);
+
         connect(surface_, &IWellTrackSurface::viewportResized, this,
                 [this](int h) {
                     Q_UNUSED(h);
                     updateOverlaysGeometry();
-                });
-        connect(splitter_, &SplitterOverlay::widthDeltaRequested, this,
-                [this](const TrackId& id, int delta) {
-                    if (!controller_) return;
-                    for (const auto& t : controller_->tracks()) {
-                        if (t.id == id && t.kind != TrackKind::Marker) {
-                            controller_->setTrackWidth(id, t.width + delta);
-                            updateOverlaysGeometry();
-                            return;
-                        }
-                    }
                 });
     } else {
         // Surface without a viewport widget: still take ownership so the
@@ -83,6 +64,24 @@ WellTrackWidget::WellTrackWidget(IWellTrackSurface* surface,
     // Owned solely by the unique_ptr member (destroyed before the surface
     // child) — deliberately not QObject-parented to avoid double ownership.
     controller_ = std::make_unique<WellTrackController>(surface_);
+
+    // Single inspection path: the controller turns surface cursor movement
+    // into InspectionResult; this widget only renders it.
+    connect(controller_.get(), &WellTrackController::inspectionChanged, this,
+            [this](const InspectionResult& result) {
+                lastInspection_ = result;
+                if (crosshair_) {
+                    const int y = surface_ ? surface_->yPosForDepth(result.depth) : -1;
+                    const bool inView = y >= 0 && crosshair_ && y <= crosshair_->height();
+                    if (result.isValid() && inView) {
+                        crosshair_->setInspection(result, y);
+                    } else {
+                        crosshair_->clearInspection();
+                    }
+                }
+                setStatusFromInspection(result);
+                emit inspectionChanged(result);
+            });
     connect(controller_.get(), &WellTrackController::depthRangeChanged, this,
             [this](double, double) { updateOverlaysGeometry(); });
     connect(controller_.get(), &WellTrackController::viewConfigChanged, this,
@@ -114,6 +113,78 @@ InspectionResult WellTrackWidget::inspectAtCursor() const { return lastInspectio
 void WellTrackWidget::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     updateOverlaysGeometry();
+    if (emptyLabel_ && emptyLabel_->isVisible()) {
+        // Empty state is not layout-managed (it overlays the hidden viewport
+        // area) — keep it spanning the content area on resize.
+        emptyLabel_->setGeometry(QRect(0, 0, width(), std::max(height() - 28, 0)));
+    }
+}
+
+bool WellTrackWidget::eventFilter(QObject* watched, QEvent* event) {
+    if (surface_ && watched == surface_->widget()) {
+        switch (event->type()) {
+            case QEvent::MouseButtonPress: {
+                auto* me = static_cast<QMouseEvent*>(event);
+                if (me->button() == Qt::LeftButton &&
+                    handleSplitterPress(me->position())) {
+                    return true;  // consumed: boundary drag, not a kernel tool
+                }
+                break;
+            }
+            case QEvent::MouseMove: {
+                auto* me = static_cast<QMouseEvent*>(event);
+                if (splitterDragging_) {
+                    handleSplitterDrag(me->position());
+                    return true;
+                }
+                break;
+            }
+            case QEvent::MouseButtonRelease: {
+                if (splitterDragging_) {
+                    handleSplitterRelease();
+                    return true;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+bool WellTrackWidget::handleSplitterPress(const QPointF& pos) {
+    if (!splitter_) return false;
+    const auto& bounds = splitter_->boundaries();
+    for (const auto& [id, rect] : bounds) {
+        if (std::abs(pos.x() - rect.center().x()) <= SplitterOverlay::kHitZonePx &&
+            pos.y() >= rect.top() && pos.y() <= rect.bottom()) {
+            splitterDragTrack_ = id;
+            splitterLastX_ = static_cast<int>(pos.x());
+            splitterDragging_ = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+void WellTrackWidget::handleSplitterDrag(const QPointF& pos) {
+    const int x = static_cast<int>(pos.x());
+    const int delta = x - splitterLastX_;
+    splitterLastX_ = x;
+    if (delta == 0 || !controller_) return;
+    for (const auto& t : controller_->tracks()) {
+        if (t.id == splitterDragTrack_ && t.kind != TrackKind::Marker) {
+            controller_->setTrackWidth(t.id, t.width + delta);
+            updateOverlaysGeometry();
+            return;
+        }
+    }
+}
+
+void WellTrackWidget::handleSplitterRelease() {
+    splitterDragging_ = false;
+    splitterDragTrack_ = TrackId{};
 }
 
 void WellTrackWidget::updateOverlaysGeometry() {
@@ -124,31 +195,29 @@ void WellTrackWidget::updateOverlaysGeometry() {
         crosshair_->raise();
     }
     if (splitter_) splitter_->raise();
-    if (splitter_ && controller_) {
-        splitter_->setGeometry(content);
-        // One boundary per adjacent visible-column pair. The track list is
-        // referenced, never copied (config entries hold strings/vectors).
-        std::vector<QPair<TrackId, QRectF>> boundaries;
-        const std::vector<TrackConfigEntry>& tracks = controller_->tracks();
-        const TrackConfigEntry* prev = nullptr;
-        QRectF prevRect;
-        for (const auto& t : tracks) {
-            if (!t.visible || t.kind == TrackKind::Marker) continue;
-            const QRectF rect = surface_->trackGeometry(t.id);
-            if (!rect.isValid() || rect.width() <= 0) continue;
-            if (prev) {
-                QRectF b;
-                b.setLeft(prevRect.right());
-                b.setTop(std::max(prevRect.top(), rect.top()));
-                b.setBottom(std::min(prevRect.bottom(), rect.bottom()));
-                b.setWidth(1);
-                if (b.top() < b.bottom()) boundaries.emplace_back(prev->id, b);
-            }
-            prev = &t;
-            prevRect = rect;
+    if (!splitter_ || !controller_) return;
+    // One boundary per adjacent visible-column pair. The track list is
+    // referenced, never copied (config entries hold strings/vectors).
+    std::vector<QPair<TrackId, QRectF>> boundaries;
+    const std::vector<TrackConfigEntry>& tracks = controller_->tracks();
+    const TrackConfigEntry* prev = nullptr;
+    QRectF prevRect;
+    for (const auto& t : tracks) {
+        if (!t.visible || t.kind == TrackKind::Marker) continue;
+        const QRectF rect = surface_->trackGeometry(t.id);
+        if (!rect.isValid() || rect.width() <= 0) continue;
+        if (prev) {
+            QRectF b;
+            b.setLeft(prevRect.right());
+            b.setTop(std::max(prevRect.top(), rect.top()));
+            b.setBottom(std::min(prevRect.bottom(), rect.bottom()));
+            b.setWidth(1);
+            if (b.top() < b.bottom()) boundaries.emplace_back(prev->id, b);
         }
-        splitter_->setBoundaries(boundaries);
+        prev = &t;
+        prevRect = rect;
     }
+    splitter_->setBoundaries(boundaries);
 }
 
 void WellTrackWidget::setStatusFromInspection(const InspectionResult& result) {
@@ -174,18 +243,21 @@ void WellTrackWidget::setStatusFromInspection(const InspectionResult& result) {
                     .arg(QString::fromStdString(h.trackTitle))
                     .arg(QString::fromStdString(h.category));
     }
+    for (const auto& m : result.markers) {
+        text += QStringLiteral("  |  层位 %1").arg(QString::fromStdString(m.name));
+    }
     statusLabel_->setText(text);
 }
 
 void WellTrackWidget::refreshEmptyState() {
     if (!surface_ || !surface_->widget()) return;  // error label already shown
-    const bool empty = !controller_ || !controller_->snapshot() ||
-                       controller_->snapshot()->empty();
+    const bool empty =
+        !controller_ || !controller_->snapshot() || controller_->snapshot()->empty();
     emptyLabel_->setVisible(false);
     surface_->widget()->setVisible(!empty);
     if (empty) {
         emptyLabel_->setText(QStringLiteral("当前井无可视化数据"));
-        emptyLabel_->setGeometry(surface_->widget()->geometry());
+        emptyLabel_->setGeometry(QRect(0, 0, width(), std::max(height() - 28, 0)));
         emptyLabel_->raise();
         emptyLabel_->setVisible(true);
     }

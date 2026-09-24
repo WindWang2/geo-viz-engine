@@ -91,9 +91,8 @@ void CrosshairOverlay::paintEvent(QPaintEvent* event) {
 }
 
 SplitterOverlay::SplitterOverlay(QWidget* parent) : QWidget(parent) {
+    setAttribute(Qt::WA_TransparentForMouseEvents);
     setAttribute(Qt::WA_NoSystemBackground);
-    setMouseTracking(true);
-    setCursor(Qt::SplitHCursor);
 }
 
 void SplitterOverlay::setBoundaries(const std::vector<QPair<TrackId, QRectF>>& boundaries) {
@@ -109,33 +108,6 @@ void SplitterOverlay::paintEvent(QPaintEvent* event) {
         Q_UNUSED(id);
         p.drawLine(QPointF(rect.center().x(), rect.top()), QPointF(rect.center().x(), rect.bottom()));
     }
-}
-
-void SplitterOverlay::mousePressEvent(QMouseEvent* event) {
-    if (event->button() != Qt::LeftButton) return;
-    for (std::size_t i = 0; i < boundaries_.size(); ++i) {
-        if (std::abs(event->position().x() - boundaries_[i].second.center().x()) <=
-                    kHitZonePx &&
-            event->position().y() >= boundaries_[i].second.top() &&
-            event->position().y() <= boundaries_[i].second.bottom()) {
-            activeIndex_ = static_cast<int>(i);
-            lastX_ = static_cast<int>(event->position().x());
-            return;
-        }
-    }
-}
-
-void SplitterOverlay::mouseMoveEvent(QMouseEvent* event) {
-    if (activeIndex_ < 0 || static_cast<std::size_t>(activeIndex_) >= boundaries_.size()) return;
-    const int x = static_cast<int>(event->position().x());
-    const int delta = x - lastX_;
-    lastX_ = x;
-    if (delta != 0) emit widthDeltaRequested(boundaries_[static_cast<std::size_t>(activeIndex_)].first, delta);
-}
-
-void SplitterOverlay::mouseReleaseEvent(QMouseEvent* event) {
-    Q_UNUSED(event);
-    activeIndex_ = -1;
 }
 
 }  // namespace geoviz::well_track

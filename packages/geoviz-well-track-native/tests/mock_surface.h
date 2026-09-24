@@ -48,12 +48,16 @@ public:
         relayout();
     }
     void updateTrack(const SurfaceTrackColumn& column) override {
+        // Seam contract: insert-or-replace (upsert).
+        bool replaced = false;
         for (auto& c : columns_) {
             if (c.trackId == column.trackId) {
                 c = column;
+                replaced = true;
                 break;
             }
         }
+        if (!replaced) columns_.push_back(column);
         calls_.push_back({MockSurfaceCall::UpdateTrack, QString::fromStdString(column.trackId.value)});
     }
     void removeTrack(const TrackId& trackId) override {
@@ -124,8 +128,10 @@ public:
         return depthTop_ + (y / content) * (depthBottom_ - depthTop_);
     }
     int yPosForDepth(double depth) const override {
+        if (!std::isfinite(depth)) return -1;
         const double span = depthBottom_ - depthTop_;
         if (span <= 0) return -1;
+        if (depth < depthTop_ || depth > depthBottom_) return -1;  // outside view
         const double y = (depth - depthTop_) / span * contentHeight();
         return static_cast<int>(y) + kHeaderHeight;
     }

@@ -113,6 +113,9 @@ public:
     virtual QWidget* widget() = 0;
 
     // --- column sync (controller -> surface) ---
+    // updateTrack is INSERT-OR-REPLACE (upsert): a column id that is not on
+    // the surface yet is appended. This contract lets the controller add
+    // single tracks without a full setTracks round trip.
     virtual void setTracks(std::vector<SurfaceTrackColumn> columns) = 0;
     virtual void updateTrack(const SurfaceTrackColumn& column) = 0;
     virtual void removeTrack(const TrackId& trackId) = 0;
@@ -126,7 +129,8 @@ public:
     virtual SurfaceHit trackAt(const QPointF& pos) const = 0;
     virtual std::optional<CurveId> hitCurve(const QPointF& pos, double tolerancePx) const = 0;
     virtual double depthAt(const QPointF& pos) const = 0;  // NaN outside content
-    virtual int yPosForDepth(double depth) const = 0;     // -1 when unknown
+    // -1 when unknown, NaN input, or depth outside the *visible* window.
+    virtual int yPosForDepth(double depth) const = 0;
     virtual double depthPerPixel() const = 0;              // 0 when unknown
     virtual int contentHeight() const = 0;                 // 0 when unknown
     // Column geometry in surface-widget coordinates (for overlays).
