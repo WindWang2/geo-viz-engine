@@ -9,6 +9,7 @@
 #include <unordered_set>
 
 #include "geoviz/well_track/domain/pattern_catalog.h"
+#include "geoviz/well_track/domain/robust_range.h"
 
 namespace geoviz::well_track::docbuild {
 
@@ -255,23 +256,6 @@ WellTrackViewConfig buildDefaultDocument(const WellDataSnapshot& snapshot) {
     return cfg;
 }
 
-// Public API (curve_style.h): manual ranges are kept when sane, robust
-// range otherwise. Sanity parity (curve_track.py:96-108), including the
-// near-equal rejection (math.isclose). C++ additionally rejects inverted
-// manual ranges — a deliberate safety divergence from Python, which kept
-// them and relied on downstream clamping.
-std::pair<std::pair<double, double>, bool> resolveXRange(const XRange& range,
-                                                         const CurveBuffer& buffer,
-                                                         const std::string& curveName) {
-    if (range.manual) {
-        const auto [lo, hi] = *range.manual;
-        const bool sane = lo < hi && lo > -100.0 && hi <= 1e5 && !isClose(lo, hi);
-        if (sane) return {*range.manual, false};
-    }
-    if (buffer.empty()) return {{0.0, 100.0}, true};
-    return {computeRobustDisplayRange(buffer.values().data(), buffer.size(), curveName), true};
-}
-
 std::pair<std::pair<double, double>, bool> effectiveRange(const XRange& range,
                                                           const CurveBuffer* buffer,
                                                           const std::string& curveName) {
@@ -400,3 +384,26 @@ std::optional<SurfaceTrackColumn> assembleColumn(const TrackConfigEntry& entry,
 }
 
 }  // namespace geoviz::well_track::docbuild
+
+namespace geoviz::well_track {
+
+// Public API (curve_style.h): manual ranges are kept when sane, robust
+// range otherwise. Sanity parity (curve_track.py:96-108), including the
+// near-equal rejection (math.isclose). C++ additionally rejects inverted
+// manual ranges — a deliberate safety divergence from Python, which kept
+// them and relied on downstream clamping.
+std::pair<std::pair<double, double>, bool> resolveXRange(const XRange& range,
+                                                         const CurveBuffer& buffer,
+                                                         const std::string& curveName) {
+    if (range.manual) {
+        const auto [lo, hi] = *range.manual;
+        // Python math.isclose defaults (rel_tol 1e-9).
+        const bool nearEqual = std::abs(lo - hi) <= 1e-9 * std::max(std::abs(lo), std::abs(hi));
+        const bool sane = lo < hi && lo > -100.0 && hi <= 1e5 && !nearEqual;
+        if (sane) return {*range.manual, false};
+    }
+    if (buffer.empty()) return {{0.0, 100.0}, true};
+    return {computeRobustDisplayRange(buffer.values().data(), buffer.size(), curveName), true};
+}
+
+}  // namespace geoviz::well_track

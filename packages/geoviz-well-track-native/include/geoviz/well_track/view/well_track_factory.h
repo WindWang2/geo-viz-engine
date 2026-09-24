@@ -10,6 +10,8 @@
 
 namespace geoviz::well_track {
 
+class IWellTrackSurface;
+
 class WellTrackWidget;
 
 class WellTrackViewFactory {

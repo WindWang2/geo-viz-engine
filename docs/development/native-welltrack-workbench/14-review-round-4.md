@@ -60,3 +60,21 @@
 2. 图像带（岩心照片）。
 3. track header 点击信号 + header 曲线摘要（swatch/range 文本）。
 4. band 子列（嵌套相）。
+
+## 构建后记（对账过程中发现的 A 侧预存问题与处置）
+
+A 的分支从未编译过；`add_subdirectory` 集成时逐个暴露并从 **B 的 CMake / adapter 文件内**以加法方式 shim（零修改 A 文件）：
+
+| # | A 侧问题 | B 侧 shim |
+|---|---|---|
+| S1 | src/*.cpp 短路径 include 自家公共头，而 CMake 只导出 `.../include` | 给 A 两 target 加 `include/geoviz/qgis_welltrack` include 路径 |
+| S2 | core 缺链 Qt6::Xml（QDomDocument） | 链 `Qt6::Xml` |
+| S3 | QGIS 4.2 头要求 C++20，A 设 C++17 | A 两 target 提到 C++20 |
+| S4 | renderer 源码 `nsecElapsed` 拼写错误（应为 `nsecsElapsed`） | 编译期宏定义 `nsecElapsed=nsecsElapsed` |
+| S5 | renderer 源码 const 转换错误（`const QgsPlotAxis*`→`QgsPlotAxis*`） | `-fpermissive`（仅本集成构建） |
+| S6 | A 的 Q_OBJECT 公共头未列入 target sources → metaobject 未定义 | 把三个头列入 **B 的** target sources（moc 由 B 侧生成） |
+| S7 | A 的 SDK interface 为 PRIVATE，消费方看不到 QGIS include | B 直链 `GeoVizQgis::Sdk`（GLOBAL imported interface） |
+| S8 | 静态库自注册 factory 被归档裁剪 | `qgisSurfaceFactorySelfRegister()` keep-alive（B 侧 surface_registry 调用） |
+| S9 | 头声明 `scheduleRefresh()` 私有槽但 .cpp 无实现 | B 曾提供外部定义，**A 随后（并行修复中）从头中移除了该槽**，shim 已同步删除 |
+
+**并行竞态处置**：对账期间 A 的会话在持续修改其 worktree（4 文件未提交）。为获得稳定验证目标，将 A 当时状态**只读快照**到 `/tmp/qwt-snapshot`（不触碰 A worktree），集成构建对快照进行。PR merge guidance：A 修完 S1–S7 后，B 侧 shim 块整体删除即可（CMake 中已注明）。

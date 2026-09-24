@@ -357,6 +357,11 @@ const bool kFactoryRegistered = [] {
 }();
 }  // namespace
 
+// Archive keep-alive: static-library linking drops unreferenced objects,
+// which would silently discard the self-registration initializer above.
+// SurfaceRegistry::createPreferred() calls this, forcing the object in.
+bool qgisSurfaceFactorySelfRegister() { return kFactoryRegistered; }
+
 }  // namespace geoviz::well_track
 
 #include "qgis_surface.moc"

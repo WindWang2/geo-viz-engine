@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QJsonArray>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>

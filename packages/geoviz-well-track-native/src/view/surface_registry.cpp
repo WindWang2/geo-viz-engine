@@ -7,6 +7,12 @@
 
 namespace geoviz::well_track {
 
+#ifdef GEOVIZ_WELL_TRACK_WITH_QGIS_KERNEL
+// Defined in qgis_surface.cpp; calling it from createPreferred forces the
+// archive member (and its factory self-registration) to be linked.
+bool qgisSurfaceFactorySelfRegister();
+#endif
+
 SurfaceRegistry& SurfaceRegistry::instance() {
     static SurfaceRegistry registry;
     return registry;
@@ -24,6 +30,9 @@ void SurfaceRegistry::registerFactory(std::shared_ptr<ISurfaceFactory> factory) 
 }
 
 IWellTrackSurface* SurfaceRegistry::createPreferred(QWidget* parent) const {
+#ifdef GEOVIZ_WELL_TRACK_WITH_QGIS_KERNEL
+    (void)qgisSurfaceFactorySelfRegister();  // archive keep-alive
+#endif
     if (factories_.empty()) return nullptr;
     return factories_.back()->create(parent);
 }

@@ -24,6 +24,42 @@ set(GEOVIZ_QGIS_WELLTRACK_DIR "" CACHE PATH
 if(NOT TARGET GeoViz::QgisWellTrack AND GEOVIZ_QGIS_WELLTRACK_DIR
    AND EXISTS "${GEOVIZ_QGIS_WELLTRACK_DIR}/CMakeLists.txt")
   add_subdirectory("${GEOVIZ_QGIS_WELLTRACK_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/qgis-welltrack-build")
+  # Integration shim (additive, no A files touched): A's src/*.cpp use
+  # short-form includes of its public headers while its CMake only exports
+  # .../include, A's targets miss Qt6::Xml, and QGIS 4.2 headers require
+  # C++20 while A sets 17. Until A fixes its own build, apply these from
+  # here. Remove once A lands the fixes (tracked in docs/14 + PR text).
+  set_target_properties(geoviz_qgis_welltrack_core geoviz_qgis_welltrack_gui
+                        PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+  if(TARGET geoviz_qgis_welltrack_core)
+    target_include_directories(geoviz_qgis_welltrack_core PUBLIC
+      "${GEOVIZ_QGIS_WELLTRACK_DIR}/include/geoviz/qgis_welltrack")
+    # QGIS headers pull Qt Xml (QDomDocument) into A's core TU set.
+    find_package(Qt6 6.6 REQUIRED COMPONENTS Xml)
+    target_link_libraries(geoviz_qgis_welltrack_core PUBLIC Qt6::Xml)
+    # A source typo: QElapsedTimer::nsecElapsed -> nsecsElapsed (A has not
+    # been compiled yet). Token-level fix from here; remove when A fixes it.
+    target_compile_definitions(geoviz_qgis_welltrack_core PRIVATE nsecElapsed=nsecsElapsed)
+    # A source const-correctness slips (const QgsPlotAxis* -> QgsPlotAxis*):
+    # tolerated with -fpermissive for THIS integration build only.
+    target_compile_options(geoviz_qgis_welltrack_core PRIVATE
+      $<$<CXX_COMPILER_ID:GNU>:-fpermissive>)
+  endif()
+  if(TARGET geoviz_qgis_welltrack_gui)
+    target_include_directories(geoviz_qgis_welltrack_gui PUBLIC
+      "${GEOVIZ_QGIS_WELLTRACK_DIR}/include/geoviz/qgis_welltrack")
+  endif()
+  # A's public headers expose QGIS types (qgsplotcanvas.h) but its SDK
+  # interface is linked PRIVATE, so consumers lack the QGIS include paths.
+  # Link the GLOBAL imported SDK *interface* targets directly (standalone
+  # mode: GeoVizQgis::Sdk carries the full include closure; paleo-workbench
+  # mode reuses PwbQgis::Sdk).
+  set(GEOVIZ_WELL_TRACK_SDK_INTERFACE "")
+  if(TARGET GeoVizQgis::Sdk)
+    list(APPEND GEOVIZ_WELL_TRACK_SDK_INTERFACE GeoVizQgis::Sdk)
+  elseif(TARGET PwbQgis::Sdk)
+    list(APPEND GEOVIZ_WELL_TRACK_SDK_INTERFACE PwbQgis::Sdk)
+  endif()
 endif()
 if(TARGET GeoViz::QgisWellTrack)
   set(GEOVIZ_WELL_TRACK_QWT_DEFAULT ON)
@@ -79,7 +115,16 @@ if(GEOVIZ_WELL_TRACK_WITH_QGIS_KERNEL)
   endif()
   find_package(Qt6 6.6 REQUIRED COMPONENTS Svg)  # pattern brush materialization
   target_sources(geoviz_well_track_native PRIVATE src/view/qgis_surface.cpp)
-  target_link_libraries(geoviz_well_track_native PUBLIC GeoViz::QgisWellTrack PRIVATE Qt6::Svg)
+  # A lists only .cpp files in its targets, so AUTOMOC never processes its
+  # Q_OBJECT public headers -> undefined metaobjects at link. Listing the
+  # headers here makes OUR build provide moc_well_track_canvas.cpp et al.
+  # (remove when A fixes its own sources list; see PR guidance).
+  target_sources(geoviz_well_track_native PRIVATE
+    "${GEOVIZ_QGIS_WELLTRACK_DIR}/include/geoviz/qgis_welltrack/well_track_canvas.h"
+    "${GEOVIZ_QGIS_WELLTRACK_DIR}/include/geoviz/qgis_welltrack/well_track_tools.h"
+    "${GEOVIZ_QGIS_WELLTRACK_DIR}/include/geoviz/qgis_welltrack/depth_synchronizer.h")
+  target_link_libraries(geoviz_well_track_native PUBLIC GeoViz::QgisWellTrack
+                        PRIVATE Qt6::Svg ${GEOVIZ_WELL_TRACK_SDK_INTERFACE})
   target_compile_definitions(geoviz_well_track_native PUBLIC GEOVIZ_WELL_TRACK_WITH_QGIS_KERNEL)
   message(STATUS "geoviz-well-track-native: QgisSurface adapter ENABLED (Prompt A kernel)")
 else()
@@ -91,30 +136,41 @@ else()
 endif()
 
 include(GNUInstallDirs)
-install(
-  TARGETS geoviz_well_track_native
-  EXPORT GeoVizWellTrackNativeTargets
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(GEOVIZ_QGIS_WELLTRACK_DIR)
+  # Integration mode: A's targets come from add_subdirectory and are not in
+  # this export set — install the artifacts without an EXPORT (the package
+  # config is only meaningful once A ships an installable config of its own).
+  install(
+    TARGETS geoviz_well_track_native
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+else()
+  install(
+    TARGETS geoviz_well_track_native
+    EXPORT GeoVizWellTrackNativeTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+  include(CMakePackageConfigHelpers)
+  write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/GeoVizWellTrackNativeConfigVersion.cmake
+    VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
+  install(EXPORT GeoVizWellTrackNativeTargets
+          NAMESPACE GeoViz::
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/GeoVizWellTrackNative)
+  file(
+    WRITE ${CMAKE_CURRENT_BINARY_DIR}/GeoVizWellTrackNativeConfig.cmake
+    "include(CMakeFindDependencyMacro)\nfind_dependency(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets)\ninclude(\"\${CMAKE_CURRENT_LIST_DIR}/GeoVizWellTrackNativeTargets.cmake\")\n"
+  )
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/GeoVizWellTrackNativeConfig.cmake
+                ${CMAKE_CURRENT_BINARY_DIR}/GeoVizWellTrackNativeConfigVersion.cmake
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/GeoVizWellTrackNative)
+endif()
 install(DIRECTORY include/geoviz DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY assets/patterns
         DESTINATION ${CMAKE_INSTALL_DATADIR}/geoviz/well-track)
-
-include(CMakePackageConfigHelpers)
-write_basic_package_version_file(
-  ${CMAKE_CURRENT_BINARY_DIR}/GeoVizWellTrackNativeConfigVersion.cmake
-  VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
-install(EXPORT GeoVizWellTrackNativeTargets
-        NAMESPACE GeoViz::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/GeoVizWellTrackNative)
-file(
-  WRITE ${CMAKE_CURRENT_BINARY_DIR}/GeoVizWellTrackNativeConfig.cmake
-  "include(CMakeFindDependencyMacro)\nfind_dependency(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets)\ninclude(\"\${CMAKE_CURRENT_LIST_DIR}/GeoVizWellTrackNativeTargets.cmake\")\n"
-)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/GeoVizWellTrackNativeConfig.cmake
-              ${CMAKE_CURRENT_BINARY_DIR}/GeoVizWellTrackNativeConfigVersion.cmake
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/GeoVizWellTrackNative)
 
 if(GEOVIZ_WELL_TRACK_BUILD_TESTS)
   enable_testing()

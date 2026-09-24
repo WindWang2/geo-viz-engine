@@ -2,6 +2,10 @@ find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets Test)
 
 function(wt_add_test name src)
   add_executable(${name} ${src})
+  # Q_OBJECT test headers must be listed for AUTOMOC.
+  if(src MATCHES "view/")
+    target_sources(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/mock_surface.h)
+  endif()
   target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                                               ${CMAKE_CURRENT_SOURCE_DIR}/../src
                                               ${CMAKE_CURRENT_SOURCE_DIR}/../src/view)
